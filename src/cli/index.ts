@@ -14,7 +14,8 @@ function parseFlags(argv: string[]): { flags: Record<string, string | boolean | 
 	const positional: string[] = [];
 
 	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i]!;
+		const arg = argv[i];
+		if (arg === undefined) break;
 		if (arg === "--") {
 			positional.push(...argv.slice(i + 1));
 			break;
@@ -153,7 +154,7 @@ async function cmdStart(argv: string[]) {
 			...(flags["api-ssl"] === false ? ["api-ssl" as ServiceName] : []),
 		],
 		network: flag(flags, "vmnet-shared") !== undefined ? "vmnet-shared"
-			: flag(flags, "vmnet-bridge") ? { type: "vmnet-bridge" as const, iface: flag(flags, "vmnet-bridge")! }
+			: flag(flags, "vmnet-bridge") ? { type: "vmnet-bridge" as const, iface: flag(flags, "vmnet-bridge") as string }
 			: undefined,
 		installDeps: flagBool(flags, "install-deps"),
 		dryRun: flagBool(flags, "dry-run"),
@@ -162,8 +163,8 @@ async function cmdStart(argv: string[]) {
 	// --add-user admin:pass
 	const userStr = flag(flags, "add-user");
 	if (userStr) {
-		const [name, password] = userStr.split(":");
-		opts.user = { name: name!, password: password ?? "" };
+		const [name = "", password] = userStr.split(":");
+		opts.user = { name, password: password ?? "" };
 	}
 
 	opts.disableAdmin = flagBool(flags, "disable-admin");

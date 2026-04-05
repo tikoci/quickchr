@@ -5,6 +5,7 @@
 import {
 	DEFAULT_PORT_BASE,
 	PORTS_PER_BLOCK,
+	type ChrPorts,
 	type PortMapping,
 	type ServiceName,
 	SERVICE_PORTS,
@@ -52,7 +53,8 @@ export function buildPortMappings(
 
 	// Add custom port mappings at offset 6+
 	for (let i = 0; i < extraPorts.length; i++) {
-		const extra = extraPorts[i]!;
+		const extra = extraPorts[i];
+		if (!extra) continue;
 		const name = extra.name || `custom-${i}`;
 		mappings[name] = {
 			name,
@@ -136,12 +138,12 @@ export async function findAvailablePortBlock(
 }
 
 /** Extract ChrPorts from port mappings. */
-export function toChrPorts(ports: Record<string, PortMapping>) {
+export function toChrPorts(ports: Record<string, PortMapping>): ChrPorts {
 	const result: Record<string, number> = {};
 	for (const [name, mapping] of Object.entries(ports)) {
 		// Convert kebab-case to camelCase for API
 		const key = name.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 		result[key] = mapping.host;
 	}
-	return result;
+	return result as ChrPorts;
 }

@@ -169,7 +169,8 @@ export type ErrorCode =
 	| "MACHINE_STOPPED"
 	| "INVALID_VERSION"
 	| "INVALID_ARCH"
-	| "PROCESS_FAILED";
+	| "PROCESS_FAILED"
+	| "SPAWN_FAILED";
 
 export class QuickCHRError extends Error {
 	code: ErrorCode;

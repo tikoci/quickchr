@@ -15,7 +15,7 @@ const COLORS = {
 
 const NO_COLORS = Object.fromEntries(
 	Object.keys(COLORS).map((k) => [k, ""]),
-) as typeof COLORS;
+) as unknown as typeof COLORS;
 
 function c(): typeof COLORS {
 	// Respect NO_COLOR env and pipe detection
@@ -58,7 +58,7 @@ export function table(headers: string[], rows: string[][]): string {
 
 	const sep = widths.map((w) => "─".repeat(w + 2)).join("┼");
 	const headerLine = headers
-		.map((h, i) => ` ${bold(h.padEnd(widths[i]!))} `)
+		.map((h, i) => ` ${bold(h.padEnd(widths[i] ?? 0))} `)
 		.join("│");
 	const dataLines = rows.map((row) =>
 		row.map((cell, i) => {

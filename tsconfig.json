@@ -7,6 +7,8 @@
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": true,
+    // Bun runtime — provides Bun globals, web APIs (fetch/ReadableStream/etc.), and node: built-ins
+    "types": ["bun"],
 
     // Bundler mode
     "moduleResolution": "bundler",

@@ -75,7 +75,7 @@ export function serialStreams(machineDir: string): {
 
 	const readable = new ReadableStream<Uint8Array>({
 		start(controller) {
-			socket.on("data", (chunk) => {
+			socket.on("data", (chunk: Buffer) => {
 				controller.enqueue(new Uint8Array(chunk));
 			});
 			socket.on("end", () => controller.close());

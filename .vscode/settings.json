@@ -1,0 +1,12 @@
+{
+	"editor.formatOnSave": false,
+	"editor.defaultFormatter": null,
+	"[typescript]": {
+		"editor.defaultFormatter": "biomejs.biome"
+	},
+	"editor.codeActionsOnSave": {
+		"quickfix.biome": "explicit"
+	},
+	"typescript.tsdk": "node_modules/typescript/lib",
+	"typescript.enablePromptUseWorkspaceTsdk": true
+}

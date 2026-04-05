@@ -6,7 +6,7 @@ quickchr is a TypeScript/Bun CLI + importable library to manage MikroTik CHR vir
 
 ### Layers
 
-```
+```text
 CLI (src/cli/)          ← Arg parsing, wizard, formatting
     ↓
 Library API (src/lib/quickchr.ts)  ← QuickCHR class, ChrInstance
@@ -46,7 +46,7 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
 ## Storage Layout
 
-```
+```text
 ~/.local/share/quickchr/
 ├── cache/                     # Downloaded images
 │   ├── chr-7.22.1.img.zip

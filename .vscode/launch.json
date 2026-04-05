@@ -1,0 +1,68 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "quickchr CLI (dev)",
+			"type": "node",
+			"request": "launch",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["run", "src/cli/index.ts"],
+			"args": ["${input:cliCommand}"],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen"
+		},
+		{
+			"name": "quickchr doctor",
+			"type": "node",
+			"request": "launch",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["run", "src/cli/index.ts"],
+			"args": ["doctor"],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen"
+		},
+		{
+			"name": "quickchr list",
+			"type": "node",
+			"request": "launch",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["run", "src/cli/index.ts"],
+			"args": ["list"],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen"
+		},
+		{
+			"name": "Unit Tests",
+			"type": "node",
+			"request": "launch",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["test", "test/unit/"],
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen"
+		},
+		{
+			"name": "Integration Tests",
+			"type": "node",
+			"request": "launch",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["test", "test/integration/"],
+			"env": { "QUICKCHR_INTEGRATION": "1" },
+			"cwd": "${workspaceFolder}",
+			"console": "integratedTerminal",
+			"internalConsoleOptions": "neverOpen"
+		}
+	],
+	"inputs": [
+		{
+			"id": "cliCommand",
+			"type": "pickString",
+			"description": "CLI command to run",
+			"options": ["doctor", "start", "list", "stop", "remove", "clean"],
+			"default": "doctor"
+		}
+	]
+}

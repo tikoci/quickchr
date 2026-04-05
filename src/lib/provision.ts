@@ -74,9 +74,10 @@ export async function disableAdmin(httpPort: number): Promise<void> {
 	}
 
 	const users = (await listResp.json()) as { ".id": string }[];
-	if (users.length === 0) return;
+	const firstUser = users[0];
+	if (!firstUser) return;
 
-	const adminId = users[0][".id"];
+	const adminId = firstUser[".id"];
 	const patchResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/${adminId}`, {
 		method: "PATCH",
 		headers: {

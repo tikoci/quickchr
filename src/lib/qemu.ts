@@ -202,9 +202,11 @@ export async function spawnQemu(
 
 	const [bin, ...args] = qemuArgs;
 
+	if (!bin) throw new QuickCHRError("SPAWN_FAILED", "Empty QEMU args");
+
 	if (background) {
-		const logFile = Bun.file(logPath).writer();
-		const proc = Bun.spawn([bin!, ...args], {
+		const logFile = Bun.file(logPath);
+		const proc = Bun.spawn([bin, ...args], {
 			stdout: logFile,
 			stderr: logFile,
 			stdin: "ignore",
@@ -215,7 +217,7 @@ export async function spawnQemu(
 	}
 
 	// Foreground — stdin/stdout connected to terminal
-	const proc = Bun.spawn([bin!, ...args], {
+	const proc = Bun.spawn([bin, ...args], {
 		stdout: "inherit",
 		stderr: "inherit",
 		stdin: "inherit",

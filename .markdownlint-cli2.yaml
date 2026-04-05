@@ -10,12 +10,8 @@
 ignores:
   - "CLAUDE.md"
   - "AGENTS.md"
-  - "DESIGN.md"
-  - "BACKLOG.md"
   - ".github/copilot-instructions.md"
   - ".github/instructions/**"
   - "node_modules/**"
   - "**/node_modules/**"
-  - ".vscode-test-web/**"
-  - ".vscode-test/**"
-  - "test-data/**"
+  - ".github/prompts/**"
