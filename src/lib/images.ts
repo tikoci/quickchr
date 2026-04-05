@@ -1,0 +1,127 @@
+/**
+ * Image download, ZIP extraction, and cache management.
+ */
+
+import { existsSync, copyFileSync, readdirSync, renameSync } from "node:fs";
+import { join, basename } from "node:path";
+import type { Arch } from "./types.ts";
+import { QuickCHRError } from "./types.ts";
+import { chrDownloadUrl, chrImageBasename } from "./versions.ts";
+import { getCacheDir, ensureDir } from "./state.ts";
+
+/** Download a CHR image ZIP if not already cached. Returns path to the ZIP. */
+export async function downloadImage(
+	version: string,
+	arch: Arch,
+	cacheDir?: string,
+): Promise<string> {
+	const cache = cacheDir ?? getCacheDir();
+	ensureDir(cache);
+
+	const url = chrDownloadUrl(version, arch);
+	const zipName = `${chrImageBasename(version, arch)}.img.zip`;
+	const zipPath = join(cache, zipName);
+
+	if (existsSync(zipPath)) {
+		return zipPath;
+	}
+
+	console.log(`Downloading CHR ${version} (${arch})...`);
+	console.log(`  ${url}`);
+
+	const response = await fetch(url);
+	if (!response.ok) {
+		throw new QuickCHRError(
+			"DOWNLOAD_FAILED",
+			`Download failed: HTTP ${response.status} for ${url}`,
+		);
+	}
+
+	// Stream to disk via arrayBuffer (Bun.write with Response can hang on large files)
+	const buf = await response.arrayBuffer();
+	await Bun.write(zipPath, buf);
+	console.log(`  Saved (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+
+	return zipPath;
+}
+
+/** Extract the .img from the ZIP. Returns path to the raw .img file. */
+export async function extractImage(
+	zipPath: string,
+	cacheDir?: string,
+): Promise<string> {
+	const cache = cacheDir ?? getCacheDir();
+	ensureDir(cache);
+
+	const imgName = basename(zipPath, ".zip");
+	const imgPath = join(cache, imgName);
+
+	if (existsSync(imgPath)) {
+		return imgPath;
+	}
+
+	console.log(`Extracting: ${basename(zipPath)}`);
+
+	const result = Bun.spawnSync(["unzip", "-o", zipPath, "-d", cache], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+
+	if (result.exitCode !== 0) {
+		const stderr = new TextDecoder().decode(result.stderr);
+		throw new QuickCHRError("PROCESS_FAILED", `unzip failed: ${stderr}`, "Install unzip");
+	}
+
+	// MikroTik x86 ZIPs contain chr-X.Y.Z.img (no arch suffix).
+	// Our ZIP is named chr-X.Y.Z.img.zip (without -x86 for x86). Check if we need to
+	// find the extracted file.
+	if (!existsSync(imgPath)) {
+		const files = readdirSync(cache).filter(
+			(f) => f.endsWith(".img") && f.startsWith("chr-"),
+		);
+		// Find the one that was just extracted (matching version)
+		const expected = files.find((f) => {
+			const base = basename(zipPath, ".img.zip");
+			// chr-7.22.1.img matches chr-7.22.1.img.zip
+			return f === base + ".img" || f.replace("-arm64", "") === base.replace("-arm64", "") + ".img";
+		});
+		if (expected) {
+			const extractedPath = join(cache, expected);
+			if (extractedPath !== imgPath) {
+				renameSync(extractedPath, imgPath);
+			}
+		} else {
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				`Expected ${imgPath} after unzip, but not found. Files: ${files.join(", ")}`,
+			);
+		}
+	}
+
+	return imgPath;
+}
+
+/** Download and extract a CHR image. Returns path to the raw .img in cache. */
+export async function ensureCachedImage(
+	version: string,
+	arch: Arch,
+	cacheDir?: string,
+): Promise<string> {
+	const zipPath = await downloadImage(version, arch, cacheDir);
+	return extractImage(zipPath, cacheDir);
+}
+
+/** Copy a cached image to a machine's working directory as disk.img. */
+export function copyImageToMachine(cachedImgPath: string, machineDir: string): string {
+	ensureDir(machineDir);
+	const dest = join(machineDir, "disk.img");
+	copyFileSync(cachedImgPath, dest);
+	return dest;
+}
+
+/** List cached images. */
+export function listCachedImages(cacheDir?: string): string[] {
+	const cache = cacheDir ?? getCacheDir();
+	if (!existsSync(cache)) return [];
+	return readdirSync(cache).filter((f) => f.endsWith(".img"));
+}
