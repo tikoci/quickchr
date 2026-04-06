@@ -25,6 +25,7 @@ export async function downloadPackages(
 	const extractDir = join(cache, `packages-${arch}-${version}`);
 
 	if (existsSync(extractDir)) {
+		console.log(`  Using cached packages: ${version} (${arch})`);
 		return extractDir;
 	}
 

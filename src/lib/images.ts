@@ -107,6 +107,12 @@ export async function ensureCachedImage(
 	arch: Arch,
 	cacheDir?: string,
 ): Promise<string> {
+	const cache = cacheDir ?? getCacheDir();
+	const imgPath = join(cache, `${chrImageBasename(version, arch)}.img`);
+	if (existsSync(imgPath)) {
+		console.log(`  Using cached image: ${chrImageBasename(version, arch)}`);
+		return imgPath;
+	}
 	const zipPath = await downloadImage(version, arch, cacheDir);
 	return extractImage(zipPath, cacheDir);
 }

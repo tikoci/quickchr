@@ -269,7 +269,11 @@ export async function runWizard(): Promise<void> {
 		const hasProvisioning = !!(opts.installAllPackages || (opts.packages && opts.packages.length > 0) || opts.user || opts.disableAdmin || opts.license);
 
 		console.log();
-		console.log(b("  Foreground mode — QEMU serial console attached"));
+		if (hasProvisioning) {
+			console.log(b("  Foreground mode — serial console will attach after provisioning"));
+		} else {
+			console.log(b("  Foreground mode — QEMU serial console"));
+		}
 		console.log(`  ${c("Ctrl-A X")}  ${d("exit QEMU and return to shell")}`);
 		console.log(`  ${c("Ctrl-A C")}  ${d("toggle QEMU monitor (type 'quit' to force-stop)")}`);
 		console.log(`  ${c("Ctrl-A H")}  ${d("list all QEMU serial shortcuts")}`);
@@ -281,8 +285,9 @@ export async function runWizard(): Promise<void> {
 		await Bun.sleep(2000);
 		try {
 			const instance = await QuickCHR.start(opts);
-			console.log(`\n${bold(instance.name)} session ended`);
-			console.log(`  Tip: quickchr start ${instance.name}`);
+			console.log(`\n${b(instance.name)} session ended`);
+			console.log(`  ${d("Tip: resume session")}   quickchr start ${instance.name} --fg`);
+			console.log(`  ${d("Tip: run background")}   quickchr start ${instance.name}`);
 		} catch (e: unknown) {
 			if (e instanceof Error) clack.log.error(e.message);
 			process.exit(1);

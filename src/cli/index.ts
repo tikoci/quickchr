@@ -143,19 +143,112 @@ async function main() {
 // --- Commands ---
 
 /** Print QEMU keyboard shortcuts before foreground launch. Screen clears after QEMU starts. */
-function printForegroundTips() {
+function printForegroundTips(hasProvisioning = false) {
 	const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 	const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 	const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 	console.log();
-	console.log(bold("  Foreground mode — QEMU serial console attached"));
+	if (hasProvisioning) {
+		console.log(bold("  Foreground mode — serial console will attach after provisioning"));
+	} else {
+		console.log(bold("  Foreground mode — QEMU serial console"));
+	}
 	console.log(`  ${cyan("Ctrl-A X")}  ${dim("exit QEMU and return to shell")}`);
 	console.log(`  ${cyan("Ctrl-A C")}  ${dim("toggle QEMU monitor (type 'quit' to force-stop)")}`);
 	console.log(`  ${cyan("Ctrl-A H")}  ${dim("list all QEMU serial shortcuts")}`);
 	console.log(`  ${cyan("Ctrl-A S")}  ${dim("send break signal to serial port")}`);
 	console.log();
-	console.log(dim("  (screen clears when QEMU initializes)"));
+	if (!hasProvisioning) {
+		console.log(dim("  (screen clears when QEMU initializes)"));
+		console.log();
+	}
+}
+
+/** Attach stdin/stdout to the serial.sock of a running background machine.
+ *  Uses Ctrl-A X to detach (same convention as QEMU foreground mux). */
+async function attachSerial(name: string, machineDir: string): Promise<void> {
+	const { join } = await import("node:path");
+	const { existsSync } = await import("node:fs");
+	const { connect } = await import("node:net");
+	const { bold, dim, cyan } = await import("./format.ts");
+
+	const serialSock = join(machineDir, "serial.sock");
+	if (!existsSync(serialSock)) {
+		console.error(`\n  "${name}" has no serial socket — is it running in background mode?`);
+		console.error(`  Expected: ${dim(serialSock)}`);
+		process.exit(1);
+	}
+
+	if (!process.stdin.isTTY) {
+		console.error("Serial attach requires an interactive terminal.");
+		process.exit(1);
+	}
+
 	console.log();
+	console.log(bold(`  Attaching to serial console: ${name}`));
+	console.log(`  ${cyan("Ctrl-A X")}  ${dim("detach and return to shell")}`);
+	console.log(`  ${cyan("Ctrl-A H")}  ${dim("show this help")}`);
+	console.log();
+	await Bun.sleep(600);
+
+	const socket = connect({ path: serialSock });
+	await new Promise<void>((resolve, reject) => {
+		socket.once("connect", resolve);
+		socket.once("error", reject);
+	}).catch((err: Error) => {
+		console.error(`\nFailed to connect to serial socket: ${err.message}`);
+		process.exit(1);
+	});
+
+	process.stdin.setRawMode(true);
+	process.stdin.resume();
+
+	let gotCtrlA = false;
+	const stdinHandler = (chunk: Buffer) => {
+		if (socket.destroyed) return;
+		for (let i = 0; i < chunk.length; i++) {
+			const byte = chunk[i] as number;
+			if (gotCtrlA) {
+				gotCtrlA = false;
+				if (byte === 0x78 || byte === 0x58) { // x or X — detach
+					socket.destroy();
+					return;
+				}
+				if (byte === 0x68 || byte === 0x48) { // h or H — help
+					process.stdout.write(
+						`\r\n  ${cyan("Ctrl-A X")}  ${dim("detach and return to shell")}\r\n  ${cyan("Ctrl-A H")}  ${dim("show this help")}\r\n`,
+					);
+					continue;
+				}
+				if (byte === 0x01) { // Ctrl-A Ctrl-A — send literal Ctrl-A
+					socket.write(Buffer.from([0x01]));
+					continue;
+				}
+				// Unknown escape — forward both bytes
+				socket.write(Buffer.from([0x01, byte]));
+			} else if (byte === 0x01) {
+				gotCtrlA = true;
+			} else {
+				socket.write(Buffer.from([byte]));
+			}
+		}
+	};
+
+	process.stdin.on("data", stdinHandler);
+	socket.on("data", (d: Buffer) => process.stdout.write(d));
+
+	await new Promise<void>((resolve) => {
+		socket.on("close", resolve);
+		socket.on("error", resolve);
+	});
+
+	process.stdin.removeListener("data", stdinHandler);
+	try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+	process.stdin.pause();
+
+	console.log(`\n\n${bold(name)} console detached`);
+	console.log(`  ${dim("Tip: resume")}      quickchr start ${name} --fg`);
+	console.log(`  ${dim("Tip: background")}  quickchr start ${name}`);
 }
 
 async function cmdStart(argv: string[]) {
@@ -294,9 +387,18 @@ async function cmdStart(argv: string[]) {
 		return;
 	}
 
+	// --fg on already-running machine: attach to its serial console
+	if (!opts.background && opts.name) {
+		const runningMachine = QuickCHR.list().find((m) => m.name === opts.name && m.status === "running");
+		if (runningMachine) {
+			await attachSerial(runningMachine.name, runningMachine.machineDir);
+			return;
+		}
+	}
+
 	if (!opts.background) {
-		printForegroundTips();
 		const hasProv = !!(opts.installAllPackages || (opts.packages?.length ?? 0) > 0 || opts.user || opts.disableAdmin || opts.license);
+		printForegroundTips(hasProv);
 		if (hasProv) {
 			console.log("\x1b[2m  (CHR will boot and configure itself before the console appears)\x1b[0m");
 			console.log();
@@ -309,7 +411,8 @@ async function cmdStart(argv: string[]) {
 
 	if (!opts.background) {
 		console.log(`\n${bold(instance.name)} session ended`);
-		console.log(`  Tip: quickchr start ${instance.name}`);
+		console.log(`  ${dim("Tip: resume session")}   quickchr start ${instance.name} --fg`);
+		console.log(`  ${dim("Tip: run background")}   quickchr start ${instance.name}`);
 	} else {
 		console.log(`${statusIcon("running")} ${bold(instance.name)} started`);
 		console.log(`  Version: ${instance.state.version} (${instance.state.arch})`);
@@ -463,6 +566,7 @@ async function cmdStatus(argv: string[]) {
 		console.log(`  REST:       ${link(`http://127.0.0.1:${instance.ports.http}`)}`);
 		console.log(`  WinBox:     127.0.0.1:${instance.ports.winbox}`);
 		console.log(`  SSH:        ssh admin@127.0.0.1 -p ${instance.sshPort}`);
+		console.log(`  Serial:     ${dim(`${s.machineDir}/serial.sock`)}`);
 		console.log();
 		console.log(`  ${dim("Tip:")} quickchr stop ${s.name}`);
 	} else {

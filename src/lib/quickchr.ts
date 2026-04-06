@@ -355,7 +355,7 @@ export class QuickCHR {
 					saveMachine(current);
 				}
 				state.licenseLevel = level;
-				console.log(`License applied: ${level}`);
+				console.log(`  License applied: free → ${level}`);
 			} catch (e) {
 				console.warn(`[quickchr] License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
 			}
