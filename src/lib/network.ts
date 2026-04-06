@@ -2,6 +2,7 @@
  * Port allocation and conflict detection for QEMU user-mode networking.
  */
 
+import { createConnection } from "node:net";
 import {
 	DEFAULT_PORT_BASE,
 	PORTS_PER_BLOCK,
@@ -74,29 +75,27 @@ export function buildHostfwdString(ports: Record<string, PortMapping>): string {
 		.join(",");
 }
 
-/** Check if a TCP port is available by attempting to listen on it.
- *  Binds to 0.0.0.0 (wildcard) to match how QEMU sets up hostfwd.
- *  On macOS, binding 127.0.0.1 can succeed even when 0.0.0.0 is already
- *  claimed (SO_REUSEADDR + different local address), giving a false positive.
- *  Using 0.0.0.0 detects all conflicts. */
+/** Check if a TCP port is available on localhost.
+ *  Uses a connect probe: if anything is actively listening, the connect
+ *  succeeds and we return false.  ECONNREFUSED means nothing is listening.
+ *  This approach is immune to SO_REUSEADDR/SO_REUSEPORT semantics that
+ *  can cause bind-based checks to give false positives on macOS when a
+ *  wildcard (0.0.0.0) listener is present. */
 export async function isPortAvailable(port: number): Promise<boolean> {
 	return new Promise((resolve) => {
-		try {
-			const server = Bun.listen({
-				hostname: "0.0.0.0",
-				port,
-				socket: {
-					data() {},
-					open() {},
-					close() {},
-					error() {},
-				},
-			});
-			server.stop();
-			resolve(true);
-		} catch {
-			resolve(false);
-		}
+		const socket = createConnection({ host: "127.0.0.1", port });
+		socket.setTimeout(300);
+		socket.on("connect", () => {
+			socket.destroy();
+			resolve(false); // Something is listening — port occupied
+		});
+		socket.on("error", (err: Error & { code?: string }) => {
+			resolve(err.code === "ECONNREFUSED");
+		});
+		socket.on("timeout", () => {
+			socket.destroy();
+			resolve(true); // Nothing answered in time — treat as available
+		});
 	});
 }
 

@@ -295,17 +295,38 @@ async function cmdStart(argv: string[]) {
 	}
 
 	if (!opts.background) {
-		printForegroundTips();
-		// Brief pause so user can read tips before QEMU clears the screen
-		await Bun.sleep(1500);
+		const hasProv = !!(opts.installAllPackages || (opts.packages?.length ?? 0) > 0 || opts.user || opts.disableAdmin || opts.license);
+		if (hasProv) {
+			// Boot in background for provisioning, then serial attach — different hints apply
+			console.log();
+			console.log("\x1b[1m  Foreground mode — booting in background for provisioning, then attaching console\x1b[0m");
+			console.log(`  \x1b[36mCtrl-C\x1b[0m    \x1b[2mdetach from serial console (VM stays running)\x1b[0m`);
+			console.log(`  \x1b[2mUse 'quickchr stop <name>' to stop the VM\x1b[0m`);
+			console.log();
+		} else {
+			printForegroundTips();
+			// Brief pause so user can read tips before QEMU clears the screen
+			await Bun.sleep(1500);
+		}
 	}
 
 	const instance = await QuickCHR.start(opts);
 
 	if (!opts.background) {
-		// QEMU exited — show session summary
-		console.log(`\n${bold(instance.name)} session ended`);
-		console.log(`  Tip: quickchr start ${instance.name}`);
+		if (instance.state.status === "running") {
+			// Foreground with provisioning: boot+provision ran in background; attach serial now.
+			const { attachSerialToStdio } = await import("./format.ts");
+			const serialSock = `${instance.state.machineDir}/serial.sock`;
+			await attachSerialToStdio(serialSock);
+			console.log(`\n${bold(instance.name)} console detached (VM still running)`);
+			console.log(`  Stop:    quickchr stop ${instance.name}`);
+			console.log(`  REST:    ${link(instance.restUrl)}`);
+			console.log(`  SSH:     ssh admin@127.0.0.1 -p ${instance.sshPort}`);
+		} else {
+			// Pure foreground (no provisioning): QEMU exited
+			console.log(`\n${bold(instance.name)} session ended`);
+			console.log(`  Tip: quickchr start ${instance.name}`);
+		}
 	} else {
 		console.log(`${statusIcon("running")} ${bold(instance.name)} started`);
 		console.log(`  Version: ${instance.state.version} (${instance.state.arch})`);

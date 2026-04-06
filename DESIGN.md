@@ -67,12 +67,16 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
 ## Platform Support
 
-| Platform        | Accel | x86 CHR | arm64 CHR |
-|-----------------|-------|---------|-----------|
-| macOS arm64     | HVF   | TCG     | HVF       |
-| macOS x86_64    | HVF   | HVF     | TCG       |
-| Linux x86_64    | KVM   | KVM     | TCG       |
-| Linux aarch64   | KVM   | TCG*    | KVM       |
-| Windows x86_64  | TCG   | TCG     | TCG       |
+| Platform               | x86 CHR | arm64 CHR | Notes |
+|------------------------|---------|-----------|-------|
+| macOS x86_64           | HVF     | TCG       | Intel Mac |
+| macOS arm64 (native)   | HVF     | HVF       | Apple Silicon, bun is arm64 |
+| macOS arm64 (Rosetta)  | HVF     | TCG       | bun is x86_64; arm64 HVF skipped |
+| Linux x86_64           | KVM     | TCG       | KVM requires `/dev/kvm` writable |
+| Linux aarch64          | TCG     | KVM       | x86 TCG on arm64 Linux |
+| Windows x86_64         | TCG     | TCG       | HVF/KVM not available |
 
-*x86→arm64 TCG works (~20s boot). arm64→x86 TCG is not viable.
+**Acceleration detection** (`detectAccel`):
+- macOS: checks `kern.hv_support` via sysctl; for arm64 guest additionally checks `process.arch === "arm64"` (native bun = Apple Silicon).
+- Linux: checks `/dev/kvm` writability.
+- Falling back to TCG is always safe, just slower (~20s x86 TCG boot on Apple Silicon; ~2 min arm64 TCG on Intel).

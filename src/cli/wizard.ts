@@ -260,21 +260,47 @@ export async function runWizard(): Promise<void> {
 		process.exit(1);
 	}
 
-	// Foreground: skip spinner — QEMU takes over the terminal
+	// Foreground: skip spinner — QEMU takes over the terminal (or serial socket bridges after provisioning)
 	if (opts.background === false) {
 		const b = (s: string) => `\x1b[1m${s}\x1b[0m`;
 		const d = (s: string) => `\x1b[2m${s}\x1b[0m`;
 		const c = (s: string) => `\x1b[36m${s}\x1b[0m`;
+
+		const hasProvisioning = !!(opts.installAllPackages || (opts.packages && opts.packages.length > 0) || opts.user || opts.disableAdmin || opts.license);
+
 		console.log();
-		console.log(b("  Foreground mode — QEMU serial console attached"));
-		console.log(`  ${c("Ctrl-A X")}  ${d("exit QEMU and return to shell")}`);
-		console.log(`  ${c("Ctrl-A C")}  ${d("toggle QEMU monitor (type 'quit' to force-stop)")}`);
-		console.log(`  ${c("Ctrl-A H")}  ${d("list all QEMU serial shortcuts")}`);
-		console.log();
+		if (hasProvisioning) {
+			// Boot happens in background so we can provision first, then attach serial
+			console.log(b("  Foreground mode — CHR will boot in background, provision, then attach console"));
+			console.log(`  ${c("Ctrl-C")}    ${d("detach from serial console (VM stays running)")}`);
+			console.log(`  ${d("Use 'quickchr stop <name>' to stop the VM")}`);
+			console.log();
+			clack.log.info("Provisioning in progress — do not close this terminal...");
+		} else {
+			// No provisioning: QEMU owns stdio with mux enabled
+			console.log(b("  Foreground mode — QEMU serial console attached"));
+			console.log(`  ${c("Ctrl-A X")}  ${d("exit QEMU and return to shell")}`);
+			console.log(`  ${c("Ctrl-A C")}  ${d("toggle QEMU monitor (type 'quit' to force-stop)")}`);
+			console.log(`  ${c("Ctrl-A H")}  ${d("list all QEMU serial shortcuts")}`);
+			console.log();
+			// Brief pause so user can read tips before QEMU clears the screen
+			await Bun.sleep(2000);
+		}
 		try {
 			const instance = await QuickCHR.start(opts);
-			console.log(`\n${bold(instance.name)} session ended`);
-			console.log(`  Tip: quickchr start ${instance.name}`);
+			if (instance.state.status === "running") {
+				// Foreground with provisioning: boot+provision ran in background; attach serial now.
+				const { attachSerialToStdio } = await import("./format.ts");
+				const serialSock = `${instance.state.machineDir}/serial.sock`;
+				await attachSerialToStdio(serialSock);
+				console.log(`\n${bold(instance.name)} console detached (VM still running)`);
+				console.log(`  Stop:   quickchr stop ${instance.name}`);
+				console.log(`  REST:   ${instance.restUrl}`);
+				console.log(`  SSH:    ssh admin@127.0.0.1 -p ${instance.sshPort}`);
+			} else {
+				console.log(`\n${bold(instance.name)} session ended`);
+				console.log(`  Tip: quickchr start ${instance.name}`);
+			}
 		} catch (e: unknown) {
 			if (e instanceof Error) clack.log.error(e.message);
 			process.exit(1);

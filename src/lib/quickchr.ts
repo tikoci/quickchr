@@ -247,6 +247,19 @@ export class QuickCHR {
 
 		// Build machine config
 		const background = opts.background ?? true;
+
+		// Provisioning includes any work that requires the machine to have booted first.
+		// When foreground mode is requested WITH provisioning, we must boot in background,
+		// provision (packages/user/license), then attach the serial socket to stdio.
+		// Without provisioning, foreground mode runs QEMU with stdio directly (classic path).
+		const hasProvisioning = !!(
+			opts.installAllPackages ||
+			(opts.packages && opts.packages.length > 0) ||
+			opts.user ||
+			opts.disableAdmin ||
+			opts.license
+		);
+		const spawnInBackground = background || (!background && hasProvisioning);
 		const state: MachineState = {
 			name,
 			version,
@@ -275,14 +288,14 @@ export class QuickCHR {
 			cpu: state.cpu,
 			ports: state.ports,
 			network: state.network,
-			background,
+			background: spawnInBackground,
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
-		const { pid } = await spawnQemu(qemuArgs, machineDir, background);
+		const { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground);
 
-		// Foreground: spawnQemu blocks until QEMU exits
-		if (!background) {
+		// Foreground (no provisioning): spawnQemu blocks until QEMU exits
+		if (!background && !hasProvisioning) {
 			state.status = "stopped";
 			state.lastStartedAt = new Date().toISOString();
 			saveMachine(state);
@@ -296,7 +309,7 @@ export class QuickCHR {
 
 		const instance = createInstance(state);
 
-		// Post-boot provisioning (background only).
+		// Post-boot provisioning.
 		// With HVF/KVM, both architectures boot in well under 60 s.
 		// 120 s is generous for TCG and ensures start() returns within the
 		// typical 3-minute integration-test timeout.
@@ -304,7 +317,7 @@ export class QuickCHR {
 		const booted = await instance.waitForBoot(bootTimeout);
 
 		if (!booted) {
-			if ((opts.packages && opts.packages.length > 0) || opts.user || opts.disableAdmin) {
+			if (hasProvisioning) {
 				console.warn(`[quickchr] Warning: CHR did not respond within ${bootTimeout / 1000}s — skipping provisioning. Run 'quickchr status ${name}' to check once it's up.`);
 			}
 			return instance;

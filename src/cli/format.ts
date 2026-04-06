@@ -2,6 +2,8 @@
  * CLI output formatting — tables, colors, status indicators.
  */
 
+import { connect } from "node:net";
+
 const COLORS = {
 	reset: "\x1b[0m",
 	bold: "\x1b[1m",
@@ -89,4 +91,37 @@ export function link(url: string, label?: string): string {
 	const col = c();
 	if (!process.stdout.isTTY) return label ?? url;
 	return `${col.cyan}${label ?? url}${col.reset}`;
+}
+
+/** Bridge a running machine's serial socket to the current process stdio.
+ *  Blocks until the socket closes or stdin ends.
+ *  Call this after QuickCHR.start() returns a running instance when foreground
+ *  mode was requested and provisioning has already completed in background. */
+export async function attachSerialToStdio(socketPath: string): Promise<void> {
+	return new Promise<void>((resolve) => {
+		const socket = connect({ path: socketPath });
+
+		// Raw mode passes arrow keys, Ctrl sequences, etc. directly to RouterOS
+		if ("setRawMode" in process.stdin) {
+			(process.stdin as { setRawMode(m: boolean): void }).setRawMode(true);
+		}
+		process.stdin.resume();
+
+		const cleanup = () => {
+			try {
+				if ("setRawMode" in process.stdin) {
+					(process.stdin as { setRawMode(m: boolean): void }).setRawMode(false);
+				}
+			} catch { /* ignore */ }
+			socket.destroy();
+			resolve();
+		};
+
+		socket.on("data", (chunk: Buffer) => { process.stdout.write(chunk); });
+		socket.on("close", cleanup);
+		socket.on("error", cleanup);
+
+		process.stdin.on("data", (chunk: Buffer) => { if (!socket.destroyed) socket.write(chunk); });
+		process.stdin.on("end", cleanup);
+	});
 }

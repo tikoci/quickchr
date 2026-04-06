@@ -61,37 +61,24 @@ export async function disableAdmin(httpPort: number): Promise<void> {
 	await waitForRest(httpPort);
 
 	const auth = `Basic ${btoa("admin:")}`;
-	// First find admin's .id
-	const listResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user?name=admin`, {
-		headers: { Authorization: auth },
-	});
 
-	if (!listResp.ok) {
-		throw new QuickCHRError(
-			"PROCESS_FAILED",
-			`Failed to find admin user: HTTP ${listResp.status}`,
-		);
-	}
-
-	const users = (await listResp.json()) as { ".id": string }[];
-	const firstUser = users[0];
-	if (!firstUser) return;
-
-	const adminId = firstUser[".id"];
-	const patchResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/${adminId}`, {
-		method: "PATCH",
+	// Use /user/set to set disabled=yes on admin.
+	// POST /rest/user/set maps to CLI `/user set disabled=yes numbers=admin`.
+	// The disable/enable sub-commands use a `numbers` selector; so does set.
+	const setResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/set`, {
+		method: "POST",
 		headers: {
 			Authorization: auth,
 			"Content-Type": "application/json",
 		},
-		body: JSON.stringify({ disabled: "yes" }),
+		body: JSON.stringify({ numbers: "admin", disabled: "yes" }),
 	});
 
-	if (!patchResp.ok) {
-		const body = await patchResp.text();
+	if (!setResp.ok) {
+		const body = await setResp.text();
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`Failed to disable admin: HTTP ${patchResp.status} — ${body}`,
+			`Failed to disable admin: HTTP ${setResp.status} — ${body}`,
 		);
 	}
 }

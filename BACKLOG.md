@@ -24,11 +24,17 @@
 - [x] `sshpass` added to `doctor` dependency check
 - [x] `QUICKCHR_NO_PROMPT=1` env var suppresses all interactive prompts (for LLMs / scripts)
 - [x] `waitForBoot` accepts 401/403 HTTP responses as "booted" (RouterOS may require auth on `/`)
-- [x] Boot timeout is arch-aware: 300s for x86 TCG emulation, 120s for arm64 HVF
+- [x] Boot timeout unified to 120s (HVF/KVM boots in <30s; 120s covers TCG)
 - [x] Warning logged when boot timeout expires with packages/provisioning pending
 - [x] Small SSH warmup delay (2s) added after HTTP comes up before starting SCP uploads
 - [x] Package install integration test added (`container` package install + REST verify)
 - [x] Integration test instructions updated: mandatory before git commits
+- [x] Foreground mode with provisioning: CHR boots in background, provisions (packages/users/license), then attaches serial socket to stdio. In non-TTY (CI/tests) serial attach is skipped silently.
+- [x] Wizard shows correct hints per mode (QEMU mux Ctrl-A X for no-provisioning; Ctrl-C detach for provisioning)
+- [x] Wizard adds 2s sleep before QEMU starts so user can read hints
+- [x] `isPortAvailable` uses TCP connect probe instead of bind — immune to SO_REUSEADDR false positives on macOS
+- [x] `detectAccel` arm64 HVF check uses `process.arch` not `hw.optional.arm64` sysctl (Intel Mac safety)
+- [x] Provisioning integration test: user creation, admin disable, foreground non-TTY path
 - [ ] Graceful cleanup on SIGINT/SIGTERM in foreground mode (SIGINT currently leaves pid file)
 - [ ] Lock file to prevent concurrent starts of same machine
 - [ ] Better error messages for common QEMU failures (EFI size mismatch, permission denied)

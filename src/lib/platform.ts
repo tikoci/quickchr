@@ -112,14 +112,12 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 			const hv = new TextDecoder().decode(hvResult.stdout).trim();
 			if (hv === "1") {
 				if (guestArch === "x86") return "hvf";
-				// arm64 guest HVF is only available on Apple Silicon.
-				// Check hw.optional.arm64 — present and set to 1 on M-series, absent on Intel.
-				const armResult = Bun.spawnSync(["sysctl", "-n", "hw.optional.arm64"], {
-					stdout: "pipe",
-					stderr: "pipe",
-				});
-				const isAppleSilicon = new TextDecoder().decode(armResult.stdout).trim() === "1";
-				if (isAppleSilicon) return "hvf";
+				// arm64 guest HVF requires a native arm64 host process.
+				// Use process.arch — on Intel Macs this is "x64" so arm64 guests get TCG,
+				// which is correct (Intel can't run arm64 HVF). On Apple Silicon, native
+				// bun reports "arm64" and gets HVF. Rosetta bun reports "x64" and gets TCG
+				// (acceptable — arm64 TCG on Apple Silicon still boots in <5 min).
+				if (process.arch === "arm64") return "hvf";
 			}
 		} catch { /* fall through */ }
 	}
