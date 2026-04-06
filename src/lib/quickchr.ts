@@ -367,6 +367,17 @@ export class QuickCHR {
 			await provision(httpPort, opts.user, opts.disableAdmin);
 		}
 
+		// Foreground + provisioning: all provisioning is done in background mode.
+		// Now stop QEMU cleanly and re-launch with stdio so the user gets the real
+		// QEMU mux console (Ctrl-A X to quit, Ctrl-A C for monitor — standard QEMU
+		// shortcuts that are well-documented and googleable).
+		if (!background && hasProvisioning) {
+			await instance.stop();
+			// Brief pause for QEMU to flush and release the disk image
+			await Bun.sleep(1000);
+			return QuickCHR._launchExisting(state, false);
+		}
+
 		return instance;
 	}
 

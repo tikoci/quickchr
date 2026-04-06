@@ -86,12 +86,11 @@ describe.skipIf(SKIP)("user provisioning", () => {
 		}
 	}, 180_000);
 
-	test("foreground mode with provisioning: library returns running provisioned instance (serial attach is CLI concern)", async () => {
-		// When background:false + provisioning options are set, the library boots in background,
-		// provisions, and returns a running instance WITHOUT attaching the serial socket.
-		// The serial attach happens at the CLI layer (index.ts / wizard.ts).
-		// This test verifies the library's behaviour in a non-TTY environment (which is always
-		// the case in tests).
+	test("provisioning fires before QEMU console handoff (background:true verifies shared provisioning path)", async () => {
+		// When background:false + provisioning: the library boots in background, provisions,
+		// stops QEMU, then re-launches in stdio foreground mode (blocking until QEMU exits).
+		// That final stdio launch can't be tested without a TTY, so we verify with background:true
+		// that the provisioning path (createUser et al) works — the same code runs in both modes.
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
@@ -99,12 +98,11 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			instance = await QuickCHR.start({
 				channel: "stable",
 				arch: "x86",
-				background: false, // foreground requested — library handles via bg boot + provision
+				background: true,
 				name: "integration-prov-fg",
 				user: { name: "fguser", password: "FgPass1" },
 			});
 
-			// Instance stays running (serial attach is CLI-layer concern, not invoked here)
 			expect(instance.state.status).toBe("running");
 
 			// Provisioning must have happened: new user can auth
