@@ -164,8 +164,9 @@ function printForegroundTips(hasProvisioning = false) {
 	}
 }
 
-/** Attach stdin/stdout to the serial.sock of a running background machine.
- *  Uses Ctrl-A X to detach (same convention as QEMU foreground mux). */
+/** Attach stdin/stdout to a running background machine — replicates QEMU's Ctrl-A mux.
+ *  serial.sock  — RouterOS console  (default mode)
+ *  monitor.sock — QEMU monitor      (Ctrl-A C to toggle, connected on demand) */
 async function attachSerial(name: string, machineDir: string): Promise<void> {
 	const { join } = await import("node:path");
 	const { existsSync } = await import("node:fs");
@@ -173,6 +174,8 @@ async function attachSerial(name: string, machineDir: string): Promise<void> {
 	const { bold, dim, cyan } = await import("./format.ts");
 
 	const serialSock = join(machineDir, "serial.sock");
+	const monitorSock = join(machineDir, "monitor.sock");
+
 	if (!existsSync(serialSock)) {
 		console.error(`\n  "${name}" has no serial socket — is it running in background mode?`);
 		console.error(`  Expected: ${dim(serialSock)}`);
@@ -184,71 +187,163 @@ async function attachSerial(name: string, machineDir: string): Promise<void> {
 		process.exit(1);
 	}
 
+	const hasMonitor = existsSync(monitorSock);
+
 	console.log();
-	console.log(bold(`  Attaching to serial console: ${name}`));
+	console.log(bold(`  Attached to: ${name}`));
 	console.log(`  ${cyan("Ctrl-A X")}  ${dim("detach and return to shell")}`);
+	if (hasMonitor) {
+		console.log(`  ${cyan("Ctrl-A C")}  ${dim("toggle QEMU monitor / serial console")}`);
+	}
 	console.log(`  ${cyan("Ctrl-A H")}  ${dim("show this help")}`);
 	console.log();
 	await Bun.sleep(600);
 
-	const socket = connect({ path: serialSock });
+	const serialConn = connect({ path: serialSock });
 	await new Promise<void>((resolve, reject) => {
-		socket.once("connect", resolve);
-		socket.once("error", reject);
+		serialConn.once("connect", resolve);
+		serialConn.once("error", reject);
 	}).catch((err: Error) => {
 		console.error(`\nFailed to connect to serial socket: ${err.message}`);
 		process.exit(1);
 	});
 
+	// Send CR to nudge RouterOS into re-printing its current prompt.
+	// Without this the socket delivers nothing until RouterOS receives input.
+	// RouterOS treats a bare CR at "Login:" as an empty entry → re-displays "Login: ".
+	serialConn.write(Buffer.from([0x0d]));
+
 	process.stdin.setRawMode(true);
 	process.stdin.resume();
 
+	// Yield one event-loop tick BEFORE attaching the data listener.
+	// Node.js/Bun streams discard data events that fire while no 'data' listener
+	// is registered (flowing mode + no listener = data lost). This cleanly drops
+	// any stale bytes buffered in stdin from a prior session that left raw mode
+	// enabled — those are what caused the spurious "\01" login in RouterOS logs.
+	await new Promise<void>((res) => setImmediate(res));
+
+	let mode: "serial" | "monitor" = "serial";
+	type Sock = ReturnType<typeof connect>;
+	let monitorConn: Sock | null = null;
 	let gotCtrlA = false;
+	let done = false;
+	let resolveExit!: () => void;
+	const exitPromise = new Promise<void>((res) => { resolveExit = res; });
+
+	const cleanup = () => {
+		if (done) return;
+		done = true;
+		serialConn.destroy();
+		if (monitorConn) monitorConn.destroy();
+		try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+		process.stdin.pause();
+		resolveExit();
+	};
+
+	// Always restore TTY on process exit — guards against SIGINT crash leaving raw mode
+	const sigHandler = () => cleanup();
+	process.once("SIGINT", sigHandler);
+	process.once("SIGTERM", sigHandler);
+
+	const printHelp = () => {
+		process.stdout.write(`\r\n  ${cyan("Ctrl-A X")}  detach\r\n`);
+		if (hasMonitor) process.stdout.write(`  ${cyan("Ctrl-A C")}  toggle monitor / serial console\r\n`);
+		process.stdout.write(`  ${cyan("Ctrl-A H")}  this help\r\n`);
+	};
+
+	/** Connect to monitor socket on demand (first Ctrl-A C press). */
+	const openMonitor = () => {
+		if (monitorConn && !monitorConn.destroyed) {
+			// Reconnect to existing live socket — just switch mode and nudge prompt
+			mode = "monitor";
+			process.stdout.write("\r\n\x1b[2m[QEMU monitor — Ctrl-A C to return to console]\x1b[0m\r\n");
+			monitorConn.write("\n");
+			return;
+		}
+		if (!existsSync(monitorSock)) {
+			process.stdout.write("\r\n\x1b[2m[monitor socket not found]\x1b[0m\r\n");
+			return;
+		}
+		const mc = connect({ path: monitorSock });
+		monitorConn = mc;
+		mc.on("data", (d: Buffer) => { if (mode === "monitor") process.stdout.write(d); });
+		mc.on("error", () => {
+			process.stdout.write("\r\n\x1b[2m[monitor unavailable]\x1b[0m\r\n");
+			if (mode === "monitor") mode = "serial";
+			monitorConn = null;
+		});
+		mc.on("close", () => {
+			if (mode === "monitor") {
+				// QEMU exited via 'quit' — serial socket will close next, triggering cleanup
+				process.stdout.write("\r\n\x1b[2m[QEMU exited]\x1b[0m\r\n");
+			}
+			monitorConn = null;
+		});
+		mc.once("connect", () => {
+			mode = "monitor";
+			process.stdout.write("\r\n\x1b[2m[QEMU monitor — Ctrl-A C to return to console]\x1b[0m\r\n");
+			// Don't nudge with "\n" here — the (qemu) banner arrives naturally on connect
+		});
+	};
+
+	serialConn.on("data", (d: Buffer) => { if (mode === "serial") process.stdout.write(d); });
+	serialConn.on("close", cleanup);
+	serialConn.on("error", cleanup);
+
 	const stdinHandler = (chunk: Buffer) => {
-		if (socket.destroyed) return;
+		if (done) return;
 		for (let i = 0; i < chunk.length; i++) {
 			const byte = chunk[i] as number;
 			if (gotCtrlA) {
 				gotCtrlA = false;
-				if (byte === 0x78 || byte === 0x58) { // x or X — detach
-					socket.destroy();
-					return;
+				// Match QEMU's mux_proc_byte exactly: unrecognised escapes are eaten (return 0).
+				// QEMU never forwards [0x01, unknown] — only listed keys trigger actions.
+				switch (byte) {
+					case 0x78: case 0x58: // x/X — detach
+						process.stdout.write("\r\n");
+						cleanup();
+						return;
+					case 0x68: case 0x48: // h/H — help
+						printHelp();
+						break;
+					case 0x63: case 0x43: // c/C — toggle monitor
+						if (!hasMonitor) {
+							process.stdout.write("\r\n\x1b[2m[monitor not available]\x1b[0m\r\n");
+						} else if (mode === "serial") {
+							openMonitor();
+						} else {
+							mode = "serial";
+							process.stdout.write("\r\n\x1b[2m[serial console]\x1b[0m\r\n");
+						}
+						break;
+					case 0x01: // Ctrl-A Ctrl-A — send literal 0x01 to active channel
+						if (mode === "serial" && !serialConn.destroyed) serialConn.write(Buffer.from([0x01]));
+						else if (monitorConn && !monitorConn.destroyed) monitorConn.write(Buffer.from([0x01]));
+						break;
+					// All other Ctrl-A + X: silently eat (matches QEMU mux_proc_byte behaviour)
+					default:
+						break;
 				}
-				if (byte === 0x68 || byte === 0x48) { // h or H — help
-					process.stdout.write(
-						`\r\n  ${cyan("Ctrl-A X")}  ${dim("detach and return to shell")}\r\n  ${cyan("Ctrl-A H")}  ${dim("show this help")}\r\n`,
-					);
-					continue;
-				}
-				if (byte === 0x01) { // Ctrl-A Ctrl-A — send literal Ctrl-A
-					socket.write(Buffer.from([0x01]));
-					continue;
-				}
-				// Unknown escape — forward both bytes
-				socket.write(Buffer.from([0x01, byte]));
 			} else if (byte === 0x01) {
 				gotCtrlA = true;
 			} else {
-				socket.write(Buffer.from([byte]));
+				const dest = mode === "serial" ? serialConn : monitorConn;
+				if (dest && !dest.destroyed) dest.write(Buffer.from([byte]));
 			}
 		}
 	};
 
 	process.stdin.on("data", stdinHandler);
-	socket.on("data", (d: Buffer) => process.stdout.write(d));
-
-	await new Promise<void>((resolve) => {
-		socket.on("close", resolve);
-		socket.on("error", resolve);
-	});
-
+	await exitPromise;
 	process.stdin.removeListener("data", stdinHandler);
-	try { process.stdin.setRawMode(false); } catch { /* ignore */ }
-	process.stdin.pause();
+	process.removeListener("SIGINT", sigHandler);
+	process.removeListener("SIGTERM", sigHandler);
+	if (!done) cleanup();
 
-	console.log(`\n\n${bold(name)} console detached`);
-	console.log(`  ${dim("Tip: resume")}      quickchr start ${name} --fg`);
-	console.log(`  ${dim("Tip: background")}  quickchr start ${name}`);
+	console.log(`\n${bold(name)} console detached`);
+	console.log(`  ${dim("Tip: resume session")}   quickchr start ${name} --fg`);
+	console.log(`  ${dim("Tip: run background")}   quickchr start ${name}`);
 }
 
 async function cmdStart(argv: string[]) {
@@ -326,7 +421,7 @@ async function cmdStart(argv: string[]) {
 
 	// Build start options from flags
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, formatPorts, link, bold } = await import("./format.ts");
+	const { statusIcon, formatPorts, link, bold, dim } = await import("./format.ts");
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),

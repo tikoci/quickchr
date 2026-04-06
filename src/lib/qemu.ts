@@ -147,11 +147,14 @@ function buildChannelArgs(
 			"-serial", "chardev:serial0",
 		);
 	} else {
-		// Foreground: serial on stdio with mux (Ctrl-A C for monitor)
+		// Foreground: serial on stdio with mux (Ctrl-A C for monitor).
+		// Also bind a socket monitor so monitorCommand() works while in fg mode.
 		args.push(
 			"-chardev", "stdio,id=serial0,mux=on,signal=off",
 			"-mon", "chardev=serial0,mode=readline",
 			"-serial", "chardev:serial0",
+			"-chardev", `socket,id=monitor0,path=${monitorSock},server=on,wait=off`,
+			"-mon", "chardev=monitor0,mode=readline",
 		);
 	}
 

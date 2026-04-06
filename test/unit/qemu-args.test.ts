@@ -138,11 +138,13 @@ describe("buildQemuArgs", () => {
 		}
 	});
 
-	test("foreground mode uses stdio", async () => {
+	test("foreground mode uses stdio and still binds monitor socket", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ background: false }));
 			const stdioArg = args.find((a) => a.includes("stdio"));
 			expect(stdioArg).toBeDefined();
+			const monitorArg = args.find((a) => a.includes("monitor.sock"));
+			expect(monitorArg).toBeDefined();
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
 				console.log("Skipping: QEMU not installed");
