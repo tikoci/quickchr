@@ -62,7 +62,9 @@ export async function renewLicense(
 }
 
 /** Fetch the current license state from a running CHR.
- *  Returns the parsed JSON response from /rest/system/license/get.
+ *  Uses GET /rest/system/license (standard REST read for a single-object menu).
+ *  Normalises the response: RouterOS omits `level` for the implicit "free" tier,
+ *  so we fill it in when absent.
  */
 export async function getLicenseInfo(
 	httpPort: number,
@@ -73,13 +75,9 @@ export async function getLicenseInfo(
 
 	let response: Response;
 	try {
-		response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license/get`, {
-			method: "POST",
-			headers: {
-				Authorization: auth,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({}),
+		response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license`, {
+			method: "GET",
+			headers: { Authorization: auth },
 			signal: AbortSignal.timeout(10_000),
 		});
 	} catch (e) {
@@ -97,7 +95,12 @@ export async function getLicenseInfo(
 		);
 	}
 
-	return response.json() as Promise<LicenseInfo>;
+	const info = await response.json() as LicenseInfo;
+	// RouterOS REST omits default / empty fields. A CHR with no registered license
+	// is implicitly "free" — normalise to the explicit string so callers can always
+	// read info.level without special-casing undefined.
+	if (!info.level) info.level = "free";
+	return info;
 }
 
 /** Parsed response from /rest/system/license/get */

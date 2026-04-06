@@ -87,25 +87,40 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 	const hostOs = process.platform;
 	const hostArch = process.arch; // "x64" | "arm64"
 
-	const archMatch =
-		(guestArch === "x86" && hostArch === "x64") ||
-		(guestArch === "arm64" && hostArch === "arm64");
-
-	if (hostOs === "linux" && archMatch) {
-		try {
-			const stat = Bun.spawnSync(["test", "-w", "/dev/kvm"], { stdout: "pipe", stderr: "pipe" });
-			if (stat.exitCode === 0) return "kvm";
-		} catch { /* fall through */ }
+	if (hostOs === "linux") {
+		// KVM requires matching host/guest architecture.
+		const archMatch =
+			(guestArch === "x86" && hostArch === "x64") ||
+			(guestArch === "arm64" && hostArch === "arm64");
+		if (archMatch) {
+			try {
+				const stat = Bun.spawnSync(["test", "-w", "/dev/kvm"], { stdout: "pipe", stderr: "pipe" });
+				if (stat.exitCode === 0) return "kvm";
+			} catch { /* fall through */ }
+		}
 	}
 
-	if (hostOs === "darwin" && archMatch) {
+	if (hostOs === "darwin") {
+		// Apple Hypervisor Framework (HVF) is a system capability, not a per-process one.
+		// It is available if kern.hv_support=1, regardless of whether the bun process
+		// itself is arm64 native or running via Rosetta (process.arch="x64").
 		try {
-			const result = Bun.spawnSync(["sysctl", "-n", "kern.hv_support"], {
+			const hvResult = Bun.spawnSync(["sysctl", "-n", "kern.hv_support"], {
 				stdout: "pipe",
 				stderr: "pipe",
 			});
-			const hv = new TextDecoder().decode(result.stdout).trim();
-			if (hv === "1") return "hvf";
+			const hv = new TextDecoder().decode(hvResult.stdout).trim();
+			if (hv === "1") {
+				if (guestArch === "x86") return "hvf";
+				// arm64 guest HVF is only available on Apple Silicon.
+				// Check hw.optional.arm64 — present and set to 1 on M-series, absent on Intel.
+				const armResult = Bun.spawnSync(["sysctl", "-n", "hw.optional.arm64"], {
+					stdout: "pipe",
+					stderr: "pipe",
+				});
+				const isAppleSilicon = new TextDecoder().decode(armResult.stdout).trim() === "1";
+				if (isAppleSilicon) return "hvf";
+			}
 		} catch { /* fall through */ }
 	}
 

@@ -11,13 +11,15 @@ import { describe, test, expect, beforeAll } from "bun:test";
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 
 describe.skipIf(SKIP)("start-stop lifecycle", () => {
-	// Clean up in case a previous run failed mid-test
+	// Clean up in case a previous run left a machine behind.
+	// Use remove() to ensure a fresh disk image — a dirty disk from
+	// an incomplete previous boot can slow recovery significantly.
 	beforeAll(async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const existing = QuickCHR.get("integration-test-1");
 		if (existing) {
-			try { await existing.stop(); } catch { /* ignore */ }
-			try { await existing.remove(); } catch { /* ignore */ }
+			try { await existing.stop(); } catch { /* ignore if already stopped */ }
+			try { await existing.remove(); } catch { /* ignore if already removed */ }
 		}
 	});
 
@@ -26,13 +28,10 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
-			// Always use native arch so QEMU has hardware acceleration (HVF/KVM).
-			// Without this, a leftover x86 machine could be relaunched via TCG
-			// emulation on an ARM64 host, making boot take minutes instead of seconds.
-			const arch = process.arch === "arm64" ? "arm64" : "x86";
+			// Let start() pick the native arch (x86 + HVF on Rosetta, arm64 + HVF on native)
+			// so QEMU uses hardware acceleration and boots quickly.
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch,
 				background: true,
 				name: "integration-test-1",
 			});
@@ -41,8 +40,9 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 			expect(instance.state.status).toBe("running");
 			expect(instance.ports.http).toBeGreaterThan(0);
 
-			// Wait for boot
-			const booted = await instance.waitForBoot(120_000);
+			// start() already waited for first boot internally. This second call
+			// should return true immediately (CHR is already up).
+			const booted = await instance.waitForBoot(60_000);
 			expect(booted).toBe(true);
 
 			// Test REST API

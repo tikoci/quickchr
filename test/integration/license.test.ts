@@ -45,11 +45,11 @@ describe.skipIf(SKIP)("license — getLicenseInfo on fresh CHR", () => {
 			expect(booted).toBe(true);
 
 			const info = await getLicenseInfo(instance.ports.http);
-			// system-id is always present; level may be absent on a truly free CHR
+			// A fresh CHR has no registered license — level must be "free".
+			// getLicenseInfo normalises absent level to "free" because RouterOS REST
+			// omits default/empty fields.
+			expect(info.level).toBe("free");
 			expect(typeof info["system-id"]).toBe("string");
-			if (info.level !== undefined) {
-				expect(info.level).toMatch(/^(free|p1|p10|unlimited)$/);
-			}
 		} finally {
 			if (instance) {
 				await instance.stop();

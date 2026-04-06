@@ -297,8 +297,10 @@ export class QuickCHR {
 		const instance = createInstance(state);
 
 		// Post-boot provisioning (background only).
-		// x86 TCG emulation is slow — use a generous timeout (5 min).
-		const bootTimeout = arch === "arm64" ? 120_000 : 300_000;
+		// With HVF/KVM, both architectures boot in well under 60 s.
+		// 120 s is generous for TCG and ensures start() returns within the
+		// typical 3-minute integration-test timeout.
+		const bootTimeout = 120_000;
 		const booted = await instance.waitForBoot(bootTimeout);
 
 		if (!booted) {

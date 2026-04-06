@@ -5,7 +5,7 @@
  * manages process spawn/stop, and handles PID tracking.
  */
 
-import { existsSync, writeFileSync, copyFileSync, statSync, openSync, closeSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import type { Arch, MachineState, NetworkMode, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -214,6 +214,23 @@ export async function spawnQemu(
 			stdin: "ignore",
 		});
 		closeSync(logFd);
+
+		// Give QEMU 1.5 s to fully initialise — if it exits immediately the
+		// arguments were bad (e.g. port already in use). Detect this early so
+		// the caller gets a clear error instead of a 120-second waitForBoot.
+		await Bun.sleep(1500);
+		try {
+			process.kill(proc.pid, 0);
+		} catch {
+			let logTail = "(no log)";
+			try {
+				if (existsSync(logPath)) {
+					logTail = readFileSync(logPath, "utf-8").slice(-800);
+				}
+			} catch { /* ignore */ }
+			throw new QuickCHRError("SPAWN_FAILED", `QEMU exited immediately:\n${logTail}`);
+		}
+
 		// unref() lets the parent Bun process exit without waiting for QEMU.
 		// QEMU becomes an orphan adopted by init/launchd and keeps running.
 		proc.unref();

@@ -74,12 +74,16 @@ export function buildHostfwdString(ports: Record<string, PortMapping>): string {
 		.join(",");
 }
 
-/** Check if a TCP port is available by attempting to listen on it. */
+/** Check if a TCP port is available by attempting to listen on it.
+ *  Binds to 0.0.0.0 (wildcard) to match how QEMU sets up hostfwd.
+ *  On macOS, binding 127.0.0.1 can succeed even when 0.0.0.0 is already
+ *  claimed (SO_REUSEADDR + different local address), giving a false positive.
+ *  Using 0.0.0.0 detects all conflicts. */
 export async function isPortAvailable(port: number): Promise<boolean> {
 	return new Promise((resolve) => {
 		try {
 			const server = Bun.listen({
-				hostname: "127.0.0.1",
+				hostname: "0.0.0.0",
 				port,
 				socket: {
 					data() {},
