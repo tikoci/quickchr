@@ -26,8 +26,13 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
+			// Always use native arch so QEMU has hardware acceleration (HVF/KVM).
+			// Without this, a leftover x86 machine could be relaunched via TCG
+			// emulation on an ARM64 host, making boot take minutes instead of seconds.
+			const arch = process.arch === "arm64" ? "arm64" : "x86";
 			instance = await QuickCHR.start({
 				channel: "stable",
+				arch,
 				background: true,
 				name: "integration-test-1",
 			});

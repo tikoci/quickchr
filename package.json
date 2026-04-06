@@ -24,8 +24,8 @@
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "bun test test/unit/",
-    "test:integration": "bun test test/integration/",
-    "test:all": "bun test",
+    "test:integration": "QUICKCHR_INTEGRATION=1 bun test test/integration/",
+    "test:all": "QUICKCHR_INTEGRATION=1 bun test",
     "dev": "bun run src/cli/index.ts"
   },
   "devDependencies": {
