@@ -94,14 +94,15 @@ export function link(url: string, label?: string): string {
 }
 
 /** Bridge a running machine's serial socket to the current process stdio.
- *  Blocks until the socket closes or stdin ends.
+ *  Blocks until Ctrl-] is pressed, the socket closes, or stdin ends.
  *  Call this after QuickCHR.start() returns a running instance when foreground
  *  mode was requested and provisioning has already completed in background. */
 export async function attachSerialToStdio(socketPath: string): Promise<void> {
 	return new Promise<void>((resolve) => {
 		const socket = connect({ path: socketPath });
 
-		// Raw mode passes arrow keys, Ctrl sequences, etc. directly to RouterOS
+		// Raw mode passes arrow keys, Ctrl sequences, etc. directly to RouterOS.
+		// Ctrl-] (0x1D) is intercepted as the local escape to detach.
 		if ("setRawMode" in process.stdin) {
 			(process.stdin as { setRawMode(m: boolean): void }).setRawMode(true);
 		}
@@ -117,11 +118,23 @@ export async function attachSerialToStdio(socketPath: string): Promise<void> {
 			resolve();
 		};
 
+		// Send a CR on connect so the CHR login prompt appears immediately without
+		// requiring the user to press Enter manually.
+		socket.on("connect", () => { socket.write("\r"); });
+
 		socket.on("data", (chunk: Buffer) => { process.stdout.write(chunk); });
 		socket.on("close", cleanup);
 		socket.on("error", cleanup);
 
-		process.stdin.on("data", (chunk: Buffer) => { if (!socket.destroyed) socket.write(chunk); });
+		process.stdin.on("data", (chunk: Buffer) => {
+			// Ctrl-] (byte 0x1D) — classic telnet escape — detaches the console.
+			if (chunk.length === 1 && chunk[0] === 0x1d) {
+				process.stdout.write("\n[detached]\n");
+				cleanup();
+				return;
+			}
+			if (!socket.destroyed) socket.write(chunk);
+		});
 		process.stdin.on("end", cleanup);
 	});
 }

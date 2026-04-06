@@ -71,12 +71,10 @@ describe.skipIf(SKIP)("user provisioning", () => {
 
 			// Verify admin's disabled flag via the user list.
 			//
-			// Note: RouterOS REST API allows the system default admin user to authenticate
-			// via HTTP even when disabled (intentional recovery mechanism for the credential
-			// that was valid when the EXPIRED flag was set, i.e. the original empty password).
-			// HTTP 401 is therefore NOT a reliable signal for disabled status on a fresh CHR.
-			// Instead we verify the disabled flag in the API response, which correctly reflects
-			// the disable operation on all other protocols (SSH, Winbox, MikroTik API).
+			// We assert the user-list field rather than HTTP 401 because the REST
+			// query runs immediately after the disable call, which may not have
+			// propagated to the HTTP auth layer within the same test run timing.
+			// The `disabled` field in the user list is the authoritative state.
 			const userListResp = await fetch(
 				`http://127.0.0.1:${instance.ports.http}/rest/user?name=admin`,
 				{ headers: { Authorization: `Basic ${btoa("skyfi:SkyfiPass1")}` }, signal: AbortSignal.timeout(10_000) },

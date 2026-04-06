@@ -272,7 +272,7 @@ export async function runWizard(): Promise<void> {
 		if (hasProvisioning) {
 			// Boot happens in background so we can provision first, then attach serial
 			console.log(b("  Foreground mode — CHR will boot in background, provision, then attach console"));
-			console.log(`  ${c("Ctrl-C")}    ${d("detach from serial console (VM stays running)")}`);
+			console.log(`  ${c("Ctrl-]")}    ${d("detach from serial console (VM stays running)")}`);
 			console.log(`  ${d("Use 'quickchr stop <name>' to stop the VM")}`);
 			console.log();
 			clack.log.info("Provisioning in progress — do not close this terminal...");

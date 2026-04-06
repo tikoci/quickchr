@@ -300,7 +300,7 @@ async function cmdStart(argv: string[]) {
 			// Boot in background for provisioning, then serial attach — different hints apply
 			console.log();
 			console.log("\x1b[1m  Foreground mode — booting in background for provisioning, then attaching console\x1b[0m");
-			console.log(`  \x1b[36mCtrl-C\x1b[0m    \x1b[2mdetach from serial console (VM stays running)\x1b[0m`);
+			console.log(`  \x1b[36mCtrl-]\x1b[0m    \x1b[2mdetach from serial console (VM stays running)\x1b[0m`);
 			console.log(`  \x1b[2mUse 'quickchr stop <name>' to stop the VM\x1b[0m`);
 			console.log();
 		} else {
