@@ -265,6 +265,15 @@ export class QuickCHR {
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const { pid } = await spawnQemu(qemuArgs, machineDir, background);
+
+		// Foreground: spawnQemu blocks until QEMU exits
+		if (!background) {
+			state.status = "stopped";
+			state.lastStartedAt = new Date().toISOString();
+			saveMachine(state);
+			return createInstance(state);
+		}
+
 		state.pid = pid;
 		state.lastStartedAt = new Date().toISOString();
 
@@ -272,32 +281,35 @@ export class QuickCHR {
 
 		const instance = createInstance(state);
 
-		// Post-boot provisioning (background — don't block on it for foreground)
-		if (background) {
-			// Wait for boot, then provision
-			const booted = await instance.waitForBoot();
-			if (booted) {
-				// Install extra packages if requested
-				if (opts.packages && opts.packages.length > 0) {
-					const httpPort = toChrPorts(ports).http;
-					await installPackages(
-						opts.packages,
-						version,
-						arch,
-						toChrPorts(ports).ssh,
-						httpPort,
-					);
-					// Wait for reboot after package install
-					await Bun.sleep(5000);
-					await instance.waitForBoot();
-				}
+		// Post-boot provisioning (background only).
+		// x86 TCG emulation is slow — use a generous timeout (5 min).
+		const bootTimeout = arch === "arm64" ? 120_000 : 300_000;
+		const booted = await instance.waitForBoot(bootTimeout);
 
-				// User provisioning
-				if (opts.user || opts.disableAdmin) {
-					const httpPort = toChrPorts(ports).http;
-					await provision(httpPort, opts.user, opts.disableAdmin);
-				}
+		if (!booted) {
+			if ((opts.packages && opts.packages.length > 0) || opts.user || opts.disableAdmin) {
+				console.warn(`[quickchr] Warning: CHR did not respond within ${bootTimeout / 1000}s — skipping provisioning. Run 'quickchr status ${name}' to check once it's up.`);
 			}
+			return instance;
+		}
+
+		// Give SSH a moment to start after HTTP comes up
+		await Bun.sleep(2000);
+
+		// Install extra packages if requested
+		if (opts.packages && opts.packages.length > 0) {
+			const chrPorts = toChrPorts(ports);
+			await installPackages(opts.packages, version, arch, chrPorts.ssh, chrPorts.http);
+			// Wait for reboot to activate packages
+			await Bun.sleep(5000);
+			await instance.waitForBoot(bootTimeout);
+			await Bun.sleep(2000);
+		}
+
+		// User provisioning
+		if (opts.user || opts.disableAdmin) {
+			const httpPort = toChrPorts(ports).http;
+			await provision(httpPort, opts.user, opts.disableAdmin);
 		}
 
 		return instance;
@@ -326,6 +338,15 @@ export class QuickCHR {
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const { pid } = await spawnQemu(qemuArgs, state.machineDir, background);
+
+		// Foreground: spawnQemu blocks until QEMU exits
+		if (!background) {
+			state.status = "stopped";
+			state.lastStartedAt = new Date().toISOString();
+			saveMachine(state);
+			return createInstance(state);
+		}
+
 		state.pid = pid;
 		state.status = "running";
 		state.lastStartedAt = new Date().toISOString();
@@ -472,6 +493,22 @@ export class QuickCHR {
 				label: "socat",
 				status: "warn",
 				detail: "not found (optional, for serial console access)",
+			});
+		}
+
+		// sshpass (needed for package upload to RouterOS — empty-password auth)
+		const sshpassResult = Bun.spawnSync(["which", "sshpass"], { stdout: "pipe", stderr: "pipe" });
+		if (sshpassResult.exitCode === 0) {
+			checks.push({
+				label: "sshpass",
+				status: "ok",
+				detail: new TextDecoder().decode(sshpassResult.stdout).trim(),
+			});
+		} else {
+			checks.push({
+				label: "sshpass",
+				status: "warn",
+				detail: "not found — required for extra package upload (brew install sshpass / apt install sshpass)",
 			});
 		}
 

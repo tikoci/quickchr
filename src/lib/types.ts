@@ -185,16 +185,49 @@ export class QuickCHRError extends Error {
 }
 
 // --- Known extra packages ---
+// Baseline: RouterOS 7.22.1 static list. The actual available package set varies
+// by version and arch — see BACKLOG (dynamic package list from all_packages zip).
 
-export const KNOWN_PACKAGES = [
+/** Extra packages available on x86 CHR (RouterOS 7.22.1 baseline). */
+export const KNOWN_PACKAGES_X86 = [
 	"container",
 	"iot",
+	"gps",
+	"calea",
+	"ups",
+	"rose-storage",
+	"tr069-client",
+] as const;
+
+/** Extra packages available on arm64 CHR (RouterOS 7.22.1 baseline). */
+export const KNOWN_PACKAGES_ARM64 = [
+	"container",
+	"iot",
+	"gps",
+	"calea",
+	"ups",
+	"rose-storage",
+	"tr069-client",
 	"wifi-qcom",
 	"wifi-qcom-ac",
 	"zerotier",
-	"rose-storage",
-	"ups",
+] as const;
+
+/** All known packages across architectures (union). */
+export const KNOWN_PACKAGES = [
+	"container",
+	"iot",
 	"gps",
 	"calea",
+	"ups",
+	"rose-storage",
 	"tr069-client",
+	"wifi-qcom",
+	"wifi-qcom-ac",
+	"zerotier",
 ] as const;
+
+/** Return the known packages for a specific architecture. */
+export function knownPackagesForArch(arch: Arch): readonly string[] {
+	return arch === "arm64" ? KNOWN_PACKAGES_ARM64 : KNOWN_PACKAGES_X86;
+}

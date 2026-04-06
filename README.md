@@ -87,6 +87,28 @@ quickchr doctor
 | `--port-base <port>` | Starting port number | Auto (9100+) |
 | `--dry-run` | Show plan without executing |  |
 
+### Background vs Foreground Mode
+
+By default `quickchr start` runs QEMU in the **background**: QEMU is spawned as a detached process and the command returns immediately once CHR has booted. You can then use `quickchr list`, `quickchr status`, and `quickchr stop` to manage it.
+
+```bash
+# Background (default) — returns after CHR finishes booting
+quickchr start --channel stable
+
+# Foreground — serial console attached to your terminal
+quickchr start --channel stable --fg
+```
+
+In **foreground** mode, your terminal becomes the CHR serial console (like a VM's VGA window). Use these key sequences:
+
+| Key | Action |
+|-----|--------|
+| `Ctrl-A X` | Exit QEMU and return to shell |
+| `Ctrl-A C` | Toggle QEMU monitor (`quit` to force-stop) |
+| `Ctrl-A H` | List all key shortcuts |
+
+> **Note:** Background QEMU processes are true OS-level orphans — `quickchr` does not use shell job control (`&`). After the command returns you can close the terminal and QEMU keeps running. Use `quickchr stop <name>` to shut it down cleanly.
+
 ### Library Usage
 
 ```typescript

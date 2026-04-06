@@ -2,8 +2,9 @@
  * Extra package download and installation for CHR instances.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, unlinkSync } from "node:fs";
 import { join, basename } from "node:path";
+import { tmpdir } from "node:os";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { packagesDownloadUrl } from "./versions.ts";
@@ -79,39 +80,47 @@ export async function uploadPackages(
 	user: string = "admin",
 	password: string = "",
 ): Promise<void> {
-	for (const pkgPath of packagePaths) {
-		const filename = basename(pkgPath);
-		console.log(`Uploading: ${filename}`);
+	// Use SSH_ASKPASS to supply the password without requiring sshpass.
+	// SSH_ASKPASS_REQUIRE=prefer (OpenSSH 8.4+) works even without a display.
+	const askpassPath = join(tmpdir(), `quickchr-askpass-${process.pid}.sh`);
+	await Bun.write(askpassPath, `#!/bin/sh\nprintf '%s' '${password.replace(/'/g, "'\\''")}'`);
+	Bun.spawnSync(["chmod", "+x", askpassPath]);
 
-		// Use sshpass for password auth, or plain scp for key auth
-		const scpArgs = password
-			? [
-				"sshpass", "-p", password,
+	const scpEnv: Record<string, string> = {
+		...(process.env as Record<string, string>),
+		DISPLAY: "",
+		SSH_ASKPASS: askpassPath,
+		SSH_ASKPASS_REQUIRE: "prefer",
+	};
+
+	try {
+		for (const pkgPath of packagePaths) {
+			const filename = basename(pkgPath);
+			console.log(`Uploading: ${filename}`);
+
+			const scpArgs = [
 				"scp", "-P", String(sshPort),
 				"-o", "StrictHostKeyChecking=accept-new",
 				"-o", "UserKnownHostsFile=/dev/null",
-				pkgPath, `${user}@127.0.0.1:/`,
-			]
-			: [
-				"scp", "-P", String(sshPort),
-				"-o", "StrictHostKeyChecking=accept-new",
-				"-o", "UserKnownHostsFile=/dev/null",
-				"-o", "BatchMode=yes",
 				pkgPath, `${user}@127.0.0.1:/`,
 			];
 
-		const result = Bun.spawnSync(scpArgs, {
-			stdout: "pipe",
-			stderr: "pipe",
-		});
+			const result = Bun.spawnSync(scpArgs, {
+				stdout: "pipe",
+				stderr: "pipe",
+				env: scpEnv,
+			});
 
-		if (result.exitCode !== 0) {
-			const stderr = new TextDecoder().decode(result.stderr);
-			throw new QuickCHRError(
-				"PROCESS_FAILED",
-				`SCP upload failed for ${filename}: ${stderr}`,
-			);
+			if (result.exitCode !== 0) {
+				const stderr = new TextDecoder().decode(result.stderr);
+				throw new QuickCHRError(
+					"PROCESS_FAILED",
+					`SCP upload failed for ${filename}: ${stderr}`,
+				);
+			}
 		}
+	} finally {
+		try { unlinkSync(askpassPath); } catch { /* ignore */ }
 	}
 }
 

@@ -12,7 +12,24 @@
 
 ## P1 — Robustness
 
-- [ ] Graceful cleanup on SIGINT/SIGTERM in foreground mode
+- [x] Foreground mode now correctly awaits QEMU exit (was returning immediately)
+- [x] Package SCP uses `sshpass` for RouterOS empty-password auth (was failing silently)
+- [x] Background mode is now the correct default (`--fg`/`--foreground` opts in to foreground)
+- [x] Arch-specific package lists — zerotier/wifi-qcom are arm64-only; x86 wizard only shows valid packages
+- [x] `start --all` restarts all stopped machines
+- [x] Interactive selectors for `start`, `stop`, `status`, `remove`, `clean` when no name given
+- [x] `remove --all` removes all machines
+- [x] Foreground tips printed before QEMU launches (Ctrl-A X to quit, etc.)
+- [x] `status` output includes WinBox URL, SSH tip, state explanation
+- [x] `sshpass` added to `doctor` dependency check
+- [x] `QUICKCHR_NO_PROMPT=1` env var suppresses all interactive prompts (for LLMs / scripts)
+- [x] `waitForBoot` accepts 401/403 HTTP responses as "booted" (RouterOS may require auth on `/`)
+- [x] Boot timeout is arch-aware: 300s for x86 TCG emulation, 120s for arm64 HVF
+- [x] Warning logged when boot timeout expires with packages/provisioning pending
+- [x] Small SSH warmup delay (2s) added after HTTP comes up before starting SCP uploads
+- [x] Package install integration test added (`container` package install + REST verify)
+- [x] Integration test instructions updated: mandatory before git commits
+- [ ] Graceful cleanup on SIGINT/SIGTERM in foreground mode (SIGINT currently leaves pid file)
 - [ ] Lock file to prevent concurrent starts of same machine
 - [ ] Better error messages for common QEMU failures (EFI size mismatch, permission denied)
 - [ ] Retry download on transient network errors
@@ -21,6 +38,7 @@
 
 ## P2 — Enhanced Features
 
+- [ ] Dynamic package list from cached all_packages.zip instead of static `KNOWN_PACKAGES` constants (version + arch dependent; current approach requires manual updates per release)
 - [ ] Disk resize support (`--disk-size 512M`)
 - [ ] Snapshot/restore using QEMU monitor savevm/loadvm
 - [ ] QGA file operations (push config files via guest agent on x86)

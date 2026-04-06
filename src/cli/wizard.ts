@@ -3,7 +3,7 @@
  */
 
 import type { Arch, Channel, StartOptions } from "../lib/types.ts";
-import { CHANNELS, ARCHES, KNOWN_PACKAGES } from "../lib/types.ts";
+import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
 
 /** Run the interactive wizard using @clack/prompts. */
 export async function runWizard(): Promise<void> {
@@ -90,10 +90,10 @@ export async function runWizard(): Promise<void> {
 	});
 	if (clack.isCancel(mem)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	// 5. Extra packages
+	// 5. Extra packages (arch-specific — filtered for the selected architecture)
 	const packages = await clack.multiselect({
 		message: "Extra packages (space to toggle, enter to confirm):",
-		options: KNOWN_PACKAGES.map((p) => ({ value: p, label: p })),
+		options: knownPackagesForArch(arch as Arch).map((p) => ({ value: p, label: p })),
 		required: false,
 	});
 	if (clack.isCancel(packages)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -162,9 +162,46 @@ export async function runWizard(): Promise<void> {
 	});
 	if (clack.isCancel(confirm) || !confirm) { clack.cancel("Cancelled."); process.exit(0); }
 
-	// Launch
+	// Pre-warm image cache BEFORE starting any spinner so that download progress
+	// prints cleanly without interleaving with spinner escape codes.
+	const { resolveVersion } = await import("../lib/versions.ts");
+	const { ensureCachedImage } = await import("../lib/images.ts");
+	const resolvedVersion = opts.version ?? await resolveVersion(opts.channel ?? "stable");
+	opts.version = resolvedVersion; // pin so QuickCHR.start doesn't resolve again
+
+	try {
+		await ensureCachedImage(resolvedVersion, arch as Arch);
+	} catch (e: unknown) {
+		clack.log.error(e instanceof Error ? e.message : String(e));
+		process.exit(1);
+	}
+
+	// Foreground: skip spinner — QEMU takes over the terminal
+	if (opts.background === false) {
+		const b = (s: string) => `\x1b[1m${s}\x1b[0m`;
+		const d = (s: string) => `\x1b[2m${s}\x1b[0m`;
+		const c = (s: string) => `\x1b[36m${s}\x1b[0m`;
+		console.log();
+		console.log(b("  Foreground mode — QEMU serial console attached"));
+		console.log(`  ${c("Ctrl-A X")}  ${d("exit QEMU and return to shell")}`);
+		console.log(`  ${c("Ctrl-A C")}  ${d("toggle QEMU monitor (type 'quit' to force-stop)")}`);
+		console.log(`  ${c("Ctrl-A H")}  ${d("list all QEMU serial shortcuts")}`);
+		console.log();
+		try {
+			const instance = await QuickCHR.start(opts);
+			console.log(`\n${bold(instance.name)} session ended`);
+			console.log(`  Tip: quickchr start ${instance.name}`);
+		} catch (e: unknown) {
+			if (e instanceof Error) clack.log.error(e.message);
+			process.exit(1);
+		}
+		clack.outro("Done!");
+		return;
+	}
+
+	// Background: spin while CHR boots
 	const spinner = clack.spinner();
-	spinner.start("Starting CHR...");
+	spinner.start("Booting CHR...");
 
 	try {
 		const instance = await QuickCHR.start(opts);
@@ -176,6 +213,7 @@ export async function runWizard(): Promise<void> {
 				`Ports:   ${formatPorts(instance.state.ports)}`,
 				`REST:    ${instance.restUrl}`,
 				`SSH:     ssh admin@127.0.0.1 -p ${instance.sshPort}`,
+				`WinBox:  127.0.0.1:${instance.ports.winbox}`,
 			].join("\n"),
 			"Instance details",
 		);

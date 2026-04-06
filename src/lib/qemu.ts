@@ -5,7 +5,7 @@
  * manages process spawn/stop, and handles PID tracking.
  */
 
-import { existsSync, writeFileSync, copyFileSync, statSync } from "node:fs";
+import { existsSync, writeFileSync, copyFileSync, statSync, openSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import type { Arch, MachineState, NetworkMode, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -205,26 +205,34 @@ export async function spawnQemu(
 	if (!bin) throw new QuickCHRError("SPAWN_FAILED", "Empty QEMU args");
 
 	if (background) {
-		const logFile = Bun.file(logPath);
+		// Open log file as an fd — more reliable than BunFile for subprocess stdio.
+		// After spawn, close parent's copy; child process inherits its own copy.
+		const logFd = openSync(logPath, "a");
 		const proc = Bun.spawn([bin, ...args], {
-			stdout: logFile,
-			stderr: logFile,
+			stdout: logFd,
+			stderr: logFd,
 			stdin: "ignore",
 		});
+		closeSync(logFd);
+		// unref() lets the parent Bun process exit without waiting for QEMU.
+		// QEMU becomes an orphan adopted by init/launchd and keeps running.
+		proc.unref();
 
 		writeFileSync(pidPath, String(proc.pid));
 		return { pid: proc.pid };
 	}
 
-	// Foreground — stdin/stdout connected to terminal
+	// Foreground — stdin/stdout connected to terminal. Blocks until QEMU exits.
 	const proc = Bun.spawn([bin, ...args], {
 		stdout: "inherit",
 		stderr: "inherit",
 		stdin: "inherit",
 	});
 
-	writeFileSync(pidPath, String(proc.pid));
-	return { pid: proc.pid, process: proc };
+	const pid = proc.pid;
+	writeFileSync(pidPath, String(pid));
+	await proc.exited;
+	return { pid };
 }
 
 /** Stop a QEMU process by PID. Tries SIGTERM first, then SIGKILL. */
@@ -276,7 +284,9 @@ export async function stopMachineByName(_name: string, state: MachineState): Pro
 	return stopped;
 }
 
-/** Wait for RouterOS to boot by polling HTTP health check. */
+/** Wait for RouterOS to boot by polling HTTP health check.
+ * Accepts any HTTP response as "booted" — 401/403 (auth required) means
+ * the server is up; connection errors mean it is still starting. */
 export async function waitForBoot(
 	httpPort: number,
 	timeoutMs: number = 120_000,
@@ -287,7 +297,9 @@ export async function waitForBoot(
 	while (Date.now() < deadline) {
 		try {
 			const r = await fetch(url, { signal: AbortSignal.timeout(3000) });
-			if (r.ok) return true;
+			// Any HTTP response (including 401 Unauthorized, 403 Forbidden) means
+			// RouterOS is up. Connection refused / timeout means still booting.
+			if (r.status > 0) return true;
 		} catch { /* not ready yet */ }
 		await Bun.sleep(2000);
 	}

@@ -20,8 +20,9 @@
     "DESIGN.md"
   ],
   "scripts": {
-    "check": "biome check . && bunx markdownlint-cli2 '**/*.md'",
+    "check": "biome check . && tsc --noEmit && bunx markdownlint-cli2 '**/*.md'",
     "lint": "biome check .",
+    "typecheck": "tsc --noEmit",
     "test": "bun test test/unit/",
     "test:integration": "bun test test/integration/",
     "test:all": "bun test",
