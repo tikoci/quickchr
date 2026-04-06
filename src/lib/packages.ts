@@ -67,8 +67,11 @@ export function findPackageFile(
 
 	const files = readdirSync(extractDir);
 	// Package files are named like: container-7.22.1-arm64.npk or iot-7.22.1-arm64.npk
+	// Check that the char after "name-" is a digit (version), not more name letters.
+	// e.g. "iot-" must NOT match "iot-bt-extra-7.22.1-arm64.npk"
+	const prefix = packageName + "-";
 	const match = files.find(
-		(f) => f.startsWith(packageName + "-") && f.endsWith(".npk"),
+		(f) => f.startsWith(prefix) && f.endsWith(".npk") && /^\d/.test(f.slice(prefix.length)),
 	);
 	return match ? join(extractDir, match) : undefined;
 }
@@ -161,4 +164,40 @@ export async function installPackages(
 	} catch {
 		// Expected — connection drops during reboot
 	}
+}
+
+/** List all package names available in an extracted all_packages directory.
+ *  Parses .npk filenames: "container-7.22.1-arm64.npk" → "container". */
+export function listAvailablePackages(extractDir: string): string[] {
+	if (!existsSync(extractDir)) return [];
+	const nameRe = /^(.+?)-\d+\.\d+/;
+	return readdirSync(extractDir)
+		.filter((f) => f.endsWith(".npk"))
+		.map((f) => nameRe.exec(f)?.[1] ?? "")
+		.filter(Boolean)
+		.sort();
+}
+
+/** Download the all_packages ZIP and return the list of available packages.
+ *  Caches the extraction — subsequent calls return immediately. */
+export async function downloadAndListPackages(
+	version: string,
+	arch: Arch,
+): Promise<string[]> {
+	const extractDir = await downloadPackages(version, arch);
+	return listAvailablePackages(extractDir);
+}
+
+/** Download all packages and install every one of them. Useful for API schema generation. */
+export async function installAllPackages(
+	version: string,
+	arch: Arch,
+	sshPort: number,
+	httpPort: number,
+): Promise<void> {
+	const extractDir = await downloadPackages(version, arch);
+	const allPkgs = listAvailablePackages(extractDir);
+	if (allPkgs.length === 0) return;
+	console.log(`Installing all ${allPkgs.length} packages: ${allPkgs.join(", ")}`);
+	await installPackages(allPkgs, version, arch, sshPort, httpPort);
 }
