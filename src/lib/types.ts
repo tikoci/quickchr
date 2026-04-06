@@ -57,6 +57,7 @@ export interface MachineConfig {
 	portBase: number;
 	excludePorts: ServiceName[];
 	extraPorts: PortMapping[];
+	licenseLevel?: LicenseLevel;
 }
 
 export interface MachineState extends MachineConfig {
@@ -79,6 +80,8 @@ export interface StartOptions {
 	mem?: number;
 	background?: boolean;
 	packages?: string[];
+	/** Install all packages from the all_packages ZIP (overrides packages[]). */
+	installAllPackages?: boolean;
 	user?: { name: string; password: string };
 	disableAdmin?: boolean;
 	portBase?: number;
@@ -87,6 +90,8 @@ export interface StartOptions {
 	network?: NetworkMode;
 	installDeps?: boolean;
 	dryRun?: boolean;
+	/** Apply a CHR trial license after boot via /system/license/renew. */
+	license?: LicenseOptions;
 }
 
 // --- Instance (runtime handle) ---
@@ -118,6 +123,8 @@ export interface ChrInstance {
 	qga(command: string, args?: object): Promise<unknown>;
 
 	rest(path: string, opts?: RequestInit): Promise<unknown>;
+	/** Apply or renew a CHR trial license. */
+	license(opts: LicenseOptions): Promise<void>;
 }
 
 // --- Platform ---
@@ -184,46 +191,81 @@ export class QuickCHRError extends Error {
 	}
 }
 
-// --- Known extra packages ---
-// Baseline: RouterOS 7.22.1 static list. The actual available package set varies
-// by version and arch — see BACKLOG (dynamic package list from all_packages zip).
+// --- CHR License ---
 
-/** Extra packages available on x86 CHR (RouterOS 7.22.1 baseline). */
+/** CHR trial license levels (speed caps). free = 1 Mbps, p1 = 1 Gbps, p10 = 10 Gbps, unlimited = no cap. */
+export type LicenseLevel = "p1" | "p10" | "unlimited";
+export const LICENSE_LEVELS: LicenseLevel[] = ["p1", "p10", "unlimited"];
+
+/** Options passed to /system/license/renew. */
+export interface LicenseOptions {
+	account: string;
+	password: string;
+	level?: LicenseLevel;
+}
+
+// --- Known extra packages ---
+// Baseline: exact contents of RouterOS 7.22.1 all_packages ZIP files.
+// x86:   all_packages-x86-7.22.1.zip
+// arm64: all_packages-arm64-7.22.1.zip
+// Note: some packages are hardware-specific (switch-marvell, wifi-*) or mutually
+// exclusive (wireless vs wifi-qcom vs wifi-qcom-be). All are included here because
+// even on CHR (VM) they register API endpoints useful for schema generation.
+
+/** Extra packages in all_packages-x86-7.22.1.zip (sorted). */
 export const KNOWN_PACKAGES_X86 = [
-	"container",
-	"iot",
-	"gps",
 	"calea",
-	"ups",
+	"container",
+	"dude",
+	"gps",
+	"iot",
+	"openflow",
 	"rose-storage",
 	"tr069-client",
+	"ups",
+	"user-manager",
+	"wireless",
 ] as const;
 
-/** Extra packages available on arm64 CHR (RouterOS 7.22.1 baseline). */
+/** Extra packages in all_packages-arm64-7.22.1.zip (sorted). */
 export const KNOWN_PACKAGES_ARM64 = [
-	"container",
-	"iot",
-	"gps",
 	"calea",
-	"ups",
+	"container",
+	"dude",
+	"extra-nic",
+	"gps",
+	"iot",
+	"iot-bt-extra",
+	"openflow",
 	"rose-storage",
+	"switch-marvell",
 	"tr069-client",
+	"ups",
+	"user-manager",
 	"wifi-qcom",
-	"wifi-qcom-ac",
+	"wifi-qcom-be",
+	"wireless",
 	"zerotier",
 ] as const;
 
-/** All known packages across architectures (union). */
+/** Union of all known packages across architectures. */
 export const KNOWN_PACKAGES = [
-	"container",
-	"iot",
-	"gps",
 	"calea",
-	"ups",
+	"container",
+	"dude",
+	"extra-nic",
+	"gps",
+	"iot",
+	"iot-bt-extra",
+	"openflow",
 	"rose-storage",
+	"switch-marvell",
 	"tr069-client",
+	"ups",
+	"user-manager",
 	"wifi-qcom",
-	"wifi-qcom-ac",
+	"wifi-qcom-be",
+	"wireless",
 	"zerotier",
 ] as const;
 

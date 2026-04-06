@@ -2,7 +2,7 @@
  * Interactive wizard for quickchr — walks user through starting a CHR.
  */
 
-import type { Arch, Channel, StartOptions } from "../lib/types.ts";
+import type { Arch, Channel, LicenseLevel, LicenseOptions, StartOptions } from "../lib/types.ts";
 import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
 
 /** Run the interactive wizard using @clack/prompts. */
@@ -90,13 +90,26 @@ export async function runWizard(): Promise<void> {
 	});
 	if (clack.isCancel(mem)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	// 5. Extra packages (arch-specific — filtered for the selected architecture)
-	const packages = await clack.multiselect({
+	// 5. Extra packages — arch-specific list from 7.22.1 baseline.
+	//    Special value "__all__" means install everything from all_packages.zip
+	//    (useful for API schema generation — see restraml project).
+	const pkgOptions = [
+		{
+			value: "__all__",
+			label: "All packages",
+			hint: "installs everything from all_packages.zip — best for API schema generation",
+		},
+		...knownPackagesForArch(arch as Arch).map((p) => ({ value: p, label: p })),
+	];
+	const pkgSelection = await clack.multiselect({
 		message: "Extra packages (space to toggle, enter to confirm):",
-		options: knownPackagesForArch(arch as Arch).map((p) => ({ value: p, label: p })),
+		options: pkgOptions,
 		required: false,
 	});
-	if (clack.isCancel(packages)) { clack.cancel("Cancelled."); process.exit(0); }
+	if (clack.isCancel(pkgSelection)) { clack.cancel("Cancelled."); process.exit(0); }
+
+	const installAllPackages = (pkgSelection as string[]).includes("__all__");
+	const packages = installAllPackages ? [] : (pkgSelection as string[]);
 
 	// 6. User setup
 	const addUser = await clack.confirm({
@@ -132,7 +145,75 @@ export async function runWizard(): Promise<void> {
 		disableAdmin = disable;
 	}
 
-	// 7. Background/foreground
+	// 7. License — optional trial license via MikroTik.com account.
+	//    Free CHR runs at 1 Mbps. A trial license unlocks 1/10 Gbps or unlimited.
+	let license: LicenseOptions | undefined;
+
+	const wantLicense = await clack.confirm({
+		message: "Apply a CHR trial license? (unlocks speed above 1 Mbps)",
+		initialValue: false,
+	});
+	if (clack.isCancel(wantLicense)) { clack.cancel("Cancelled."); process.exit(0); }
+
+	if (wantLicense) {
+		// Check for stored credentials first
+		const { getStoredCredentials, saveCredentials, credentialStorageLabel } = await import("../lib/credentials.ts");
+		const stored = await getStoredCredentials();
+
+		let licAccount = "";
+		let licPassword = "";
+
+		if (stored) {
+			const useStored = await clack.confirm({
+				message: `Use saved credentials for ${stored.account} (${credentialStorageLabel()})?`,
+				initialValue: true,
+			});
+			if (clack.isCancel(useStored)) { clack.cancel("Cancelled."); process.exit(0); }
+
+			if (useStored) {
+				licAccount = stored.account;
+				licPassword = stored.password;
+			} else {
+				const acct = await clack.text({ message: "MikroTik account (email):", validate: (v) => v.trim() ? undefined : "Required" });
+				if (clack.isCancel(acct)) { clack.cancel("Cancelled."); process.exit(0); }
+				const pass = await clack.password({ message: "MikroTik password:" });
+				if (clack.isCancel(pass)) { clack.cancel("Cancelled."); process.exit(0); }
+				licAccount = acct;
+				licPassword = pass;
+				const saveCreds = await clack.confirm({ message: "Save these credentials?", initialValue: true });
+				if (!clack.isCancel(saveCreds) && saveCreds) {
+					await saveCredentials(licAccount, licPassword);
+					clack.log.success(`Saved to ${credentialStorageLabel()}`);
+				}
+			}
+		} else {
+			const acct = await clack.text({ message: "MikroTik account (email):", validate: (v) => v.trim() ? undefined : "Required" });
+			if (clack.isCancel(acct)) { clack.cancel("Cancelled."); process.exit(0); }
+			const pass = await clack.password({ message: "MikroTik password:" });
+			if (clack.isCancel(pass)) { clack.cancel("Cancelled."); process.exit(0); }
+			licAccount = acct;
+			licPassword = pass;
+			const saveCreds = await clack.confirm({ message: "Save these credentials?", initialValue: true });
+			if (!clack.isCancel(saveCreds) && saveCreds) {
+				await saveCredentials(licAccount, licPassword);
+				clack.log.success(`Saved to ${credentialStorageLabel()}`);
+			}
+		}
+
+		const licLevel = await clack.select({
+			message: "License level:",
+			options: [
+				{ value: "p1", label: "p1 — 1 Gbps", hint: "trial, 60 days" },
+				{ value: "p10", label: "p10 — 10 Gbps", hint: "trial, 60 days" },
+				{ value: "unlimited", label: "unlimited — no cap", hint: "trial, 60 days" },
+			] as Array<{ value: LicenseLevel; label: string; hint: string }>,
+			initialValue: "p1" as LicenseLevel,
+		});
+		if (clack.isCancel(licLevel)) { clack.cancel("Cancelled."); process.exit(0); }
+			license = { account: licAccount, password: licPassword, level: licLevel };
+	}
+
+	// 8. Background/foreground
 	const background = await clack.select({
 		message: "Run mode:",
 		options: [
@@ -143,7 +224,7 @@ export async function runWizard(): Promise<void> {
 	});
 	if (clack.isCancel(background)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	// 8. Confirm
+	// 9. Confirm
 	const opts: StartOptions = {
 		version,
 		channel,
@@ -151,14 +232,17 @@ export async function runWizard(): Promise<void> {
 		name: name || undefined,
 		cpu: Number(cpu),
 		mem: Number(mem),
-		packages: packages as string[],
+		packages,
+		installAllPackages,
 		user,
 		disableAdmin,
+		license,
 		background: background as boolean,
 	};
 
+	const pkgSummary = installAllPackages ? "all packages" : packages.length > 0 ? `+${packages.join(",")}` : "";
 	const confirm = await clack.confirm({
-		message: `Start CHR ${version ?? `(${channel})`} ${arch}${(packages as string[]).length > 0 ? ` +${(packages as string[]).join(",")}` : ""}?`,
+		message: `Start CHR ${version ?? `(${channel})`} ${arch}${pkgSummary ? ` ${pkgSummary}` : ""}${license ? ` (license: ${license.level})` : ""}?`,
 	});
 	if (clack.isCancel(confirm) || !confirm) { clack.cancel("Cancelled."); process.exit(0); }
 
@@ -201,7 +285,8 @@ export async function runWizard(): Promise<void> {
 
 	// Background: spin while CHR boots
 	const spinner = clack.spinner();
-	spinner.start("Booting CHR...");
+	const spinMsg = installAllPackages ? "Booting CHR and installing all packages..." : "Booting CHR...";
+	spinner.start(spinMsg);
 
 	try {
 		const instance = await QuickCHR.start(opts);

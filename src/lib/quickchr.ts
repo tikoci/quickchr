@@ -30,8 +30,10 @@ import {
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, type QemuLaunchConfig } from "./qemu.ts";
 import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
-import { installPackages } from "./packages.ts";
+import { installPackages, installAllPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
+import { renewLicense } from "./license.ts";
+import type { LicenseOptions } from "./types.ts";
 import { toChrPorts } from "./network.ts";
 import { existsSync, rmSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
@@ -134,6 +136,19 @@ function createInstance(state: MachineState): ChrInstance {
 				return response.json();
 			}
 			return response.text();
+		},
+
+		async license(opts: LicenseOptions): Promise<void> {
+			await renewLicense(ports.http, opts);
+			// Persist the applied level in state
+			if (opts.level) {
+				const current = loadMachine(state.name);
+				if (current) {
+					current.licenseLevel = opts.level;
+					saveMachine(current);
+				}
+				state.licenseLevel = opts.level;
+			}
 		},
 	};
 }
@@ -297,13 +312,38 @@ export class QuickCHR {
 		await Bun.sleep(2000);
 
 		// Install extra packages if requested
-		if (opts.packages && opts.packages.length > 0) {
+		if (opts.installAllPackages) {
+			const chrPorts = toChrPorts(ports);
+			await installAllPackages(version, arch, chrPorts.ssh, chrPorts.http);
+			// Wait for reboot to activate packages
+			await Bun.sleep(5000);
+			await instance.waitForBoot(bootTimeout);
+			await Bun.sleep(2000);
+		} else if (opts.packages && opts.packages.length > 0) {
 			const chrPorts = toChrPorts(ports);
 			await installPackages(opts.packages, version, arch, chrPorts.ssh, chrPorts.http);
 			// Wait for reboot to activate packages
 			await Bun.sleep(5000);
 			await instance.waitForBoot(bootTimeout);
 			await Bun.sleep(2000);
+		}
+
+		// Apply CHR trial license if credentials provided
+		if (opts.license) {
+			console.log("Applying CHR license...");
+			try {
+				await renewLicense(toChrPorts(ports).http, opts.license);
+				const level = opts.license.level ?? "p1";
+				const current = loadMachine(name);
+				if (current) {
+					current.licenseLevel = level;
+					saveMachine(current);
+				}
+				state.licenseLevel = level;
+				console.log(`License applied: ${level}`);
+			} catch (e) {
+				console.warn(`[quickchr] License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
+			}
 		}
 
 		// User provisioning

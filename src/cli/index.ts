@@ -98,6 +98,9 @@ async function main() {
 			case "clean":
 				await cmdClean(args.slice(1));
 				break;
+			case "license":
+				await cmdLicense(args.slice(1));
+				break;
 			case "doctor":
 				await cmdDoctor();
 				break;
@@ -240,6 +243,7 @@ async function cmdStart(argv: string[]) {
 		cpu: flag(flags, "cpu") ? Number(flag(flags, "cpu")) : undefined,
 		mem: flag(flags, "mem") ? Number(flag(flags, "mem")) : undefined,
 		packages: flagList(flags, "add-package"),
+		installAllPackages: flagBool(flags, "install-all-packages"),
 		portBase: flag(flags, "port-base") ? Number(flag(flags, "port-base")) : undefined,
 		excludePorts: [
 			...(flags.winbox === false ? ["winbox" as ServiceName] : []),
@@ -251,6 +255,22 @@ async function cmdStart(argv: string[]) {
 		installDeps: flagBool(flags, "install-deps"),
 		dryRun: flagBool(flags, "dry-run"),
 	};
+
+	// --license-* flags (credentials from env if not supplied)
+	const licenseLevel = flag(flags, "license-level");
+	const licenseAccount = flag(flags, "license-account") ?? process.env.MIKROTIK_ACCOUNT;
+	const licensePassword = flag(flags, "license-password") ?? process.env.MIKROTIK_PASSWORD;
+	if (licenseLevel || licenseAccount) {
+		if (!licenseAccount || !licensePassword) {
+			console.error("Error: --license-level requires --license-account and --license-password (or MIKROTIK_ACCOUNT/MIKROTIK_PASSWORD env vars).");
+			process.exit(1);
+		}
+		opts.license = {
+			account: licenseAccount,
+			password: licensePassword,
+			level: licenseLevel as import("../lib/types.ts").LicenseLevel | undefined,
+		};
+	}
 
 	// --add-user admin:pass
 	const userStr = flag(flags, "add-user");
@@ -561,6 +581,93 @@ async function cmdClean(argv: string[]) {
 	console.log(`${bold(name)} reset to fresh image.`);
 }
 
+async function cmdLicense(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { bold } = await import("./format.ts");
+
+	let name = positional[0] ?? flag(flags, "name");
+
+	// Interactive selector if no name given
+	if (!name) {
+		const running = QuickCHR.list().filter((m) => m.status === "running");
+		if (running.length === 0) {
+			console.error("No running instances. Start a CHR first.");
+			process.exit(1);
+		}
+		if (isNoPrompt()) {
+			console.error("Usage: quickchr license <name> [--level=p1|p10|unlimited]");
+			process.exit(1);
+		}
+		const clack = await import("@clack/prompts");
+		clack.intro("quickchr license");
+		const sel = await clack.select({
+			message: "Select running instance:",
+			options: running.map((m) => ({
+				value: m.name,
+				label: m.name,
+				hint: `${m.version} (${m.arch})`,
+			})),
+		});
+		if (clack.isCancel(sel)) { clack.cancel("Cancelled."); return; }
+		clack.outro("");
+		name = sel as string;
+	}
+
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(`Machine "${name}" not found.`);
+		process.exit(1);
+	}
+	if (instance.state.status !== "running") {
+		console.error(`Machine "${name}" is not running.`);
+		process.exit(1);
+	}
+
+	// Resolve credentials: explicit flags → env vars → stored credentials
+	let account = flag(flags, "account") ?? process.env.MIKROTIK_ACCOUNT;
+	let password = flag(flags, "password") ?? process.env.MIKROTIK_PASSWORD;
+	const level = (flag(flags, "level") as import("../lib/types.ts").LicenseLevel | undefined) ?? "p1";
+
+	if (!account || !password) {
+		const { getStoredCredentials, credentialStorageLabel } = await import("../lib/credentials.ts");
+		const stored = await getStoredCredentials();
+		if (stored) {
+			account = stored.account;
+			password = stored.password;
+			console.log(`Using stored credentials for ${stored.account} (${credentialStorageLabel()})`);
+		}
+	}
+
+	if (!account || !password) {
+		if (isNoPrompt()) {
+			console.error("No credentials found. Set MIKROTIK_ACCOUNT and MIKROTIK_PASSWORD, or pass --account/--password.");
+			process.exit(1);
+		}
+
+		const clack = await import("@clack/prompts");
+		clack.intro("quickchr license — credentials needed");
+		const acct = await clack.text({ message: "MikroTik account (email):", validate: (v) => v.trim() ? undefined : "Required" });
+		if (clack.isCancel(acct)) { clack.cancel("Cancelled."); return; }
+		const pass = await clack.password({ message: "MikroTik password:" });
+		if (clack.isCancel(pass)) { clack.cancel("Cancelled."); return; }
+		account = acct;
+		password = pass;
+
+		const save = await clack.confirm({ message: "Save credentials to system secret store?", initialValue: true });
+		if (!clack.isCancel(save) && save) {
+			const { saveCredentials, credentialStorageLabel } = await import("../lib/credentials.ts");
+			await saveCredentials(account, password);
+			clack.log.success(`Saved to ${credentialStorageLabel()}`);
+		}
+		clack.outro("");
+	}
+
+	console.log(`Applying license level=${level} to ${bold(name)}...`);
+	await instance.license({ account: account as string, password: password as string, level });
+	console.log(`License applied: ${level}`);
+}
+
 async function cmdDoctor() {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { statusIcon, bold } = await import("./format.ts");
@@ -618,12 +725,15 @@ Commands:
   status [<name>]         Detailed status — interactive selector if no name
   remove [<name>|--all]   Remove instance(s) and disk — interactive selector if no name
   clean [<name>]          Reset instance disk to fresh image — interactive selector if no name
+  license [<name>]        Apply/renew CHR trial license — interactive selector if no name
   doctor                  Check prerequisites
   version                 Show version info
   help [command]          Show help
 
 Environment:
   QUICKCHR_NO_PROMPT=1    Disable interactive selectors (for scripts/LLMs)
+  MIKROTIK_ACCOUNT        MikroTik.com account email (for license)
+  MIKROTIK_PASSWORD       MikroTik.com password (for license)
 
 Run 'quickchr help <command>' for command-specific help.`);
 }
@@ -647,13 +757,17 @@ Options:
   --fg / --foreground   Run in foreground — serial console on stdio
   --all                 Start all stopped machines
   --add-package <pkg>   Extra package to install (repeatable)
-  --add-user <u:p>      Create user with name:password
+	--add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
   --vmnet-shared        vmnet-shared networking (macOS)
   --vmnet-bridge <if>   vmnet-bridge networking (macOS), e.g. en0
+  --install-all-packages  Install all packages from all_packages.zip (mutually exclusive with --add-package)
+  --license-level <l>   Apply trial license: p1 (1 Gbps), p10 (10 Gbps), unlimited
+  --license-account <a> MikroTik account email (or use MIKROTIK_ACCOUNT env var)
+  --license-password <p> MikroTik password (or use MIKROTIK_PASSWORD env var)
   --dry-run             Print what would run without starting`);
 			break;
 		case "stop":
@@ -674,6 +788,27 @@ Options:
 
 Check system prerequisites: QEMU binaries, firmware, acceleration,
 sshpass (for package upload), data directories, and cached images.`);
+			break;
+		case "license":
+			console.log(`quickchr license [<name>] [options]
+
+Apply or renew a CHR trial license via MikroTik.com.
+Free CHR runs at 1 Mbps — a trial license unlocks full speed.
+No reboot required. Takes effect immediately.
+
+  <name>              Name of a running CHR instance.
+                      Omit to get an interactive selector.
+
+Options:
+  --level <level>     License level: p1 (1 Gbps), p10 (10 Gbps), unlimited (default: p1)
+  --account <email>   MikroTik.com account email
+  --password <pass>   MikroTik.com password
+
+Credential resolution order (highest priority first):
+  1. --account / --password flags
+  2. MIKROTIK_ACCOUNT / MIKROTIK_PASSWORD environment variables
+  3. OS native secret store (macOS Keychain, Linux GNOME Keyring, Windows Credential Manager)
+  4. ~/.config/quickchr/credentials.json (fallback)`);
 			break;
 		default:
 			console.log(`No detailed help for '${command}'.`);
