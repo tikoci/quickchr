@@ -80,3 +80,35 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 - macOS: checks `kern.hv_support` via sysctl; for arm64 guest additionally checks `process.arch === "arm64"` (native bun = Apple Silicon).
 - Linux: checks `/dev/kvm` writability.
 - Falling back to TCG is always safe, just slower (~20s x86 TCG boot on Apple Silicon; ~2 min arm64 TCG on Intel).
+
+## CI System
+
+**Workflow**: `.github/workflows/ci.yml`
+
+Three jobs — lint and unit-tests run in parallel; integration is gated on both:
+
+```
+lint                    unit-tests
+Biome + tsc --noEmit    bun test test/unit/ --coverage
+        ↘               ↙
+        integration (matrix)
+          linux/x86_64  (always)
+          linux/aarch64 (always)
+          macos/arm64   (workflow_dispatch: macos=true)
+          macos/x86_64  (workflow_dispatch: macos=true)
+```
+
+**Integration matrix**: Each runner boots a CHR matching its native arch.  `detectAccel()`
+selects KVM/HVF/TCG automatically — no per-runner overrides needed.
+
+**Coverage**: `bun test test/unit/ --coverage` output is parsed and compared against
+thresholds (default 75% functions, 60% lines).  Failures emit `::warning::` annotations
+but do NOT block merges (`continue-on-error: true`).  Thresholds are overridable via
+dispatch inputs `min-funcs` / `min-lines`.
+
+**Artifacts** (details in `.github/instructions/ci.instructions.md`):
+- `coverage-report` — full per-file coverage table (14 days)
+- `integration-logs-{platform}` — bun test output + machine.json + qemu.log (7 days)
+
+**Publish workflow** (`.github/workflows/publish.yml`): triggers on `v*` tags;
+runs lint + typecheck + unit tests before npm publish.

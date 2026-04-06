@@ -65,3 +65,18 @@ New library functionality must include an integration test that:
 
 Example: `packages` option → verify via `/rest/system/package` that the package appears
 as active after `QuickCHR.start` returns.
+
+## CI Integration
+
+Integration tests run in CI on every push/PR to `main` across two runners:
+- `linux/x86_64` (ubuntu-latest) → x86 CHR, KVM if available
+- `linux/aarch64` (ubuntu-24.04-arm) → arm64 CHR, KVM if available
+
+Each runner auto-selects the CHR arch from `process.arch` — no test changes needed.
+
+If a CI integration run fails, check (in order):
+1. **Step summary** — last 80 lines of test output per runner
+2. **`integration-logs-{platform}` artifact** — `qemu.log` for boot errors, `integration-output.txt` for test errors, `machine.json` for state
+3. **Annotations** — `::error::` lines appear inline on the commit
+
+See `.github/instructions/ci.instructions.md` for the full artifact map and failure diagnosis guide.

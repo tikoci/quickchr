@@ -1,39 +1,252 @@
 name: CI
 
+# Runs on every push/PR to main.  Also available as workflow_dispatch for manual
+# triggers with optional macOS runners and custom coverage thresholds.
+#
+# Jobs:
+#   lint          — Biome + TypeScript type-check (parallel with unit-tests)
+#   unit-tests    — bun:test unit suite + coverage enforcement (parallel with lint)
+#   integration   — matrix boot-test on linux/x86_64 + linux/aarch64
+#                   (+ macOS arm64/x86_64 when dispatched with macos: true)
+#
+# Artifacts produced (retention: see each job):
+#   coverage-report                 — full bun coverage table text (14 days)
+#   integration-logs-{platform}     — bun output + machine.json + qemu.log (7 days)
+#
+# Step summaries written after each job for quick inspection without downloading artifacts.
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      macos:
+        type: boolean
+        description: "Include macOS runners (arm64 silicon + Intel, HVF if available; costs more)"
+        required: false
+        default: false
+      min-funcs:
+        type: string
+        description: "Function coverage floor % — build warns but does not fail below this (default: 75)"
+        default: "75"
+      min-lines:
+        type: string
+        description: "Line coverage floor % — build warns but does not fail below this (default: 60)"
+        default: "60"
+
+# Thresholds fall back to hardcoded defaults when triggered by push/PR (no dispatch inputs).
+env:
+  COVERAGE_MIN_FUNCS: ${{ github.event.inputs.min-funcs || '75' }}
+  COVERAGE_MIN_LINES: ${{ github.event.inputs.min-lines || '60' }}
 
 jobs:
+  # ── Lint + type-check ────────────────────────────────────────────────────────
   lint:
+    name: Lint & Type-check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run lint
+      - run: bun install --frozen-lockfile
+      - name: Biome lint
+        run: bun run lint
+      - name: TypeScript check
+        run: bun run typecheck
 
+  # ── Unit tests + coverage ────────────────────────────────────────────────────
+  # Runs in parallel with lint. Integration tests depend on both completing.
   unit-tests:
+    name: Unit Tests & Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun test test/unit/
+      - run: bun install --frozen-lockfile
 
-  integration-tests:
-    runs-on: ubuntu-latest
+      - name: Run unit tests with coverage
+        id: coverage
+        run: |
+          echo "::group::Test output"
+          bun test test/unit/ --coverage 2>&1 | tee /tmp/coverage-report.txt
+          echo "::endgroup::"
+
+          # Parse the "All files" summary row from bun's coverage table.
+          # Table format: File | % Funcs | % Lines | Uncovered Line #s
+          FUNC_PCT=$(grep "^All files" /tmp/coverage-report.txt \
+            | awk -F'|' '{gsub(/ /,"",$2); print $2}')
+          LINE_PCT=$(grep "^All files" /tmp/coverage-report.txt \
+            | awk -F'|' '{gsub(/ /,"",$3); print $3}')
+          echo "funcs=${FUNC_PCT:-0}" >> "$GITHUB_OUTPUT"
+          echo "lines=${LINE_PCT:-0}" >> "$GITHUB_OUTPUT"
+          echo "Parsed coverage: functions=${FUNC_PCT}%  lines=${LINE_PCT}%"
+
+      - name: Write coverage to job summary
+        if: always()
+        run: |
+          {
+            echo "## Unit Test Coverage"
+            echo ""
+            echo '```'
+            # Extract the coverage table (from first dashed separator to EOF)
+            awk '/^-{10}/{found=1} found{print}' /tmp/coverage-report.txt
+            echo '```'
+            echo ""
+            echo "| Metric    | Actual | Threshold |"
+            echo "|-----------|--------|-----------|"
+            echo "| Functions | ${{ steps.coverage.outputs.funcs }}% | ${COVERAGE_MIN_FUNCS}% |"
+            echo "| Lines     | ${{ steps.coverage.outputs.lines }}% | ${COVERAGE_MIN_LINES}% |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: /tmp/coverage-report.txt
+          retention-days: 14
+
+      # This step warns but does NOT hard-fail the build (continue-on-error: true).
+      # Thresholds are enforced as annotations so agents can see the degradation
+      # without blocking merges.  Override via workflow_dispatch inputs to 0 if
+      # you need to land a PR while coverage is temporarily below baseline.
+      - name: Enforce coverage thresholds
+        continue-on-error: true
+        run: |
+          FUNC_PCT="${{ steps.coverage.outputs.funcs }}"
+          LINE_PCT="${{ steps.coverage.outputs.lines }}"
+          MIN_FUNCS="${COVERAGE_MIN_FUNCS}"
+          MIN_LINES="${COVERAGE_MIN_LINES}"
+          FAIL=0
+
+          if awk "BEGIN { exit !($FUNC_PCT + 0 < $MIN_FUNCS + 0) }"; then
+            echo "::warning title=Coverage::Function coverage ${FUNC_PCT}% is below threshold ${MIN_FUNCS}%"
+            FAIL=1
+          fi
+          if awk "BEGIN { exit !($LINE_PCT + 0 < $MIN_LINES + 0) }"; then
+            echo "::warning title=Coverage::Line coverage ${LINE_PCT}% is below threshold ${MIN_LINES}%"
+            FAIL=1
+          fi
+
+          if [ "$FAIL" = "1" ]; then
+            echo "Coverage thresholds not met — build continues, check annotations above"
+            exit 1
+          fi
+          echo "Coverage thresholds met: functions=${FUNC_PCT}% >= ${MIN_FUNCS}%, lines=${LINE_PCT}% >= ${MIN_LINES}%"
+
+  # ── Integration tests — per-arch matrix ─────────────────────────────────────
+  # Default: linux/x86_64 + linux/aarch64.
+  # Add macos/arm64 + macos/x86_64 via workflow_dispatch with macos: true.
+  #
+  # Each runner boots a CHR matching its native architecture:
+  #   linux/x86_64  → x86 CHR  via qemu-system-x86_64  (KVM if available, else TCG)
+  #   linux/aarch64 → arm64 CHR via qemu-system-aarch64 (KVM if available, else TCG)
+  #   macos/arm64   → arm64 CHR via qemu-system-aarch64 (HVF if kern.hv_support=1)
+  #   macos/x86_64  → x86 CHR  via qemu-system-x86_64  (HVF if kern.hv_support=1)
+  #
+  # quickchr's detectAccel() handles accelerator selection automatically — tests
+  # do not need arch-specific logic.  The arch is inferred from process.arch at
+  # test runtime (arm64 → arm64 CHR, x64 → x86 CHR).
+  #
+  # NOTE: x86_64 cross-arch on aarch64 (TCG) is NOT tested here — it is too slow
+  # (~5 min even on native I/O port emulation).  See DESIGN.md for details.
+  integration:
+    name: Integration (${{ matrix.name }})
     needs: [lint, unit-tests]
+    strategy:
+      fail-fast: false
+      # Dynamic matrix: include macOS runners only when dispatched with macos: true.
+      # JSON inline trick sourced from tikoci/mikropkl qemu-test.yaml.
+      matrix: ${{ fromJSON(github.event.inputs.macos == 'true' && '{"include":[{"runner":"ubuntu-latest","name":"linux/x86_64","artifact":"linux-x64","qemu-pkgs":"qemu-system-x86 sshpass"},{"runner":"ubuntu-24.04-arm","name":"linux/aarch64","artifact":"linux-arm64","qemu-pkgs":"qemu-system-arm qemu-efi-aarch64 sshpass"},{"runner":"macos-15","name":"macos/arm64","artifact":"macos-arm64"},{"runner":"macos-13","name":"macos/x86_64","artifact":"macos-x64"}]}' || '{"include":[{"runner":"ubuntu-latest","name":"linux/x86_64","artifact":"linux-x64","qemu-pkgs":"qemu-system-x86 sshpass"},{"runner":"ubuntu-24.04-arm","name":"linux/aarch64","artifact":"linux-arm64","qemu-pkgs":"qemu-system-arm qemu-efi-aarch64 sshpass"}]}') }}
+    runs-on: ${{ matrix.runner }}
+
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - name: Install QEMU
+
+      - name: Install QEMU + tools (Linux)
+        if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils
-      - run: bun install
+          echo "::group::apt-get install"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ${{ matrix.qemu-pkgs }}
+          echo "::endgroup::"
+
+      - name: Install QEMU + tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install qemu sshpass
+
+      # Allow the runner's user access to /dev/kvm.  If KVM is not available the
+      # udevadm trigger silently fails and quickchr falls back to TCG.
+      - name: Enable KVM (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -w /dev/kvm ] 2>/dev/null; then
+            echo "KVM is available — hardware acceleration active"
+          else
+            echo "::notice::KVM not available — integration tests will use TCG (slower boot times expected)"
+          fi
+
+      - name: Log platform + QEMU info
+        run: |
+          {
+            echo "### Platform: ${{ matrix.name }}"
+            echo "- OS: $(uname -s) $(uname -m)"
+            qemu-system-x86_64 --version 2>/dev/null | head -1 || true
+            qemu-system-aarch64 --version 2>/dev/null | head -1 || true
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          qemu-system-x86_64 --version 2>/dev/null || true
+          qemu-system-aarch64 --version 2>/dev/null || true
+          uname -a
+
+      # Cache downloaded CHR images to avoid re-downloading on every run.
+      # Key includes OS+arch so different runners don't share incompatible caches.
+      # Cache misses (e.g. new RouterOS stable release) are safe — quickchr re-downloads.
+      - name: Cache CHR images
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
       - name: Run integration tests
-        run: QUICKCHR_INTEGRATION=1 bun test test/integration/
-        timeout-minutes: 10
+        id: inttest
+        run: |
+          echo "::group::Integration test output"
+          QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
+          echo "::endgroup::"
+        timeout-minutes: 20
+
+      - name: Write integration summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Tests — ${{ matrix.name }}"
+            echo ""
+            echo '```'
+            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Upload bun test output + machine state/logs for post-mortem debugging.
+      # Excludes disk.img (large binary) — only JSON state and QEMU log.
+      # To debug a boot failure: check qemu.log for panic/error messages,
+      # machine.json for last-known state, integration-output.txt for test errors.
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-${{ matrix.artifact }}
+          path: |
+            /tmp/integration-output.txt
+            ~/.local/share/quickchr/machines/**/*.json
+            ~/.local/share/quickchr/machines/**/*.log
+          retention-days: 7

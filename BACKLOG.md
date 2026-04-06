@@ -54,8 +54,13 @@
 
 ## P3 — Distribution & CI
 
-- [ ] npm publish workflow (GitHub Actions on tag)
-- [ ] CI with real CHR boot on ubuntu-latest KVM
+- [x] CI matrix integration tests — linux/x86_64 + linux/aarch64 (ubuntu-24.04-arm); macOS optional via dispatch
+- [x] CI coverage enforcement — bun test --coverage parsed, thresholds 75% funcs / 60% lines (warn, not hard-fail); overridable via dispatch inputs
+- [x] CI artifacts: coverage-report (14 days), integration-logs-{platform} (7 days) with machine.json + qemu.log
+- [x] CI step summaries — coverage table + integration tail written to $GITHUB_STEP_SUMMARY for agent-readable output
+- [x] `publish.yml` runs lint + typecheck + unit tests before npm publish
+- [ ] CI image cache invalidation strategy — currently bumping `-v1` suffix manually; could auto-detect stale cache via RouterOS release feed
+- [ ] npm publish workflow (GitHub Actions on tag) — workflow exists but needs NPM_TOKEN secret in repo settings
 - [ ] Homebrew formula
 - [ ] Binary builds via bun compile
 - [ ] Shell completions (bash, zsh, fish)
