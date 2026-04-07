@@ -81,11 +81,11 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 
 ### Robustness
 
-- [ ] Graceful SIGINT/SIGTERM cleanup in foreground mode (currently leaves pid file)
-- [ ] Lock file to prevent concurrent starts of same machine
-- [ ] Better error messages for common QEMU failures (EFI size mismatch, permission denied)
-- [ ] Retry download on transient network errors
-- [ ] Machine name validation — reject names starting with `-` to prevent flag confusion (e.g. `quickchr start -fg` creating a machine named `-fg`)
+- [x] Graceful SIGINT/SIGTERM cleanup in foreground mode (currently leaves pid file)
+- [x] Lock file to prevent concurrent starts of same machine
+- [x] Better error messages for common QEMU failures (EFI size mismatch, permission denied)
+- [x] Retry download on transient network errors
+- [x] Machine name validation — reject names starting with `-` to prevent flag confusion (e.g. `quickchr start -fg` creating a machine named `-fg`)
 
 ### Docs & Project
 

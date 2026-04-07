@@ -1,5 +1,5 @@
-import { describe, test, expect, } from "bun:test";
-import { buildQemuArgs, type QemuLaunchConfig } from "../../src/lib/qemu.ts";
+import { describe, test, expect } from "bun:test";
+import { buildQemuArgs, buildQemuErrorMessage, type QemuLaunchConfig } from "../../src/lib/qemu.ts";
 import type { PortMapping } from "../../src/lib/types.ts";
 
 // These tests verify QEMU arg generation without spawning QEMU.
@@ -156,5 +156,30 @@ describe("buildQemuArgs", () => {
 			}
 			throw e;
 		}
+	});
+});
+
+describe("buildQemuErrorMessage", () => {
+	test("classifies permission denied", () => {
+		const msg = buildQemuErrorMessage("qemu: open /some/file: Permission denied");
+		expect(msg).toContain("permission denied");
+		expect(msg).toContain("check image file permissions");
+	});
+
+	test("classifies EFI / pflash size mismatch", () => {
+		const msg = buildQemuErrorMessage("pflash: drive size (67108864) larger than 67108863");
+		expect(msg).toContain("EFI firmware size mismatch");
+		expect(msg).toContain("quickchr clean");
+	});
+
+	test("classifies port already in use", () => {
+		const msg = buildQemuErrorMessage("inet_listen_opts: bind(ipv4,0.0.0.0,9100): Address already in use");
+		expect(msg).toContain("port already in use");
+	});
+
+	test("fallback message for unrecognized log", () => {
+		const msg = buildQemuErrorMessage("some unknown error");
+		expect(msg).toContain("QEMU exited immediately");
+		expect(msg).toContain("some unknown error");
 	});
 });

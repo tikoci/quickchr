@@ -5,7 +5,7 @@
  * manages process spawn/stop, and handles PID tracking.
  */
 
-import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { Arch, MachineState, NetworkMode, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -192,6 +192,20 @@ function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: st
 	}
 }
 
+/** Parse QEMU log output and produce a human-friendly error message. */
+export function buildQemuErrorMessage(log: string): string {
+	if (log.includes("Permission denied")) {
+		return `QEMU exited immediately (permission denied — check image file permissions):\n${log}`;
+	}
+	if (log.includes("pflash") || (log.includes("EFI") && log.includes("size"))) {
+		return `QEMU exited immediately (EFI firmware size mismatch — try 'quickchr clean <name>' to reset):\n${log}`;
+	}
+	if (log.includes("Address already in use")) {
+		return `QEMU exited immediately (port already in use — another process may be using the same ports):\n${log}`;
+	}
+	return `QEMU exited immediately:\n${log}`;
+}
+
 /** Spawn QEMU process. Returns the process or PID. */
 export async function spawnQemu(
 	qemuArgs: string[],
@@ -231,7 +245,7 @@ export async function spawnQemu(
 					logTail = readFileSync(logPath, "utf-8").slice(-800);
 				}
 			} catch { /* ignore */ }
-			throw new QuickCHRError("SPAWN_FAILED", `QEMU exited immediately:\n${logTail}`);
+			throw new QuickCHRError("SPAWN_FAILED", buildQemuErrorMessage(logTail));
 		}
 
 		// unref() lets the parent Bun process exit without waiting for QEMU.
@@ -252,6 +266,7 @@ export async function spawnQemu(
 	const pid = proc.pid;
 	writeFileSync(pidPath, String(pid));
 	await proc.exited;
+	try { unlinkSync(pidPath); } catch { /* ignore */ }
 	return { pid };
 }
 

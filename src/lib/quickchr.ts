@@ -35,7 +35,7 @@ import { provision } from "./provision.ts";
 import { renewLicense } from "./license.ts";
 import type { LicenseOptions } from "./types.ts";
 import { toChrPorts } from "./network.ts";
-import { existsSync, rmSync, copyFileSync } from "node:fs";
+import { existsSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Create a ChrInstance handle from persisted MachineState. */
@@ -153,6 +153,44 @@ function createInstance(state: MachineState): ChrInstance {
 	};
 }
 
+/**
+ * Atomically acquire an exclusive start lock for a machine directory.
+ * Uses O_CREAT|O_EXCL so concurrent attempts are rejected by the OS — no TOCTOU race.
+ * If the lock is stale (owning process is dead) it is silently replaced.
+ * Throws MACHINE_LOCKED if the lock is held by a live process.
+ */
+export function acquireLock(lockPath: string): void {
+	let fd: number;
+	try {
+		fd = openSync(lockPath, "wx"); // O_WRONLY | O_CREAT | O_EXCL — atomic
+		writeSync(fd, String(process.pid));
+		closeSync(fd);
+		return;
+	} catch {
+		// File already exists — check whether owner is still alive
+	}
+
+	let ownerPid: number | undefined;
+	try {
+		ownerPid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
+	} catch { /* unreadable — treat as stale */ }
+
+	if (ownerPid && !Number.isNaN(ownerPid)) {
+		try {
+			process.kill(ownerPid, 0); // probes liveness; throws ESRCH if process not found
+			throw new QuickCHRError("MACHINE_LOCKED", `Machine is already being started (pid ${ownerPid})`);
+		} catch (e) {
+			if (e instanceof QuickCHRError) throw e;
+			// Process is dead — stale lock, overwrite
+			writeFileSync(lockPath, String(process.pid));
+			return;
+		}
+	}
+
+	// Owner unreadable or zero — treat as stale, overwrite
+	writeFileSync(lockPath, String(process.pid));
+}
+
 /** Resolve the host architecture to a CHR architecture. */
 function hostArchToChr(): Arch {
 	const arch = process.arch;
@@ -164,6 +202,11 @@ function hostArchToChr(): Arch {
 export class QuickCHR {
 	/** Start a new or existing CHR instance. */
 	static async start(opts: StartOptions = {}): Promise<ChrInstance> {
+		// Validate name early (before any I/O) so callers get a fast, clear error
+		if (opts.name?.startsWith("-")) {
+			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
+		}
+
 		// Resolve version
 		let version: string;
 		if (opts.version) {
@@ -239,10 +282,15 @@ export class QuickCHR {
 			return createInstance(state);
 		}
 
-		// Download and prepare image
-		const cachedImg = await ensureCachedImage(version, arch);
+		// Acquire a lock to prevent concurrent starts of the same machine
 		const machineDir = getMachineDir(name);
 		ensureDir(machineDir);
+		const lockPath = join(machineDir, ".start-lock");
+		acquireLock(lockPath);
+		try {
+
+		// Download and prepare image
+		const cachedImg = await ensureCachedImage(version, arch);
 		const diskPath = copyImageToMachine(cachedImg, machineDir);
 
 		// Build machine config
@@ -375,10 +423,16 @@ export class QuickCHR {
 			await instance.stop();
 			// Brief pause for QEMU to flush and release the disk image
 			await Bun.sleep(1000);
+			// Release lock before re-launching — _launchExisting acquires its own.
+			// The outer finally block will attempt a second unlink; that is harmless.
+			try { unlinkSync(lockPath); } catch { /* ignore */ }
 			return QuickCHR._launchExisting(state, false);
 		}
 
-		return instance;
+			return instance;
+		} finally {
+			try { unlinkSync(lockPath); } catch { /* ignore */ }
+		}
 	}
 
 	/** Re-launch an existing stopped machine. */
@@ -386,6 +440,10 @@ export class QuickCHR {
 		state: MachineState,
 		background: boolean,
 	): Promise<ChrInstance> {
+		const lockPath = join(state.machineDir, ".start-lock");
+		acquireLock(lockPath);
+		try {
+
 		const diskPath = join(state.machineDir, "disk.img");
 		if (!existsSync(diskPath)) {
 			throw new QuickCHRError("MACHINE_NOT_FOUND", `Disk image not found for "${state.name}"`);
@@ -419,6 +477,9 @@ export class QuickCHR {
 		saveMachine(state);
 
 		return createInstance(state);
+		} finally {
+			try { unlinkSync(lockPath); } catch { /* ignore */ }
+		}
 	}
 
 	/** List all machines (refreshes PID status). */

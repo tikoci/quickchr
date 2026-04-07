@@ -29,20 +29,44 @@ export async function downloadImage(
 	console.log(`Downloading CHR ${version} (${arch})...`);
 	console.log(`  ${url}`);
 
-	const response = await fetch(url);
-	if (!response.ok) {
-		throw new QuickCHRError(
-			"DOWNLOAD_FAILED",
-			`Download failed: HTTP ${response.status} for ${url}`,
-		);
+	const MAX_RETRIES = 3;
+	let lastError: Error | undefined;
+
+	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+		try {
+			const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+			// Non-retriable: client errors except 408 (request timeout) and 429
+			// (rate limited), which can be transient on CDNs.
+			if (response.status >= 400 && response.status < 500
+					&& response.status !== 408 && response.status !== 429) {
+				throw new QuickCHRError(
+					"DOWNLOAD_FAILED",
+					`Download failed: HTTP ${response.status} for ${url}`,
+				);
+			}
+			if (!response.ok) {
+				lastError = new Error(`HTTP ${response.status}`);
+			} else {
+				// Stream to disk via arrayBuffer (Bun.write with Response can hang on large files)
+				const buf = await response.arrayBuffer();
+				await Bun.write(zipPath, buf);
+				console.log(`  Saved (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+				return zipPath;
+			}
+		} catch (e) {
+			if (e instanceof QuickCHRError) throw e;
+			lastError = e instanceof Error ? e : new Error(String(e));
+		}
+		if (attempt < MAX_RETRIES) {
+			console.log(`  Download failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${attempt * 2}s...`);
+			await Bun.sleep(attempt * 2000);
+		}
 	}
 
-	// Stream to disk via arrayBuffer (Bun.write with Response can hang on large files)
-	const buf = await response.arrayBuffer();
-	await Bun.write(zipPath, buf);
-	console.log(`  Saved (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-
-	return zipPath;
+	throw new QuickCHRError(
+		"DOWNLOAD_FAILED",
+		`Download failed after ${MAX_RETRIES} attempts: ${lastError?.message ?? "unknown error"}`,
+	);
 }
 
 /** Extract the .img from the ZIP. Returns path to the raw .img file. */
