@@ -185,6 +185,9 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			const fresh = await QuickCHR.start({ name: "integration-clean-test" });
 			instance = fresh;
 
+				// _launchExisting (used on restart) does not wait for boot — do it explicitly.
+				await instance.waitForBoot(120_000);
+
 			// cleanuser must no longer exist — 401 expected
 			const afterClean = await fetch(
 				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,

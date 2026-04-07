@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { monitorCommand, serialStreams, qgaCommand } from "../../src/lib/channels.ts";
-import { QuickCHRError } from "../../src/lib/types.ts";
+import type { QuickCHRError } from "../../src/lib/types.ts";
 
 const TMP = join(import.meta.dir, ".tmp-channels-test");
 

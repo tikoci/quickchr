@@ -35,7 +35,7 @@ Published as `@tikoci/quickchr` on npm.
 
 ## Code Style
 
-- Linter: Biome 2.x (no formatter, lint only). Run: `bun run lint`.
+- Linter: Biome 2.x (no formatter, lint only). Run: `bun run lint:biome`.
 - Tabs for indentation.
 - No unnecessary comments on obvious code.
 - Errors: throw `QuickCHRError(code, message, installHint?)`.
@@ -45,6 +45,6 @@ Published as `@tikoci/quickchr` on npm.
 ```bash
 bun install                  # Install deps
 bun test test/unit/          # Run unit tests
-bun run lint                 # Run biome
+bun run check                # Run all linters
 bun run dev -- doctor        # Run CLI in dev mode
 ```

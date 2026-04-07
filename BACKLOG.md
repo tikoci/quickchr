@@ -52,7 +52,7 @@
 - [x] Coverage enforcement: 75% funcs / 60% lines (warn, not hard-fail)
 - [x] CI artifacts: coverage-report (14d), integration-logs-{platform} (7d)
 - [x] Step summaries written to `$GITHUB_STEP_SUMMARY`
-- [x] `publish.yml` runs lint + typecheck + unit tests before npm publish
+- [x] `publish.yml` runs lint (biome & tsc --noEmit) + unit tests before npm publish
 
 </details>
 
@@ -120,7 +120,11 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 **Instance lifecycle (integration — needs running QEMU):**
 - [x] `quickchr.ts`: integration test for `instance.remove()` on a *running* machine — stop-then-delete path — added to `test/integration/start-stop.test.ts`
 - [x] `quickchr.ts`: integration test for `instance.clean()` — reset disk image from cache, verify CHR returns to factory state (custom user gone, admin/empty works) — added to `test/integration/start-stop.test.ts`
-- [x] `provision.ts`: provisioning corner cases — duplicate username → PROCESS_FAILED; new user placed in "full" group with write access — added to `test/integration/provisioning.test.ts`
+- [x] `quickchr.ts`: bug fix — `clean()` test was missing `waitForBoot` after `_launchExisting` restart; REST assertions raced the boot and failed intermittently; fixed in `test/integration/start-stop.test.ts`
+- [x] `provision.ts`: provisioning corner cases — invalid group → PROCESS_FAILED; new user placed in "full" group with write access — added to `test/integration/provisioning.test.ts`
+
+**Device-mode feature flags (integration):**
+- [x] `device-mode.ts`: integration test for `mode=basic` with `enable: [bandwidth-test, ipsec]` + `disable: [zerotier]` — verifies non-rose mode + non-empty enable/disable arrays are fully applied and confirmed via `verifyDeviceMode`; covers the CLI `--device-mode-enable`/`--device-mode-disable` code path end-to-end — added to `test/integration/device-mode.test.ts`
 - [ ] `quickchr.ts`: `hardRebootMachine` signal fallback — monitor socket unavailable → SIGTERM cascade. Device-mode integration test covers the monitor-quit path only; signal path is untested
 
 **CI-gated / platform-specific:**

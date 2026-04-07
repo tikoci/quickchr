@@ -105,15 +105,15 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 describe("renewLicense — error paths", () => {
 	test("throws PROCESS_FAILED on network error", async () => {
-		globalThis.fetch = () => Promise.reject(new Error("Connection refused"));
+		globalThis.fetch = (() => Promise.reject(new Error("Connection refused"))) as unknown as typeof fetch;
 		const err = await renewLicense(9100, { account: "a@example.com", password: "pass", level: "p1" }).catch((e) => e);
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/Connection refused/);
 	});
 
 	test("throws PROCESS_FAILED on HTTP error response", async () => {
-		globalThis.fetch = () =>
-			Promise.resolve(new Response("Bad credentials", { status: 401 }));
+		globalThis.fetch = (() =>
+			Promise.resolve(new Response("Bad credentials", { status: 401 }))) as unknown as typeof fetch;
 		const err = await renewLicense(9100, { account: "a@example.com", password: "wrong" }).catch((e) => e);
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/401/);
@@ -122,15 +122,15 @@ describe("renewLicense — error paths", () => {
 
 describe("getLicenseInfo — error paths", () => {
 	test("throws PROCESS_FAILED on network error", async () => {
-		globalThis.fetch = () => Promise.reject(new Error("ECONNREFUSED"));
+		globalThis.fetch = (() => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
 		const err = await getLicenseInfo(9100).catch((e) => e);
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/ECONNREFUSED/);
 	});
 
 	test("throws PROCESS_FAILED on HTTP error response", async () => {
-		globalThis.fetch = () =>
-			Promise.resolve(new Response("Forbidden", { status: 403 }));
+		globalThis.fetch = (() =>
+			Promise.resolve(new Response("Forbidden", { status: 403 }))) as unknown as typeof fetch;
 		const err = await getLicenseInfo(9100).catch((e) => e);
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/403/);
@@ -138,26 +138,26 @@ describe("getLicenseInfo — error paths", () => {
 
 	test("normalises missing level field to 'free'", async () => {
 		// RouterOS omits 'level' on fresh unlicensed CHRs — getLicenseInfo fills it in.
-		globalThis.fetch = () =>
+		globalThis.fetch = (() =>
 			Promise.resolve(
 				new Response(JSON.stringify({ "system-id": "ABCD1234" }), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
 				}),
-			);
+			)) as unknown as typeof fetch;
 		const info = await getLicenseInfo(9100);
 		expect(info.level).toBe("free");
 		expect(info["system-id"]).toBe("ABCD1234");
 	});
 
 	test("preserves level when already present in response", async () => {
-		globalThis.fetch = () =>
+		globalThis.fetch = (() =>
 			Promise.resolve(
 				new Response(JSON.stringify({ level: "p1", deadline: "2026-12-31" }), {
 					status: 200,
 					headers: { "Content-Type": "application/json" },
 				}),
-			);
+			)) as unknown as typeof fetch;
 		const info = await getLicenseInfo(9100);
 		expect(info.level).toBe("p1");
 	});

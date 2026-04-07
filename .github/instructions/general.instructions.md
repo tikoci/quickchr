@@ -30,7 +30,7 @@ applyTo: "src/**"
 
 ## Style
 
-- Biome 2.x lint only (no formatting). Run: `bun run lint`.
+- Biome 2.x lint only (no formatting). Run: `bun run lint:biome`.
 - Tabs for indentation.
 - No unnecessary comments on obvious code.
 

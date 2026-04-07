@@ -22,7 +22,7 @@ async function cleanupMachine(name: string): Promise<void> {
 
 describe.skipIf(SKIP)("device-mode provisioning", () => {
 	beforeAll(async () => {
-		for (const name of ["integration-dm-rose", "integration-dm-skip"]) {
+		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features"]) {
 			await cleanupMachine(name);
 		}
 	});
@@ -91,4 +91,57 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			await cleanupMachine("integration-dm-skip");
 		}
 	}, 180_000);
+
+	test("mode=basic with enable/disable feature flags is applied and verified", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { readDeviceMode, resolveDeviceModeOptions, verifyDeviceMode } = await import("../../src/lib/device-mode.ts");
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		// Explicitly enable bandwidth-test and ipsec; disable smb.
+		// This exercises the enable[] + disable[] paths on top of a non-rose mode.
+		// verifyDeviceMode() then confirms every requested field matches the actual
+		// RouterOS REST state — the same logic used internally by start().
+		const deviceMode = {
+			mode: "basic",
+			enable: ["bandwidth-test", "ipsec"],
+			disable: ["smb"],
+		};
+
+		try {
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch,
+				background: true,
+				name: "integration-dm-features",
+				deviceMode,
+			});
+
+			expect(instance.state.status).toBe("running");
+
+			// Read back the full device-mode record via REST.
+			const actual = await readDeviceMode(instance.ports.http);
+
+			// Mode must match.
+			expect(actual.mode).toBe("basic");
+
+			// Explicitly enabled features must be "yes".
+			expect(actual["bandwidth-test"]).toBe("yes");
+			expect(actual.ipsec).toBe("yes");
+
+			// Explicitly disabled feature must be "no".
+			expect(actual.smb).toBe("no");
+
+			// verifyDeviceMode must agree with no mismatches — same path start() uses.
+			const resolved = resolveDeviceModeOptions(deviceMode);
+			const verification = verifyDeviceMode(resolved, actual);
+			expect(verification.ok).toBe(true);
+			expect(verification.mismatches).toHaveLength(0);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-dm-features");
+		}
+	}, 300_000);
 });

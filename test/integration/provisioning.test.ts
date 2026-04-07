@@ -172,7 +172,6 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 		// RouterOS has a concept of user groups. The library must place the new user
 		// in the "full" group, not the default read-only group.
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
-		const { createUser } = await import("../../src/lib/provision.ts");
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {

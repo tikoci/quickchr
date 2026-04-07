@@ -173,7 +173,9 @@ Default base is 9100, so first instance gets HTTP on 9100, SSH on 9102, etc.
 ```bash
 bun install
 bun test                    # Unit tests
-bun run lint                # Biome check
+bun run check               # All linters
+bun run lint:biome          # Biome check
+bun run lint:typecheck      # tsc --noEmit
 QUICKCHR_INTEGRATION=1 bun test test/integration/  # Integration tests (needs QEMU)
 ```
 

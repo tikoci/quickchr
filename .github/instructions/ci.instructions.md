@@ -92,7 +92,7 @@ enforcement entirely for a specific run.
 
 ```bash
 # What lint job runs:
-bun run lint && bun run typecheck
+bun run lint:biome && bun run lint:typecheck
 
 # What unit-tests job runs (with coverage):
 bun test test/unit/ --coverage

@@ -51,9 +51,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - name: Biome lint
-        run: bun run lint
+        run: bun run lint:biome
       - name: TypeScript check
-        run: bun run typecheck
+        run: bun run lint:typecheck
 
   # ── Unit tests + coverage ────────────────────────────────────────────────────
   # Runs in parallel with lint. Integration tests depend on both completing.
