@@ -207,6 +207,8 @@ Two CHRs on the same LAN (`--vmnet-bridged` or TAP) with VXLAN tunnels over user
 - [ ] `examples/divi/Makefile`
 - [ ] `examples/divi/divi.test.ts` (bun:test)
 - [ ] `examples/divi/divi.py` (Python, subprocess CLI)
+- [ ] `examples/divi/README.md` 
+
 
 #### "trīs" — 3-CHR Hub-and-Spoke (Latvian for "three")
 
@@ -215,6 +217,26 @@ One hub + two branch offices. Dynamic routing via IS-IS (or OSPF). Tests topolog
 - [ ] `examples/tris/Makefile`
 - [ ] `examples/tris/tris.test.ts` (bun:test)
 - [ ] `examples/tris/tris.py` (Python, subprocess CLI)
+- [ ] `examples/tris/README.md` 
+
+
+#### "solis" - Sequence CHR: long-term -> stable -> testing -> development (Latvian for "steps")
+
+Runs a **sequence**.  Takes a RouterOS `.rsc` config file (or `.backup`), copies file to router, runs `/system/reset-configuration run-after-reset=($"rsc-config-input-as-file-path-on-router") keep-users=yes skip-backup=yes` (or `/system/backup/load`) in current `long-term` channel version, reboots, `:export` after reboot, then use exported config from long-term in a new `stable` CHR, ... repeating same process ..., import into `testing` CHR ... with output from `development` diff'ed from starting.  Verify that a config is durable through various update cycles (which may migrate config), spots any version who migration did something to config.
+
+- [ ] `examples/solis/Makefile`
+- [ ] `examples/solis/solis.test.ts` (bun:test)
+- [ ] `examples/solis/solis.py` (Python, subprocess CLI)
+- [ ] `examples/solis/README.md`
+
+#### "matrica" - Matrix CHR: config/backup -> (long-term &; stable &; testing &; development &) | foreach { diff } (Latvian for "matrix")
+
+Similar to "solis", takes config `.rsc` (or `.backup`) as input, but instead of sequences each version, "matrica" runs **parallel** CHRs with same outputs, uses `reset-configuration` then `:export` on each, comparing the 4 results at end.  Quick to know if current test config worked as-is on current versions. 
+
+- [ ] `examples/matrica/Makefile`
+- [ ] `examples/matrica/matrica.test.ts` (bun:test)
+- [ ] `examples/matrica/matrica.py` (Python, subprocess CLI)
+- [ ] `examples/matrica/README.md`
 
 ---
 
