@@ -66,6 +66,22 @@ New library functionality must include an integration test that:
 Example: `packages` option → verify via `/rest/system/package` that the package appears
 as active after `QuickCHR.start` returns.
 
+## CHR-Interacting Features Must Be Integration-Tested Before "Done"
+
+**A feature is NOT done until its integration test passes against a real running CHR.**
+
+Unit tests and mock tests are insufficient for any feature that:
+- Sends commands to or reads from RouterOS (REST calls, provisioning steps)
+- Interacts with the QEMU monitor, serial, or QGA channels
+- Performs a hard reboot / power-cycle sequence
+- Reads or writes RouterOS state (device-mode, license, users, packages)
+
+**Do NOT mark a feature `[x]` in BACKLOG.md until `QUICKCHR_INTEGRATION=1 bun test test/integration/` passes with a test that exercises that feature end-to-end.**
+
+Rationale: the RouterOS REST API has non-obvious blocking behavior (e.g. `/system/device-mode/update`
+holds the HTTP connection open until power-cycle confirmation). These behaviors cannot be caught
+by unit tests and have caused previously "done" features to be broken in practice.
+
 ## CI Integration
 
 Integration tests run in CI on every push/PR to `main` across two runners:

@@ -2,7 +2,7 @@
  * Interactive wizard for quickchr — walks user through starting a CHR.
  */
 
-import type { Arch, Channel, LicenseLevel, LicenseOptions, StartOptions } from "../lib/types.ts";
+import type { Arch, Channel, DeviceModeOptions, LicenseLevel, LicenseOptions, StartOptions } from "../lib/types.ts";
 import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
 
 /** Run the interactive wizard using @clack/prompts. */
@@ -111,7 +111,63 @@ export async function runWizard(): Promise<void> {
 	const installAllPackages = (pkgSelection as string[]).includes("__all__");
 	const packages = installAllPackages ? [] : (pkgSelection as string[]);
 
-	// 6. User setup
+	// 6. Device mode — opt-in; CHR ships with mode=advanced by default.
+	//    Device-mode provisioning requires a hard power-cycle, so only do it when the user
+	//    actually needs features beyond what the default advanced mode provides (e.g. containers).
+	//    See: https://help.mikrotik.com/docs/spaces/ROS/pages/93749258/Device-mode
+	const wantDeviceMode = await clack.confirm({
+		message: "Configure device-mode? (needed for containers and some restricted features)",
+		initialValue: false,
+	});
+	if (clack.isCancel(wantDeviceMode)) { clack.cancel("Cancelled."); process.exit(0); }
+
+	let deviceMode: DeviceModeOptions | undefined;
+	if (wantDeviceMode) {
+		const modeChoice = await clack.select({
+			message: "Device-mode profile:",
+			options: [
+				{ value: "rose", label: "rose", hint: "includes container; recommended for most users" },
+				{ value: "advanced", label: "advanced", hint: "CHR default — no container" },
+				{ value: "basic", label: "basic" },
+				{ value: "home", label: "home" },
+			],
+			initialValue: "rose",
+		});
+		if (clack.isCancel(modeChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+
+		deviceMode = { mode: modeChoice as string };
+
+		// Offer extra features that are always disabled regardless of mode.
+		// MikroTik docs: traffic-gen, partitions, routerboard are ❌ in all modes.
+		// container is ❌ in all modes except rose.
+		// We show the subset most useful for CHR users — CLI --device-mode-enable
+		// handles the rest (partitions, install-any-version).
+		const extraFeatures = modeChoice === "rose"
+			? [
+				{ value: "traffic-gen", label: "traffic-gen", hint: "/tool traffic-gen" },
+				{ value: "routerboard", label: "routerboard", hint: "/system routerboard settings" },
+			]
+			: [
+				{ value: "container", label: "container", hint: "/container — required for running containers" },
+				{ value: "traffic-gen", label: "traffic-gen", hint: "/tool traffic-gen" },
+				{ value: "routerboard", label: "routerboard", hint: "/system routerboard settings" },
+			];
+
+		const enableExtras = await clack.multiselect({
+			message: `Enable extra features beyond ${modeChoice} mode? (space to toggle, enter to confirm)`,
+			options: extraFeatures,
+			required: false,
+		});
+		if (clack.isCancel(enableExtras)) { clack.cancel("Cancelled."); process.exit(0); }
+
+		if ((enableExtras as string[]).length > 0) {
+			deviceMode.enable = enableExtras as string[];
+		}
+
+		clack.log.info("Not all features shown. Use CLI --device-mode-enable for additional settings.");
+	}
+
+	// 7. User setup
 	const addUser = await clack.confirm({
 		message: "Create a custom user?",
 		initialValue: false,
@@ -145,7 +201,7 @@ export async function runWizard(): Promise<void> {
 		disableAdmin = disable;
 	}
 
-	// 7. License — optional trial license via MikroTik.com account.
+	// 8. License — optional trial license via MikroTik.com account.
 	//    Free CHR runs at 1 Mbps. A trial license unlocks 1/10 Gbps or unlimited.
 	let license: LicenseOptions | undefined;
 
@@ -213,7 +269,7 @@ export async function runWizard(): Promise<void> {
 			license = { account: licAccount, password: licPassword, level: licLevel };
 	}
 
-	// 8. Background/foreground
+	// 9. Background/foreground
 	const background = await clack.select({
 		message: "Run mode:",
 		options: [
@@ -224,7 +280,7 @@ export async function runWizard(): Promise<void> {
 	});
 	if (clack.isCancel(background)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	// 9. Confirm
+	// 10. Confirm
 	const opts: StartOptions = {
 		version,
 		channel,
@@ -234,6 +290,7 @@ export async function runWizard(): Promise<void> {
 		mem: Number(mem),
 		packages,
 		installAllPackages,
+		deviceMode,
 		user,
 		disableAdmin,
 		license,
@@ -241,8 +298,11 @@ export async function runWizard(): Promise<void> {
 	};
 
 	const pkgSummary = installAllPackages ? "all packages" : packages.length > 0 ? `+${packages.join(",")}` : "";
+	const deviceModeSummary = deviceMode
+		? ` (device-mode: ${deviceMode.mode}${deviceMode.enable?.length ? `, +${deviceMode.enable.join(",")}` : ""})`
+		: "";
 	const confirm = await clack.confirm({
-		message: `Start CHR ${version ?? `(${channel})`} ${arch}${pkgSummary ? ` ${pkgSummary}` : ""}${license ? ` (license: ${license.level})` : ""}?`,
+		message: `Start CHR ${version ?? `(${channel})`} ${arch}${pkgSummary ? ` ${pkgSummary}` : ""}${license ? ` (license: ${license.level})` : ""}${deviceModeSummary}?`,
 	});
 	if (clack.isCancel(confirm) || !confirm) { clack.cancel("Cancelled."); process.exit(0); }
 
@@ -266,7 +326,14 @@ export async function runWizard(): Promise<void> {
 		const d = (s: string) => `\x1b[2m${s}\x1b[0m`;
 		const c = (s: string) => `\x1b[36m${s}\x1b[0m`;
 
-		const hasProvisioning = !!(opts.installAllPackages || (opts.packages && opts.packages.length > 0) || opts.user || opts.disableAdmin || opts.license);
+		const hasProvisioning = !!(
+			opts.installAllPackages ||
+			(opts.packages && opts.packages.length > 0) ||
+			opts.user ||
+			opts.disableAdmin ||
+			opts.license ||
+			opts.deviceMode
+		);
 
 		console.log();
 		if (hasProvisioning) {

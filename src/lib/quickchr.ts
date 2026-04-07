@@ -33,6 +33,15 @@ import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
 import { installPackages, installAllPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense } from "./license.ts";
+import {
+	formatDeviceModeSelection,
+	readDeviceMode,
+	resolveDeviceModeOptions,
+	shouldApplyDeviceMode,
+	startDeviceModeUpdate,
+	verifyDeviceMode,
+	waitForDeviceModeApi,
+} from "./device-mode.ts";
 import type { LicenseOptions } from "./types.ts";
 import { toChrPorts } from "./network.ts";
 import { existsSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
@@ -198,6 +207,55 @@ function hostArchToChr(): Arch {
 	return "x86";
 }
 
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			process.kill(pid, 0);
+		} catch {
+			return true;
+		}
+		await Bun.sleep(100);
+	}
+	return false;
+}
+
+async function hardRebootMachine(
+	state: MachineState,
+	launchConfig: QemuLaunchConfig,
+): Promise<"monitor" | "signal"> {
+	if (!state.pid) {
+		throw new QuickCHRError("PROCESS_FAILED", "Cannot hard-reboot machine: missing QEMU pid");
+	}
+
+	let method: "monitor" | "signal" = "monitor";
+	try {
+		await monitorCommand(state.machineDir, "quit", 4000);
+	} catch (e) {
+		method = "signal";
+		console.warn(`[quickchr] Device-mode: monitor quit failed, falling back to process terminate (${e instanceof Error ? e.message : String(e)})`);
+	}
+
+	const exited = await waitForPidExit(state.pid, 5000);
+	if (!exited) {
+		method = "signal";
+		await stopQemu(state.pid);
+	}
+
+	const restartConfig: QemuLaunchConfig = {
+		...launchConfig,
+		background: true,
+	};
+	const qemuArgs = await buildQemuArgs(restartConfig);
+	const { pid } = await spawnQemu(qemuArgs, state.machineDir, true);
+	state.pid = pid;
+	state.status = "running";
+	state.lastStartedAt = new Date().toISOString();
+	saveMachine(state);
+
+	return method;
+}
+
 // biome-ignore lint/complexity/noStaticOnlyClass: QuickCHR is the public API — class provides a clear namespace for consumers
 export class QuickCHR {
 	/** Start a new or existing CHR instance. */
@@ -206,6 +264,13 @@ export class QuickCHR {
 		if (opts.name?.startsWith("-")) {
 			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
 		}
+
+		const requestedDeviceMode = opts.deviceMode;
+		const resolvedDeviceMode = resolveDeviceModeOptions(requestedDeviceMode);
+		for (const warning of resolvedDeviceMode.warnings) {
+			console.warn(`[quickchr] Device-mode: ${warning}`);
+		}
+		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 
 		// Resolve version
 		let version: string;
@@ -270,6 +335,7 @@ export class QuickCHR {
 				network: opts.network ?? "user",
 				ports,
 				packages: opts.packages ?? [],
+				deviceMode: requestedDeviceMode,
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				portBase,
@@ -305,7 +371,8 @@ export class QuickCHR {
 			(opts.packages && opts.packages.length > 0) ||
 			opts.user ||
 			opts.disableAdmin ||
-			opts.license
+			opts.license ||
+			hasDeviceModeProvisioning
 		);
 		const spawnInBackground = background || (!background && hasProvisioning);
 		const state: MachineState = {
@@ -317,6 +384,7 @@ export class QuickCHR {
 			network: opts.network ?? "user",
 			ports,
 			packages: opts.packages ?? [],
+			deviceMode: requestedDeviceMode,
 			user: opts.user,
 			disableAdmin: opts.disableAdmin,
 			portBase,
@@ -389,6 +457,84 @@ export class QuickCHR {
 			await Bun.sleep(5000);
 			await instance.waitForBoot(bootTimeout);
 			await Bun.sleep(2000);
+		}
+
+		if (hasDeviceModeProvisioning) {
+			const httpPort = toChrPorts(ports).http;
+			await waitForDeviceModeApi(httpPort, 30_000);
+			console.log(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
+
+			const maxAttempts = 5;
+			let updateRequest: Promise<Response> | undefined;
+			let requiresPowerCycle = false;
+
+			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+				const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
+				const outcome = await Promise.race([
+					request
+						.then(() => ({ state: "resolved" as const }))
+						.catch((error: unknown) => ({ state: "rejected" as const, error })),
+					Bun.sleep(2000).then(() => ({ state: "pending" as const })),
+				]);
+
+				if (outcome.state === "rejected") {
+					throw (outcome.error instanceof Error)
+						? outcome.error
+						: new QuickCHRError("PROCESS_FAILED", `Device-mode update request failed: ${String(outcome.error)}`);
+				}
+
+				if (outcome.state === "pending") {
+					updateRequest = request;
+					requiresPowerCycle = true;
+					break;
+				}
+
+				const actualNow = await readDeviceMode(httpPort);
+				const immediateVerification = verifyDeviceMode(resolvedDeviceMode, actualNow);
+				if (immediateVerification.ok) {
+					console.log("  Device-mode already active; no power-cycle required.");
+					break;
+				}
+
+				if (attempt === maxAttempts) {
+					throw new QuickCHRError(
+						"PROCESS_FAILED",
+						`Device-mode update did not enter pending confirmation state after ${maxAttempts} attempts; last mismatch: ${immediateVerification.mismatches.join("; ")}`,
+					);
+				}
+
+				console.warn(`[quickchr] Device-mode update returned early (attempt ${attempt}/${maxAttempts}); retrying...`);
+				await Bun.sleep(2000);
+			}
+
+			if (requiresPowerCycle) {
+				// Kill QEMU — this IS the power cycle that confirms the pending device-mode change.
+				const rebootMethod = await hardRebootMachine(state, launchConfig);
+				// The inflight HTTP request fails (ECONNRESET) when QEMU exits — suppress it.
+				updateRequest?.catch(() => {});
+
+				console.log(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
+
+				const rebooted = await instance.waitForBoot(bootTimeout);
+				if (!rebooted) {
+					throw new QuickCHRError(
+						"BOOT_TIMEOUT",
+						`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s. Ensure QEMU was fully power-cycled and try again.`,
+					);
+				}
+				await waitForDeviceModeApi(httpPort, 30_000);
+			}
+
+			const actual = await readDeviceMode(httpPort);
+			const verification = verifyDeviceMode(resolvedDeviceMode, actual);
+			if (!verification.ok) {
+				throw new QuickCHRError(
+					"PROCESS_FAILED",
+					`Device-mode verification failed after hard reboot: ${verification.mismatches.join("; ")}. Re-run start with explicit --device-mode flags or stop/start to force another power-cycle.`,
+				);
+			}
+
+			console.log(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
 		}
 
 		// Apply CHR trial license if credentials provided

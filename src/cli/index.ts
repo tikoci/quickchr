@@ -70,6 +70,10 @@ function flagList(flags: Record<string, string | boolean | string[]>, key: strin
 	return [];
 }
 
+function csvList(values: string[]): string[] {
+	return [...new Set(values.flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean))];
+}
+
 /** True when interactive prompts must be suppressed (e.g. LLM / CI / pipe). */
 function isNoPrompt(): boolean {
 	return !!process.env.QUICKCHR_NO_PROMPT || !process.stdout.isTTY || !process.stdin.isTTY;
@@ -444,6 +448,22 @@ async function cmdStart(argv: string[]) {
 		dryRun: flagBool(flags, "dry-run"),
 	};
 
+	const deviceModeValue = flag(flags, "device-mode");
+	const deviceModeEnable = csvList(flagList(flags, "device-mode-enable"));
+	const deviceModeDisable = csvList(flagList(flags, "device-mode-disable"));
+	const noDeviceMode = flags["device-mode"] === false;
+	if (noDeviceMode) {
+		if (deviceModeEnable.length > 0 || deviceModeDisable.length > 0) {
+			console.warn("Warning: --device-mode-enable/--device-mode-disable ignored because --no-device-mode was set.");
+		}
+	} else if (deviceModeValue !== undefined || deviceModeEnable.length > 0 || deviceModeDisable.length > 0) {
+		opts.deviceMode = {
+			mode: deviceModeValue ?? "auto",
+			enable: deviceModeEnable.length > 0 ? deviceModeEnable : undefined,
+			disable: deviceModeDisable.length > 0 ? deviceModeDisable : undefined,
+		};
+	}
+
 	// --license-* flags (credentials from env if not supplied)
 	const licenseLevel = flag(flags, "license-level");
 	const licenseAccount = flag(flags, "license-account") ?? process.env.MIKROTIK_ACCOUNT;
@@ -492,7 +512,15 @@ async function cmdStart(argv: string[]) {
 	}
 
 	if (!opts.background) {
-		const hasProv = !!(opts.installAllPackages || (opts.packages?.length ?? 0) > 0 || opts.user || opts.disableAdmin || opts.license);
+		const wantsDeviceMode = !!opts.deviceMode && !["skip", "none", "off", "disabled"].includes((opts.deviceMode.mode ?? "auto").toLowerCase());
+		const hasProv = !!(
+			opts.installAllPackages ||
+			(opts.packages?.length ?? 0) > 0 ||
+			opts.user ||
+			opts.disableAdmin ||
+			opts.license ||
+			wantsDeviceMode
+		);
 		printForegroundTips(hasProv);
 		if (hasProv) {
 			console.log("\x1b[2m  (CHR will boot and configure itself before the console appears)\x1b[0m");
@@ -971,6 +999,12 @@ Options:
   --license-level <l>   Apply trial license: p1 (1 Gbps), p10 (10 Gbps), unlimited
   --license-account <a> MikroTik account email (or use MIKROTIK_ACCOUNT env var)
   --license-password <p> MikroTik password (or use MIKROTIK_PASSWORD env var)
+	--device-mode <m>     Configure device-mode: rose|advanced|basic|home|auto|skip
+	                      CHR default is advanced. rose enables containers. auto resolves to rose.
+	                      Not configured unless explicitly requested.
+	--device-mode-enable <f>  Set one or more device-mode flags to yes (repeatable or comma-separated)
+	--device-mode-disable <f> Set one or more device-mode flags to no (repeatable or comma-separated)
+	--no-device-mode      Skip device-mode provisioning entirely
   --dry-run             Print what would run without starting`);
 			break;
 		case "stop":

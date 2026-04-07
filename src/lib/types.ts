@@ -52,6 +52,7 @@ export interface MachineConfig {
 	network: NetworkMode;
 	ports: Record<string, PortMapping>;
 	packages: string[];
+	deviceMode?: DeviceModeOptions;
 	user?: { name: string; password: string };
 	disableAdmin?: boolean;
 	portBase: number;
@@ -92,6 +93,8 @@ export interface StartOptions {
 	dryRun?: boolean;
 	/** Apply a CHR trial license after boot via /system/license/renew. */
 	license?: LicenseOptions;
+	/** Configure /system/device-mode after boot. If omitted, CHR boots with RouterOS defaults (mode=advanced). */
+	deviceMode?: DeviceModeOptions;
 }
 
 // --- Instance (runtime handle) ---
@@ -204,6 +207,18 @@ export interface LicenseOptions {
 	account: string;
 	password: string;
 	level?: LicenseLevel;
+}
+
+// --- Device-mode ---
+
+/** Device-mode options for /system/device-mode/update. */
+export interface DeviceModeOptions {
+	/** Profile mode. Supports known modes plus unknown future values. */
+	mode?: string;
+	/** Feature names to set to yes (e.g. container, routerboard). */
+	enable?: string[];
+	/** Feature names to set to no (e.g. zerotier, iot). */
+	disable?: string[];
 }
 
 // --- Known extra packages ---

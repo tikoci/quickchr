@@ -10,17 +10,20 @@ import { describe, test, expect, beforeAll } from "bun:test";
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 
+async function cleanupMachine(name: string): Promise<void> {
+	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+	const existing = QuickCHR.get(name);
+	if (!existing) return;
+	try { await existing.stop(); } catch { /* ignore */ }
+	try { await existing.remove(); } catch { /* ignore */ }
+}
+
 describe.skipIf(SKIP)("start-stop lifecycle", () => {
 	// Clean up in case a previous run left a machine behind.
 	// Use remove() to ensure a fresh disk image — a dirty disk from
 	// an incomplete previous boot can slow recovery significantly.
 	beforeAll(async () => {
-		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
-		const existing = QuickCHR.get("integration-test-1");
-		if (existing) {
-			try { await existing.stop(); } catch { /* ignore if already stopped */ }
-			try { await existing.remove(); } catch { /* ignore if already removed */ }
-		}
+		await cleanupMachine("integration-test-1");
 	});
 
 	test("start → wait for boot → stop", async () => {
@@ -55,8 +58,8 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 			if (instance) {
 				await instance.stop();
 				expect(instance.state.status).toBe("stopped");
-				await instance.remove();
 			}
+			await cleanupMachine("integration-test-1");
 		}
 	}, 180_000); // 3 minute timeout
 });
@@ -64,12 +67,7 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 describe.skipIf(SKIP)("package installation", () => {
 	// Clean up in case a previous run failed mid-test (e.g. provisioning error)
 	beforeAll(async () => {
-		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
-		const existing = QuickCHR.get("integration-pkg-test");
-		if (existing) {
-			try { await existing.stop(); } catch { /* ignore */ }
-			try { await existing.remove(); } catch { /* ignore */ }
-		}
+		await cleanupMachine("integration-pkg-test");
 	});
 
 	test("start with extra package → package active after boot", async () => {
@@ -108,8 +106,8 @@ describe.skipIf(SKIP)("package installation", () => {
 		} finally {
 			if (instance) {
 				await instance.stop();
-				await instance.remove();
 			}
+			await cleanupMachine("integration-pkg-test");
 		}
 	}, 600_000); // 10 min: download + two boots + package install
 });

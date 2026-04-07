@@ -11,15 +11,18 @@ import { describe, test, expect, beforeAll } from "bun:test";
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 
+async function cleanupMachine(name: string): Promise<void> {
+	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+	const existing = QuickCHR.get(name);
+	if (!existing) return;
+	try { await existing.stop(); } catch { /* ignore */ }
+	try { await existing.remove(); } catch { /* ignore */ }
+}
+
 describe.skipIf(SKIP)("user provisioning", () => {
 	beforeAll(async () => {
-		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		for (const name of ["integration-prov-bg", "integration-prov-fg"]) {
-			const existing = QuickCHR.get(name);
-			if (existing) {
-				try { await existing.stop(); } catch { /* ignore */ }
-				try { await existing.remove(); } catch { /* ignore */ }
-			}
+			await cleanupMachine(name);
 		}
 	});
 
@@ -44,7 +47,10 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			});
 			expect(resp.status).toBe(200);
 		} finally {
-			if (instance) await instance.remove();
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-bg");
 		}
 	}, 180_000);
 
@@ -82,7 +88,10 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			const users = await userListResp.json() as Record<string, string>[];
 			expect(users[0]?.disabled).toBe("true");
 		} finally {
-			if (instance) await instance.remove();
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-bg");
 		}
 	}, 180_000);
 
@@ -112,7 +121,10 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			});
 			expect(resp.status).toBe(200);
 		} finally {
-			if (instance) await instance.remove();
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-fg");
 		}
 	}, 180_000);
 });

@@ -51,6 +51,17 @@ export async function monitorCommand(
 			}
 		});
 
+		// When the socket closes after we've already sent the command, QEMU exited.
+		// This is the normal outcome for `quit` — no further (qemu) prompt is sent.
+		socket.on("close", () => {
+			clearTimeout(timeout);
+			if (sentCommand) {
+				resolve(buffer.replace(/\(qemu\)\s*/g, "").trim());
+			} else {
+				reject(new QuickCHRError("MACHINE_STOPPED", "Monitor socket closed before command could be sent"));
+			}
+		});
+
 		socket.on("error", (err) => {
 			clearTimeout(timeout);
 			reject(new QuickCHRError("PROCESS_FAILED", `Monitor connection failed: ${err.message}`));

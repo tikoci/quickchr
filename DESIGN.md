@@ -141,7 +141,7 @@ quickchr provisions at first boot and (optionally) on restart:
 - **User creation** — create user, set password, optionally disable admin
 - **Package install** — SCP `.npk` files, reboot to activate
 - **License** — `/system/license/renew` for trial
-- **Device-mode** — `/system/device-mode update container=yes ...` for restricted features (containers, schedulers, etc.). Required before container package will function. Reference: tikoci/mikropkl `qemu.sh`.
+- **Device-mode** — `/system/device-mode/update mode=rose container=yes ...` for restricted features (containers, traffic-gen, routerboard). Opt-in: not configured unless explicitly requested via CLI `--device-mode` or API `deviceMode` option. CHR ships with `mode=advanced` which is sufficient for most use cases. Device-mode requires a hard QEMU power-cycle to confirm changes — this is the MikroTik-mandated confirmation mechanism (physical button press on real hardware, cold reboot on VM). The wizard defaults to `rose` when the user opts in, since it enables containers. See: https://help.mikrotik.com/docs/spaces/ROS/pages/93749258/Device-mode
 - **Config import** — planned: load `.rsc` or `.backup` at creation time
 
 Provisioning via REST API is preferred (simple HTTP calls). Serial console provisioning (prompt detection + buffer tracking, as in chr-armed) is a fallback for locked environments. Key lessons from chr-armed serial work: use `\r` not `\r\n` on PTY; accumulate buffer with offset tracking to prevent re-matching; detect prompts dynamically, don't use fixed delays.

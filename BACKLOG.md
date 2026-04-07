@@ -75,7 +75,8 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 
 ### Provisioning
 
-- [ ] `/system/device-mode` support — `update container=yes scheduler=yes ...` with mode selection (`advanced`/`enterprise`/etc). Required for containers and other restricted features. Reference: tikoci/mikropkl `qemu.sh` handles this; chr-armed provisions device-mode via serial console.
+- [x] `/system/device-mode` support — `update container=yes scheduler=yes ...` with mode selection (`advanced`/`enterprise`/etc). Required for containers and other restricted features. Opt-in only (not configured unless explicitly requested). CHR ships with mode=advanced. Wizard defaults to rose when user opts in.
+- [ ] `instance.setDeviceMode(options)` — allow changing device-mode on a running instance via the library API. Requires the hard-reboot QEMU flow, unlike most config changes that are simple REST calls. Useful for test scenarios that need to toggle device-mode features between runs.
 - [ ] License apply should read back and verify via REST after write — RouterOS commands vary by version; early detection beats debugging later
 - [ ] First-boot serial console provisioning (from chr-armed): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. Pattern worth lifting if we add console-based provisioning.
 
@@ -90,7 +91,39 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 ### Docs & Project
 
 - [ ] Split README.md → CONTRIBUTING.md: move `git clone`, dev setup, and contributor workflow out of README so it focuses on end-user usage
-- [ ] Align test coverage organically — don't chase numbers, but audit gaps. If something isn't unit testable, add an integration test. Add comments where tests are intentionally skipped.
+- [x] Align test coverage organically — don't chase numbers, but audit gaps. Coverage report captured Apr 2026; specific gaps tracked in "Test Coverage Gaps" section below.
+
+### Test Coverage Gaps
+
+From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should prove correctness of the covered path, not just hit lines.
+
+**State utilities (unit — no QEMU):**
+- [ ] `state.ts`: unit tests for `updateMachineStatus`, `isMachineRunning`, `refreshAllStatuses`, and `pruneCache` — all four are untested despite being simple JSON-file utilities; state.test.ts only covers save/load/list/remove
+
+**QEMU build + error paths (unit — no QEMU):**
+- [ ] `qemu.ts`: unit tests for TCG-specific arg generation (`tb-size=256`, correct CPU per arch) — qemu-args.test.ts exercises only the HVF/default path; TCG branch is untested
+- [ ] `qemu.ts`: unit tests for remaining `buildQemuErrorMessage` unclassified patterns (driver/permission strings not currently matched)
+- [ ] `qemu.ts`: `waitForBoot` timeout/warning branch — always bypassed in integration tests because HVF/TCG boot completes well within 120 s; consider a mock-fetch unit test
+
+**Image management (unit — mock fetch/fs):**
+- [ ] `images.ts`: unit test `listCachedImages` for both empty and populated cache dirs
+- [ ] `images.ts`: `downloadImage` error paths — HTTP 4xx (non-retriable abort), 5xx retry exhaustion — mock `fetch`; integration tests only hit the cached-image path
+
+**License error paths (unit — mock fetch):**
+- [ ] `license.ts`: unit tests for `renewLicense` and `getLicenseInfo` error branches (network error, HTTP 4xx/5xx) using mocked fetch; the 3 credential-gated integration tests cover the happy path but failure branches are never executed in CI
+
+**Channels (unit + integration):**
+- [ ] `channels.ts`: unit tests for `monitorCommand` error paths — socket-not-found (MACHINE_STOPPED), timeout (BOOT_TIMEOUT), socket-close-before-command-sent; currently only the live device-mode power-cycle exercises this code path
+- [ ] `channels.ts + quickchr.ts`: integration test for `instance.serial()` — verify the readable stream delivers bytes from a running CHR's serial console; currently only exercised indirectly via `attachSerial` in foreground provisioning
+
+**Instance lifecycle (integration — needs running QEMU):**
+- [ ] `quickchr.ts`: integration test for `instance.remove()` on a *running* machine — exercises the stop-then-delete path; current tests call `stop()` before any removal
+- [ ] `quickchr.ts`: integration test for `instance.clean()` — reset disk image from cache, verify CHR returns to factory state and boots again
+- [ ] `quickchr.ts`: `hardRebootMachine` signal fallback — monitor socket unavailable → SIGTERM cascade. Device-mode integration test covers the monitor-quit path only; signal path is untested
+
+**CI-gated / platform-specific:**
+- [ ] `state.ts` / `platform.ts`: Windows path logic (`LOCALAPPDATA`, `USERPROFILE`, PowerShell qemu paths) — needs Windows CI runner (tracked under P4)
+- [ ] `platform.ts`: KVM detection with `/dev/kvm` present/absent — Linux CI matrix should exercise both paths explicitly
 
 ---
 

@@ -15,14 +15,17 @@ import { describe, test, expect, beforeAll } from "bun:test";
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 const HAS_CREDS = !!process.env.MIKROTIK_ACCOUNT && !!process.env.MIKROTIK_PASSWORD;
 
+async function cleanupMachine(name: string): Promise<void> {
+	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+	const existing = QuickCHR.get(name);
+	if (!existing) return;
+	try { await existing.stop(); } catch { /* ignore */ }
+	try { await existing.remove(); } catch { /* ignore */ }
+}
+
 describe.skipIf(SKIP)("license — getLicenseInfo on fresh CHR", () => {
 	beforeAll(async () => {
-		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
-		const existing = QuickCHR.get("integration-license-test");
-		if (existing) {
-			try { await existing.stop(); } catch { /* ignore */ }
-			try { await existing.remove(); } catch { /* ignore */ }
-		}
+		await cleanupMachine("integration-license-test");
 	});
 
 	test("fresh CHR reports free license", async () => {
@@ -52,21 +55,16 @@ describe.skipIf(SKIP)("license — getLicenseInfo on fresh CHR", () => {
 			expect(typeof info["system-id"]).toBe("string");
 		} finally {
 			if (instance) {
-				await instance.stop();
-				await instance.remove();
+				try { await instance.stop(); } catch { /* ignore */ }
 			}
+			await cleanupMachine("integration-license-test");
 		}
 	}, 300_000);
 });
 
 describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credentials", () => {
 	beforeAll(async () => {
-		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
-		const existing = QuickCHR.get("integration-license-renew");
-		if (existing) {
-			try { await existing.stop(); } catch { /* ignore */ }
-			try { await existing.remove(); } catch { /* ignore */ }
-		}
+		await cleanupMachine("integration-license-renew");
 	});
 
 	test("renewLicense upgrades from free to p1", async () => {
@@ -99,9 +97,9 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 			expect(info.level).toBe("p1");
 		} finally {
 			if (instance) {
-				await instance.stop();
-				await instance.remove();
+				try { await instance.stop(); } catch { /* ignore */ }
 			}
+			await cleanupMachine("integration-license-renew");
 		}
 	}, 300_000);
 
@@ -134,9 +132,9 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 			expect(info.level).toBe("p10");
 		} finally {
 			if (instance) {
-				await instance.stop();
-				await instance.remove();
+				try { await instance.stop(); } catch { /* ignore */ }
 			}
+			await cleanupMachine("integration-license-renew");
 		}
 	}, 300_000);
 });

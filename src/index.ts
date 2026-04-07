@@ -13,6 +13,7 @@ export type {
 	Channel,
 	ChrInstance,
 	ChrPorts,
+	DeviceModeOptions,
 	DoctorCheck,
 	DoctorResult,
 	EfiFirmwarePaths,
