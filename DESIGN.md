@@ -112,3 +112,59 @@ dispatch inputs `min-funcs` / `min-lines`.
 
 **Publish workflow** (`.github/workflows/publish.yml`): triggers on `v*` tags;
 runs lint + typecheck + unit tests before npm publish.
+
+## Design Principles
+
+### Scope Boundary — QEMU Expert, Not Orchestrator
+
+quickchr manages individual CHR instances. Multi-router topologies, test matrices, and workflow orchestration are **out of scope** for the CLI and library. Provide `examples/` with Makefiles and `bun:test` scripts to inspire, but don't build a framework. Users (and their AI agents) compose quickchr instances into whatever topology they need — we give them reliable building blocks.
+
+### Networking — Discover, Don't Configure
+
+For advanced networking (TAP interfaces, bridges), quickchr **discovers and presents options** but does not manage OS-level network configuration. On macOS, vmnet is straightforward (root + a QEMU flag). On Linux, TAP requires editing system files that vary by distro and network manager — that's the user's domain. quickchr will enumerate available interfaces, generate the correct QEMU flags, and link to tikoci docs for setup guides.
+
+### Platform Priority
+
+macOS → Linux → Windows. Mac and Linux share most code paths with minor `#ifdef`-style branches. Windows is tracked but lower priority — larger RouterOS admin audience there, but fewer recipes and harder to test. Windows CI runner planned after the existing macOS/Linux matrix is stable.
+
+### CLI Design
+
+Tighten before expanding. New subcommands (`logs`, `exec`, `console`) wait for a full command tree review. The CLI should be discoverable without paging `--help` — shell completions help more than a long command list. Use multipass and virsh as reference points for symmetry, not to copy.
+
+### RouterOS Verification
+
+Always read back what we write. One extra REST API call after a provisioning action (license, user, package) catches version-specific command drift early. Surface errors with actionable hints rather than silent failures.
+
+### Provisioning Scope
+
+quickchr provisions at first boot and (optionally) on restart:
+- **User creation** — create user, set password, optionally disable admin
+- **Package install** — SCP `.npk` files, reboot to activate
+- **License** — `/system/license/renew` for trial
+- **Device-mode** — `/system/device-mode update container=yes ...` for restricted features (containers, schedulers, etc.). Required before container package will function. Reference: tikoci/mikropkl `qemu.sh`.
+- **Config import** — planned: load `.rsc` or `.backup` at creation time
+
+Provisioning via REST API is preferred (simple HTTP calls). Serial console provisioning (prompt detection + buffer tracking, as in chr-armed) is a fallback for locked environments. Key lessons from chr-armed serial work: use `\r` not `\r\n` on PTY; accumulate buffer with offset tracking to prevent re-matching; detect prompts dynamically, don't use fixed delays.
+
+### Exec Transport Design
+
+`quickchr exec` supports three transports via `--via=auto|ssh|rest|qga`:
+- **auto** (default) — try SSH first (most capable), fall back to REST `/execute`
+- **ssh** — full RouterOS CLI, supports interactive commands, requires `sshpass`
+- **rest** — POST to `/rest/execute` (RouterOS 7.x), no SSH needed, JSON response
+- **qga** — QEMU Guest Agent commands (x86 only today, ARM64 pending MikroTik fix)
+
+Output formatting via `--output=text|json|csv|tsv`. RouterOS trick for structured output: wrap commands in `[:serialize to=json [<routeros-cmd>]]` to get JSON from any CLI command. For REST-to-CLI mapping, see tikoci/restraml `lookup.html`.
+
+### Examples Philosophy
+
+Three representations of each scenario, targeting different audiences:
+- **Makefile** — recipe-driven, targets as documentation (tikoci tradition, see tikoci/netinstall). Agents read targets; humans run `make`.
+- **bun:test** — library API, TypeScript. First-class integration tests. The "source of truth."
+- **Python** — subprocess around CLI. The language agents and network engineers both reach for. Demonstrates quickchr is a real tool, not just a library.
+
+Building examples early is a form of "anchor testing" for the CLI surface — it finds ergonomic issues before we commit to new commands.
+
+### Document Maintenance
+
+DESIGN.md and BACKLOG.md are living documents. At the end of any significant work session, agents should review whether new implementation details, design decisions, or discovered constraints belong in DESIGN.md, and whether completed/new work should update BACKLOG.md. Treat this as a lightweight checklist, not a gate.

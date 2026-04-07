@@ -33,3 +33,12 @@ applyTo: "src/**"
 - Biome 2.x lint only (no formatting). Run: `bun run lint`.
 - Tabs for indentation.
 - No unnecessary comments on obvious code.
+
+## End-of-Session Review
+
+After completing significant work (new features, design changes, bug fixes with architectural impact), check:
+
+1. **DESIGN.md** — Do new implementation details, design decisions, or discovered constraints need documenting? Review git diff and memory for "added but undocumented" behavior.
+2. **BACKLOG.md** — Has any tracked item been completed? Did new work reveal items to add? Update status and priority as needed.
+
+This is a lightweight habit, not a gate. Skip for trivial changes.
