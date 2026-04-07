@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, utimesSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
 	saveMachine,
@@ -8,6 +8,12 @@ import {
 	listMachineNames,
 	removeMachine,
 	getUsedPortBases,
+	updateMachineStatus,
+	isMachineRunning,
+	refreshAllStatuses,
+	pruneCache,
+	getCacheDir,
+	ensureDir,
 } from "../../src/lib/state.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
@@ -94,5 +100,125 @@ describe("state persistence", () => {
 
 	test("removeMachine throws for non-existent", () => {
 		expect(() => removeMachine("nope")).toThrow();
+	});
+});
+
+describe("updateMachineStatus", () => {
+	test("updates status and pid for a saved machine", () => {
+		const state = makeMachine("update-test");
+		saveMachine(state);
+
+		updateMachineStatus("update-test", "running", 12345);
+
+		const loaded = loadMachine("update-test");
+		expect(loaded?.status).toBe("running");
+		expect(loaded?.pid).toBe(12345);
+	});
+
+	test("sets lastStartedAt when status is running", () => {
+		const before = Date.now();
+		const state = makeMachine("ts-test");
+		saveMachine(state);
+
+		updateMachineStatus("ts-test", "running", 99);
+
+		const loaded = loadMachine("ts-test");
+		const ts = new Date(loaded?.lastStartedAt ?? "").getTime();
+		expect(ts).toBeGreaterThanOrEqual(before);
+	});
+
+	test("clears pid when status is stopped", () => {
+		const state = { ...makeMachine("stop-test"), status: "running" as const, pid: 555 };
+		saveMachine(state);
+
+		updateMachineStatus("stop-test", "stopped", undefined);
+
+		const loaded = loadMachine("stop-test");
+		expect(loaded?.status).toBe("stopped");
+		expect(loaded?.pid).toBeUndefined();
+	});
+
+	test("throws MACHINE_NOT_FOUND for non-existent name", () => {
+		expect(() => updateMachineStatus("no-such-machine", "stopped")).toThrow("no-such-machine");
+	});
+});
+
+describe("isMachineRunning", () => {
+	test("returns false when status is not running", () => {
+		const state = makeMachine("stopped-machine");
+		expect(isMachineRunning(state)).toBe(false);
+	});
+
+	test("returns false when pid is missing", () => {
+		const state = { ...makeMachine("no-pid"), status: "running" as const, pid: undefined };
+		expect(isMachineRunning(state)).toBe(false);
+	});
+
+	test("returns true when pid is our own live process", () => {
+		const state = { ...makeMachine("live-pid"), status: "running" as const, pid: process.pid };
+		expect(isMachineRunning(state)).toBe(true);
+	});
+
+	test("returns false when pid is dead (ESRCH)", () => {
+		// PID 999_999_999 is guaranteed not to exist (Linux max is ~4 million)
+		const state = { ...makeMachine("dead-pid"), status: "running" as const, pid: 999_999_999 };
+		expect(isMachineRunning(state)).toBe(false);
+	});
+});
+
+describe("refreshAllStatuses", () => {
+	test("marks stopped for machines with dead PIDs, leaves live ones running", () => {
+		// Machine with a live PID (ourselves) — should stay running
+		const live = { ...makeMachine("live-machine", 9100), status: "running" as const, pid: process.pid };
+		saveMachine(live);
+
+		// Machine with a dead PID — should become stopped
+		const dead = { ...makeMachine("dead-machine", 9110), status: "running" as const, pid: 999_999_999 };
+		saveMachine(dead);
+
+		// Stopped machine — should stay stopped
+		const stopped = makeMachine("stopped-machine", 9120);
+		saveMachine(stopped);
+
+		const statuses = refreshAllStatuses();
+		const byName = Object.fromEntries(statuses.map((m) => [m.name, m.status]));
+
+		expect(byName["live-machine"]).toBe("running");
+		expect(byName["dead-machine"]).toBe("stopped");
+		expect(byName["stopped-machine"]).toBe("stopped");
+
+		// Persisted state should also be updated
+		expect(loadMachine("dead-machine")?.status).toBe("stopped");
+		expect(loadMachine("dead-machine")?.pid).toBeUndefined();
+	});
+});
+
+describe("pruneCache", () => {
+	test("removes files older than maxAgeDays and returns count", () => {
+		const cache = getCacheDir();
+		ensureDir(cache);
+
+		const oldPath = join(cache, "chr-7.0.0.img");
+		const newPath = join(cache, "chr-7.22.1.img");
+		writeFileSync(oldPath, "old");
+		writeFileSync(newPath, "new");
+
+		// Set mtime of oldPath to 31 days ago
+		const oldTime = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+		utimesSync(oldPath, oldTime, oldTime);
+
+		const removed = pruneCache(30);
+		expect(removed).toBe(1);
+
+		// Old file gone, new file remains
+		expect(loadMachine("chr-7.0.0.img")).toBeUndefined(); // doesn't exist
+		const files = readdirSync(cache);
+		expect(files).not.toContain("chr-7.0.0.img");
+		expect(files).toContain("chr-7.22.1.img");
+	});
+
+	test("returns 0 when cache dir does not exist", () => {
+		// HOME set to a fresh empty temp dir — cache dir won't exist
+		expect(pruneCache(1)).toBe(0);
 	});
 });

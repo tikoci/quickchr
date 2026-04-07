@@ -98,27 +98,29 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should prove correctness of the covered path, not just hit lines.
 
 **State utilities (unit — no QEMU):**
-- [ ] `state.ts`: unit tests for `updateMachineStatus`, `isMachineRunning`, `refreshAllStatuses`, and `pruneCache` — all four are untested despite being simple JSON-file utilities; state.test.ts only covers save/load/list/remove
+- [x] `state.ts`: unit tests for `updateMachineStatus`, `isMachineRunning`, `refreshAllStatuses`, and `pruneCache` — added to `test/unit/state.test.ts` (11 new tests)
 
 **QEMU build + error paths (unit — no QEMU):**
-- [ ] `qemu.ts`: unit tests for TCG-specific arg generation (`tb-size=256`, correct CPU per arch) — qemu-args.test.ts exercises only the HVF/default path; TCG branch is untested
-- [ ] `qemu.ts`: unit tests for remaining `buildQemuErrorMessage` unclassified patterns (driver/permission strings not currently matched)
+- [x] `qemu.ts`: unit tests for TCG-specific arg generation (`tb-size=256`, correct CPU per arch) — added to `test/unit/qemu-args.test.ts`
+- [x] `qemu.ts`: vmnet-shared and vmnet-bridge network mode arg generation — added to `test/unit/qemu-args.test.ts`
+- [x] `qemu.ts`: additional `buildQemuErrorMessage` patterns — EFI+size branch covered
 - [ ] `qemu.ts`: `waitForBoot` timeout/warning branch — always bypassed in integration tests because HVF/TCG boot completes well within 120 s; consider a mock-fetch unit test
 
 **Image management (unit — mock fetch/fs):**
-- [ ] `images.ts`: unit test `listCachedImages` for both empty and populated cache dirs
+- [x] `images.ts`: unit test `listCachedImages` for empty, absent, and populated cache dirs — `test/unit/images.test.ts` (new file, 4 tests)
 - [ ] `images.ts`: `downloadImage` error paths — HTTP 4xx (non-retriable abort), 5xx retry exhaustion — mock `fetch`; integration tests only hit the cached-image path
 
 **License error paths (unit — mock fetch):**
-- [ ] `license.ts`: unit tests for `renewLicense` and `getLicenseInfo` error branches (network error, HTTP 4xx/5xx) using mocked fetch; the 3 credential-gated integration tests cover the happy path but failure branches are never executed in CI
+- [x] `license.ts`: unit tests for `renewLicense` and `getLicenseInfo` error branches (network error, HTTP 4xx/5xx, level normalisation) using mocked fetch — added to `test/unit/license.test.ts` (6 new tests)
 
 **Channels (unit + integration):**
-- [ ] `channels.ts`: unit tests for `monitorCommand` error paths — socket-not-found (MACHINE_STOPPED), timeout (BOOT_TIMEOUT), socket-close-before-command-sent; currently only the live device-mode power-cycle exercises this code path
-- [ ] `channels.ts + quickchr.ts`: integration test for `instance.serial()` — verify the readable stream delivers bytes from a running CHR's serial console; currently only exercised indirectly via `attachSerial` in foreground provisioning
+- [x] `channels.ts`: unit tests for `monitorCommand` error paths (socket-not-found, server-close-before-prompt, quit resolves), `serialStreams` no-socket, `qgaCommand` arm64 guard — `test/unit/channels.test.ts` (new file, 6 tests)
+- [x] `channels.ts + quickchr.ts`: integration test for `instance.serial()` — readable stream delivers bytes from a running CHR's serial console — added to `test/integration/start-stop.test.ts`
 
 **Instance lifecycle (integration — needs running QEMU):**
-- [ ] `quickchr.ts`: integration test for `instance.remove()` on a *running* machine — exercises the stop-then-delete path; current tests call `stop()` before any removal
-- [ ] `quickchr.ts`: integration test for `instance.clean()` — reset disk image from cache, verify CHR returns to factory state and boots again
+- [x] `quickchr.ts`: integration test for `instance.remove()` on a *running* machine — stop-then-delete path — added to `test/integration/start-stop.test.ts`
+- [x] `quickchr.ts`: integration test for `instance.clean()` — reset disk image from cache, verify CHR returns to factory state (custom user gone, admin/empty works) — added to `test/integration/start-stop.test.ts`
+- [x] `provision.ts`: provisioning corner cases — duplicate username → PROCESS_FAILED; new user placed in "full" group with write access — added to `test/integration/provisioning.test.ts`
 - [ ] `quickchr.ts`: `hardRebootMachine` signal fallback — monitor socket unavailable → SIGTERM cascade. Device-mode integration test covers the monitor-quit path only; signal path is untested
 
 **CI-gated / platform-specific:**

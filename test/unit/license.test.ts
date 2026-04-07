@@ -2,9 +2,10 @@
  * Unit tests for license types, credential utilities, and package lists.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { LICENSE_LEVELS, KNOWN_PACKAGES_X86, KNOWN_PACKAGES_ARM64, knownPackagesForArch } from "../../src/lib/types.ts";
 import { credentialStorageLabel } from "../../src/lib/credentials.ts";
+import { renewLicense, getLicenseInfo } from "../../src/lib/license.ts";
 
 describe("LicenseLevel constants", () => {
 	test("LICENSE_LEVELS contains all valid levels", () => {
@@ -92,5 +93,72 @@ describe("credentialStorageLabel", () => {
 		const label = credentialStorageLabel();
 		expect(typeof label).toBe("string");
 		expect(label.length).toBeGreaterThan(0);
+	});
+});
+
+// --- Error path tests via mocked fetch ---
+// These test the network failure and HTTP error branches which are never
+// reached in normal integration tests (cached image is always used).
+
+const realFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = realFetch; });
+
+describe("renewLicense — error paths", () => {
+	test("throws PROCESS_FAILED on network error", async () => {
+		globalThis.fetch = () => Promise.reject(new Error("Connection refused"));
+		const err = await renewLicense(9100, { account: "a@example.com", password: "pass", level: "p1" }).catch((e) => e);
+		expect(err.code).toBe("PROCESS_FAILED");
+		expect(err.message).toMatch(/Connection refused/);
+	});
+
+	test("throws PROCESS_FAILED on HTTP error response", async () => {
+		globalThis.fetch = () =>
+			Promise.resolve(new Response("Bad credentials", { status: 401 }));
+		const err = await renewLicense(9100, { account: "a@example.com", password: "wrong" }).catch((e) => e);
+		expect(err.code).toBe("PROCESS_FAILED");
+		expect(err.message).toMatch(/401/);
+	});
+});
+
+describe("getLicenseInfo — error paths", () => {
+	test("throws PROCESS_FAILED on network error", async () => {
+		globalThis.fetch = () => Promise.reject(new Error("ECONNREFUSED"));
+		const err = await getLicenseInfo(9100).catch((e) => e);
+		expect(err.code).toBe("PROCESS_FAILED");
+		expect(err.message).toMatch(/ECONNREFUSED/);
+	});
+
+	test("throws PROCESS_FAILED on HTTP error response", async () => {
+		globalThis.fetch = () =>
+			Promise.resolve(new Response("Forbidden", { status: 403 }));
+		const err = await getLicenseInfo(9100).catch((e) => e);
+		expect(err.code).toBe("PROCESS_FAILED");
+		expect(err.message).toMatch(/403/);
+	});
+
+	test("normalises missing level field to 'free'", async () => {
+		// RouterOS omits 'level' on fresh unlicensed CHRs — getLicenseInfo fills it in.
+		globalThis.fetch = () =>
+			Promise.resolve(
+				new Response(JSON.stringify({ "system-id": "ABCD1234" }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			);
+		const info = await getLicenseInfo(9100);
+		expect(info.level).toBe("free");
+		expect(info["system-id"]).toBe("ABCD1234");
+	});
+
+	test("preserves level when already present in response", async () => {
+		globalThis.fetch = () =>
+			Promise.resolve(
+				new Response(JSON.stringify({ level: "p1", deadline: "2026-12-31" }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			);
+		const info = await getLicenseInfo(9100);
+		expect(info.level).toBe("p1");
 	});
 });

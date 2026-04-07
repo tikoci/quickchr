@@ -182,4 +182,96 @@ describe("buildQemuErrorMessage", () => {
 		expect(msg).toContain("QEMU exited immediately");
 		expect(msg).toContain("some unknown error");
 	});
+
+	test("classifies EFI size mismatch via EFI+size pattern", () => {
+		const msg = buildQemuErrorMessage("EFI: unable to open drive size mismatch detected");
+		expect(msg).toContain("EFI firmware size mismatch");
+	});
+});
+
+describe("buildQemuArgs — acceleration", () => {
+	// These tests are platform-aware: we can't control which accelerator is
+	// selected, but we CAN assert invariants that must hold regardless.
+
+	test("TCG accel always includes tb-size=256", async () => {
+		try {
+			// On arm64 hosts, x86 QEMU must use tcg. On x86 hosts, arm64 uses tcg.
+			// Test both arch combos and assert the invariant when tcg is selected.
+			for (const arch of ["arm64", "x86"] as const) {
+				const args = await buildQemuArgs(makeConfig({ arch }));
+				const accelIdx = args.indexOf("-accel");
+				expect(accelIdx).toBeGreaterThan(-1);
+				const accelValue = args[accelIdx + 1] ?? "";
+				if (accelValue.startsWith("tcg")) {
+					expect(accelValue).toContain("tb-size=256");
+				}
+			}
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("arm64 TCG uses cortex-a710 CPU model; HVF uses host", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({ arch: "arm64" }));
+			const accelValue = args[args.indexOf("-accel") + 1] ?? "";
+			const cpuValue = args[args.indexOf("-cpu") + 1] ?? "";
+			if (accelValue.startsWith("tcg")) {
+				expect(cpuValue).toBe("cortex-a710");
+			} else if (accelValue === "hvf") {
+				expect(cpuValue).toBe("host");
+			}
+			// kvm on Linux: also expects "host" but may vary — don't assert
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+});
+
+describe("buildQemuArgs — network modes", () => {
+	test("vmnet-shared produces vmnet-shared netdev", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({ arch: "x86", network: "vmnet-shared" }));
+			const netdevArg = args.find((a) => a.startsWith("vmnet-shared,id=net0"));
+			expect(netdevArg).toBeDefined();
+			// Also has a virtio-net-pci device attached
+			expect(args).toContain("virtio-net-pci,netdev=net0");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("vmnet-bridge produces vmnet-bridged netdev with iface", async () => {
+		try {
+			const args = await buildQemuArgs(
+				makeConfig({ arch: "x86", network: { type: "vmnet-bridge", iface: "en0" } }),
+			);
+			const netdevArg = args.find((a) => a.includes("vmnet-bridged,id=net0"));
+			expect(netdevArg).toBeDefined();
+			expect(netdevArg).toContain("ifname=en0");
+			// vmnet-bridge also adds a shared interface for OOB management
+			const sharedNetdev = args.find((a) => a.startsWith("vmnet-shared,id=net1"));
+			expect(sharedNetdev).toBeDefined();
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+	});
 });

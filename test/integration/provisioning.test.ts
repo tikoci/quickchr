@@ -128,3 +128,85 @@ describe.skipIf(SKIP)("user provisioning", () => {
 		}
 	}, 180_000);
 });
+
+describe.skipIf(SKIP)("provisioning corner cases", () => {
+	beforeAll(async () => {
+		await cleanupMachine("integration-prov-corner");
+	});
+
+	test("createUser with an invalid group throws PROCESS_FAILED", async () => {
+		// RouterOS rejects /rest/user/add when the group name doesn't exist.
+		// This verifies the library surfaces that RouterOS error as PROCESS_FAILED
+		// rather than silently succeeding or crashing. Using an invalid group name
+		// is a reliable trigger — RouterOS always rejects unknown groups.
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { createUser } = await import("../../src/lib/provision.ts");
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch: "x86",
+				background: true,
+				name: "integration-prov-corner",
+			});
+
+			// "no-such-group" is not a built-in RouterOS user group.
+			// RouterOS returns HTTP 400 Bad Request — createUser must throw PROCESS_FAILED.
+			const err = await createUser(
+				instance.ports.http,
+				"validname",
+				"ValidPass1",
+				"no-such-group",
+			).catch((e) => e);
+			expect(err.code).toBe("PROCESS_FAILED");
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-corner");
+		}
+	}, 180_000);
+
+	test("createUser sets the user group to 'full' by default", async () => {
+		// RouterOS has a concept of user groups. The library must place the new user
+		// in the "full" group, not the default read-only group.
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { createUser } = await import("../../src/lib/provision.ts");
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch: "x86",
+				background: true,
+				name: "integration-prov-corner",
+				user: { name: "groupcheck", password: "GroupPass1" },
+			});
+
+			// Confirm the user is in the "full" group by querying the user list as admin.
+			const resp = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/user?name=groupcheck`,
+				{ headers: { Authorization: `Basic ${btoa("admin:")}` }, signal: AbortSignal.timeout(10_000) },
+			);
+			const users = await resp.json() as Record<string, string>[];
+			expect(users[0]?.group).toBe("full");
+
+			// The new user must authenticate and can read (full group gives read+write).
+			// RouterOS returns 200 for any GET from a valid "full" group user.
+			const readResp = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{
+					headers: { Authorization: `Basic ${btoa("groupcheck:GroupPass1")}` },
+					signal: AbortSignal.timeout(10_000),
+				},
+			);
+			expect(readResp.status).toBe(200);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-corner");
+		}
+	}, 180_000);
+});

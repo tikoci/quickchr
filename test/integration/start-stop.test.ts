@@ -111,3 +111,148 @@ describe.skipIf(SKIP)("package installation", () => {
 		}
 	}, 600_000); // 10 min: download + two boots + package install
 });
+
+describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
+	beforeAll(async () => {
+		for (const name of ["integration-remove-running", "integration-clean-test"]) {
+			await cleanupMachine(name);
+		}
+	});
+
+	test("remove() on a running machine stops QEMU and deletes the directory", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { existsSync } = await import("node:fs");
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+		let machineDir: string | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch,
+				background: true,
+				name: "integration-remove-running",
+			});
+
+			expect(instance.state.status).toBe("running");
+			machineDir = instance.state.machineDir;
+
+			// remove() while running — should stop QEMU first, then delete
+			await instance.remove();
+
+			// Machine should be gone from the state store
+			expect(QuickCHR.get("integration-remove-running")).toBeNull();
+
+			// Directory should be deleted
+			if (machineDir) {
+				expect(existsSync(machineDir)).toBe(false);
+			}
+		} finally {
+			// remove() deletes the machine, so cleanupMachine is a no-op here
+			await cleanupMachine("integration-remove-running");
+		}
+	}, 180_000);
+
+	test("clean() resets disk to factory defaults — custom users disappear on next boot", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			// Boot with a custom user
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch,
+				background: true,
+				name: "integration-clean-test",
+				user: { name: "cleanuser", password: "CleanPass1" },
+			});
+
+			// Verify the custom user exists before clean
+			const before = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{ headers: { Authorization: `Basic ${btoa("cleanuser:CleanPass1")}` } },
+			);
+			expect(before.status).toBe(200);
+
+			// Clean while stopped (clean() handles stopping internally)
+			await instance.stop();
+			await instance.clean();
+
+			// Reboot from the fresh disk image
+			const fresh = await QuickCHR.start({ name: "integration-clean-test" });
+			instance = fresh;
+
+			// cleanuser must no longer exist — 401 expected
+			const afterClean = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{ headers: { Authorization: `Basic ${btoa("cleanuser:CleanPass1")}` } },
+			);
+			expect(afterClean.status).toBe(401);
+
+			// Factory admin with empty password must work
+			const adminOk = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{ headers: { Authorization: `Basic ${btoa("admin:")}` } },
+			);
+			expect(adminOk.status).toBe(200);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-clean-test");
+		}
+	}, 360_000); // 6 min: two full boots
+});
+
+describe.skipIf(SKIP)("instance channels — serial console", () => {
+	beforeAll(async () => {
+		await cleanupMachine("integration-serial-test");
+	});
+
+	test("serial() readable stream delivers bytes from RouterOS console", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch,
+				background: true,
+				name: "integration-serial-test",
+			});
+
+			expect(instance.state.status).toBe("running");
+
+			const { readable, writable } = instance.serial();
+			const reader = readable.getReader();
+			const writer = writable.getWriter();
+
+			// The boot banner has already scrolled by the time we connect.
+			// Send a CR to provoke RouterOS into re-printing the login prompt.
+			await writer.write(new Uint8Array([0x0d]));
+			writer.releaseLock();
+
+			// Read the response with a 15 s timeout.
+			const chunk = await Promise.race([
+				reader.read(),
+				Bun.sleep(15_000).then(() => ({ value: undefined, done: true as const })),
+			]);
+
+			reader.releaseLock();
+
+			expect(chunk.value).toBeDefined();
+			expect(chunk.value instanceof Uint8Array).toBe(true);
+			expect((chunk.value as Uint8Array).length).toBeGreaterThan(0);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-serial-test");
+		}
+	}, 180_000);
+});
