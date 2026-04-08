@@ -135,26 +135,257 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 
 ## P2 — CLI & UX
 
-### New Commands
+### Design Principles
 
-- [ ] `quickchr logs <name>` — tail `qemu.log`
-- [ ] `quickchr exec <name> <command>` — run a RouterOS CLI command. Default `--via=auto` tries SSH, falls back to REST `/execute`. Options: `--via=ssh|rest|qga`. Output: `--output=text|json|csv|tsv` (RouterOS trick: wrap in `[:serialize to=json [<cmd>]]` for structured output; see tikoci/restraml `lookup.html` for CLI→REST mapping). Consider `--strict` flag that pre-validates via `/console/inspect request=completion` before executing — check result for `"error"` or `"obj-invalid"` (pattern from `~/GitHub/lsp-routeros-ts` and `~/GitHub/vscode-tikbook`). Strict mode is especially valuable for LLM-generated commands where typos are common.
-- [ ] `quickchr console <name>` — attach to serial console of a running background instance (current `attachSerial` logic, promoted to a top-level command)
+**Interactive prompts are confined to `setup` (and future `tui`).** Every other command is non-interactive — no clack selectors, no `QUICKCHR_NO_PROMPT=1` needed. Without a `<name>` argument, commands print a helpful machine list with a tip instead of launching a selector. Shell completions cover the "discovery" need that interactive selectors were filling. This makes every command safe for scripts, LLMs, CI, and pipes by default.
+
+**`start`/`stop` are pure operations.** They start or stop a machine. No wizard, no creation, no prompts. `add` creates machines. `setup` is the interactive wizard for humans exploring the tool.
+
+**`set`/`get` for machine configuration.** License, device-mode, admin accounts — anything that mutates machine config goes through `set`. Avoids a proliferation of top-level commands (`quickchr license`, `quickchr device-mode`, `quickchr admin`, etc.). Loosely follows RouterOS `set`/`get` naming.
+
+**`--json` and `--yaml` on all read commands.** Structured output for scripts and LLMs. Plain table is the default for humans.
+
+### Command Reference (target design)
+
+```text
+quickchr — MikroTik CHR QEMU Manager
+
+Usage:
+  quickchr                           Run 'setup' wizard (TTY) or 'help' (non-TTY / QUICKCHR_NO_PROMPT=1)
+  quickchr <command> [options]
+
+Lifecycle:
+  add <name> [options]    Create a new CHR instance (download image, allocate ports)
+  start [<name>|--all]    Start existing instance(s). No name → list startable machines with tip
+  stop [<name>|--all]     Stop instance(s). No name → list stoppable machines with tip
+  remove [<name>|--all]   Remove instance(s) and disk. No name → list removable machines with tip
+  clean [<name>]          Reset instance disk to fresh image. No name → list machines with tip
+
+Interaction:
+  exec <name> <command>   Run RouterOS CLI command (--via=auto|ssh|rest|qga, --output=text|json)
+  console <name>          Attach to serial console (interactive TTY required)
+  logs <name>             Tail qemu.log
+
+Configuration:
+  set <name> [options]    Set machine properties (see 'quickchr help set')
+  get <name> [options]    Get machine properties (--json, --yaml)
+
+Inspection:
+  list [--json|--yaml]    List all instances with summary status
+  networks [--json]       List available networks (interfaces, named sockets)
+  doctor [--json]         Check prerequisites and system health
+
+Interactive:
+  setup                   Interactive wizard — create, manage, configure machines (TTY only)
+
+Meta:
+  version                 Show version info
+  help [command]          Show help
+
+Environment:
+  QUICKCHR_NO_PROMPT=1    Force non-interactive (bare 'quickchr' runs 'help' instead of 'setup')
+  MIKROTIK_ACCOUNT        MikroTik.com account email (for license via 'set')
+  MIKROTIK_PASSWORD       MikroTik.com password (for license via 'set')
+```
+
+### Command Details
+
+#### `add` — Create Machine (replaces old `start` wizard path)
+
+Takes the same options as the current `start` wizard but as CLI flags. Errors on duplicate name. Non-interactive.
+
+```text
+quickchr add my-chr --version stable --arch x86_64 --mem 512 --add-network user
+quickchr add rb-sim --version long-term --emulate-device rb5009
+quickchr add arm-test --arch arm64 --packages container,zerotier
+```
+
+- [ ] Implement `add` command with all current `start` creation options
+- [ ] Error on duplicate name (currently silent overwrite risk)
+- [ ] After creation, print machine summary and `tip: quickchr start my-chr`
+
+#### `start` / `stop` — Pure Operations
+
+`start <name>` starts a stopped machine. `start --all` starts all stopped machines. No name and no `--all` → print list of startable machines with tip.
+
+```text
+$ quickchr start
+NAME        STATUS    VERSION    ARCH
+my-chr      stopped   7.22       x86_64
+arm-test    stopped   7.22       arm64
+
+tip: quickchr start <name>  or  quickchr start --all
+
+$ quickchr start my-chr
+● my-chr started (http://127.0.0.1:9100)
+```
+
+- [ ] Refactor `start` to remove wizard/creation logic — pure start only
+- [ ] `start` without name: list startable machines, print tip, exit 0
+- [ ] `stop` without name: list stoppable machines, print tip, exit 0
+- [ ] Remove all clack selectors from `start` and `stop`
+- [ ] `--all` flag on both
+
+#### `set` / `get` — Machine Configuration
+
+Unified interface for machine properties that were previously separate commands or only in the wizard.
+
+```text
+# License
+quickchr set my-chr --license --account user@example.com --password secret
+quickchr set my-chr --license                    # uses MIKROTIK_ACCOUNT/PASSWORD env
+
+# Device mode
+quickchr set my-chr --device-mode advanced
+quickchr set my-chr --device-mode-enable ipsec,bandwidth-test
+quickchr set my-chr --device-mode-disable zerotier
+
+# Admin account
+quickchr set my-chr --disable-builtin-admin
+quickchr set my-chr --add-admin-user deploy --password secret123
+
+# Read back
+quickchr get my-chr                              # all settable properties
+quickchr get my-chr --json                       # structured output
+quickchr get my-chr license                      # specific property group
+quickchr get my-chr device-mode
+quickchr get my-chr admin                        # RouterOS users in group=full
+```
+
+- [ ] Implement `set` command — license, device-mode, admin account
+- [ ] Implement `get` command — query settable properties via REST API. `--json`/`--yaml` output.
+- [ ] `get` without a property group: show all settable config (license level, device-mode, admin users)
+- [ ] Deprecate standalone `license` command → alias to `set <name> --license`
+
+#### `remove` / `clean` — Non-Interactive
+
+Without a name: print list of machines with tip. No selectors.
+
+```text
+$ quickchr remove
+NAME        STATUS    VERSION    ARCH
+my-chr      stopped   7.22       x86_64
+arm-test    running   7.22       arm64     (stop first)
+
+tip: quickchr remove <name>  or  quickchr remove --all
+
+$ quickchr remove my-chr
+my-chr removed.
+```
+
+- [ ] Remove clack selectors from `remove` and `clean`
+- [ ] Print machine list with tip when no name given
+- [ ] `--all` flag on `remove` (already exists). Add to `clean`.
+- [ ] For running machines in `remove` list, show "(stop first)" hint
+
+#### `list` — Unified Machine List
+
+Merge current `list` and `status` into one command. `list` shows the summary table. `list <name>` shows detailed status for one machine (what `status <name>` does today). `status` becomes an alias for `list`.
+
+```text
+$ quickchr list
+NAME        STATUS    VERSION    ARCH      PORTS           NETWORKS
+my-chr      running   7.22       x86_64    9100-9109       user
+hub         running   7.22       x86_64    9110-9119       user, socket::hub-a, socket::hub-b
+branch-a    stopped   7.22       x86_64    9120-9129       user, socket::hub-a
+
+$ quickchr list my-chr
+Name:       my-chr
+Status:     running (PID 12345)
+Version:    7.22 (stable)
+Arch:       x86_64
+...
+
+$ quickchr list --json
+[{"name":"my-chr","status":"running",...}]
+```
+
+- [ ] Merge `list` and `status` — `list` for table, `list <name>` for detail
+- [ ] Keep `status` as alias for `list`
+- [ ] `--json` / `--yaml` output on `list`
+- [ ] Enrichment: pull live QEMU stats (CPU, memory) via monitor channel for `list <name>` detail view
+- [ ] Show network info (names, any downgrades) in both table and detail views
+
+#### `setup` — Interactive Wizard
+
+All interactive UI lives here. The "home screen" for humans exploring quickchr.
+
+```text
+$ quickchr setup
+
+  ◆ quickchr setup
+  │
+  │ What would you like to do?
+  │ ○ Create a new machine
+  │ ○ Manage machines (start/stop/remove)
+  │ ○ Configure networks
+  │ └
+```
+
+**Flow when zero machines exist:** Jump straight to "Create a new machine" (current wizard flow).
+
+**Flow when machines exist:**
+
+- **Create** → current wizard flow → `add` under the hood
+- **Manage** → list machines with state → per-machine choices:
+  - Running: start, stop, "stop and edit" (future)
+  - Stopped: start, edit config (stub as unimplemented for now), remove
+- **Networks** → show available networks by type:
+  - `user`: list machines with user networks and their port mappings. Tip: controlled by machine config.
+  - `socket`: list active named sockets with connected machines. Option to add new socket link between machines.
+  - `shared`/`bridge`: show available platform networks (vmnet on macOS, TAPs on Linux). Stub for now — full implementation deferred to P5 networking work.
+
+- [ ] Create `setup` command with top-level menu
+- [ ] Wire "Create" to existing wizard flow
+- [ ] Wire "Manage" to machine list with per-machine actions
+- [ ] Stub "Networks" with basic listing, mark advanced networking as unimplemented
+- [ ] Make bare `quickchr` (no args, TTY) invoke `setup`
+- [ ] Make bare `quickchr` (no args, non-TTY or `QUICKCHR_NO_PROMPT=1`) invoke `help`
+
+#### `exec` — Run RouterOS Commands
+
+- [ ] `quickchr exec <name> <command>` — `--via=auto|ssh|rest|qga` (auto: try SSH, fall back to REST `/execute`). `--output=text|json|csv|tsv` (RouterOS trick: `[:serialize to=json [<cmd>]]` for structured output; see tikoci/restraml `lookup.html` for CLI→REST mapping). `--strict` pre-validates via `/console/inspect request=completion` — check for `"error"` or `"obj-invalid"` (from `~/GitHub/lsp-routeros-ts` and `~/GitHub/vscode-tikbook`). Strict mode is especially valuable for LLM-generated commands.
+
+#### `console` — Serial Console
+
+- [ ] `quickchr console <name>` — attach to serial console of a running background instance (current `attachSerial` logic, promoted to top-level command). Requires TTY. The only interactive command besides `setup`.
+
+#### `logs` — QEMU Log
+
+- [ ] `quickchr logs <name>` — tail `qemu.log`. `--follow` for live tail. `--json` for structured log entries if we add structured logging later.
 
 ### Shell Completions
 
-- [ ] Completions for bash, zsh, fish — subcommands, machine names, `--flag` options
-- [ ] Explore generating completions without requiring Homebrew/package install (standalone shell script)
+Shell completions replace interactive selectors as the "discovery" mechanism for machine names and flags. Higher priority now that commands are non-interactive.
+
+- [ ] Completions for bash, zsh, fish — subcommands, machine names (from state dir), `--flag` options
+- [ ] Explore generating completions without requiring Homebrew/package install (standalone shell script that reads `~/.local/share/quickchr/machines/` for names)
+- [ ] Machine name completion should be context-aware: `start` completes to stopped machines, `stop` completes to running machines, etc.
 
 ### Output & Display
 
-- [ ] ANSI table cleanup — replace heavy box-drawing borders with minimal style; improve color usage and terminal-width-aware column layout for clean copy-paste
-- [ ] `quickchr status <name>` enrichment — pull live QEMU stats (CPU, memory) via monitor channel, tail recent qemu.log, show richer details from machine state
-- [ ] `doctor` enhancements — OS-level diagnostics: `ps`/port scan correlated with our PID files, stale machine detection (not started in >10 days), "prescription" hints for each finding. Keep `status`/`list` for per-machine detail; `doctor` is system-wide health.
+- [ ] ANSI table cleanup — replace heavy box-drawing borders with minimal ANSI style; improve color and terminal-width-aware column layout. No new borders on any new output.
+- [ ] `--json` / `--yaml` output on: `list`, `get`, `networks`, `doctor`, `exec`. Consistent structure across commands.
+- [ ] `--no-ansi` option (low priority) — strip colors/formatting for log capture. ANSI may actually help LLMs as visual signal, so unclear if needed. Track but don't rush.
+- [ ] `doctor` as `bun test` — the checks are essentially assertions about the environment. Consider expressing doctor checks as a test file (`test/environment/doctor.test.ts`) that `bun test` can run, with `quickchr doctor` as a CLI wrapper. Keeps the "prescription" hints and rich output.
+- [ ] `doctor` enhancements — OS-level diagnostics: `ps`/port scan correlated with PID files, stale machine detection, named socket port conflict detection. System-wide health.
 
-### TUI Mode (exploratory)
+### TUI Mode (future)
 
-- [ ] Full terminal UI with interactive controls — passgo-style (see rootisgod/passgo for multipass). Live machine list with start/stop/status actions. Lower priority but a natural evolution of the wizard.
+- [ ] `quickchr tui` or `quickchr manage` — full terminal UI with live machine list, start/stop/status actions, log viewer. Separate from `setup` wizard (which is guided creation). Lower priority but a natural evolution. Reserve the command name now.
+
+### Migration Path (current → target)
+
+The refactoring is not all-or-nothing. Incremental steps:
+
+1. **Add `add` command** — copy current creation logic from `start`. Both work temporarily.
+2. **Add `setup`** — move wizard from bare `quickchr` and `start` into `setup`.
+3. **Strip `start`/`stop`** — remove selectors, make pure. Print machine list + tip when no name given.
+4. **Strip `remove`/`clean`** — same pattern (list + tip).
+5. **Add `set`/`get`** — start with license (migrate from `license` command).
+6. **Merge `list`/`status`** — `list` does both, `status` becomes alias.
+7. **Deprecation notices** — old `license` command prints "use `set <name> --license`" for one release cycle.
+8. **Shell completions** — fill the gap left by removed selectors.
 
 ---
 
@@ -241,7 +472,7 @@ The core tension: different use cases need different network modes, each with di
 
 ### Rootless Network Topologies
 
-**Key insight: `user` + `socket` are the universal rootless pair.** The default is one `user` network (management via REST API hostfwd). Multi-CHR topologies add `socket` links for inter-VM data-plane connectivity. This combination is cross-platform, rootless, CI-friendly, and covers the majority of use cases (testing, training, tooling, CI). vmnet/TAP are "upgrades" for scenarios needing real LAN presence or host-visible broadcast domains. Rootless should be the default path — if someone sees three CHRs routing OSPF from `make` or `bun test`, _then_ they'll be willing to `sudo` something for the next step. (Compare: Multipass requires a privileged daemon just to start — "Waiting for daemon..." with no workaround if launchd is unhappy.)
+**Key insight: `user` + `socket` are the universal rootless pair.** The default is one `user` network (management via REST API hostfwd). Multi-CHR topologies add `socket` links for inter-VM data-plane connectivity. This combination is cross-platform, rootless, CI-friendly, and covers the majority of use cases (testing, training, tooling, CI). vmnet/TAP are "upgrades" for scenarios needing real LAN presence or host-visible broadcast domains. Rootless should be the default path — if someone sees three CHRs routing OSPF from `make` or `bun test`, *then* they'll be willing to `sudo` something for the next step. (Compare: Multipass requires a privileged daemon just to start — "Waiting for daemon..." with no workaround if launchd is unhappy.)
 
 For network admins familiar with GNS3/EVE-NG — quickchr rootless topologies are not trying to replace those tools for large-scale simulation. The sweet spot is 2-5 CHRs with realistic routing/VPN configs, automatable from a Makefile or test script, runnable in CI. The fun "two-cute-by-half" tricks (PPPoE over socket, VXLAN overlays, IPSec site-to-site — all rootless) are worth calling out in MANUAL.md for network engineers who'll appreciate the cleverness.
 
