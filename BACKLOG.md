@@ -64,14 +64,14 @@ Tighten before expanding. These are preconditions for most items below.
 
 ### Anchor Manual (MANUAL.md)
 
-Highest-priority doc task. Write a comprehensive user guide **describing exactly how quickchr works today** — every command, every option, every provisioning step, port layout, storage layout. Like tikoci/mikropkl's QEMU.md but better. This is the "anchor document" (same concept as anchor tests): a human-readable spec that both users and agents reference, and that surfaces gaps when reality diverges from documentation.
+Highest-priority doc task *after CLI command work stabilises*. Write a comprehensive user guide **describing exactly how quickchr works today** — every command, every option, every provisioning step, port layout, storage layout. Like tikoci/mikropkl's QEMU.md but better. This is the "anchor document" (same concept as anchor tests): a human-readable spec that both users and agents reference, and that surfaces gaps when reality diverges from documentation. Sequenced after `exec`, `set`/`get`, and `list`/`status` merge — no point documenting commands that are about to change.
 
 - [ ] Draft MANUAL.md covering current CLI, library API, provisioning, and storage layout
 - [ ] Include command tree diagram (becomes input for CLI rationalization)
-- [ ] Document `exec` design: `exec --via=auto|ssh|rest|qga` (auto = try SSH first, fall back to REST `/execute`). `--output=json|csv|tsv` — on RouterOS, wrap commands in `[:serialize to=json [<cmd>]]` for structured output. `--via=auto` is the default.
+- [ ] Document `exec` design: `exec --via=auto|ssh|rest|qga` (auto = try SSH first, fall back to REST `/execute`). `--output=json|csv|tsv|yaml` — on RouterOS, wrap commands in `[:serialize to=json [<cmd>]]` for structured output. `--via=auto` is the default. Document `--lint`/`--skip-lint` (pre-validates via `/console/inspect request=completion`).
 - [ ] Document `console`/`attach` as the name for interactive serial access (currently hidden in `start --fg`)
 
-The manual drives CLI design decisions forward — writing how it *should* work forces the design questions that "CLI rationalization" was deferring.
+The manual drives CLI design decisions forward — writing how it *should* work forces the design questions that "CLI rationalization" was deferring. But writing it *too early* means constant rewrites as commands evolve. Current priority: examples and `exec` first (they're the "strawman" tests for CLI ergonomics), MANUAL.md follows once the command surface is more stable.
 
 ### Provisioning
 
@@ -79,6 +79,7 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 - [ ] `instance.setDeviceMode(options)` — allow changing device-mode on a running instance via the library API. Requires the hard-reboot QEMU flow, unlike most config changes that are simple REST calls. Useful for test scenarios that need to toggle device-mode features between runs.
 - [ ] License apply should read back and verify via REST after write — RouterOS commands vary by version; early detection beats debugging later
 - [ ] First-boot serial console provisioning (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. chr-armed handles the full first-boot sequence: license Y/n screen, forced password change, and command execution over serial. The serial approach is valuable when REST API is unavailable (pre-boot, broken config, netinstall recovery). Code to vendor from: `chr-armed/src/oracle/console.ts`.
+- [ ] **Fix: `disableAdmin()` race condition** — integration test "admin can be disabled after creating a replacement user" fails with "Admin user not found". `disableAdmin()` hardcodes `admin:` auth and calls `readUser(httpPort, auth, "admin")` without retry. When called immediately after `createUser()`, the REST API may not yet have the admin user visible in the query (timing race similar to the one `createUser` already handles with a poll loop). Fix: add a retry/poll loop to `readUser("admin")` in `disableAdmin()`, matching `createUser`'s pattern. Alternatively, use the newly-provisioned user's credentials for the admin disable call since admin creds may already be less reliable at that point.
 
 ### Robustness
 
@@ -126,6 +127,14 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 **Device-mode feature flags (integration):**
 - [x] `device-mode.ts`: integration test for `mode=basic` with `enable: [bandwidth-test, ipsec]` + `disable: [zerotier]` — verifies non-rose mode + non-empty enable/disable arrays are fully applied and confirmed via `verifyDeviceMode`; covers the CLI `--device-mode-enable`/`--device-mode-disable` code path end-to-end — added to `test/integration/device-mode.test.ts`
 - [ ] `quickchr.ts`: `hardRebootMachine` signal fallback — monitor socket unavailable → SIGTERM cascade. Device-mode integration test covers the monitor-quit path only; signal path is untested
+
+**Exec (unit + integration):**
+- [x] `auth.ts`: unit tests for `resolveAuth()` — explicit override, provisioned user, admin fallback, disableAdmin edge case — `test/unit/exec.test.ts` (5 tests)
+- [x] `exec.ts`: unit tests for `restExecute()` — POST body, JSON wrap, array/object/empty response formatting, HTTP error codes, auth header — `test/unit/exec.test.ts` (8 tests)
+- [ ] `exec.ts`: integration test fix — `/system/resource/print` returns `*5` instead of key-value output. Real RouterOS `/rest/execute` response format for `print` commands may differ from the mock shape. Needs investigation against live CHR.
+- [ ] `exec.ts`: integration test for exec with provisioned user credentials (not just default admin)
+- [ ] `exec.ts`: integration test for invalid command error path (e.g. `/nonexistent/garbage`)
+- [ ] `cli/index.ts`: `cmdExec` flag parsing — unit test for `--via`, `--user`, `--password`, `--timeout`, `--json` flag handling
 
 **CI-gated / platform-specific:**
 - [ ] `state.ts` / `platform.ts`: Windows path logic (`LOCALAPPDATA`, `USERPROFILE`, PowerShell qemu paths) — needs Windows CI runner (tracked under P4)
@@ -344,7 +353,16 @@ $ quickchr setup
 
 #### `exec` — Run RouterOS Commands
 
-- [ ] `quickchr exec <name> <command>` — `--via=auto|ssh|rest|qga` (auto: try SSH, fall back to REST `/execute`). `--output=text|json|csv|tsv` (RouterOS trick: `[:serialize to=json [<cmd>]]` for structured output; see tikoci/restraml `lookup.html` for CLI→REST mapping). `--strict` pre-validates via `/console/inspect request=completion` — check for `"error"` or `"obj-invalid"` (from `~/GitHub/lsp-routeros-ts` and `~/GitHub/vscode-tikbook`). Strict mode is especially valuable for LLM-generated commands.
+- [x] `quickchr exec <name> <command>` — REST `/execute` transport. `--via=auto|rest` (auto defaults to REST). `--json` wraps command in `[:serialize to=json [...]]` for structured output. `--user`, `--password`, `--timeout` overrides. Smart auth via `resolveAuth()` uses provisioned credentials from machine.json.
+- [x] `resolveAuth()` in `src/lib/auth.ts` — centralised credential resolution (explicit → provisioned → admin default). Used by both `exec()` and `rest()`.
+- [ ] **Fix: exec integration test** — `/system/resource/print` via REST `/execute` returns `*5` (an internal ID) instead of formatted key-value output. The `formatRestOutput()` parser handles `[{...}]` arrays correctly in unit tests, but the real RouterOS `/rest/execute` response for `print` commands differs from the expected shape. Investigate actual response format against a live CHR and adjust parser.
+- [ ] SSH transport (`--via=ssh`) — spawn `ssh -p <port>` subprocess. Required for commands that don't work well over REST (long-running, interactive).
+- [ ] `--via=auto` tries SSH first, falls back to REST `/execute` (current auto = REST only until SSH implemented).
+- [ ] `--output=csv|tsv|yaml` additional output formats. `--yaml` is LLM/terminal-friendly (human-readable, parseable). JSON and YAML carry the same semantic meaning; JSON for programmatic callers (Python/matrica), YAML for interactive/agent use.
+- [ ] `--lint` pre-validates commands via `/console/inspect request=completion` before execution — check result array for `"error"` or `"obj-invalid"` entries. Enabled by default (safe pre-flight check). `--skip-lint` to bypass. The core logic is ~50 lines wrapping `/console/inspect request=completion` (see `~/GitHub/lsp-routeros-ts` — most of that LSP just wraps this for VS Code; the inspect call itself is the source of truth for command validity since it's what RouterOS's own CLI uses for error colorization). Especially valuable for LLM-generated commands where a bad command should fail fast with a clear error before execution.
+- [ ] User preference overrides in `.local` config — `prefer-transport: ssh`, `default-timeout: 60`, etc. Low priority until CLI stabilises, but the scheme should not preclude this.
+
+> **Design note — "MCP-like API feel":** `exec` should feel like calling an MCP tool — caller provides a RouterOS command and gets back output. No need to know ports, protocols, or auth details. But every automatic choice is overridable (`--via`, `--user`, `--port`, etc.) for callers who need precise control. This mirrors MCP's pattern of sensible defaults with full override capability.
 
 #### `console` — Serial Console
 
