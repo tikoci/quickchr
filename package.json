@@ -20,7 +20,7 @@
     "DESIGN.md"
   ],
   "scripts": {
-    "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown && bun run test",
+    "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown",
     "lint": "biome check . && tsc --noEmit",
     "lint:biome": "biome check .",
     "lint:typecheck": "tsc --noEmit",

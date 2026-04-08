@@ -153,6 +153,6 @@ bun run dev -- clean <name>
 ## Architecture Notes (from QEMU instructions)
 
 - **ARM64**: Uses `qemu-system-aarch64`, `-M virt`, UEFI pflash, `-device virtio-blk-pci` (never `if=virtio`)
-- **x86**: Uses `qemu-system-x86_64`, `-M q35`, SeaBIOS, `if=virtio` disk
+- **x86**: Uses `qemu-system-x86_64`, `-M pc`, SeaBIOS, `if=virtio` disk
 - **Acceleration priority**: KVM (Linux) → HVF (macOS) → TCG (fallback)
 - **Boot detection**: polls `http://127.0.0.1:{httpPort}/` until 200 OK

@@ -111,16 +111,26 @@ export async function disableAdmin(httpPort: number): Promise<void> {
 
 	const auth = `Basic ${btoa("admin:")}`;
 
-	// Use /user/set to set disabled=yes on admin.
-	// POST /rest/user/set maps to CLI `/user set disabled=yes numbers=admin`.
-	// The disable/enable sub-commands use a `numbers` selector; so does set.
-	const setResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/set`, {
-		method: "POST",
+	// Resolve the admin user's internal .id so we can PATCH by resource path.
+	// Using PATCH /rest/user/{id} is more reliable than POST /rest/user/set
+	// with a `numbers` selector, which RouterOS may silently ignore.
+	const adminUser = await readUser(httpPort, auth, "admin");
+	if (!adminUser) {
+		throw new QuickCHRError("PROCESS_FAILED", "Admin user not found");
+	}
+	const adminId = String(adminUser[".id"] ?? "");
+	if (!adminId) {
+		throw new QuickCHRError("PROCESS_FAILED", "Admin user .id not found");
+	}
+
+	const setResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/${encodeURIComponent(adminId)}`, {
+		method: "PATCH",
 		headers: {
 			Authorization: auth,
 			"Content-Type": "application/json",
 		},
-		body: JSON.stringify({ numbers: "admin", disabled: "yes" }),
+		body: JSON.stringify({ disabled: "yes" }),
+		signal: AbortSignal.timeout(10_000),
 	});
 
 	if (!setResp.ok) {
@@ -130,6 +140,21 @@ export async function disableAdmin(httpPort: number): Promise<void> {
 			`Failed to disable admin: HTTP ${setResp.status} — ${body}`,
 		);
 	}
+
+	// RouterOS REST may acknowledge the PATCH before the state is committed.
+	// Poll until disabled reads back as "true" (RouterOS REST uses JS-style
+	// "true"/"false" for booleans, not RouterOS-native "yes"/"no").
+	const deadline = Date.now() + 10_000;
+	while (Date.now() < deadline) {
+		const user = await readUser(httpPort, auth, "admin");
+		if (user && String(user.disabled) === "true") return;
+		await Bun.sleep(500);
+	}
+
+	throw new QuickCHRError(
+		"PROCESS_FAILED",
+		"Admin disable request succeeded but admin user is still enabled after 10s",
+	);
 }
 
 /** Run all provisioning steps based on the config. */

@@ -15,9 +15,9 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 
 ## x86 CHR (qemu-system-x86_64)
 
-- Machine: `-M q35`
+- Machine: `-M pc`
 - No firmware needed (SeaBIOS built in)
-- Disk: `-drive file=...,format=raw,if=virtio` (fine on q35 — maps to PCI)
+- Disk: `-drive file=...,format=raw,if=virtio` (fine on q35/pc — maps to PCI)
 - QGA available via `virtio-serial-pci` + `virtserialport`
 
 ## Acceleration

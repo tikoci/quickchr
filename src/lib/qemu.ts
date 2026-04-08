@@ -34,7 +34,7 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 
 	// Machine type
 	if (arch === "x86") {
-		args.push("-M", "q35");
+		args.push("-M", "pc");
 	} else {
 		args.push("-M", "virt");
 	}
@@ -82,7 +82,7 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 			"-device", "virtio-blk-pci,drive=drive0",
 		);
 	} else {
-		// x86: if=virtio is fine (maps to PCI on q35)
+		// x86: if=virtio is fine (maps to PCI on q35/pc)
 		args.push("-drive", `file=${diskPath},format=raw,if=virtio`);
 	}
 

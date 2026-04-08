@@ -41,11 +41,11 @@ describe("buildQemuArgs", () => {
 		}
 	});
 
-	test("x86 uses q35 machine type", async () => {
+	test("x86 uses pc machine type", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ arch: "x86" }));
 			const machineIdx = args.indexOf("-M");
-			expect(args[machineIdx + 1]).toBe("q35");
+			expect(args[machineIdx + 1]).toBe("pc");
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
 				console.log("Skipping: QEMU not installed");
