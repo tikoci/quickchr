@@ -153,13 +153,12 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 
 			// "no-such-group" is not a built-in RouterOS user group.
 			// RouterOS returns HTTP 400 Bad Request — createUser must throw PROCESS_FAILED.
-			const err = await createUser(
+			await expect(createUser(
 				instance.ports.http,
 				"validname",
 				"ValidPass1",
 				"no-such-group",
-			).catch((e) => e);
-			expect(err.code).toBe("PROCESS_FAILED");
+			)).rejects.toMatchObject({ code: "PROCESS_FAILED" });
 		} finally {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }

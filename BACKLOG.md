@@ -200,9 +200,9 @@ quickchr add rb-sim --version long-term --emulate-device rb5009
 quickchr add arm-test --arch arm64 --packages container,zerotier
 ```
 
-- [ ] Implement `add` command with all current `start` creation options
-- [ ] Error on duplicate name (currently silent overwrite risk)
-- [ ] After creation, print machine summary and `tip: quickchr start my-chr`
+- [x] Implement `add` command with all current `start` creation options
+- [x] Error on duplicate name (currently silent overwrite risk)
+- [x] After creation, print machine summary and `tip: quickchr start my-chr`
 
 #### `start` / `stop` — Pure Operations
 
@@ -221,10 +221,10 @@ $ quickchr start my-chr
 ```
 
 - [ ] Refactor `start` to remove wizard/creation logic — pure start only
-- [ ] `start` without name: list startable machines, print tip, exit 0
-- [ ] `stop` without name: list stoppable machines, print tip, exit 0
-- [ ] Remove all clack selectors from `start` and `stop`
-- [ ] `--all` flag on both
+- [x] `start` without name: list startable machines, print tip, exit 0
+- [x] `stop` without name: list stoppable machines, print tip, exit 0
+- [x] Remove all clack selectors from `start` and `stop`
+- [x] `--all` flag on both
 
 #### `set` / `get` — Machine Configuration
 
@@ -273,10 +273,10 @@ $ quickchr remove my-chr
 my-chr removed.
 ```
 
-- [ ] Remove clack selectors from `remove` and `clean`
-- [ ] Print machine list with tip when no name given
-- [ ] `--all` flag on `remove` (already exists). Add to `clean`.
-- [ ] For running machines in `remove` list, show "(stop first)" hint
+- [x] Remove clack selectors from `remove` and `clean`
+- [x] Print machine list with tip when no name given
+- [x] `--all` flag on `remove` (already exists). Add to `clean`.
+- [x] For running machines in `remove` list, show "(stop first)" hint
 
 #### `list` — Unified Machine List
 
@@ -335,12 +335,12 @@ $ quickchr setup
   - `socket`: list active named sockets with connected machines. Option to add new socket link between machines.
   - `shared`/`bridge`: show available platform networks (vmnet on macOS, TAPs on Linux). Stub for now — full implementation deferred to P5 networking work.
 
-- [ ] Create `setup` command with top-level menu
-- [ ] Wire "Create" to existing wizard flow
-- [ ] Wire "Manage" to machine list with per-machine actions
-- [ ] Stub "Networks" with basic listing, mark advanced networking as unimplemented
-- [ ] Make bare `quickchr` (no args, TTY) invoke `setup`
-- [ ] Make bare `quickchr` (no args, non-TTY or `QUICKCHR_NO_PROMPT=1`) invoke `help`
+- [x] Create `setup` command with top-level menu
+- [x] Wire "Create" to existing wizard flow
+- [x] Wire "Manage" to machine list with per-machine actions
+- [x] Stub "Networks" with basic listing, mark advanced networking as unimplemented
+- [x] Make bare `quickchr` (no args, TTY) invoke `setup`
+- [x] Make bare `quickchr` (no args, non-TTY or `QUICKCHR_NO_PROMPT=1`) invoke `help`
 
 #### `exec` — Run RouterOS Commands
 
@@ -348,7 +348,7 @@ $ quickchr setup
 
 #### `console` — Serial Console
 
-- [ ] `quickchr console <name>` — attach to serial console of a running background instance (current `attachSerial` logic, promoted to top-level command). Requires TTY. The only interactive command besides `setup`.
+- [x] `quickchr console <name>` — attach to serial console of a running background instance (current `attachSerial` logic, promoted to top-level command). Requires TTY. The only interactive command besides `setup`.
 
 #### `logs` — QEMU Log
 
@@ -378,10 +378,10 @@ Shell completions replace interactive selectors as the "discovery" mechanism for
 
 The refactoring is not all-or-nothing. Incremental steps:
 
-1. **Add `add` command** — copy current creation logic from `start`. Both work temporarily.
-2. **Add `setup`** — move wizard from bare `quickchr` and `start` into `setup`.
-3. **Strip `start`/`stop`** — remove selectors, make pure. Print machine list + tip when no name given.
-4. **Strip `remove`/`clean`** — same pattern (list + tip).
+1. [x] **Add `add` command** — copy current creation logic from `start`. Both work temporarily.
+2. [x] **Add `setup`** — move wizard from bare `quickchr` and `start` into `setup`.
+3. [x] **Strip `start`/`stop`** — selectors removed; machine-list+tip behavior implemented. Remaining pure-start cleanup tracked above.
+4. [x] **Strip `remove`/`clean`** — same pattern (list + tip).
 5. **Add `set`/`get`** — start with license (migrate from `license` command).
 6. **Merge `list`/`status`** — `list` does both, `status` becomes alias.
 7. **Deprecation notices** — old `license` command prints "use `set <name> --license`" for one release cycle.

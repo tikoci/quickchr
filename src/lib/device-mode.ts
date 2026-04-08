@@ -65,7 +65,10 @@ function normalizeFeatureList(list: string[] | undefined): string[] {
 function toYesNo(value: unknown): string {
 	if (typeof value === "boolean") return value ? "yes" : "no";
 	if (typeof value === "number") return value > 0 ? "yes" : "no";
-	return String(value ?? "").trim().toLowerCase();
+	const normalized = String(value ?? "").trim().toLowerCase();
+	if (["yes", "true", "on", "enabled", "1"].includes(normalized)) return "yes";
+	if (["no", "false", "off", "disabled", "0"].includes(normalized)) return "no";
+	return normalized;
 }
 
 export function resolveDeviceModeOptions(options?: DeviceModeOptions): ResolvedDeviceModeOptions {

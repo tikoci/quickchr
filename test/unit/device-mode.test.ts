@@ -97,4 +97,20 @@ describe("device-mode verification", () => {
 		expect(verification.mismatches.some((m) => m.includes("mode"))).toBe(true);
 		expect(verification.mismatches.some((m) => m.includes("routerboard"))).toBe(true);
 	});
+
+	test("verification accepts RouterOS-style string booleans", () => {
+		const resolved = resolveDeviceModeOptions({
+			mode: "basic",
+			enable: ["bandwidth-test", "ipsec"],
+			disable: ["smb"],
+		});
+		const verification = verifyDeviceMode(resolved, {
+			mode: "basic",
+			"bandwidth-test": "true",
+			ipsec: "true",
+			smb: "false",
+		});
+		expect(verification.ok).toBe(true);
+		expect(verification.mismatches.length).toBe(0);
+	});
 });
