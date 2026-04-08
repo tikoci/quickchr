@@ -78,7 +78,7 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 - [x] `/system/device-mode` support — `update container=yes scheduler=yes ...` with mode selection (`advanced`/`enterprise`/etc). Required for containers and other restricted features. Opt-in only (not configured unless explicitly requested). CHR ships with mode=advanced. Wizard defaults to rose when user opts in.
 - [ ] `instance.setDeviceMode(options)` — allow changing device-mode on a running instance via the library API. Requires the hard-reboot QEMU flow, unlike most config changes that are simple REST calls. Useful for test scenarios that need to toggle device-mode features between runs.
 - [ ] License apply should read back and verify via REST after write — RouterOS commands vary by version; early detection beats debugging later
-- [ ] First-boot serial console provisioning (from chr-armed): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. Pattern worth lifting if we add console-based provisioning.
+- [ ] First-boot serial console provisioning (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. chr-armed handles the full first-boot sequence: license Y/n screen, forced password change, and command execution over serial. The serial approach is valuable when REST API is unavailable (pre-boot, broken config, netinstall recovery). Code to vendor from: `chr-armed/src/oracle/console.ts`.
 
 ### Robustness
 
@@ -138,7 +138,7 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 ### New Commands
 
 - [ ] `quickchr logs <name>` — tail `qemu.log`
-- [ ] `quickchr exec <name> <command>` — run a RouterOS CLI command. Default `--via=auto` tries SSH, falls back to REST `/execute`. Options: `--via=ssh|rest|qga`. Output: `--output=text|json|csv|tsv` (RouterOS trick: wrap in `[:serialize to=json [<cmd>]]` for structured output; see tikoci/restraml `lookup.html` for CLI→REST mapping).
+- [ ] `quickchr exec <name> <command>` — run a RouterOS CLI command. Default `--via=auto` tries SSH, falls back to REST `/execute`. Options: `--via=ssh|rest|qga`. Output: `--output=text|json|csv|tsv` (RouterOS trick: wrap in `[:serialize to=json [<cmd>]]` for structured output; see tikoci/restraml `lookup.html` for CLI→REST mapping). Consider `--strict` flag that pre-validates via `/console/inspect request=completion` before executing — check result for `"error"` or `"obj-invalid"` (pattern from `~/GitHub/lsp-routeros-ts` and `~/GitHub/vscode-tikbook`). Strict mode is especially valuable for LLM-generated commands where typos are common.
 - [ ] `quickchr console <name>` — attach to serial console of a running background instance (current `attachSerial` logic, promoted to a top-level command)
 
 ### Shell Completions
@@ -225,9 +225,35 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 
 Platform priority: macOS → Linux → Windows.
 
+### Networking Rationalization (cross-cutting design question)
+
+The core tension: different use cases need different network modes, each with different `sudo`/privilege requirements and platform availability. quickchr needs a coherent story for how networking is configured across the CLI, library API, and wizard — without hiding the complexity from users who need to understand it.
+
+**Network modes and their realities:**
+
+| Mode | Platforms | Root/sudo? | CHR gets real IP? | Multi-CHR L2? | Notes |
+|------|-----------|------------|-------------------|---------------|-------|
+| `user` (default) | All | No | No (NAT via hostfwd) | No | Sufficient for REST API, SSH. restraml's use case |
+| `vmnet-shared` | macOS | Yes (`sudo`) | Yes (DHCP from vmnet) | Yes | Tested on Intel Mac (`~/GitHub/mikropkl`). macOS's built-in NAT network |
+| `vmnet-bridged` | macOS | Yes (`sudo`) | Yes (from LAN DHCP) | Yes (same bridge) | Needs `ifname` selection (e.g. `en0`). Real LAN presence |
+| `tap` | Linux | Yes (or CAP_NET_ADMIN) | Depends on bridge config | Yes (same bridge) | User configures bridge externally; quickchr discovers + presents available TAPs |
+| `socket` | All | No | No | Yes (limited) | QEMU `-netdev socket` for inter-VM only. No host/LAN access. Simplest multi-CHR |
+
+**Design decisions to make:**
+- [ ] How does the CLI express network mode? `--net=user|vmnet-shared|vmnet-bridged|tap|socket`? Per-interface options for multi-NIC?
+- [ ] How does the wizard present this? Should it detect available modes and only show viable options?
+- [ ] `sudo` handling: should quickchr prompt for sudo itself, or require the user to run `sudo quickchr start`? Former is friendlier; latter is more transparent. mikropkl's `qemu.sh` uses `sudo qemu-system-*` directly.
+- [ ] How does `machine.json` (or future `.yaml`) store network config? Needs to be re-applicable on restart.
+- [ ] For CI (GitHub Actions): user-mode only (no root). Document this constraint.
+
+**Priority by customer:**
+1. **restraml** (beta customer #1): user-mode networking is sufficient — just needs REST API access via hostfwd. No networking changes needed.
+2. **examples/ (divi, tris)**: need multi-CHR L2 connectivity. `socket` mode is root-free but limited; vmnet/tap is more realistic but needs root. Start examples with `socket`, note vmnet/tap as alternatives.
+3. **netinstall testing**: would need vmnet-bridged or tap to simulate BOOTP/TFTP — advanced use case, defer.
+
 ### macOS
 
-- [ ] vmnet-shared and vmnet-bridge testing — higher priority (primary dev platform). vmnet-shared needs root; vmnet-bridge needs `ifname` selection.
+- [ ] vmnet-shared and vmnet-bridge testing — higher priority (primary dev platform). vmnet-shared needs root; vmnet-bridge needs `ifname` selection. Reference implementation: `~/GitHub/mikropkl` `qemu.sh` and `qemu.cfg` — tested and working on Intel Mac. Key detail: QEMU's vmnet backend is macOS-only (uses Apple's `vmnet.framework`).
 
 ### Linux
 
@@ -313,12 +339,12 @@ Items that don't fit cleanly into one priority tier.
 
 | Project | Relationship to quickchr |
 |---|---|
-| tikoci/restraml | RouterOS API schemas; `lookup.html` maps CLI→REST for `exec --via=rest` |
+| tikoci/restraml | **Beta customer #1.** RouterOS API schemas; `lookup.html` maps CLI→REST for `exec --via=rest`. Needs quickchr for local iteration on `deep-inspect.json` extraction. Use case: user-mode networking (REST API only). Wants ARM64 CHR for complete package schema (zerotier, wifi-qcom). Sequential package install for per-package schema attribution |
 | tikoci/rosetta | RouterOS docs as SQLite FTS5 RAG (MCP); helps agents write RouterOS commands |
-| tikoci/mikropkl | Pkl-based QEMU support; extensive QGA lab work; `qemu.sh` handles device-mode |
+| tikoci/mikropkl | Pkl-based QEMU support; extensive QGA lab work; `qemu.sh` handles device-mode. **Vendor from here:** vmnet-shared/vmnet-bridge networking (tested on Intel Mac), `qemu.cfg` config separation pattern. `Lab/` has grounded QEMU facts from many experiments |
 | tikoci/netinstall | Elegant Makefile (~100 lines) for packaging; model for `examples/` Makefiles |
 | tikoci/vscode-tikbook | VS Code extension; will use quickchr as backend (replacing UTM) |
-| `~/GitHub/chr-armed` | OCI/AWS CHR deployment; serial console provisioning patterns; not yet on GitHub |
+| `~/GitHub/chr-armed` | OCI/AWS CHR deployment. **Vendor from here:** serial console provisioning (`src/oracle/console.ts`) — full first-boot sequence handling (license Y/n, password change, `\r` not `\r\n`). Also: ARM64 CHR lacks AWS ENA driver (MikroTik bug reported) |
 | `~/Lab/tiktui` | Archived HTMX+SSE experiment; lesson: don't combine experiments in one project |
 
 
