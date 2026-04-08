@@ -6,6 +6,7 @@ import type {
 	Arch,
 	Channel,
 	ChrInstance,
+	DeviceModeOptions,
 	DoctorResult,
 	MachineState,
 	StartOptions,
@@ -258,6 +259,74 @@ async function hardRebootMachine(
 
 // biome-ignore lint/complexity/noStaticOnlyClass: QuickCHR is the public API — class provides a clear namespace for consumers
 export class QuickCHR {
+	/** Create a new CHR machine (download image, allocate ports, write config) without starting it.
+	 *  Provisioning options (packages, deviceMode, user, disableAdmin) are stored in machine.json
+	 *  and applied automatically on the first subsequent start(). */
+	static async add(opts: StartOptions = {}): Promise<MachineState> {
+		if (opts.name?.startsWith("-")) {
+			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
+		}
+
+		let version: string;
+		if (opts.version) {
+			if (!isValidVersion(opts.version)) {
+				throw new QuickCHRError("INVALID_VERSION", `Invalid version: ${opts.version}`);
+			}
+			version = opts.version;
+		} else {
+			const channel = opts.channel ?? "stable";
+			version = await resolveVersion(channel);
+		}
+
+		const arch: Arch = opts.arch ?? hostArchToChr();
+		requireQemu(arch);
+		if (arch === "arm64") requireFirmware();
+
+		const existingNames = listMachineNames();
+		const name = opts.name ?? generateMachineName(version, arch, existingNames);
+		if (existingNames.includes(name)) {
+			throw new QuickCHRError("MACHINE_EXISTS", `Machine "${name}" already exists. Use 'quickchr start ${name}' to start it.`);
+		}
+
+		const usedBases = getUsedPortBases();
+		const portBase = opts.portBase ?? await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts);
+		const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
+
+		const machineDir = getMachineDir(name);
+		ensureDir(machineDir);
+		const lockPath = join(machineDir, ".start-lock");
+		acquireLock(lockPath);
+		try {
+			const cachedImg = await ensureCachedImage(version, arch);
+			copyImageToMachine(cachedImg, machineDir);
+
+			const state: MachineState = {
+				name,
+				version,
+				arch,
+				cpu: opts.cpu ?? 1,
+				mem: opts.mem ?? 512,
+				network: opts.network ?? "user",
+				ports,
+				packages: opts.packages ?? [],
+				installAllPackages: opts.installAllPackages,
+				deviceMode: opts.deviceMode,
+				user: opts.user,
+				disableAdmin: opts.disableAdmin,
+				portBase,
+				excludePorts: opts.excludePorts ?? [],
+				extraPorts: opts.extraPorts ?? [],
+				createdAt: new Date().toISOString(),
+				status: "stopped",
+				machineDir,
+			};
+			saveMachine(state);
+			return state;
+		} finally {
+			try { unlinkSync(lockPath); } catch { /* ignore */ }
+		}
+	}
+
 	/** Start a new or existing CHR instance. */
 	static async start(opts: StartOptions = {}): Promise<ChrInstance> {
 		// Validate name early (before any I/O) so callers get a fast, clear error
@@ -302,6 +371,28 @@ export class QuickCHR {
 		if (existing) {
 			if (isMachineRunning(existing)) {
 				return createInstance(existing);
+			}
+			// First boot of add()-created machine: apply pending provisioning from stored state
+			if (!existing.lastStartedAt) {
+				const pendingOpts = {
+					installAllPackages: opts.installAllPackages ?? existing.installAllPackages,
+					packages: opts.packages?.length ? opts.packages : (existing.packages.length > 0 ? existing.packages : undefined),
+					deviceMode: opts.deviceMode ?? existing.deviceMode,
+					user: opts.user ?? existing.user,
+					disableAdmin: opts.disableAdmin ?? existing.disableAdmin,
+					license: opts.license,
+				};
+				const hasPending = !!(
+					pendingOpts.installAllPackages ||
+					(pendingOpts.packages?.length ?? 0) > 0 ||
+					pendingOpts.deviceMode ||
+					pendingOpts.user ||
+					pendingOpts.disableAdmin ||
+					pendingOpts.license
+				);
+				if (hasPending) {
+					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts);
+				}
 			}
 			// Exists but stopped — restart it
 			return QuickCHR._launchExisting(existing, opts.background ?? true);
@@ -425,42 +516,83 @@ export class QuickCHR {
 
 		const instance = createInstance(state);
 
-		// Post-boot provisioning.
-		// With HVF/KVM, both architectures boot in well under 60 s.
-		// 120 s is generous for TCG and ensures start() returns within the
-		// typical 3-minute integration-test timeout.
 		const bootTimeout = 120_000;
-		const booted = await instance.waitForBoot(bootTimeout);
-
-		if (!booted) {
-			if (hasProvisioning) {
+		if (hasProvisioning) {
+			const booted = await instance.waitForBoot(bootTimeout);
+			if (!booted) {
 				console.warn(`[quickchr] Warning: CHR did not respond within ${bootTimeout / 1000}s — skipping provisioning. Run 'quickchr status ${name}' to check once it's up.`);
+				return instance;
 			}
-			return instance;
+			await QuickCHR._provisionInstance(instance, state, {
+				installAllPackages: opts.installAllPackages,
+				packages: opts.packages,
+				deviceMode: requestedDeviceMode,
+				user: opts.user,
+				disableAdmin: opts.disableAdmin,
+				license: opts.license,
+			}, launchConfig);
 		}
+
+		// Foreground + provisioning: all provisioning is done in background mode.
+		// Now stop QEMU cleanly and re-launch with stdio so the user gets the real
+		// QEMU mux console (Ctrl-A X to quit, Ctrl-A C for monitor — standard QEMU
+		// shortcuts that are well-documented and googleable).
+		if (!background && hasProvisioning) {
+			await instance.stop();
+			// Brief pause for QEMU to flush and release the disk image
+			await Bun.sleep(1000);
+			// Release lock before re-launching — _launchExisting acquires its own.
+			// The outer finally block will attempt a second unlink; that is harmless.
+			try { unlinkSync(lockPath); } catch { /* ignore */ }
+			return QuickCHR._launchExisting(state, false);
+		}
+
+			return instance;
+		} finally {
+			try { unlinkSync(lockPath); } catch { /* ignore */ }
+		}
+	}
+
+	/** Apply post-boot provisioning steps (packages, device-mode, license, users).
+	 *  Assumes the machine has already booted and HTTP is responding. */
+	static async _provisionInstance(
+		instance: ChrInstance,
+		machineState: MachineState,
+		opts: {
+			installAllPackages?: boolean;
+			packages?: string[];
+			deviceMode?: DeviceModeOptions;
+			user?: { name: string; password: string };
+			disableAdmin?: boolean;
+			license?: LicenseOptions;
+		},
+		launchConfig: QemuLaunchConfig,
+	): Promise<void> {
+		const resolvedDeviceMode = resolveDeviceModeOptions(opts.deviceMode);
+		for (const warning of resolvedDeviceMode.warnings) {
+			console.warn(`[quickchr] Device-mode: ${warning}`);
+		}
+		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
+		const bootTimeout = 120_000;
+		const chrPorts = toChrPorts(machineState.ports);
 
 		// Give SSH a moment to start after HTTP comes up
 		await Bun.sleep(2000);
 
-		// Install extra packages if requested
 		if (opts.installAllPackages) {
-			const chrPorts = toChrPorts(ports);
-			await installAllPackages(version, arch, chrPorts.ssh, chrPorts.http);
-			// Wait for reboot to activate packages
+			await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http);
 			await Bun.sleep(5000);
 			await instance.waitForBoot(bootTimeout);
 			await Bun.sleep(2000);
 		} else if (opts.packages && opts.packages.length > 0) {
-			const chrPorts = toChrPorts(ports);
-			await installPackages(opts.packages, version, arch, chrPorts.ssh, chrPorts.http);
-			// Wait for reboot to activate packages
+			await installPackages(opts.packages, machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http);
 			await Bun.sleep(5000);
 			await instance.waitForBoot(bootTimeout);
 			await Bun.sleep(2000);
 		}
 
 		if (hasDeviceModeProvisioning) {
-			const httpPort = toChrPorts(ports).http;
+			const httpPort = chrPorts.http;
 			await waitForDeviceModeApi(httpPort, 30_000);
 			console.log(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
 
@@ -472,18 +604,18 @@ export class QuickCHR {
 				const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
 				const outcome = await Promise.race([
 					request
-						.then(() => ({ state: "resolved" as const }))
-						.catch((error: unknown) => ({ state: "rejected" as const, error })),
-					Bun.sleep(2000).then(() => ({ state: "pending" as const })),
+						.then(() => ({ kind: "resolved" as const }))
+						.catch((error: unknown) => ({ kind: "rejected" as const, error })),
+					Bun.sleep(2000).then(() => ({ kind: "pending" as const })),
 				]);
 
-				if (outcome.state === "rejected") {
+				if (outcome.kind === "rejected") {
 					throw (outcome.error instanceof Error)
 						? outcome.error
 						: new QuickCHRError("PROCESS_FAILED", `Device-mode update request failed: ${String(outcome.error)}`);
 				}
 
-				if (outcome.state === "pending") {
+				if (outcome.kind === "pending") {
 					updateRequest = request;
 					requiresPowerCycle = true;
 					break;
@@ -508,11 +640,8 @@ export class QuickCHR {
 			}
 
 			if (requiresPowerCycle) {
-				// Kill QEMU — this IS the power cycle that confirms the pending device-mode change.
-				const rebootMethod = await hardRebootMachine(state, launchConfig);
-				// The inflight HTTP request fails (ECONNRESET) when QEMU exits — suppress it.
+				const rebootMethod = await hardRebootMachine(machineState, launchConfig);
 				updateRequest?.catch(() => {});
-
 				console.log(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
 
 				const rebooted = await instance.waitForBoot(bootTimeout);
@@ -537,47 +666,25 @@ export class QuickCHR {
 			console.log(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
 		}
 
-		// Apply CHR trial license if credentials provided
 		if (opts.license) {
 			console.log("Applying CHR license...");
 			try {
-				await renewLicense(toChrPorts(ports).http, opts.license);
+				await renewLicense(chrPorts.http, opts.license);
 				const level = opts.license.level ?? "p1";
-				const current = loadMachine(name);
+				const current = loadMachine(machineState.name);
 				if (current) {
 					current.licenseLevel = level;
 					saveMachine(current);
 				}
-				state.licenseLevel = level;
+				machineState.licenseLevel = level;
 				console.log(`  License applied: free → ${level}`);
 			} catch (e) {
 				console.warn(`[quickchr] License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		}
 
-		// User provisioning
 		if (opts.user || opts.disableAdmin) {
-			const httpPort = toChrPorts(ports).http;
-			await provision(httpPort, opts.user, opts.disableAdmin);
-		}
-
-		// Foreground + provisioning: all provisioning is done in background mode.
-		// Now stop QEMU cleanly and re-launch with stdio so the user gets the real
-		// QEMU mux console (Ctrl-A X to quit, Ctrl-A C for monitor — standard QEMU
-		// shortcuts that are well-documented and googleable).
-		if (!background && hasProvisioning) {
-			await instance.stop();
-			// Brief pause for QEMU to flush and release the disk image
-			await Bun.sleep(1000);
-			// Release lock before re-launching — _launchExisting acquires its own.
-			// The outer finally block will attempt a second unlink; that is harmless.
-			try { unlinkSync(lockPath); } catch { /* ignore */ }
-			return QuickCHR._launchExisting(state, false);
-		}
-
-			return instance;
-		} finally {
-			try { unlinkSync(lockPath); } catch { /* ignore */ }
+			await provision(chrPorts.http, opts.user, opts.disableAdmin);
 		}
 	}
 
@@ -585,6 +692,14 @@ export class QuickCHR {
 	static async _launchExisting(
 		state: MachineState,
 		background: boolean,
+		provisioningOpts?: {
+			installAllPackages?: boolean;
+			packages?: string[];
+			deviceMode?: DeviceModeOptions;
+			user?: { name: string; password: string };
+			disableAdmin?: boolean;
+			license?: LicenseOptions;
+		},
 	): Promise<ChrInstance> {
 		const lockPath = join(state.machineDir, ".start-lock");
 		acquireLock(lockPath);
@@ -595,6 +710,19 @@ export class QuickCHR {
 			throw new QuickCHRError("MACHINE_NOT_FOUND", `Disk image not found for "${state.name}"`);
 		}
 
+		const hasProvisioning = !!(
+			provisioningOpts && (
+				provisioningOpts.installAllPackages ||
+				(provisioningOpts.packages?.length ?? 0) > 0 ||
+				provisioningOpts.deviceMode ||
+				provisioningOpts.user ||
+				provisioningOpts.disableAdmin ||
+				provisioningOpts.license
+			)
+		);
+		// Always boot in background when provisioning is needed
+		const spawnBackground = hasProvisioning ? true : background;
+
 		const launchConfig: QemuLaunchConfig = {
 			arch: state.arch,
 			machineDir: state.machineDir,
@@ -603,14 +731,14 @@ export class QuickCHR {
 			cpu: state.cpu,
 			ports: state.ports,
 			network: state.network,
-			background,
+			background: spawnBackground,
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
-		const { pid } = await spawnQemu(qemuArgs, state.machineDir, background);
+		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground);
 
-		// Foreground: spawnQemu blocks until QEMU exits
-		if (!background) {
+		// Foreground without provisioning: spawnQemu blocks until QEMU exits
+		if (!background && !hasProvisioning) {
 			state.status = "stopped";
 			state.lastStartedAt = new Date().toISOString();
 			saveMachine(state);
@@ -622,7 +750,19 @@ export class QuickCHR {
 		state.lastStartedAt = new Date().toISOString();
 		saveMachine(state);
 
-		return createInstance(state);
+		const instance = createInstance(state);
+
+		if (hasProvisioning && provisioningOpts) {
+			const bootTimeout = 120_000;
+			const booted = await instance.waitForBoot(bootTimeout);
+			if (!booted) {
+				console.warn(`[quickchr] Warning: CHR did not respond within ${bootTimeout / 1000}s — skipping provisioning. Run 'quickchr status ${state.name}' to check once it's up.`);
+				return instance;
+			}
+			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig);
+		}
+
+		return instance;
 		} finally {
 			try { unlinkSync(lockPath); } catch { /* ignore */ }
 		}

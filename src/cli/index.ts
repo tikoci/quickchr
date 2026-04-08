@@ -82,6 +82,9 @@ function isNoPrompt(): boolean {
 async function main() {
 	try {
 		switch (command) {
+			case "add":
+				await cmdAdd(args.slice(1));
+				break;
 			case "start":
 				await cmdStart(args.slice(1));
 				break;
@@ -102,8 +105,14 @@ async function main() {
 			case "clean":
 				await cmdClean(args.slice(1));
 				break;
+			case "console":
+				await cmdConsole(args.slice(1));
+				break;
 			case "license":
 				await cmdLicense(args.slice(1));
+				break;
+			case "setup":
+				await cmdSetup();
 				break;
 			case "doctor":
 				await cmdDoctor();
@@ -119,12 +128,11 @@ async function main() {
 				printHelp(args[1]);
 				break;
 			case undefined:
-				// No command — smart home screen if TTY, otherwise help
-				// Delegates to cmdStart: existing machines → restart selector, none → wizard
+				// No command — interactive setup on TTY, help otherwise
 				if (isNoPrompt()) {
 					printHelp();
 				} else {
-					await cmdStart([]);
+					await cmdSetup();
 				}
 				break;
 			default:
@@ -350,6 +358,217 @@ async function attachSerial(name: string, machineDir: string): Promise<void> {
 	console.log(`  ${dim("Tip: run background")}   quickchr start ${name}`);
 }
 
+/** Print a machine table with a tip line — used when a command gets no name argument. */
+function printMachineListWithTip(
+	tipCommand: string,
+	machines: Array<{ name: string; status: string; version: string; arch: string }>,
+	hintFn?: (m: { name: string; status: string }) => string | undefined,
+) {
+	if (machines.length === 0) {
+		console.log("No matching instances.");
+		return;
+	}
+	const rows = machines.map((m) => ({
+		name: m.name,
+		status: m.status,
+		version: m.version,
+		arch: m.arch,
+		hint: hintFn?.(m),
+	}));
+	const [wName, wStatus, wVersion, wArch] = [
+		Math.max(4, ...rows.map((r) => r.name.length)),
+		Math.max(6, ...rows.map((r) => r.status.length)),
+		Math.max(7, ...rows.map((r) => r.version.length)),
+		Math.max(4, ...rows.map((r) => r.arch.length)),
+	];
+	const pad = (s: string, n: number) => s + " ".repeat(Math.max(0, n - s.length));
+	const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
+	console.log(dim(`  ${pad("NAME", wName)}  ${pad("STATUS", wStatus)}  ${pad("VERSION", wVersion)}  ${pad("ARCH", wArch)}`));
+	for (const r of rows) {
+		const extra = r.hint ? `  ${dim(r.hint)}` : "";
+		console.log(`  ${pad(r.name, wName)}  ${pad(r.status, wStatus)}  ${pad(r.version, wVersion)}  ${pad(r.arch, wArch)}${extra}`);
+	}
+	console.log();
+	console.log(`${dim("tip:")}  quickchr ${tipCommand} <name>  or  quickchr ${tipCommand} --all`);
+}
+
+async function cmdAdd(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { bold, formatPorts, dim } = await import("./format.ts");
+
+	const opts: StartOptions = {
+		version: flag(flags, "version"),
+		channel: flag(flags, "channel") as Channel | undefined,
+		arch: flag(flags, "arch") as Arch | undefined,
+		name: flag(flags, "name") ?? positional[0],
+		cpu: flag(flags, "cpu") ? Number(flag(flags, "cpu")) : undefined,
+		mem: flag(flags, "mem") ? Number(flag(flags, "mem")) : undefined,
+		packages: csvList(flagList(flags, "add-package")),
+		installAllPackages: flagBool(flags, "install-all-packages"),
+		portBase: flag(flags, "port-base") ? Number(flag(flags, "port-base")) : undefined,
+		excludePorts: [
+			...(flags.winbox === false ? ["winbox" as ServiceName] : []),
+			...(flags["api-ssl"] === false ? ["api-ssl" as ServiceName] : []),
+		],
+		network: flag(flags, "vmnet-shared") !== undefined ? "vmnet-shared"
+			: flag(flags, "vmnet-bridge") ? { type: "vmnet-bridge" as const, iface: flag(flags, "vmnet-bridge") as string }
+			: undefined,
+	};
+
+	const deviceModeValue = flag(flags, "device-mode");
+	const deviceModeEnable = csvList(flagList(flags, "device-mode-enable"));
+	const deviceModeDisable = csvList(flagList(flags, "device-mode-disable"));
+	if (deviceModeValue !== undefined || deviceModeEnable.length > 0 || deviceModeDisable.length > 0) {
+		opts.deviceMode = {
+			mode: deviceModeValue ?? "auto",
+			enable: deviceModeEnable.length > 0 ? deviceModeEnable : undefined,
+			disable: deviceModeDisable.length > 0 ? deviceModeDisable : undefined,
+		};
+	}
+
+	const userStr = flag(flags, "add-user");
+	if (userStr) {
+		const [uname = "", password] = userStr.split(":");
+		opts.user = { name: uname, password: password ?? "" };
+	}
+	opts.disableAdmin = flagBool(flags, "disable-admin");
+
+	const state = await QuickCHR.add(opts);
+
+	const { toChrPorts } = await import("../lib/network.ts");
+	const ports = toChrPorts(state.ports);
+	console.log(`${bold(state.name)} created`);
+	console.log(`  Version: ${state.version} (${state.arch})`);
+	console.log(`  CPU/Mem: ${state.cpu} vCPU${state.cpu > 1 ? "s" : ""}, ${state.mem} MB`);
+	console.log(`  Ports:   ${formatPorts(state.ports)}`);
+	console.log(`  REST:    http://127.0.0.1:${ports.http}  ${dim("(after start)")}`);
+	console.log(`  Dir:     ${dim(state.machineDir)}`);
+	if (state.packages.length > 0) console.log(`  Packages: ${state.packages.join(", ")}  ${dim("(applied on first start)")}`);
+	if (state.deviceMode) console.log(`  Device-mode: ${state.deviceMode.mode ?? "auto"}  ${dim("(applied on first start)")}`);
+	console.log();
+	console.log(`${dim("tip:")}  quickchr start ${state.name}`);
+}
+
+async function cmdConsole(argv: string[]) {
+	const { positional } = parseFlags(argv);
+	const name = positional[0];
+
+	if (!name) {
+		console.error("Usage: quickchr console <name>\n  Attach to the serial console of a running machine.");
+		process.exit(1);
+	}
+
+	if (!process.stdin.isTTY) {
+		console.error("quickchr console requires an interactive terminal.");
+		process.exit(1);
+	}
+
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const machine = QuickCHR.get(name);
+	if (!machine) {
+		console.error(`Machine "${name}" not found.`);
+		process.exit(1);
+	}
+	if (machine.state.status !== "running") {
+		console.error(`Machine "${name}" is not running. Start it first: quickchr start ${name}`);
+		process.exit(1);
+	}
+	await attachSerial(name, machine.state.machineDir);
+}
+
+async function cmdSetup() {
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const machines = QuickCHR.list();
+	const { runWizard } = await import("./wizard.ts");
+
+	// Zero machines: jump straight into create flow
+	if (machines.length === 0) {
+		return runWizard();
+	}
+
+	const clack = await import("@clack/prompts");
+	clack.intro("quickchr setup");
+
+	const choice = await clack.select({
+		message: "What would you like to do?",
+		options: [
+			{ value: "create", label: "Create a new machine" },
+			{ value: "manage", label: "Manage machines (start / stop / remove)" },
+			{ value: "networks", label: "Configure networks" },
+		],
+	});
+	if (clack.isCancel(choice)) { clack.cancel("Cancelled."); return; }
+
+	if (choice === "create") {
+		clack.outro("");
+		return runWizard();
+	}
+
+	if (choice === "networks") {
+		clack.log.warn("Network configuration is not yet implemented. Use --vmnet-shared / --vmnet-bridge flags with 'add'.");
+		clack.outro("");
+		return;
+	}
+
+	// Manage flow
+	const { statusIcon, bold } = await import("./format.ts");
+	const selected = await clack.select({
+		message: "Select machine:",
+		options: machines.map((m) => ({
+			value: m.name,
+			label: m.name,
+			hint: `${statusIcon(m.status)} ${m.version} (${m.arch})`,
+		})),
+	});
+	if (clack.isCancel(selected)) { clack.cancel("Cancelled."); return; }
+
+	const target = machines.find((m) => m.name === selected);
+	if (!target) return;
+
+	const { statusIcon: si } = await import("./format.ts");
+	const actions = target.status === "running"
+		? [
+			{ value: "stop", label: "Stop" },
+			{ value: "remove", label: "Remove  (stop first, then delete)" },
+		]
+		: [
+			{ value: "start", label: "Start" },
+			{ value: "remove", label: "Remove" },
+		];
+
+	const action = await clack.select({
+		message: `${bold(target.name)} — ${target.status}. Choose action:`,
+		options: actions,
+	});
+	if (clack.isCancel(action)) { clack.cancel("Cancelled."); return; }
+
+	const { link } = await import("./format.ts");
+	const instance = QuickCHR.get(target.name);
+	if (!instance) { clack.log.error("Machine not found."); return; }
+
+	if (action === "start") {
+		const spinner = clack.spinner();
+		spinner.start(`Starting ${target.name}...`);
+		const started = await QuickCHR.start({ name: target.name, background: true });
+		spinner.stop(`${si("running")} ${bold(started.name)} started`);
+		clack.note(`REST: ${link(started.restUrl)}\nSSH:  ssh admin@127.0.0.1 -p ${started.sshPort}`, "Instance details");
+	} else if (action === "stop") {
+		await instance.stop();
+		clack.log.success(`${bold(target.name)} stopped`);
+	} else if (action === "remove") {
+		const confirmed = await clack.confirm({ message: `Remove ${bold(target.name)} and its disk? This cannot be undone.`, initialValue: false });
+		if (!clack.isCancel(confirmed) && confirmed) {
+			await instance.remove();
+			clack.log.success(`${bold(target.name)} removed`);
+		} else {
+			clack.cancel("Cancelled.");
+		}
+	}
+
+	clack.outro("Done!");
+}
+
 async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 
@@ -377,49 +596,11 @@ async function cmdStart(argv: string[]) {
 		flag(flags, "version") !== undefined ||
 		flag(flags, "channel") !== undefined;
 
-	// No target + interactive → show selector (restart existing) or launch wizard
-	if (!hasExplicitTarget && !isNoPrompt()) {
+	// No target → list stopped machines with tip
+	if (!hasExplicitTarget) {
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const stopped = QuickCHR.list().filter((m) => m.status !== "running");
-
-		if (stopped.length > 0) {
-			const clack = await import("@clack/prompts");
-			clack.intro("quickchr start");
-			const selected = await clack.select({
-				message: "Restart a stopped machine or create a new CHR?",
-				options: [
-					{ value: "__new__", label: "Create new CHR", hint: "opens wizard" },
-					...stopped.map((m) => ({
-						value: m.name,
-						label: m.name,
-						hint: `${m.version} (${m.arch})`,
-					})),
-				],
-			});
-			if (clack.isCancel(selected)) { clack.cancel("Cancelled."); return; }
-			if (selected === "__new__") {
-				clack.outro("");
-				const { runWizard } = await import("./wizard.ts");
-				return runWizard();
-			}
-			clack.outro("");
-			const { statusIcon, link, bold } = await import("./format.ts");
-			const instance = await QuickCHR.start({ name: selected as string, background: true });
-			console.log(`${statusIcon("running")} ${bold(instance.name)} started`);
-			console.log(`  REST:   ${link(instance.restUrl)}`);
-			console.log(`  SSH:    ssh admin@127.0.0.1 -p ${instance.sshPort}`);
-			console.log(`  WinBox: 127.0.0.1:${instance.ports.winbox}`);
-			return;
-		}
-
-		// No stopped machines → wizard
-		const { runWizard } = await import("./wizard.ts");
-		return runWizard();
-	}
-
-	// No target + not TTY → show help
-	if (!hasExplicitTarget) {
-		printCommandHelp("start");
+		printMachineListWithTip("start", stopped);
 		return;
 	}
 
@@ -571,32 +752,7 @@ async function cmdStop(argv: string[]) {
 
 	if (!name) {
 		const running = QuickCHR.list().filter((m) => m.status === "running");
-		if (running.length === 0) {
-			console.log("No running instances.");
-			return;
-		}
-		if (isNoPrompt()) {
-			console.error("Usage: quickchr stop <name|--all>");
-			process.exit(1);
-		}
-
-		const clack = await import("@clack/prompts");
-		clack.intro("quickchr stop");
-		const selected = await clack.select({
-			message: "Select instance to stop:",
-			options: running.map((m) => ({
-				value: m.name,
-				label: m.name,
-				hint: `${m.version} (${m.arch})  PID ${m.pid}`,
-			})),
-		});
-		if (clack.isCancel(selected)) { clack.cancel("Cancelled."); return; }
-		clack.outro("");
-		const target = QuickCHR.get(selected as string);
-		if (target) {
-			await target.stop();
-			console.log(`${statusIcon("stopped")} ${bold(selected as string)} stopped`);
-		}
+		printMachineListWithTip("stop", running);
 		return;
 	}
 
@@ -637,32 +793,11 @@ async function cmdStatus(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { statusIcon, bold, dim, link, formatPorts } = await import("./format.ts");
 
-	let name = argv[0];
+	const name = argv[0];
 
 	if (!name) {
-		const machines = QuickCHR.list();
-		if (machines.length === 0) {
-			console.log("No instances. Run 'quickchr start' to create one.");
-			return;
-		}
-		if (!isNoPrompt()) {
-			const clack = await import("@clack/prompts");
-			clack.intro("quickchr status");
-			const selected = await clack.select({
-				message: "Select instance:",
-				options: machines.map((m) => ({
-					value: m.name,
-					label: m.name,
-					hint: `${m.status} · ${m.version} (${m.arch})`,
-				})),
-			});
-			if (clack.isCancel(selected)) { clack.cancel("Cancelled."); return; }
-			clack.outro("");
-			name = selected as string;
-		} else {
-			await cmdList();
-			return;
-		}
+		await cmdList();
+		return;
 	}
 
 	const instance = QuickCHR.get(name);
@@ -725,32 +860,7 @@ async function cmdRemove(argv: string[]) {
 
 	if (!name) {
 		const machines = QuickCHR.list();
-		if (machines.length === 0) {
-			console.log("No instances.");
-			return;
-		}
-		if (isNoPrompt()) {
-			console.error("Usage: quickchr remove <name|--all>");
-			process.exit(1);
-		}
-
-		const clack = await import("@clack/prompts");
-		clack.intro("quickchr remove");
-		const selected = await clack.select({
-			message: "Select instance to remove:",
-			options: machines.map((m) => ({
-				value: m.name,
-				label: m.name,
-				hint: `${m.status} · ${m.version} (${m.arch})`,
-			})),
-		});
-		if (clack.isCancel(selected)) { clack.cancel("Cancelled."); return; }
-		clack.outro("");
-		const target = QuickCHR.get(selected as string);
-		if (target) {
-			await target.remove();
-			console.log(`${bold(selected as string)} removed.`);
-		}
+		printMachineListWithTip("remove", machines, (m) => m.status === "running" ? "(stop first)" : undefined);
 		return;
 	}
 
@@ -769,36 +879,28 @@ async function cmdClean(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold, statusIcon } = await import("./format.ts");
 
-	const name = positional[0] ?? flag(flags, "name");
-
-	if (!name) {
+	// --all: clean every machine
+	if (flagBool(flags, "all")) {
 		const machines = QuickCHR.list();
 		if (machines.length === 0) {
 			console.log("No instances.");
 			return;
 		}
-		if (isNoPrompt()) {
-			console.error("Usage: quickchr clean <name>");
-			process.exit(1);
+		for (const m of machines) {
+			const instance = QuickCHR.get(m.name);
+			if (instance) {
+				await instance.clean();
+				console.log(`${statusIcon("stopped")} ${bold(m.name)} reset to fresh image.`);
+			}
 		}
+		return;
+	}
 
-		const clack = await import("@clack/prompts");
-		clack.intro("quickchr clean");
-		const selected = await clack.select({
-			message: "Select instance to reset to fresh image:",
-			options: machines.map((m) => ({
-				value: m.name,
-				label: m.name,
-				hint: `${m.status} · ${m.version} (${m.arch})`,
-			})),
-		});
-		if (clack.isCancel(selected)) { clack.cancel("Cancelled."); return; }
-		clack.outro("");
-		const target = QuickCHR.get(selected as string);
-		if (target) {
-			await target.clean();
-			console.log(`${statusIcon("stopped")} ${bold(selected as string)} reset to fresh image.`);
-		}
+	const name = positional[0] ?? flag(flags, "name");
+
+	if (!name) {
+		const machines = QuickCHR.list();
+		printMachineListWithTip("clean", machines);
 		return;
 	}
 
@@ -817,32 +919,11 @@ async function cmdLicense(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold } = await import("./format.ts");
 
-	let name = positional[0] ?? flag(flags, "name");
+	const name = positional[0] ?? flag(flags, "name");
 
-	// Interactive selector if no name given
 	if (!name) {
-		const running = QuickCHR.list().filter((m) => m.status === "running");
-		if (running.length === 0) {
-			console.error("No running instances. Start a CHR first.");
-			process.exit(1);
-		}
-		if (isNoPrompt()) {
-			console.error("Usage: quickchr license <name> [--level=p1|p10|unlimited]");
-			process.exit(1);
-		}
-		const clack = await import("@clack/prompts");
-		clack.intro("quickchr license");
-		const sel = await clack.select({
-			message: "Select running instance:",
-			options: running.map((m) => ({
-				value: m.name,
-				label: m.name,
-				hint: `${m.version} (${m.arch})`,
-			})),
-		});
-		if (clack.isCancel(sel)) { clack.cancel("Cancelled."); return; }
-		clack.outro("");
-		name = sel as string;
+		console.error("Usage: quickchr license <name> [--level=p1|p10|unlimited]");
+		process.exit(1);
 	}
 
 	const instance = QuickCHR.get(name);
@@ -950,19 +1031,21 @@ Usage:
   quickchr <command> [options]
 
 Commands:
-  start [<name>|options]  Restart existing or start new CHR instance
-  stop [<name>|--all]     Stop instance(s) — interactive selector if no name
+  setup                   Interactive setup wizard (TTY only)
+  add [options]           Create a new CHR machine (without starting)
+  start [<name>|options]  Start or restart a CHR instance
+  stop [<name>|--all]     Stop instance(s) — print list if no name
   list                    List all instances (plain table)
-  status [<name>]         Detailed status — interactive selector if no name
-  remove [<name>|--all]   Remove instance(s) and disk — interactive selector if no name
-  clean [<name>]          Reset instance disk to fresh image — interactive selector if no name
-  license [<name>]        Apply/renew CHR trial license — interactive selector if no name
+  status [<name>]         Detailed status — list all if no name
+  console <name>          Attach to serial console of a running instance
+  remove [<name>|--all]   Remove instance(s) and disk
+  clean [<name>|--all]    Reset instance disk to fresh image
+  license <name>          Apply/renew CHR trial license
   doctor                  Check prerequisites
   version                 Show version info
   help [command]          Show help
 
 Environment:
-  QUICKCHR_NO_PROMPT=1    Disable interactive selectors (for scripts/LLMs)
   MIKROTIK_ACCOUNT        MikroTik.com account email (for license)
   MIKROTIK_PASSWORD       MikroTik.com password (for license)
 
@@ -971,54 +1054,88 @@ Run 'quickchr help <command>' for command-specific help.`);
 
 function printCommandHelp(command: string) {
 	switch (command) {
-		case "start":
-			console.log(`quickchr start [<name>] [options]
+		case "add":
+			console.log(`quickchr add [options]
 
-  <name>              Restart an existing machine by name, or use as name for new.
-                      Omit to get an interactive selector (TTY) or wizard.
+Create a new CHR machine without starting it.
+Use 'quickchr start <name>' to boot it afterwards.
 
 Options:
+  --name <name>         Instance name (required)
   --version <ver>       RouterOS version (e.g., 7.22.1)
   --channel <ch>        Channel: stable, long-term, testing, development
   --arch <arch>         Architecture: arm64, x86 (default: host native)
-  --name <name>         Instance name for a new machine
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
+  --add-package <pkg>   Extra package to install on first boot (repeatable)
+  --install-all-packages  Install all packages on first boot
+  --add-user <u:p>      Create user on first boot (name:password)
+  --disable-admin       Disable the default admin account on first boot
+  --port-base <port>    Starting port number (default: auto-allocated from 9100)
+  --no-winbox           Exclude WinBox port mapping
+  --no-api-ssl          Exclude API-SSL port mapping
+  --device-mode <m>     Set device-mode on first boot: rose|advanced|basic|home|auto|skip
+  --vmnet-shared        vmnet-shared networking (macOS)
+  --vmnet-bridge <if>   vmnet-bridge networking (macOS), e.g. en0`);
+			break;
+		case "setup":
+			console.log(`quickchr setup
+
+Launch the interactive wizard (requires a TTY).
+If machines already exist, shows a menu to manage them.`);
+			break;
+		case "console":
+			console.log(`quickchr console <name>
+
+Attach to the serial console of a running CHR instance.
+Requires a TTY. Exit with Ctrl-A X (QEMU monitor quit).`);
+			break;
+		case "start":
+			console.log(`quickchr start [<name>] [options]
+
+  <name>              Restart an existing stopped machine by name.
+                      Omit to see a list of stopped machines.
+
+Options:
+  --all                 Start all stopped machines
   --bg / --background   Run in background (default)
   --fg / --foreground   Run in foreground — serial console on stdio
-  --all                 Start all stopped machines
+  --version <ver>       RouterOS version (e.g., 7.22.1)
+  --channel <ch>        Channel: stable, long-term, testing, development
+  --arch <arch>         Architecture: arm64, x86 (default: host native)
+  --name <name>         Instance name
+  --cpu <n>             vCPU count (default: 1)
+  --mem <mb>            RAM in MB (default: 512)
   --add-package <pkg>   Extra package to install (repeatable)
-	--add-user <u:p>      Create user with name:password
+  --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
   --vmnet-shared        vmnet-shared networking (macOS)
   --vmnet-bridge <if>   vmnet-bridge networking (macOS), e.g. en0
-  --install-all-packages  Install all packages from all_packages.zip (mutually exclusive with --add-package)
+  --install-all-packages  Install all packages from all_packages.zip
   --license-level <l>   Apply trial license: p1 (1 Gbps), p10 (10 Gbps), unlimited
   --license-account <a> MikroTik account email (or use MIKROTIK_ACCOUNT env var)
   --license-password <p> MikroTik password (or use MIKROTIK_PASSWORD env var)
-	--device-mode <m>     Configure device-mode: rose|advanced|basic|home|auto|skip
-	                      CHR default is advanced. rose enables containers. auto resolves to rose.
-	                      Not configured unless explicitly requested.
-	--device-mode-enable <f>  Set one or more device-mode flags to yes (repeatable or comma-separated)
-	--device-mode-disable <f> Set one or more device-mode flags to no (repeatable or comma-separated)
-	--no-device-mode      Skip device-mode provisioning entirely
+  --device-mode <m>     Configure device-mode: rose|advanced|basic|home|auto|skip
+  --device-mode-enable <f>  Set one or more device-mode flags to yes
+  --device-mode-disable <f> Set one or more device-mode flags to no
+  --no-device-mode      Skip device-mode provisioning entirely
   --dry-run             Print what would run without starting`);
 			break;
 		case "stop":
 			console.log(`quickchr stop [<name>] [--all]
 
   <name>      Stop a specific running instance.
-              Omit to get an interactive selector.
+              Omit to see a list of running instances.
   --all       Stop all running instances.`);
 			break;
 		case "status":
 			console.log(`quickchr status [<name>]
 
   <name>      Show detailed status for a specific instance.
-              Omit to get an interactive selector.`);
+              Omit to list all instances.`);
 			break;
 		case "doctor":
 			console.log(`quickchr doctor
@@ -1027,14 +1144,13 @@ Check system prerequisites: QEMU binaries, firmware, acceleration,
 sshpass (for package upload), data directories, and cached images.`);
 			break;
 		case "license":
-			console.log(`quickchr license [<name>] [options]
+			console.log(`quickchr license <name> [options]
 
 Apply or renew a CHR trial license via MikroTik.com.
 Free CHR runs at 1 Mbps — a trial license unlocks full speed.
 No reboot required. Takes effect immediately.
 
-  <name>              Name of a running CHR instance.
-                      Omit to get an interactive selector.
+  <name>              Name of a running CHR instance (required).
 
 Options:
   --level <level>     License level: p1 (1 Gbps), p10 (10 Gbps), unlimited (default: p1)
@@ -1046,6 +1162,20 @@ Credential resolution order (highest priority first):
   2. MIKROTIK_ACCOUNT / MIKROTIK_PASSWORD environment variables
   3. OS native secret store (macOS Keychain, Linux GNOME Keyring, Windows Credential Manager)
   4. ~/.config/quickchr/credentials.json (fallback)`);
+			break;
+		case "clean":
+			console.log(`quickchr clean [<name>] [--all]
+
+  <name>      Reset an instance's disk to a fresh image (removes all data).
+              Omit to see a list of instances.
+  --all       Clean all instances.`);
+			break;
+		case "remove":
+			console.log(`quickchr remove [<name>] [--all]
+
+  <name>      Remove an instance (stops if running, deletes disk and state).
+              Omit to see a list of instances.
+  --all       Remove all instances.`);
 			break;
 		default:
 			console.log(`No detailed help for '${command}'.`);

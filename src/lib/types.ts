@@ -52,6 +52,8 @@ export interface MachineConfig {
 	network: NetworkMode;
 	ports: Record<string, PortMapping>;
 	packages: string[];
+	/** Install all packages from all_packages.zip on first boot. */
+	installAllPackages?: boolean;
 	deviceMode?: DeviceModeOptions;
 	user?: { name: string; password: string };
 	disableAdmin?: boolean;
