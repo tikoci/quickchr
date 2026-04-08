@@ -225,39 +225,160 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 
 Platform priority: macOS → Linux → Windows.
 
-### Networking Rationalization (cross-cutting design question)
+### Networking Rationalization
 
 The core tension: different use cases need different network modes, each with different `sudo`/privilege requirements and platform availability. quickchr needs a coherent story for how networking is configured across the CLI, library API, and wizard — without hiding the complexity from users who need to understand it.
 
 **Network modes and their realities:**
 
-| Mode | Platforms | Root/sudo? | CHR gets real IP? | Multi-CHR L2? | Notes |
-|------|-----------|------------|-------------------|---------------|-------|
-| `user` (default) | All | No | No (NAT via hostfwd) | No | Sufficient for REST API, SSH. restraml's use case |
-| `vmnet-shared` | macOS | Yes (`sudo`) | Yes (DHCP from vmnet) | Yes | Tested on Intel Mac (`~/GitHub/mikropkl`). macOS's built-in NAT network |
-| `vmnet-bridged` | macOS | Yes (`sudo`) | Yes (from LAN DHCP) | Yes (same bridge) | Needs `ifname` selection (e.g. `en0`). Real LAN presence |
-| `tap` | Linux | Yes (or CAP_NET_ADMIN) | Depends on bridge config | Yes (same bridge) | User configures bridge externally; quickchr discovers + presents available TAPs |
-| `socket` | All | No | No | Yes (limited) | QEMU `-netdev socket` for inter-VM only. No host/LAN access. Simplest multi-CHR |
+| Mode | Platforms | Root/sudo? | CHR gets real IP? | Multi-CHR L2? | Host access? | Notes |
+|------|-----------|------------|-------------------|---------------|-------------|-------|
+| `user` (default) | All | No | No (NAT via hostfwd) | No | Yes (hostfwd) | Sufficient for REST API, SSH. restraml's use case |
+| `socket` | All | No | No | Yes (point-to-point) | No | QEMU `-netdev socket` for inter-VM links. listen/connect pairs on localhost ports. Simplest multi-CHR |
+| `vmnet-shared` | macOS | Yes (`sudo`) | Yes (DHCP from vmnet) | Yes | Yes (shared NAT) | Tested on Intel Mac (`~/GitHub/mikropkl`). macOS's built-in NAT network via `vmnet.framework` |
+| `vmnet-bridged` | macOS | Yes (`sudo`) | Yes (from LAN DHCP) | Yes (same bridge) | Yes (LAN peer) | Needs `ifname` selection (e.g. `en0`). Real LAN presence |
+| `tap` | Linux | Yes (or CAP_NET_ADMIN) | Depends on bridge config | Yes (same bridge) | Depends | User configures bridge externally; quickchr discovers + presents available TAPs |
 
-**Design decisions to make:**
-- [ ] How does the CLI express network mode? `--net=user|vmnet-shared|vmnet-bridged|tap|socket`? Per-interface options for multi-NIC?
-- [ ] How does the wizard present this? Should it detect available modes and only show viable options?
-- [ ] `sudo` handling: should quickchr prompt for sudo itself, or require the user to run `sudo quickchr start`? Former is friendlier; latter is more transparent. mikropkl's `qemu.sh` uses `sudo qemu-system-*` directly.
-- [ ] How does `machine.json` (or future `.yaml`) store network config? Needs to be re-applicable on restart.
-- [ ] For CI (GitHub Actions): user-mode only (no root). Document this constraint.
+### Rootless Network Topologies
 
-**Priority by customer:**
-1. **restraml** (beta customer #1): user-mode networking is sufficient — just needs REST API access via hostfwd. No networking changes needed.
-2. **examples/ (divi, tris)**: need multi-CHR L2 connectivity. `socket` mode is root-free but limited; vmnet/tap is more realistic but needs root. Start examples with `socket`, note vmnet/tap as alternatives.
-3. **netinstall testing**: would need vmnet-bridged or tap to simulate BOOTP/TFTP — advanced use case, defer.
+**Key insight: `user` + `socket` are the universal rootless pair.** The default is one `user` network (management via REST API hostfwd). Multi-CHR topologies add `socket` links for inter-VM data-plane connectivity. This combination is cross-platform, rootless, CI-friendly, and covers the majority of use cases (testing, training, tooling, CI). vmnet/TAP are "upgrades" for scenarios needing real LAN presence or host-visible broadcast domains. Rootless should be the default path — if someone sees three CHRs routing OSPF from `make` or `bun test`, _then_ they'll be willing to `sudo` something for the next step. (Compare: Multipass requires a privileged daemon just to start — "Waiting for daemon..." with no workaround if launchd is unhappy.)
+
+For network admins familiar with GNS3/EVE-NG — quickchr rootless topologies are not trying to replace those tools for large-scale simulation. The sweet spot is 2-5 CHRs with realistic routing/VPN configs, automatable from a Makefile or test script, runnable in CI. The fun "two-cute-by-half" tricks (PPPoE over socket, VXLAN overlays, IPSec site-to-site — all rootless) are worth calling out in MANUAL.md for network engineers who'll appreciate the cleverness.
+
+#### CLI Design: `--add-network`
+
+**Semantics:** Zero `--add-network` flags = default 1 `user` network (ether1). Once you specify ANY `--add-network`, you are specifying ALL networks — the count of `--add-network` flags equals the number of NICs. Use `--no-network` for zero NICs (headless/serial-only).
+
+```text
+# Default: 1 NIC (user)
+quickchr start test1
+
+# Explicit: same as default
+quickchr start test1 --add-network user
+
+# 2 NICs: user + named socket
+quickchr start hub --add-network user --add-network socket::spoke-a
+
+# 3 NICs: user + 2 named sockets
+quickchr start hub --add-network user --add-network socket::spoke-a --add-network socket::spoke-b
+
+# 9 NICs: emulate RB5009 layout
+quickchr start rb-sim --emulate-device rb5009
+
+# 0 NICs: serial-only (no networking)
+quickchr start headless --no-network
+```
+
+**Network specifier syntax** — uses `:` separators (prefix:type:name):
+
+| Specifier | Resolves to | Root? | Notes |
+|-----------|------------|-------|-------|
+| `user` | `-netdev user,hostfwd=...` | No | Management NIC with port forwarding |
+| `socket::<name>` | `-netdev socket,listen=:<auto-port>` or `connect` | No | Named socket. First machine to use a name listens, others connect. Port auto-allocated and tracked in `~/.local/share/quickchr/networks/<name>.json` |
+| `socket:listen:<port>` | `-netdev socket,listen=:<port>` | No | Explicit port, listen side |
+| `socket:connect:<port>` | `-netdev socket,connect=127.0.0.1:<port>` | No | Explicit port, connect side |
+| `socket:mcast:<group>:<port>` | `-netdev socket,mcast=<group>:<port>` | No | Multicast socket, shared L2 segment |
+| `:shared:<name>` | `-netdev vmnet-shared` (macOS) | Yes | Named shared network. Discovered via `quickchr networks`, not created per-machine |
+| `:bridge:<ifname>` | `-netdev vmnet-bridged,ifname=<iface>` (macOS) or `-netdev tap,ifname=<tap>` (Linux) | Yes | Bridge to host interface. Same specifier, platform-resolved |
+| `<tap-name>` | `-netdev tap,ifname=<tap>` | Yes | Direct TAP name (Linux). Discovered via `quickchr networks` |
+
+**Named sockets (`socket::<name>`)** are the key usability improvement over explicit ports. quickchr tracks named socket state in `~/.local/share/quickchr/networks/<name>.json` — which port, which machine is listen vs connect. This avoids port conflicts and makes configs readable:
+
+```text
+quickchr start hub --add-network user --add-network socket::hub-to-a --add-network socket::hub-to-b
+quickchr start branch-a --add-network user --add-network socket::hub-to-a
+quickchr start branch-b --add-network user --add-network socket::hub-to-b
+```
+
+**Multi-NIC mapping in QEMU:** Each `--add-network` adds a `-netdev`/`-device virtio-net-pci` pair. RouterOS sees them as `ether1` (first `--add-network`), `ether2`, etc. Ordering is deterministic and matches the order of flags on the command line.
+
+**Cross-platform portability:** If `~/.local/share/quickchr` is synced between Mac and Linux, rootless configs (user + socket) work unchanged. Privileged configs (`:bridge:en0`) use the same specifier but resolve differently per platform — document the TAP naming convention so Linux users can create TAPs matching macOS interface names.
+
+**Network downgrade:** If a machine config references `:bridge:en0` but quickchr isn't running as root (or the interface doesn't exist), show a yellow warning and downgrade to `user` or `socket`. `quickchr list` and `quickchr status` should clearly indicate downgraded networks (e.g., `ether2: :bridge:en0 → user (no root)`).
+
+#### `quickchr networks` — Discovery Command
+
+Inspired by `multipass networks`. Lists available network interfaces and named sockets:
+
+```text
+$ quickchr networks
+TYPE          NAME            STATUS    NOTES
+user          (default)       always    hostfwd port forwarding
+socket        hub-to-a        active    listen:4001 (hub), connect (branch-a)
+socket        hub-to-b        active    listen:4002 (hub), connect (branch-b)
+vmnet-shared  shared0         available macOS vmnet (requires root)
+bridge        en0             available Ethernet (Realtek), 1Gbps, connected
+bridge        en1             available Wi-Fi (AirPort), 802.11ac
+tap           tap0            available Linux TAP (pre-configured)
+```
+
+- [ ] `quickchr networks` — list available networks. `--format json|table` output.
+- [ ] macOS: enumerate physical interfaces only (Multipass learned the hard way — listing virtual bridges QEMU can't actually bridge to caused bugs). Filter via `networksetup -listallhardwareports`.
+- [ ] Linux: `ip link show type tun` for TAPs, `ip link show type bridge` for bridges.
+- [ ] Show active named sockets with port allocations and connected machines.
+
+#### `--emulate-device` — Hardware Profiles
+
+Shorthand for NIC count + other QEMU settings matching a specific MikroTik hardware model:
+
+```text
+quickchr start rb-sim --emulate-device rb5009
+# Expands to: --add-network user + 8x socket::<auto> (ether1..ether9)
+```
+
+- [ ] `--emulate-device <model>` — lookup in built-in table, expand to network + QEMU args. Start with RB5009 (9 NICs) and hAP ax3 (5 ports). WiFi interfaces won't work on CHR but interface count is useful for config testing.
+- [ ] Device table as JSON/YAML file in package. Possibly sourced from tikoci/rosetta device data (144 devices with specs).
+
+#### `--add-network` Implementation
+
+- [ ] Implement `--add-network` CLI flag (repeatable). Parse the specifier syntax above.
+- [ ] Extend `NetworkMode` type: `network: NetworkMode` → `networks: NetworkConfig[]`. Each entry has type, name, and platform-resolved QEMU args.
+- [ ] Semantics: zero flags = `[user]`. Any flags = exactly what you specified (count of flags = count of NICs). `--no-network` = `[]`.
+- [ ] Named socket state management: `~/.local/share/quickchr/networks/<name>.json` tracks port, listen machine, connect machines.
+- [ ] Wizard: detect available modes and only show viable options. If not root, show `user` and `socket` only. If macOS + root, add `:shared:` and `:bridge:<ifname>`.
+- [ ] Store in `machine.json`/`.yaml` as `networks: [...]` array. Re-applicable on restart.
+- [ ] CI (GitHub Actions): `user` + `socket` only (no root). Document.
+
+#### sudo Handling
+
+- [ ] quickchr should NOT prompt for sudo itself. Require `sudo quickchr start ...` when vmnet or TAP is needed. More transparent, avoids privilege escalation surprises, matches mikropkl's `sudo qemu-system-*` pattern. The wizard detects root and adjusts available options.
+- [ ] **No daemon.** quickchr runs QEMU directly as a child process (foreground) or detached process (background). No launchd/systemd service required for basic operation. This is a deliberate contrast to Multipass's daemon architecture — no "Waiting for daemon..." failure mode, no socket permissions, no gRPC complexity. Daemonization (P4) is an optional promotion for long-running instances, not a requirement.
+
+#### Creative Networking Tricks (RouterOS-side, no root needed)
+
+These use RouterOS's own tunneling capabilities to create "real" interfaces over rootless socket/user networks. Worth documenting in MANUAL.md as "rootless network topology" recipes:
+
+- **VXLAN over socket:** Two CHRs connected via `socket` get L2 adjacency. RouterOS VXLAN on top creates additional overlay segments. This is the standard enterprise pattern (underlay + overlay) and works perfectly rootless.
+- **PPPoE server/client over socket:** One CHR as PPPoE server, another as client. Client gets a dynamic `pppoe-out1` interface with an IP from the server's pool. Creates routed point-to-point links. Useful for testing PPPoE configurations (common in ISP/WISP deployments).
+- **EoIP/GRE tunnels:** RouterOS EoIP creates L2 tunnels over L3. Useful for extending broadcast domains across routed socket links.
+- **IPSec/L2TP/PPTP VPN:** Build VPN tunnels between CHRs over socket links. Tests the full VPN stack without any host configuration. IPSec site-to-site is especially common in MikroTik deployments.
+- **VRRP over vmnet-shared:** Requires root, but the VIP floats on a real macOS network segment. This is the one scenario where rootless socket mode genuinely can't substitute — VRRP needs a shared broadcast domain visible to the host.
+
+### Multipass Comparison Notes
+
+Reviewed Multipass (Canonical) as a reference for multi-VM CLI design. Key lessons:
+
+**Adopt:** `multipass networks` → `quickchr networks` (discovery). Always-present default NIC aligns with our `user` default. `--format json|yaml|csv|table` on inspection commands (tracked in P2). Mutable resources post-creation (`multipass set local.<instance>.cpus=4` on stopped instances — consider for quickchr config schema). Flat command namespace.
+
+**Avoid:** Daemon requirement (`multipassd` runs as privileged launchd service — broken daemon = nothing works). The `local.bridged-network` indirection for adding NICs to existing instances (set global pref, toggle per-instance — awkward). Driver-dependent networking (different behavior on QEMU vs Hyper-V vs VirtualBox — quickchr targets QEMU only, one backend = consistent). macOS vmnet-bridged only works with physical interfaces (Multipass discovered this via bugs — apply same filter in `quickchr networks`).
 
 ### macOS
 
-- [ ] vmnet-shared and vmnet-bridge testing — higher priority (primary dev platform). vmnet-shared needs root; vmnet-bridge needs `ifname` selection. Reference implementation: `~/GitHub/mikropkl` `qemu.sh` and `qemu.cfg` — tested and working on Intel Mac. Key detail: QEMU's vmnet backend is macOS-only (uses Apple's `vmnet.framework`).
+- [ ] vmnet-shared and vmnet-bridge via `:shared:` and `:bridge:<ifname>`: generate correct `-netdev vmnet-shared,id=netN` or `-netdev vmnet-bridged,id=netN,ifname=<iface>`. Reference: `~/GitHub/mikropkl` `qemu.sh` and `qemu.cfg`. Key: QEMU vmnet is macOS-only (`vmnet.framework`). vmnet-bridged only works with physical interfaces — filter in `quickchr networks`.
+- [ ] vmnet-shared and vmnet-bridged are **discovered, not created** per-machine. They exist as macOS platform capabilities. quickchr references them; it doesn't manage them. (Contrast with named sockets, which quickchr does manage.)
 
 ### Linux
 
-- [ ] TAP networking — philosophy: **discover and present**, don't configure. Show available TAP interfaces (from `ip link`), let the user pick, generate the QEMU flag. Don't edit `/etc/network/` files or manage bridge creation. Link to tikoci docs for detailed setup guides.
+- [ ] TAP networking via `--add-network <tap-name>` or `:bridge:<ifname>`: philosophy is **discover and present**, don't configure. `quickchr networks` shows available TAPs and bridges. Don't edit `/etc/network/` or manage bridge creation — an agent can figure out the right TAP for a given OS in one prompt better than a generic script.
+- [ ] Cross-platform config hint: document TAP naming convention so Linux users can create TAPs matching macOS interface names (e.g., name a TAP `en0`) for portable machine configs.
+- [ ] CI (GitHub Actions): rootless only (`user` + `socket`). No TAP in CI unless runner has pre-configured TAPs (self-hosted runners).
+
+### Windows (low priority, document the scheme)
+
+- [ ] QEMU on Windows: `winget install QEMU.QEMU` or MSYS2. User-mode and socket networking work. No vmnet equivalent.
+- [ ] TAP equivalent: OpenVPN TAP-Windows adapter or WireGuard `wintun`. Both require admin install. `quickchr networks` could discover installed TAP adapters.
+- [ ] WHPX acceleration: Windows Hypervisor Platform as alternative to TCG. Requires Hyper-V enabled.
+- [ ] Document: "user + socket works everywhere. For bridged networking on Windows, install OpenVPN TAP adapter." Don't automate Windows networking config.
 
 ### Multi-CHR (examples, not orchestration)
 
@@ -265,43 +386,207 @@ quickchr is the QEMU expert. Orchestrating multi-router topologies is out of sco
 
 Provide an `examples/` directory with each scenario in three forms: **Makefile** (recipe-driven, tikoci tradition — see tikoci/netinstall), **bun:test** (library API, TypeScript), and **Python** (subprocess CLI, the language agents and network engineers both reach for). Building examples early finds CLI soft spots before we add more commands.
 
-#### "divi" — 2-CHR Redundancy (Latvian for "two")
+**Example design principles:**
 
-Two CHRs on the same LAN (`--vmnet-bridged` or TAP) with VXLAN tunnels over user-mode networking as OOB management. `/ip/vrrp` presents a redundant virtual router to the local network. Validates: multi-instance, VRRP failover, VXLAN over user-mode, mixed network modes.
+- Every example must work with `user` + `socket` (rootless) as the baseline. Note vmnet/TAP as upgrades where relevant.
+- Every CHR keeps `user` mode (ether1) for management — tests assert via REST API over hostfwd.
+- Socket links create the data-plane topology. RouterOS protocols (OSPF, VXLAN, PPPoE, etc.) run on top.
+- At least tris, solis, and matrica should be CI-testable (rootless). divi requires root (VRRP needs shared broadcast domain on host).
 
-- [ ] `examples/divi/Makefile`
-- [ ] `examples/divi/divi.test.ts` (bun:test)
-- [ ] `examples/divi/divi.py` (Python, subprocess CLI)
-- [ ] `examples/divi/README.md` 
+#### "tris" — 3-CHR Hub-and-Spoke (Latvian for "three") **[build first]**
 
+**Priority: build this first.** It exercises `socket` mode, multi-instance, and dynamic routing — all rootless and CI-testable. Findings here drive CLI design for all other examples.
 
-#### "trīs" — 3-CHR Hub-and-Spoke (Latvian for "three")
+**Topology:**
 
-One hub + two branch offices. Dynamic routing via IS-IS (or OSPF). Tests topology convergence and route propagation between sites.
+```text
+quickchr start hub      --add-network user --add-network socket::hub-a --add-network socket::hub-b
+quickchr start branch-a --add-network user --add-network socket::hub-a
+quickchr start branch-b --add-network user --add-network socket::hub-b
+
+                 user:hostfwd (REST mgmt)
+                        |
+                   +---------+
+                   |   HUB   |
+                   | ether1  | user (mgmt, port base 9100)
+                   | ether2  | socket::hub-a  ──── OSPF area 0
+                   | ether3  | socket::hub-b  ──── OSPF area 0
+                   +---------+
+                    /         \
+          socket::hub-a      socket::hub-b
+           /                        \
+   +-----------+              +-----------+
+   | BRANCH-A  |              | BRANCH-B  |
+   | ether1    | user (mgmt,  | ether1    | user (mgmt,
+   | ether2    | port 9110)   | ether2    | port 9120)
+   +-----------+ socket link  +-----------+ socket link
+                  to hub                    to hub
+```
+
+**RouterOS config on each:**
+
+- **Hub:** OSPF instance with two interfaces (ether2, ether3) in area 0. Redistribute connected. IP addresses on ether2 (10.0.1.1/30) and ether3 (10.0.2.1/30). A loopback or bridge with 10.0.0.1/32 as router-id.
+- **Branch-A:** OSPF on ether2 (10.0.1.2/30), area 0. Loopback 10.0.10.1/32 (advertised). Default route learned from hub.
+- **Branch-B:** OSPF on ether2 (10.0.2.2/30), area 0. Loopback 10.0.20.1/32 (advertised). Default route learned from hub.
+
+**What this validates:**
+
+- `--add-network socket:listen/connect` works for point-to-point links
+- Multiple CHR instances with different port bases coexist
+- OSPF adjacency forms over socket interfaces (proves L2 works)
+- Route propagation: Branch-A learns Branch-B's loopback via hub (proves L3 routing over socket works)
+- Test asserts via REST API: check `/routing/ospf/neighbor` for FULL state, check `/ip/route` for learned routes, ping far loopback via `/tool/ping`
+
+**CI-testable:** Yes (rootless, user + socket only).
+
+**Stretch goals:**
+
+- VXLAN overlay: Branch-A and Branch-B establish a VXLAN tunnel through the hub (L2 over L3 over L2). Validates overlay networking without root.
+- IPSec: site-to-site tunnel between branches through hub. Common MikroTik deployment pattern.
 
 - [ ] `examples/tris/Makefile`
 - [ ] `examples/tris/tris.test.ts` (bun:test)
 - [ ] `examples/tris/tris.py` (Python, subprocess CLI)
-- [ ] `examples/tris/README.md` 
+- [ ] `examples/tris/README.md`
+- [ ] `examples/tris/hub.rsc` (RouterOS config)
+- [ ] `examples/tris/branch-a.rsc`
+- [ ] `examples/tris/branch-b.rsc`
 
+#### "divi" — 2-CHR Redundancy (Latvian for "two")
 
-#### "solis" - Sequence CHR: long-term -> stable -> testing -> development (Latvian for "steps")
+**Requires root** (vmnet-shared for VRRP broadcast domain visible to host). Not CI-testable in GitHub Actions.
 
-Runs a **sequence**.  Takes a RouterOS `.rsc` config file (or `.backup`), copies file to router, runs `/system/reset-configuration run-after-reset=($"rsc-config-input-as-file-path-on-router") keep-users=yes skip-backup=yes` (or `/system/backup/load`) in current `long-term` channel version, reboots, `:export` after reboot, then use exported config from long-term in a new `stable` CHR, ... repeating same process ..., import into `testing` CHR ... with output from `development` diff'ed from starting.  Verify that a config is durable through various update cycles (which may migrate config), spots any version who migration did something to config.
+**Topology:**
+
+```text
+sudo quickchr start chr-a --add-network user --add-network :shared:vrrp-lan --add-network socket::divi-sync
+sudo quickchr start chr-b --add-network user --add-network :shared:vrrp-lan --add-network socket::divi-sync
+
+     [macOS host / LAN]
+            |
+     :shared:vrrp-lan (vmnet-shared on macOS, TAP+bridge on Linux)
+       |          |
+  +---------+ +---------+
+  |  CHR-A  | |  CHR-B  |
+  | ether1  | | ether1  | user (mgmt, hostfwd)
+  | ether2  | | ether2  | :shared:vrrp-lan (VRRP)
+  | ether3  | | ether3  | socket::divi-sync (VXLAN sync)
+  +---------+ +---------+
+       |          |
+    VRRP VIP floats on :shared:vrrp-lan
+    VXLAN tunnel over socket::divi-sync
+```
+
+**RouterOS config on each:**
+
+- **CHR-A (master):** VRRP instance on ether2 with priority 200, VIP 192.168.64.100/24 (vmnet-shared subnet). VXLAN interface over ether3 (socket link to CHR-B) for internal state sync or routed traffic.
+- **CHR-B (backup):** Same VRRP config, priority 100. Same VXLAN.
+
+**What this validates:**
+
+- `:shared:` and `socket::` mixed network modes with root
+- VRRP failover: stop CHR-A, verify VIP migrates to CHR-B (test via host ping to VIP)
+- VXLAN over socket: internal sync channel between routers
+
+**Linux equivalent:** Replace vmnet-shared with a TAP interface attached to a bridge. quickchr doesn't create the bridge — user sets it up, quickchr discovers and uses it.
+
+**Why root is unavoidable here:** VRRP sends gratuitous ARP on a shared broadcast domain. The host (or other LAN devices) need to see the VIP. Socket mode provides inter-VM L2 but is invisible to the host. vmnet-shared (or TAP+bridge) puts CHR traffic on a network the host participates in.
+
+- [ ] `examples/divi/Makefile`
+- [ ] `examples/divi/divi.test.ts` (bun:test)
+- [ ] `examples/divi/divi.py` (Python, subprocess CLI)
+- [ ] `examples/divi/README.md`
+- [ ] `examples/divi/chr-a.rsc`
+- [ ] `examples/divi/chr-b.rsc`
+
+#### "solis" — Sequential Version Migration (Latvian for "steps")
+
+Runs a **sequence**: load config into `long-term` CHR, export, load export into `stable` CHR, export, ... through `testing` and `development`. Detects config drift across RouterOS version migrations.
+
+**Arch choice:** x86 (broader user base, faster on Intel Mac with HVF, SeaBIOS — no firmware hassle). Uses `--emulate-device rb5009` to give the CHR 9 interfaces matching the RB5009 layout, so configs referencing `ether1`..`ether9` have somewhere to land.
+
+**Topology (per step, one CHR at a time):**
+
+```text
+quickchr start solis-lt --version long-term --emulate-device rb5009
+# Expands to: --add-network user + 8x socket::<auto> → ether1..ether9
+```
+
+The 9 socket NICs don't need to be connected — they exist purely so RouterOS sees the interfaces and the config can reference them.
+
+**Flow:**
+
+1. Start CHR at `long-term` version with 9 NICs
+2. Upload `.rsc` config via SCP or REST API file upload
+3. `/system/reset-configuration run-after-reset=<file> keep-users=yes skip-backup=yes`
+4. Wait for reboot, `:export file=step1` via REST `/execute` or SSH
+5. Download exported config, stop CHR
+6. Start new CHR at `stable` version with same 9 NICs
+7. Upload step1's export, repeat
+8. Continue through `testing` → `development`
+9. Diff the final export against the original input. Any differences = version migration changed the config
+
+**What this validates:**
+
+- quickchr version resolution across all 4 channels
+- `--add-network` with many unconnected sockets (interface count, not connectivity)
+- `.rsc` config import/export cycle via REST API
+- Sequential CHR lifecycle: create → provision → use → destroy → repeat
+
+**CI-testable:** Yes (rootless, user + unconnected sockets). Needs a sample `.rsc` config to ship with the example.
 
 - [ ] `examples/solis/Makefile`
 - [ ] `examples/solis/solis.test.ts` (bun:test)
 - [ ] `examples/solis/solis.py` (Python, subprocess CLI)
 - [ ] `examples/solis/README.md`
+- [ ] `examples/solis/rb5009-sample.rsc` (sample config — bridge, firewall, DHCP server, DNS, basic security)
 
-#### "matrica" - Matrix CHR: config/backup -> (long-term &; stable &; testing &; development &) | foreach { diff } (Latvian for "matrix")
+#### "matrica" — Parallel Version Matrix (Latvian for "matrix")
 
-Similar to "solis", takes config `.rsc` (or `.backup`) as input, but instead of sequences each version, "matrica" runs **parallel** CHRs with same outputs, uses `reset-configuration` then `:export` on each, comparing the 4 results at end.  Quick to know if current test config worked as-is on current versions. 
+Same concept as solis but runs all 4 versions **in parallel**, comparing exports at the end. Fast way to know if a config works as-is across all current RouterOS channels.
+
+**Arch choice:** ARM64 (complement to solis's x86, and ARM64 CHR has extra packages). Add `zerotier` and `container` packages to test configs that reference these. ARM64 on Intel Mac uses TCG (slower) but 4 parallel CHRs at ~20-60s boot each is still practical since the total wall-clock time is dominated by the slowest.
+
+**Topology:** Same as solis (`--emulate-device rb5009` for 9 NICs) but 4 CHRs running simultaneously on different port bases.
+
+```text
+quickchr start matrica-lt    --version long-term   --arch arm64 --port-base 9200 --emulate-device rb5009
+quickchr start matrica-st    --version stable       --arch arm64 --port-base 9210 --emulate-device rb5009
+quickchr start matrica-test  --version testing      --arch arm64 --port-base 9220 --emulate-device rb5009
+quickchr start matrica-dev   --version development  --arch arm64 --port-base 9230 --emulate-device rb5009
+```
+
+**Flow:**
+
+1. Start all 4 CHRs in parallel (different port bases, same .rsc config)
+2. Install `zerotier` + `container` packages on each (ARM64 has both)
+3. Upload config, reset-configuration on each
+4. Wait for all to reboot, export from each
+5. 4-way diff of exports. Differences = version-specific migration behavior
+
+**What this validates:**
+
+- 4 concurrent CHR instances (port allocation, no conflicts)
+- ARM64 CHR package install (zerotier, container — ARM64-only packages)
+- Parallel lifecycle management via library API
+- Cross-version config compatibility in a single test run
+
+**CI-testable:** Partially. ARM64 on x86 GitHub runners = TCG, very slow for 4 parallel VMs. May need a "matrica-lite" CI variant that runs 2 versions (long-term + stable) on x86 instead. Full ARM64 matrix is a local/self-hosted-runner exercise.
 
 - [ ] `examples/matrica/Makefile`
 - [ ] `examples/matrica/matrica.test.ts` (bun:test)
 - [ ] `examples/matrica/matrica.py` (Python, subprocess CLI)
 - [ ] `examples/matrica/README.md`
+- [ ] `examples/matrica/rb5009-arm64.rsc` (sample config with zerotier/container references)
+
+#### Example Summary
+
+| Example | Arch | Root? | CI? | Network modes | Primary test |
+|---------|------|-------|-----|---------------|-------------|
+| **tris** | x86 | No | Yes | user + socket | OSPF, multi-CHR routing, VXLAN overlay |
+| **divi** | x86 | Yes | No | user + vmnet-shared + socket | VRRP failover, mixed network modes |
+| **solis** | x86 | No | Yes | user + socket (unconnected) | Sequential version migration, config drift |
+| **matrica** | arm64 | No | Partial | user + socket (unconnected) | Parallel version matrix, ARM64 packages |
 
 ---
 
@@ -346,5 +631,3 @@ Items that don't fit cleanly into one priority tier.
 | tikoci/vscode-tikbook | VS Code extension; will use quickchr as backend (replacing UTM) |
 | `~/GitHub/chr-armed` | OCI/AWS CHR deployment. **Vendor from here:** serial console provisioning (`src/oracle/console.ts`) — full first-boot sequence handling (license Y/n, password change, `\r` not `\r\n`). Also: ARM64 CHR lacks AWS ENA driver (MikroTik bug reported) |
 | `~/Lab/tiktui` | Archived HTMX+SSE experiment; lesson: don't combine experiments in one project |
-
-
