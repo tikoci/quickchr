@@ -108,6 +108,9 @@ async function main() {
 			case "console":
 				await cmdConsole(args.slice(1));
 				break;
+			case "exec":
+				await cmdExec(args.slice(1));
+				break;
 			case "license":
 				await cmdLicense(args.slice(1));
 				break;
@@ -475,6 +478,55 @@ async function cmdConsole(argv: string[]) {
 		process.exit(1);
 	}
 	await attachSerial(name, machine.state.machineDir);
+}
+
+async function cmdExec(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const name = positional[0];
+	const commandParts = positional.slice(1);
+
+	if (!name || commandParts.length === 0) {
+		const running = await getRunningMachines();
+		if (running.length > 0) {
+			printMachineListWithTip("exec", running);
+			console.log(`\nUsage: quickchr exec <name> <command...>`);
+		} else {
+			console.error("Usage: quickchr exec <name> <command...>\n  Run a RouterOS CLI command on a running instance.");
+		}
+		process.exit(1);
+	}
+
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const machine = QuickCHR.get(name);
+	if (!machine) {
+		console.error(`Machine "${name}" not found.`);
+		process.exit(1);
+	}
+	if (machine.state.status !== "running") {
+		console.error(`Machine "${name}" is not running. Start it first: quickchr start ${name}`);
+		process.exit(1);
+	}
+
+	const command = commandParts.join(" ");
+	const via = flag(flags, "via") as "auto" | "rest" | undefined;
+	const user = flag(flags, "user");
+	const password = flag(flags, "password");
+	const timeout = flag(flags, "timeout") ? Number(flag(flags, "timeout")) * 1000 : undefined;
+
+	const result = await machine.exec(command, { via, user, password, timeout });
+	if (result.output) {
+		process.stdout.write(result.output);
+		// Ensure trailing newline for clean CLI output
+		if (!result.output.endsWith("\n")) {
+			process.stdout.write("\n");
+		}
+	}
+}
+
+/** Get running machines for list hints. */
+async function getRunningMachines() {
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	return QuickCHR.list().filter((m) => m.status === "running");
 }
 
 async function cmdSetup() {
@@ -1038,6 +1090,7 @@ Commands:
   list                    List all instances (plain table)
   status [<name>]         Detailed status — list all if no name
   console <name>          Attach to serial console of a running instance
+  exec <name> <command>   Run a RouterOS CLI command on a running instance
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
   license <name>          Apply/renew CHR trial license
@@ -1089,6 +1142,26 @@ If machines already exist, shows a menu to manage them.`);
 
 Attach to the serial console of a running CHR instance.
 Requires a TTY. Exit with Ctrl-A X (QEMU monitor quit).`);
+			break;
+		case "exec":
+			console.log(`quickchr exec <name> <command...> [options]
+
+Run a RouterOS CLI command on a running CHR instance.
+Uses the REST /execute endpoint (no SSH needed).
+
+  <name>              Name of a running CHR instance (required).
+  <command...>        RouterOS CLI command to execute.
+
+Options:
+  --via <transport>   Transport: auto, rest (default: auto)
+  --user <user>       Override username
+  --password <pass>   Override password
+  --timeout <secs>    Timeout in seconds (default: 30)
+
+Examples:
+  quickchr exec my-chr /system/resource/print
+  quickchr exec my-chr ":put [:serialize to=json [/ip/address/print]]"
+  quickchr exec my-chr "/log/info message=hello"`);
 			break;
 		case "start":
 			console.log(`quickchr start [<name>] [options]

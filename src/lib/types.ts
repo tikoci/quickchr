@@ -128,6 +128,8 @@ export interface ChrInstance {
 	qga(command: string, args?: object): Promise<unknown>;
 
 	rest(path: string, opts?: RequestInit): Promise<unknown>;
+	/** Run a RouterOS CLI command against the instance. */
+	exec(command: string, opts?: ExecOptions): Promise<ExecResult>;
 	/** Apply or renew a CHR trial license. */
 	license(opts: LicenseOptions): Promise<void>;
 }
@@ -183,6 +185,7 @@ export type ErrorCode =
 	| "INVALID_ARCH"
 	| "INVALID_NAME"
 	| "MACHINE_LOCKED"
+	| "EXEC_FAILED"
 	| "PROCESS_FAILED"
 	| "SPAWN_FAILED";
 
@@ -196,6 +199,31 @@ export class QuickCHRError extends Error {
 		this.code = code;
 		this.installHint = installHint;
 	}
+}
+
+// --- Exec ---
+
+/** Transport used to execute a RouterOS CLI command. */
+export type ExecTransport = "auto" | "rest" | "ssh" | "console" | "qga";
+
+/** Options for ChrInstance.exec(). */
+export interface ExecOptions {
+	/** Transport to use. "auto" tries REST /execute, future: SSH fallback. */
+	via?: ExecTransport;
+	/** Override username (default: resolved from machine config). */
+	user?: string;
+	/** Override password (default: resolved from machine config). */
+	password?: string;
+	/** Request timeout in milliseconds (default: 30 000). */
+	timeout?: number;
+}
+
+/** Result of a ChrInstance.exec() call. */
+export interface ExecResult {
+	/** Command output as a string (or parsed JSON when output="json"). */
+	output: string;
+	/** Which transport actually carried the command. */
+	via: ExecTransport;
 }
 
 // --- CHR License ---

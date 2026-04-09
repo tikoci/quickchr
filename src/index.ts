@@ -17,6 +17,9 @@ export type {
 	DoctorCheck,
 	DoctorResult,
 	EfiFirmwarePaths,
+	ExecOptions,
+	ExecResult,
+	ExecTransport,
 	LicenseLevel,
 	LicenseOptions,
 	MachineConfig,
@@ -31,6 +34,13 @@ export type {
 
 export { QuickCHRError } from "./lib/types.ts";
 export type { ErrorCode } from "./lib/types.ts";
+
+// Auth utilities
+export { resolveAuth } from "./lib/auth.ts";
+export type { ResolvedAuth } from "./lib/auth.ts";
+
+// Exec utilities
+export { restExecute } from "./lib/exec.ts";
 
 // License utilities
 export { renewLicense, getLicenseInfo } from "./lib/license.ts";

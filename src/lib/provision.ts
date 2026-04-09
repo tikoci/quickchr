@@ -106,17 +106,25 @@ export async function createUser(
 }
 
 /** Disable the admin user via the REST API. */
-export async function disableAdmin(httpPort: number): Promise<void> {
+export async function disableAdmin(httpPort: number, verifyAuth?: string): Promise<void> {
 	await waitForRest(httpPort);
 
-	const auth = `Basic ${btoa("admin:")}`;
+	const adminAuth = `Basic ${btoa("admin:")}`;
 
 	// Resolve the admin user's internal .id so we can PATCH by resource path.
-	// Using PATCH /rest/user/{id} is more reliable than POST /rest/user/set
-	// with a `numbers` selector, which RouterOS may silently ignore.
-	const adminUser = await readUser(httpPort, auth, "admin");
+	let adminUser: Record<string, unknown> | undefined;
+	const findDeadline = Date.now() + 10_000;
+	while (Date.now() < findDeadline) {
+		try {
+			adminUser = await readUser(httpPort, adminAuth, "admin");
+			if (adminUser) break;
+		} catch {
+			// Transient REST errors — keep trying
+		}
+		await Bun.sleep(500);
+	}
 	if (!adminUser) {
-		throw new QuickCHRError("PROCESS_FAILED", "Admin user not found");
+		throw new QuickCHRError("PROCESS_FAILED", "Admin user not found after 10s");
 	}
 	const adminId = String(adminUser[".id"] ?? "");
 	if (!adminId) {
@@ -126,7 +134,7 @@ export async function disableAdmin(httpPort: number): Promise<void> {
 	const setResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/${encodeURIComponent(adminId)}`, {
 		method: "PATCH",
 		headers: {
-			Authorization: auth,
+			Authorization: adminAuth,
 			"Content-Type": "application/json",
 		},
 		body: JSON.stringify({ disabled: "yes" }),
@@ -141,19 +149,24 @@ export async function disableAdmin(httpPort: number): Promise<void> {
 		);
 	}
 
-	// RouterOS REST may acknowledge the PATCH before the state is committed.
-	// Poll until disabled reads back as "true" (RouterOS REST uses JS-style
-	// "true"/"false" for booleans, not RouterOS-native "yes"/"no").
-	const deadline = Date.now() + 10_000;
+	// Verify the disabled flag reads back as "true".
+	// Use alternate credentials if provided — after disabling admin, the admin
+	// account may stop authenticating on subsequent requests.
+	const readAuth = verifyAuth ?? adminAuth;
+	const deadline = Date.now() + 20_000;
 	while (Date.now() < deadline) {
-		const user = await readUser(httpPort, auth, "admin");
-		if (user && String(user.disabled) === "true") return;
+		try {
+			const user = await readUser(httpPort, readAuth, "admin");
+			if (user && String(user.disabled) === "true") return;
+		} catch {
+			// Transient errors (401 from disabled admin, network blip) — retry
+		}
 		await Bun.sleep(500);
 	}
 
 	throw new QuickCHRError(
 		"PROCESS_FAILED",
-		"Admin disable request succeeded but admin user is still enabled after 10s",
+		"Admin disable request succeeded but admin user is still enabled after 20s",
 	);
 }
 
@@ -175,6 +188,11 @@ export async function provision(
 		if (!user) {
 			console.warn("Warning: disabling admin without creating another user — you may lose access");
 		}
-		await disableAdmin(httpPort);
+		// Pass the new user's auth for verification — after disabling admin,
+		// admin creds may stop working for REST queries.
+		const verifyAuth = user
+			? `Basic ${btoa(`${user.name}:${user.password}`)}`
+			: undefined;
+		await disableAdmin(httpPort, verifyAuth);
 	}
 }

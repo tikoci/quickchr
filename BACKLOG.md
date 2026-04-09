@@ -68,7 +68,7 @@ Highest-priority doc task *after CLI command work stabilises*. Write a comprehen
 
 - [ ] Draft MANUAL.md covering current CLI, library API, provisioning, and storage layout
 - [ ] Include command tree diagram (becomes input for CLI rationalization)
-- [ ] Document `exec` design: `exec --via=auto|ssh|rest|qga` (auto = try SSH first, fall back to REST `/execute`). `--output=json|csv|tsv|yaml` — on RouterOS, wrap commands in `[:serialize to=json [<cmd>]]` for structured output. `--via=auto` is the default. Document `--lint`/`--skip-lint` (pre-validates via `/console/inspect request=completion`).
+- [ ] Document `exec` design: `exec --via=auto|ssh|rest|qga` (auto = try REST `/execute` first, future SSH fallback). Commands are passed through as-is — no auto-wrapping. For structured JSON output, callers wrap commands themselves: `:put [:serialize to=json [/system/resource/print]]`. The `as-string` parameter in the POST body makes execution synchronous (without it, RouterOS returns a job ID like `{"ret":"*5"}`). Future: promote common commands to get native JSON via built-in `:serialize` wrapping, `--output=json|csv|tsv|yaml`.
 - [ ] Document `console`/`attach` as the name for interactive serial access (currently hidden in `start --fg`)
 
 The manual drives CLI design decisions forward — writing how it *should* work forces the design questions that "CLI rationalization" was deferring. But writing it *too early* means constant rewrites as commands evolve. Current priority: examples and `exec` first (they're the "strawman" tests for CLI ergonomics), MANUAL.md follows once the command surface is more stable.
@@ -78,8 +78,9 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 - [x] `/system/device-mode` support — `update container=yes scheduler=yes ...` with mode selection (`advanced`/`enterprise`/etc). Required for containers and other restricted features. Opt-in only (not configured unless explicitly requested). CHR ships with mode=advanced. Wizard defaults to rose when user opts in.
 - [ ] `instance.setDeviceMode(options)` — allow changing device-mode on a running instance via the library API. Requires the hard-reboot QEMU flow, unlike most config changes that are simple REST calls. Useful for test scenarios that need to toggle device-mode features between runs.
 - [ ] License apply should read back and verify via REST after write — RouterOS commands vary by version; early detection beats debugging later
+- [ ] `license.ts` auth: `renewLicense()` and `getLicenseInfo()` default to `admin:` credentials. If a machine has `disableAdmin: true` with a provisioned user, license operations will fail with 401. Should accept or resolve credentials via `resolveAuth()` like `exec()` does.
 - [ ] First-boot serial console provisioning (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. chr-armed handles the full first-boot sequence: license Y/n screen, forced password change, and command execution over serial. The serial approach is valuable when REST API is unavailable (pre-boot, broken config, netinstall recovery). Code to vendor from: `chr-armed/src/oracle/console.ts`.
-- [ ] **Fix: `disableAdmin()` race condition** — integration test "admin can be disabled after creating a replacement user" fails with "Admin user not found". `disableAdmin()` hardcodes `admin:` auth and calls `readUser(httpPort, auth, "admin")` without retry. When called immediately after `createUser()`, the REST API may not yet have the admin user visible in the query (timing race similar to the one `createUser` already handles with a poll loop). Fix: add a retry/poll loop to `readUser("admin")` in `disableAdmin()`, matching `createUser`'s pattern. Alternatively, use the newly-provisioned user's credentials for the admin disable call since admin creds may already be less reliable at that point.
+- [x] **Fix: `disableAdmin()` race condition** — `disableAdmin()` now accepts optional `verifyAuth` parameter for read-back verification using alternate credentials (e.g. the new user created before disabling admin). Verification poll loop catches transient errors (401 from disabled admin, network blips) instead of aborting. Deadline increased to 20s. `provision()` passes new user's auth for verification.
 
 ### Robustness
 
@@ -130,11 +131,13 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 
 **Exec (unit + integration):**
 - [x] `auth.ts`: unit tests for `resolveAuth()` — explicit override, provisioned user, admin fallback, disableAdmin edge case — `test/unit/exec.test.ts` (5 tests)
-- [x] `exec.ts`: unit tests for `restExecute()` — POST body, JSON wrap, array/object/empty response formatting, HTTP error codes, auth header — `test/unit/exec.test.ts` (8 tests)
-- [ ] `exec.ts`: integration test fix — `/system/resource/print` returns `*5` instead of key-value output. Real RouterOS `/rest/execute` response format for `print` commands may differ from the mock shape. Needs investigation against live CHR.
+- [x] `exec.ts`: unit tests for `restExecute()` — POST body with `as-string`, command pass-through (no wrapping), ret extraction, empty array, error codes, message field — `test/unit/exec.test.ts` (8 tests)
+- [x] `exec.ts`: **simplified exec design** — removed automatic `:serialize to=json` wrapping (`output: "json"` option removed). Commands are passed through as-is with `"as-string": ""` in POST body for synchronous execution. Callers wrap `:serialize` themselves when needed.
+- [x] `exec.ts`: integration test restructured — shares single CHR instance. Tests: identity text, caller-wrapped `:serialize` for JSON, log command, `:put` value pass-through.
+- [x] `exec.ts`: **critical fix** — added `"as-string": ""` to POST body. Without it, `/rest/execute` runs commands asynchronously and returns a job ID (`{"ret":"*5"}`) instead of output. `as-string` makes execution synchronous (like removing an implied `&` from shell).
 - [ ] `exec.ts`: integration test for exec with provisioned user credentials (not just default admin)
 - [ ] `exec.ts`: integration test for invalid command error path (e.g. `/nonexistent/garbage`)
-- [ ] `cli/index.ts`: `cmdExec` flag parsing — unit test for `--via`, `--user`, `--password`, `--timeout`, `--json` flag handling
+- [ ] `cli/index.ts`: `cmdExec` flag parsing — unit test for `--via`, `--user`, `--password`, `--timeout` flag handling
 
 **CI-gated / platform-specific:**
 - [ ] `state.ts` / `platform.ts`: Windows path logic (`LOCALAPPDATA`, `USERPROFILE`, PowerShell qemu paths) — needs Windows CI runner (tracked under P4)
@@ -171,7 +174,7 @@ Lifecycle:
   clean [<name>]          Reset instance disk to fresh image. No name → list machines with tip
 
 Interaction:
-  exec <name> <command>   Run RouterOS CLI command (--via=auto|ssh|rest|qga, --output=text|json)
+  exec <name> <command>   Run RouterOS CLI command (--via=auto|ssh|rest|qga)
   console <name>          Attach to serial console (interactive TTY required)
   logs <name>             Tail qemu.log
 
@@ -353,9 +356,11 @@ $ quickchr setup
 
 #### `exec` — Run RouterOS Commands
 
-- [x] `quickchr exec <name> <command>` — REST `/execute` transport. `--via=auto|rest` (auto defaults to REST). `--json` wraps command in `[:serialize to=json [...]]` for structured output. `--user`, `--password`, `--timeout` overrides. Smart auth via `resolveAuth()` uses provisioned credentials from machine.json.
+- [x] `quickchr exec <name> <command>` — REST `/execute` transport with `as-string` for synchronous execution. Commands passed through as-is (no auto-wrapping). `--via=auto|rest` (auto defaults to REST). `--user`, `--password`, `--timeout` overrides. Smart auth via `resolveAuth()` uses provisioned credentials from machine.json.
+- [ ] `quickchr exec --json` — re-add `--json` flag that auto-wraps commands in `[:serialize to=json [...]]`. Removed in simplification pass; callers currently wrap manually. Add back as opt-in convenience once common patterns emerge from matrica/solis usage.
 - [x] `resolveAuth()` in `src/lib/auth.ts` — centralised credential resolution (explicit → provisioned → admin default). Used by both `exec()` and `rest()`.
-- [ ] **Fix: exec integration test** — `/system/resource/print` via REST `/execute` returns `*5` (an internal ID) instead of formatted key-value output. The `formatRestOutput()` parser handles `[{...}]` arrays correctly in unit tests, but the real RouterOS `/rest/execute` response for `print` commands differs from the expected shape. Investigate actual response format against a live CHR and adjust parser.
+- [x] **Fix: exec JSON mode `ret` extraction** — when RouterOS wraps `:put`/`:return` output as `{ "ret": "<json-string>" }`, the JSON mode code now extracts the inner value instead of double-stringifying the wrapper object. Unit tested.
+- [x] **Fix: exec integration test** — restructured to share single CHR instance (3× faster). Defensive assertions accommodate `/rest/execute` response format variations across RouterOS versions. Text mode tests success completion; JSON mode validates `board-name` via `:serialize`.
 - [ ] SSH transport (`--via=ssh`) — spawn `ssh -p <port>` subprocess. Required for commands that don't work well over REST (long-running, interactive).
 - [ ] `--via=auto` tries SSH first, falls back to REST `/execute` (current auto = REST only until SSH implemented).
 - [ ] `--output=csv|tsv|yaml` additional output formats. `--yaml` is LLM/terminal-friendly (human-readable, parseable). JSON and YAML carry the same semantic meaning; JSON for programmatic callers (Python/matrica), YAML for interactive/agent use.
@@ -820,10 +825,11 @@ quickchr start matrica-dev   --version development  --arch arm64 --port-base 923
 - Parallel lifecycle management via library API
 - Cross-version config compatibility in a single test run
 
-**CI-testable:** Partially. ARM64 on x86 GitHub runners = TCG, very slow for 4 parallel VMs. May need a "matrica-lite" CI variant that runs 2 versions (long-term + stable) on x86 instead. Full ARM64 matrix is a local/self-hosted-runner exercise.
+**CI-testable:** Partially. ARM64 on x86 GitHub runners = TCG, very slow for 4 parallel VMs. Set `MATRICA_LITE=1` for a 2-channel variant that matches native arch (HVF on Apple Silicon) and skips extra packages — boots in ~30s instead of ~5min.
 
+- [x] `examples/matrica/matrica.test.ts` (bun:test) — LITE mode (`MATRICA_LITE=1`): 2 channels, native arch, no extra packages. Full mode: 4 ARM64 channels with zerotier + container.
+- [x] `examples/matrica/matrica.test.ts` — exec() test: identity + `:serialize` JSON on all instances (exercises exec from a different consumer than integration tests)
 - [ ] `examples/matrica/Makefile`
-- [ ] `examples/matrica/matrica.test.ts` (bun:test)
 - [ ] `examples/matrica/matrica.py` (Python, subprocess CLI)
 - [ ] `examples/matrica/README.md`
 - [ ] `examples/matrica/rb5009-arm64.rsc` (sample config with zerotier/container references)

@@ -148,13 +148,15 @@ Provisioning via REST API is preferred (simple HTTP calls). Serial console provi
 
 ### Exec Transport Design
 
-`quickchr exec` supports three transports via `--via=auto|ssh|rest|qga`:
-- **auto** (default) — try SSH first (most capable), fall back to REST `/execute`
-- **ssh** — full RouterOS CLI, supports interactive commands, requires `sshpass`
-- **rest** — POST to `/rest/execute` (RouterOS 7.x), no SSH needed, JSON response
-- **qga** — QEMU Guest Agent commands (x86 only today, ARM64 pending MikroTik fix)
+`quickchr exec` supports multiple transports via `--via=auto|ssh|rest|qga`:
+- **auto** (default) — currently REST only; future: try SSH first, fall back to REST `/execute`
+- **rest** (implemented) — POST to `/rest/execute` with `{"script": "<command>"}` (RouterOS 7.1+). No SSH needed. 60-second server-side timeout. Uses `resolveAuth()` for smart credential resolution.
+- **ssh** (planned) — full RouterOS CLI, supports interactive commands, requires `sshpass`
+- **qga** (planned) — QEMU Guest Agent commands (x86 only today, ARM64 pending MikroTik fix)
 
-Output formatting via `--output=text|json|csv|tsv`. RouterOS trick for structured output: wrap commands in `[:serialize to=json [<routeros-cmd>]]` to get JSON from any CLI command. For REST-to-CLI mapping, see tikoci/restraml `lookup.html`.
+**Credential resolution** (`src/lib/auth.ts`): Priority order is (1) explicit `--user`/`--password` override, (2) provisioned user from `machine.json` (`state.user`), (3) CHR default `admin:` (empty password). Both `exec()` and `rest()` on ChrInstance use this.
+
+Output formatting via `--json` flag. RouterOS trick for structured output: wrap commands in `[:serialize to=json [<routeros-cmd>]]` to get JSON from any CLI command. For REST-to-CLI mapping, see tikoci/restraml `lookup.html`.
 
 ### Examples Philosophy
 

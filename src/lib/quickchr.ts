@@ -8,6 +8,8 @@ import type {
 	ChrInstance,
 	DeviceModeOptions,
 	DoctorResult,
+	ExecOptions,
+	ExecResult,
 	MachineState,
 	StartOptions,
 } from "./types.ts";
@@ -34,6 +36,8 @@ import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
 import { installPackages, installAllPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense } from "./license.ts";
+import { resolveAuth } from "./auth.ts";
+import { restExecute } from "./exec.ts";
 import {
 	formatDeviceModeSelection,
 	readDeviceMode,
@@ -129,7 +133,8 @@ function createInstance(state: MachineState): ChrInstance {
 			const url = `${restUrl}/rest${path.startsWith("/") ? path : "/" + path}`;
 			const headers = new Headers(opts?.headers);
 			if (!headers.has("Authorization")) {
-				headers.set("Authorization", `Basic ${btoa("admin:")}`);
+				const auth = resolveAuth(state);
+				headers.set("Authorization", auth.header);
 			}
 			if (!headers.has("Content-Type") && opts?.body) {
 				headers.set("Content-Type", "application/json");
@@ -146,6 +151,18 @@ function createInstance(state: MachineState): ChrInstance {
 				return response.json();
 			}
 			return response.text();
+		},
+
+		async exec(command: string, opts?: ExecOptions): Promise<ExecResult> {
+			const via = opts?.via ?? "auto";
+			if (via !== "auto" && via !== "rest") {
+				throw new QuickCHRError(
+					"EXEC_FAILED",
+					`exec transport "${via}" is not yet implemented`,
+				);
+			}
+			const auth = resolveAuth(state, opts?.user, opts?.password);
+			return restExecute(restUrl, auth, command, opts);
 		},
 
 		async license(opts: LicenseOptions): Promise<void> {
