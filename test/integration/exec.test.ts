@@ -17,6 +17,24 @@ async function cleanupMachine(name: string): Promise<void> {
 	try { await existing.remove(); } catch { /* ignore */ }
 }
 
+async function waitForExecReady(
+	instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>>,
+	timeoutMs: number,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const result = await instance.exec(":put ready", { timeout: 10_000 });
+			if (result.via === "rest" && result.output.trim() === "ready") return;
+		} catch {
+			// RouterOS can accept HTTP before /rest/execute is fully ready.
+		}
+		await Bun.sleep(1000);
+	}
+
+	throw new Error(`Timed out waiting for /rest/execute readiness after ${timeoutMs}ms`);
+}
+
 describe.skipIf(SKIP)("exec — REST /execute", () => {
 	const MACHINE = "integration-exec-1";
 	let instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>> | undefined;
@@ -29,7 +47,16 @@ describe.skipIf(SKIP)("exec — REST /execute", () => {
 			background: true,
 			name: MACHINE,
 		});
-	}, 120_000);
+
+		expect(instance).toBeDefined();
+		if (!instance) {
+			throw new Error("Failed to start integration CHR instance");
+		}
+		// _launchNew() returns immediately for non-provisioning starts; wait explicitly.
+		const booted = await instance.waitForBoot(120_000);
+		expect(booted).toBe(true);
+		await waitForExecReady(instance, 60_000);
+	}, 240_000);
 
 	afterAll(async () => {
 		if (instance) {
