@@ -34,7 +34,6 @@ QUICKCHR_INTEGRATION=1 bun test matrica.test.ts
 
 ## Flow
 
-```
 1. Pre-clean stale instances
 2. Resolve current version for each channel (long-term, stable, testing, development)
 3. Start 4 ARM64 CHRs in parallel:
@@ -46,7 +45,6 @@ QUICKCHR_INTEGRATION=1 bun test matrica.test.ts
 5. Upload rb5009-arm64.rsc → reset-configuration → wait for reboot → :export
 6. 4-way diff of exports — differences = version-specific migration behaviour
 7. Stop and remove all instances
-```
 
 Package installation triggers an extra reboot inside `quickchr start`. The total wall time is dominated by the slowest instance (4 in parallel, not serial).
 
