@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { join } from "node:path";
 
 /**
  * Integration test — exec() against a real CHR instance.
@@ -35,9 +36,11 @@ async function waitForExecReady(
 	throw new Error(`Timed out waiting for /rest/execute readiness after ${timeoutMs}ms`);
 }
 
-describe.skipIf(SKIP)("exec — REST /execute", () => {
+describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 	const MACHINE = "integration-exec-1";
 	let instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>> | undefined;
+	let machineArch: string | undefined;
+	let isQgaAvailable = false;
 
 	beforeAll(async () => {
 		await cleanupMachine(MACHINE);
@@ -56,6 +59,19 @@ describe.skipIf(SKIP)("exec — REST /execute", () => {
 		const booted = await instance.waitForBoot(120_000);
 		expect(booted).toBe(true);
 		await waitForExecReady(instance, 60_000);
+
+		// Capture arch for transport-specific gating.
+		machineArch = instance.state.arch;
+
+		// Detect QGA availability once (x86 only; RouterOS CHR may not implement QGA).
+		if (machineArch === "x86") {
+			const { qgaProbe } = await import("../../src/lib/qga.ts");
+			const qgaSockPath = join(instance.state.machineDir, "qga.sock");
+			isQgaAvailable = await qgaProbe(qgaSockPath, 10_000);
+			if (!isQgaAvailable) {
+				console.log("[exec.test] QGA daemon did not respond on this x86 instance — QGA tests will be skipped");
+			}
+		}
 	}, 240_000);
 
 	afterAll(async () => {
@@ -107,4 +123,91 @@ describe.skipIf(SKIP)("exec — REST /execute", () => {
 		expect(result.via).toBe("rest");
 		expect(result.output).toBe("hello");
 	}, 30_000);
+
+	// --- QGA transport (x86 only) ---
+
+	test("QGA: probe returns true on running x86 CHR", async () => {
+		if (machineArch !== "x86") return; // skip on arm64
+		if (!isQgaAvailable) { console.log("[exec.test] QGA not available, skipping probe test"); return; }
+		expect(instance).toBeDefined();
+		const { qgaProbe } = await import("../../src/lib/qga.ts");
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const socketPath = join(instance!.state.machineDir, "qga.sock");
+		const ready = await qgaProbe(socketPath, 10_000);
+		expect(ready).toBe(true);
+	}, 30_000);
+
+	test("QGA: exec :put hello returns hello", async () => {
+		if (!isQgaAvailable) return; // skip if QGA daemon not available on this host
+		expect(instance).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const result = await instance!.exec(":put hello", { via: "qga", timeout: 20_000 });
+		expect(result.via).toBe("qga");
+		expect(result.output.trim()).toBe("hello");
+	}, 30_000);
+
+	test("QGA: exec identity query", async () => {
+		if (!isQgaAvailable) return; // skip if QGA daemon not available on this host
+		expect(instance).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const result = await instance!.exec(":put [/system/identity/get name]", { via: "qga", timeout: 20_000 });
+		expect(result.via).toBe("qga");
+		expect(result.output.trim().length).toBeGreaterThan(0);
+	}, 30_000);
+
+	test("QGA: guest-info lists supported commands", async () => {
+		if (!isQgaAvailable) return; // skip if QGA daemon not available on this host
+		expect(instance).toBeDefined();
+		const { qgaInfo } = await import("../../src/lib/qga.ts");
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const socketPath = join(instance!.state.machineDir, "qga.sock");
+		const commands = await qgaInfo(socketPath, 10_000);
+		expect(commands.length).toBeGreaterThan(0);
+		const names = commands.map((c) => c.name);
+		expect(names).toContain("guest-exec");
+		expect(names).toContain("guest-ping");
+	}, 30_000);
+
+	test("QGA: throws on arm64", async () => {
+		if (machineArch !== "arm64") return;
+		expect(instance).toBeDefined();
+		await expect(
+			// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+			instance!.exec(":put test", { via: "qga" }),
+		).rejects.toMatchObject({ code: "QGA_UNSUPPORTED" });
+	}, 10_000);
+
+	// --- Console transport ---
+
+	test("Console: isConsoleReady returns ready or login", async () => {
+		expect(instance).toBeDefined();
+		const { isConsoleReady } = await import("../../src/lib/console.ts");
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const status = await isConsoleReady(instance!.state.machineDir, 10_000);
+		expect(status === "ready" || status === "login").toBe(true);
+	}, 30_000);
+
+	test("Console: exec :put hello returns hello", async () => {
+		expect(instance).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const result = await instance!.exec(":put hello", { via: "console", timeout: 30_000 });
+		expect(result.via).toBe("console");
+		expect(result.output.trim()).toBe("hello");
+	}, 60_000);
+
+	test("Console: exec identity print returns identity text", async () => {
+		expect(instance).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const result = await instance!.exec("/system/identity/print", { via: "console", timeout: 30_000 });
+		expect(result.via).toBe("console");
+		expect(result.output).toContain("name:");
+	}, 60_000);
+
+	test("Console: multi-line output from /interface/print", async () => {
+		expect(instance).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const result = await instance!.exec("/interface/print", { via: "console", timeout: 30_000 });
+		expect(result.via).toBe("console");
+		expect(result.output).toContain("ether");
+	}, 60_000);
 });

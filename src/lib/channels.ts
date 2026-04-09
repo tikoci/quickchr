@@ -2,6 +2,8 @@
  * Communication channels — QEMU monitor, serial console, QGA (QEMU Guest Agent).
  *
  * Uses Unix domain sockets stored in the machine directory.
+ * QGA protocol implementation lives in qga.ts — this module provides
+ * the high-level qgaCommand() wrapper with arch guards and path resolution.
  */
 
 import { existsSync } from "node:fs";
@@ -9,6 +11,7 @@ import { join } from "node:path";
 import { connect } from "node:net";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
+import { qgaSync, qgaProbe } from "./qga.ts";
 
 /** Send a command to the QEMU monitor via Unix socket and return the response. */
 export async function monitorCommand(
@@ -114,7 +117,9 @@ export function serialStreams(machineDir: string): {
 	return { readable, writable };
 }
 
-/** Send a QGA (QEMU Guest Agent) command via Unix socket. x86 only. */
+/** Send a QGA (QEMU Guest Agent) command via Unix socket. x86 only.
+ *  Delegates to qga.ts for protocol handling — this wrapper adds the
+ *  arch guard and socket path resolution. */
 export async function qgaCommand(
 	machineDir: string,
 	arch: Arch,
@@ -137,6 +142,8 @@ export async function qgaCommand(
 		);
 	}
 
+	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
+
 	return new Promise((resolve, reject) => {
 		const timeout = setTimeout(() => {
 			socket.destroy();
@@ -144,16 +151,9 @@ export async function qgaCommand(
 		}, timeoutMs);
 
 		let buffer = "";
-		const socket = connect({ path: socketPath });
-
-		// First send sync to establish session
-		const syncId = Date.now();
-		socket.write(JSON.stringify({ execute: "guest-sync-delimited", arguments: { id: syncId } }) + "\n");
-
-		let synced = false;
 
 		socket.on("data", (data) => {
-			buffer += data.toString();
+			buffer += data.toString().replace(/\xff/g, "");
 			const lines = buffer.split("\n");
 			buffer = lines.pop() || "";
 
@@ -161,25 +161,14 @@ export async function qgaCommand(
 				if (!line.trim()) continue;
 				try {
 					const msg = JSON.parse(line.trim());
-					if (!synced) {
-						// Wait for sync response
-						if (msg.return === syncId) {
-							synced = true;
-							// Now send the actual command
-							const payload: Record<string, unknown> = { execute: command };
-							if (args) payload.arguments = args;
-							socket.write(JSON.stringify(payload) + "\n");
-						}
+					clearTimeout(timeout);
+					socket.destroy();
+					if (msg.error) {
+						reject(new QuickCHRError("PROCESS_FAILED", `QGA error: ${msg.error.desc || JSON.stringify(msg.error)}`));
 					} else {
-						// Got our response
-						clearTimeout(timeout);
-						socket.destroy();
-						if (msg.error) {
-							reject(new QuickCHRError("PROCESS_FAILED", `QGA error: ${msg.error.desc || JSON.stringify(msg.error)}`));
-						} else {
-							resolve(msg.return);
-						}
+						resolve(msg.return);
 					}
+					return;
 				} catch { /* partial JSON, wait for more */ }
 			}
 		});
@@ -188,5 +177,23 @@ export async function qgaCommand(
 			clearTimeout(timeout);
 			reject(new QuickCHRError("PROCESS_FAILED", `QGA connection failed: ${err.message}`));
 		});
+
+		// Send the actual command now that sync completed
+		const payload: Record<string, unknown> = { execute: command };
+		if (args) payload.arguments = args;
+		socket.write(JSON.stringify(payload) + "\n");
 	});
+}
+
+/** Check whether QGA is available and responding for a machine. */
+export function isQgaReady(
+	machineDir: string,
+	arch: Arch,
+): Promise<boolean> {
+	if (arch === "arm64") return Promise.resolve(false);
+
+	const socketPath = join(machineDir, "qga.sock");
+	if (!existsSync(socketPath)) return Promise.resolve(false);
+
+	return qgaProbe(socketPath, 5000);
 }

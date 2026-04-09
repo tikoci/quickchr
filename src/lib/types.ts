@@ -226,6 +226,15 @@ export interface ExecResult {
 	via: ExecTransport;
 }
 
+// --- QGA (QEMU Guest Agent) ---
+
+/** Result of a QGA guest-exec command (exitcode + decoded stdout/stderr). */
+export interface QgaExecResult {
+	exitcode: number;
+	stdout: string;
+	stderr: string;
+}
+
 // --- CHR License ---
 
 /** CHR trial license levels (speed caps). free = 1 Mbps, p1 = 1 Gbps, p10 = 10 Gbps, unlimited = no cap. */

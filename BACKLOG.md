@@ -79,7 +79,8 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 - [ ] `instance.setDeviceMode(options)` — allow changing device-mode on a running instance via the library API. Requires the hard-reboot QEMU flow, unlike most config changes that are simple REST calls. Useful for test scenarios that need to toggle device-mode features between runs.
 - [ ] License apply should read back and verify via REST after write — RouterOS commands vary by version; early detection beats debugging later
 - [ ] `license.ts` auth: `renewLicense()` and `getLicenseInfo()` default to `admin:` credentials. If a machine has `disableAdmin: true` with a provisioned user, license operations will fail with 401. Should accept or resolve credentials via `resolveAuth()` like `exec()` does.
-- [ ] First-boot serial console provisioning (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. chr-armed handles the full first-boot sequence: license Y/n screen, forced password change, and command execution over serial. The serial approach is valuable when REST API is unavailable (pre-boot, broken config, netinstall recovery). Code to vendor from: `chr-armed/src/oracle/console.ts`.
+- [x] First-boot serial console provisioning engine (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. `src/lib/console.ts` handles: login sequence (Login:, Password:), license `[Y/n]:` prompt, password change skip (Ctrl-C), and command execution over serial. Version-proof prompt pattern (`] > ` suffix). Wired into `instance.exec()` as `--via=console`. Unit tests in `test/unit/console.test.ts`, integration tests in `test/integration/exec.test.ts`.
+- [ ] Console-based provisioning — use `console.ts` login/prompt engine for first-boot provisioning when REST API is unavailable. Refactor `provision.ts` to optionally use console transport.
 - [x] **Fix: `disableAdmin()` race condition** — `disableAdmin()` now accepts optional `verifyAuth` parameter for read-back verification using alternate credentials (e.g. the new user created before disabling admin). Verification poll loop catches transient errors (401 from disabled admin, network blips) instead of aborting. Deadline increased to 20s. `provision()` passes new user's auth for verification.
 
 ### Robustness
@@ -133,7 +134,7 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 - [x] `auth.ts`: unit tests for `resolveAuth()` — explicit override, provisioned user, admin fallback, disableAdmin edge case — `test/unit/exec.test.ts` (5 tests)
 - [x] `exec.ts`: unit tests for `restExecute()` — POST body with `as-string`, command pass-through (no wrapping), ret extraction, empty array, error codes, message field — `test/unit/exec.test.ts` (8 tests)
 - [x] `exec.ts`: **simplified exec design** — removed automatic `:serialize to=json` wrapping (`output: "json"` option removed). Commands are passed through as-is with `"as-string": ""` in POST body for synchronous execution. Callers wrap `:serialize` themselves when needed.
-- [x] `exec.ts`: integration test restructured — shares single CHR instance. Tests: identity text, caller-wrapped `:serialize` for JSON, log command, `:put` value pass-through.
+- [x] `exec.ts`: integration test restructured — shares single CHR instance across REST, QGA, and console transports. Tests: identity text, caller-wrapped `:serialize` for JSON, log command, `:put` value pass-through, QGA probe/exec/info (x86), console ready/exec/multi-line.
 - [x] `exec.ts`: **critical fix** — added `"as-string": ""` to POST body. Without it, `/rest/execute` runs commands asynchronously and returns a job ID (`{"ret":"*5"}`) instead of output. `as-string` makes execution synchronous (like removing an implied `&` from shell).
 - [ ] `exec.ts`: integration test for exec with provisioned user credentials (not just default admin)
 - [ ] `exec.ts`: integration test for invalid command error path (e.g. `/nonexistent/garbage`)
@@ -426,9 +427,11 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 ### QGA (Guest Agent)
 
-- [ ] Integration tests for QGA on x86 — verify `guest-sync-delimited`, basic commands. We offer the QGA channel but don't currently test it. Reference: tikoci/mikropkl Lab has extensive QGA exploration.
-- [ ] QGA file operations — push config files via guest agent (x86 only today)
+- [x] QGA protocol implementation — `src/lib/qga.ts`: `qgaSync()` (handshake with 0xFF stripping), `qgaExec()` (base64 script execution with polling), `qgaProbe()` (availability detection), `qgaInfo()` (supported command listing). Wired into `instance.exec()` as `--via=qga` (x86 only). Unit tests in `test/unit/qga.test.ts` (20 tests), integration tests in `test/integration/exec.test.ts`.
+- [x] Integration tests for QGA on x86 — verify `guest-sync-delimited`, `qgaProbe`, `:put` exec, identity query, `guest-info` command listing.
+- [ ] QGA file operations — push config files via guest agent (x86 only today). `qga.ts` is structured to expand with `qgaFileWrite()`, `qgaFileRead()`.
 - [ ] ARM64 QGA — MikroTik has an open bug for ARM64 guest agent support. Once fixed, extend tests to arm64. Be ready to test when the fix drops.
+- [ ] `--via=auto` smart routing — try REST first, fall back to QGA (x86), then console. Now that all three transports exist, `auto` can intelligently probe and select.
 
 ### Machine Config
 

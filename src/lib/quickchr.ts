@@ -38,6 +38,8 @@ import { provision } from "./provision.ts";
 import { renewLicense } from "./license.ts";
 import { resolveAuth } from "./auth.ts";
 import { restExecute } from "./exec.ts";
+import { qgaExec } from "./qga.ts";
+import { consoleExec } from "./console.ts";
 import {
 	formatDeviceModeSelection,
 	readDeviceMode,
@@ -155,6 +157,31 @@ function createInstance(state: MachineState): ChrInstance {
 
 		async exec(command: string, opts?: ExecOptions): Promise<ExecResult> {
 			const via = opts?.via ?? "auto";
+
+			if (via === "qga") {
+				if (state.arch === "arm64") {
+					throw new QuickCHRError(
+						"QGA_UNSUPPORTED",
+						"QEMU Guest Agent is not functional on ARM64 CHR (userspace daemon doesn't start)",
+					);
+				}
+				const socketPath = join(state.machineDir, "qga.sock");
+				const result = await qgaExec(socketPath, command, opts?.timeout ?? 30_000);
+				return { output: result.stdout.trim(), via: "qga" };
+			}
+
+			if (via === "console") {
+				const auth = resolveAuth(state, opts?.user, opts?.password);
+				const result = await consoleExec(
+					state.machineDir,
+					command,
+					auth.user,
+					opts?.password ?? state.user?.password ?? "",
+					opts?.timeout ?? 30_000,
+				);
+				return { output: result.output, via: "console" };
+			}
+
 			if (via !== "auto" && via !== "rest") {
 				throw new QuickCHRError(
 					"EXEC_FAILED",
@@ -616,6 +643,7 @@ export class QuickCHR {
 			const maxAttempts = 5;
 			let updateRequest: Promise<Response> | undefined;
 			let requiresPowerCycle = false;
+			let selfRebooted = false;
 
 			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 				const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
@@ -638,7 +666,15 @@ export class QuickCHR {
 					break;
 				}
 
-				const actualNow = await readDeviceMode(httpPort);
+				// Update resolved quickly — RouterOS may have applied changes and self-rebooted.
+				// If readDeviceMode fails, treat it as a self-reboot and wait for CHR to recover.
+				let actualNow: Record<string, string>;
+				try {
+					actualNow = await readDeviceMode(httpPort);
+				} catch {
+					selfRebooted = true;
+					break;
+				}
 				const immediateVerification = verifyDeviceMode(resolvedDeviceMode, actualNow);
 				if (immediateVerification.ok) {
 					console.log("  Device-mode already active; no power-cycle required.");
@@ -666,6 +702,17 @@ export class QuickCHR {
 					throw new QuickCHRError(
 						"BOOT_TIMEOUT",
 						`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s. Ensure QEMU was fully power-cycled and try again.`,
+					);
+				}
+				await waitForDeviceModeApi(httpPort, 30_000);
+			} else if (selfRebooted) {
+				// RouterOS applied the change and self-rebooted; wait for it to come back.
+				console.log("  Device-mode self-rebooted; waiting for CHR to recover...");
+				const rebooted = await instance.waitForBoot(bootTimeout);
+				if (!rebooted) {
+					throw new QuickCHRError(
+						"BOOT_TIMEOUT",
+						`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s.`,
 					);
 				}
 				await waitForDeviceModeApi(httpPort, 30_000);

@@ -28,6 +28,7 @@ export type {
 	PackageManager,
 	PlatformInfo,
 	PortMapping,
+	QgaExecResult,
 	ServiceName,
 	StartOptions,
 } from "./lib/types.ts";
@@ -41,6 +42,16 @@ export type { ResolvedAuth } from "./lib/auth.ts";
 
 // Exec utilities
 export { restExecute } from "./lib/exec.ts";
+
+// QGA (QEMU Guest Agent) utilities
+export { qgaExec, qgaProbe, qgaSync, qgaInfo } from "./lib/qga.ts";
+export type { QgaCommandInfo } from "./lib/qga.ts";
+
+// Console exec utilities
+export { consoleExec, isConsoleReady, stripAnsi } from "./lib/console.ts";
+
+// Channel utilities
+export { isQgaReady } from "./lib/channels.ts";
 
 // License utilities
 export { renewLicense, getLicenseInfo } from "./lib/license.ts";
