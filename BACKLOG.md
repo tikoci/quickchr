@@ -107,11 +107,14 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 - [x] `qemu.ts`: unit tests for TCG-specific arg generation (`tb-size=256`, correct CPU per arch) — added to `test/unit/qemu-args.test.ts`
 - [x] `qemu.ts`: vmnet-shared and vmnet-bridge network mode arg generation — added to `test/unit/qemu-args.test.ts`
 - [x] `qemu.ts`: additional `buildQemuErrorMessage` patterns — EFI+size branch covered
-- [ ] `qemu.ts`: `waitForBoot` timeout/warning branch — always bypassed in integration tests because HVF/TCG boot completes well within 120 s; consider a mock-fetch unit test
+- [x] `qemu.ts`: `waitForBoot` timeout/warning branch — mock-fetch unit tests for 401 (booted), 200 (booted), connection-refused timeout added to `test/unit/qemu-args.test.ts` (3 tests)
+- [x] `qemu.ts`: `stopQemu` dead-PID path (returns false) and `spawnQemu` empty-args guard (throws SPAWN_FAILED) — added to `test/unit/qemu-args.test.ts`
+- [x] `qemu.ts`: `stopMachineByName` — no-pid early-return and socket-file cleanup tested — added to `test/unit/qemu-args.test.ts`
 
 **Image management (unit — mock fetch/fs):**
 - [x] `images.ts`: unit test `listCachedImages` for empty, absent, and populated cache dirs — `test/unit/images.test.ts` (new file, 4 tests)
-- [ ] `images.ts`: `downloadImage` error paths — HTTP 4xx (non-retriable abort), 5xx retry exhaustion — mock `fetch`; integration tests only hit the cached-image path
+- [x] `images.ts`: `downloadImage` error paths — HTTP 4xx (non-retriable abort), 5xx retry exhaustion, cached-zip path, successful download — mock `fetch`; added to `test/unit/images.test.ts` (4 new tests)
+- [x] `images.ts`: `copyImageToMachine` — copies source .img to disk.img in machine dir; added to `test/unit/images.test.ts`
 
 **License error paths (unit — mock fetch):**
 - [x] `license.ts`: unit tests for `renewLicense` and `getLicenseInfo` error branches (network error, HTTP 4xx/5xx, level normalisation) using mocked fetch — added to `test/unit/license.test.ts` (6 new tests)
@@ -125,6 +128,17 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 - [x] `quickchr.ts`: integration test for `instance.clean()` — reset disk image from cache, verify CHR returns to factory state (custom user gone, admin/empty works) — added to `test/integration/start-stop.test.ts`
 - [x] `quickchr.ts`: bug fix — `clean()` test was missing `waitForBoot` after `_launchExisting` restart; REST assertions raced the boot and failed intermittently; fixed in `test/integration/start-stop.test.ts`
 - [x] `provision.ts`: provisioning corner cases — invalid group → PROCESS_FAILED; new user placed in "full" group with write access — added to `test/integration/provisioning.test.ts`
+
+**Package management (unit):**
+- [x] `packages.ts`: `downloadPackages` — cached extractDir path (no fetch), HTTP error (mock fetch), corrupt-zip extraction failure — added to `test/unit/packages.test.ts` (3 tests)
+
+**Version resolution (unit — mock fetch):**
+- [x] `versions.ts`: `resolveVersion` — HTTP error and invalid-body branches; `resolveAllVersions` — all 4 channels via mocked server — added to `test/unit/versions.test.ts` (5 tests)
+
+**Platform detection (unit):**
+- [x] `platform.ts`: `getQemuInstallHint` for all package managers (brew, apt, dnf, pacman, winget, unknown) — added to `test/unit/platform.test.ts` (6 tests)
+- [x] `platform.ts`: `getQemuVersion` — nonexistent binary returns undefined, installed binary returns semver string — added to `test/unit/platform.test.ts`
+- [x] `platform.ts`: `requireQemu` / `requireFirmware` — conditional tests (skip when binary/firmware absent or present as appropriate) — added to `test/unit/platform.test.ts`
 
 **Device-mode feature flags (integration):**
 - [x] `device-mode.ts`: integration test for `mode=basic` with `enable: [bandwidth-test, ipsec]` + `disable: [zerotier]` — verifies non-rose mode + non-empty enable/disable arrays are fully applied and confirmed via `verifyDeviceMode`; covers the CLI `--device-mode-enable`/`--device-mode-disable` code path end-to-end — added to `test/integration/device-mode.test.ts`

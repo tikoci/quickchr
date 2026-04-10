@@ -6,7 +6,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { listAvailablePackages, findPackageFile } from "../../src/lib/packages.ts";
+import { listAvailablePackages, findPackageFile, downloadPackages } from "../../src/lib/packages.ts";
 
 describe("listAvailablePackages", () => {
 	let dir: string;
@@ -147,5 +147,61 @@ describe("findPackageFile", () => {
 
 	test("returns undefined for missing directory", () => {
 		expect(findPackageFile(join(tmpdir(), "no-such-dir-999"), "iot")).toBeUndefined();
+	});
+});
+
+// --- Mock-fetch helper ---
+
+function makeMockFetch(fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) {
+	return Object.assign(fn, { preconnect: (_url: string | URL) => {} }) as typeof fetch;
+}
+
+describe("downloadPackages", () => {
+	let cacheDir: string;
+	const originalFetch = globalThis.fetch;
+
+	beforeEach(() => {
+		cacheDir = join(tmpdir(), `quickchr-pkgs-${Date.now()}`);
+		mkdirSync(cacheDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(cacheDir, { recursive: true, force: true });
+		globalThis.fetch = originalFetch;
+	});
+
+	test("returns cached extractDir immediately without fetching", async () => {
+		const extractDir = join(cacheDir, "packages-x86-7.22.1");
+		mkdirSync(extractDir, { recursive: true });
+
+		let fetchCalled = false;
+		globalThis.fetch = makeMockFetch(() => {
+			fetchCalled = true;
+			return Promise.resolve(new Response(""));
+		});
+
+		const result = await downloadPackages("7.22.1", "x86", cacheDir);
+		expect(result).toBe(extractDir);
+		expect(fetchCalled).toBe(false);
+	});
+
+	test("throws DOWNLOAD_FAILED when server returns non-ok status", async () => {
+		globalThis.fetch = makeMockFetch(() =>
+			Promise.resolve(new Response("Not Found", { status: 404 })),
+		);
+		await expect(downloadPackages("7.22.1", "x86", cacheDir)).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+		});
+	});
+
+	test("throws PROCESS_FAILED when zip extraction fails (corrupt zip)", async () => {
+		// Pre-create a corrupt zip file so the download step is skipped
+		const zipPath = join(cacheDir, "all_packages-x86-7.22.1.zip");
+		writeFileSync(zipPath, "this is not a valid zip");
+
+		await expect(downloadPackages("7.22.1", "x86", cacheDir)).rejects.toMatchObject({
+			code: "PROCESS_FAILED",
+			message: expect.stringContaining("Failed to extract packages"),
+		});
 	});
 });

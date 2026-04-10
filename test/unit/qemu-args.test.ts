@@ -1,6 +1,16 @@
-import { describe, test, expect } from "bun:test";
-import { buildQemuArgs, buildQemuErrorMessage, type QemuLaunchConfig } from "../../src/lib/qemu.ts";
-import type { PortMapping } from "../../src/lib/types.ts";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import {
+	buildQemuArgs,
+	buildQemuErrorMessage,
+	spawnQemu,
+	stopQemu,
+	stopMachineByName,
+	waitForBoot,
+	type QemuLaunchConfig,
+} from "../../src/lib/qemu.ts";
+import type { MachineState, PortMapping } from "../../src/lib/types.ts";
 
 // These tests verify QEMU arg generation without spawning QEMU.
 // They depend on QEMU being installed (for binary path resolution).
@@ -274,4 +284,111 @@ describe("buildQemuArgs — network modes", () => {
 			throw e;
 		}
 	});
+});
+
+// --- spawnQemu ---
+
+describe("spawnQemu", () => {
+	test("throws SPAWN_FAILED when qemuArgs is empty", async () => {
+		await expect(spawnQemu([], "/tmp/quickchr-test", true)).rejects.toMatchObject({
+			code: "SPAWN_FAILED",
+			message: expect.stringContaining("Empty QEMU args"),
+		});
+	});
+});
+
+// --- stopQemu ---
+
+describe("stopQemu", () => {
+	test("returns false when PID does not exist", async () => {
+		// A PID this large is virtually guaranteed not to exist
+		const result = await stopQemu(999_999_999);
+		expect(result).toBe(false);
+	});
+});
+
+// --- stopMachineByName ---
+
+const TMP_STOP = join(import.meta.dir, ".tmp-qemu-stop-test");
+
+function makeMachineState(overrides: Partial<MachineState> = {}): MachineState {
+	return {
+		name: "test",
+		version: "7.22.1",
+		arch: "x86",
+		cpu: 1,
+		mem: 512,
+		network: "user",
+		ports: {},
+		packages: [],
+		portBase: 9100,
+		excludePorts: [],
+		extraPorts: [],
+		createdAt: new Date().toISOString(),
+		status: "stopped",
+		machineDir: TMP_STOP,
+		...overrides,
+	};
+}
+
+describe("stopMachineByName", () => {
+	beforeEach(() => {
+		mkdirSync(TMP_STOP, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(TMP_STOP, { recursive: true, force: true });
+	});
+
+	test("returns false immediately when state has no pid", async () => {
+		const state = makeMachineState({ pid: undefined });
+		const result = await stopMachineByName("test", state);
+		expect(result).toBe(false);
+	});
+
+	test("cleans up socket files even when PID is already dead", async () => {
+		writeFileSync(join(TMP_STOP, "monitor.sock"), "");
+		writeFileSync(join(TMP_STOP, "serial.sock"), "");
+		writeFileSync(join(TMP_STOP, "qga.sock"), "");
+
+		const state = makeMachineState({ pid: 999_999_999 });
+		await stopMachineByName("test", state);
+
+		expect(existsSync(join(TMP_STOP, "monitor.sock"))).toBe(false);
+		expect(existsSync(join(TMP_STOP, "serial.sock"))).toBe(false);
+		expect(existsSync(join(TMP_STOP, "qga.sock"))).toBe(false);
+	});
+});
+
+// --- waitForBoot ---
+
+describe("waitForBoot", () => {
+	const originalFetch = globalThis.fetch;
+
+	afterEach(() => {
+		globalThis.fetch = originalFetch;
+	});
+
+	function mockBoot(fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) {
+		globalThis.fetch = Object.assign(fn, { preconnect: (_url: string | URL) => {} }) as typeof fetch;
+	}
+
+	test("returns true when HTTP server responds with 401 (auth required = booted)", async () => {
+		mockBoot(() => Promise.resolve(new Response("Unauthorized", { status: 401 })));
+		const result = await waitForBoot(9199, 5000);
+		expect(result).toBe(true);
+	});
+
+	test("returns true when HTTP server responds with 200", async () => {
+		mockBoot(() => Promise.resolve(new Response("OK", { status: 200 })));
+		const result = await waitForBoot(9199, 5000);
+		expect(result).toBe(true);
+	});
+
+	test("returns false when all polls fail within timeout", async () => {
+		mockBoot(() => Promise.reject(new Error("connection refused")));
+		// Very short timeout — should expire after first failed poll
+		const result = await waitForBoot(9199, 50);
+		expect(result).toBe(false);
+	}, 10_000);
 });

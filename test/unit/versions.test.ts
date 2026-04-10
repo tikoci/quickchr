@@ -1,5 +1,13 @@
-import { describe, test, expect } from "bun:test";
-import { isValidVersion, chrDownloadUrl, packagesDownloadUrl, chrImageBasename, generateMachineName } from "../../src/lib/versions.ts";
+import { describe, test, expect, afterEach } from "bun:test";
+import {
+	isValidVersion,
+	chrDownloadUrl,
+	packagesDownloadUrl,
+	chrImageBasename,
+	generateMachineName,
+	resolveVersion,
+	resolveAllVersions,
+} from "../../src/lib/versions.ts";
 
 describe("isValidVersion", () => {
 	test("accepts standard versions", () => {
@@ -81,5 +89,74 @@ describe("generateMachineName", () => {
 		expect(
 			generateMachineName("7.22.1", "x86", ["7.22.1-x86-1", "7.22.1-x86-2", "7.22.1-x86-3"]),
 		).toBe("7.22.1-x86-4");
+	});
+});
+
+// --- Mock-fetch helpers ---
+
+function makeMockFetch(fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) {
+	return Object.assign(fn, { preconnect: (_url: string | URL) => {} }) as typeof fetch;
+}
+
+describe("resolveVersion", () => {
+	const originalFetch = globalThis.fetch;
+
+	afterEach(() => {
+		globalThis.fetch = originalFetch;
+	});
+
+	test("throws DOWNLOAD_FAILED on HTTP error response", async () => {
+		globalThis.fetch = makeMockFetch(() =>
+			Promise.resolve(new Response("Service Unavailable", { status: 503 })),
+		);
+		await expect(resolveVersion("stable")).rejects.toMatchObject({ code: "DOWNLOAD_FAILED" });
+	});
+
+	test("throws INVALID_VERSION when body is not a version string", async () => {
+		globalThis.fetch = makeMockFetch(() =>
+			Promise.resolve(new Response("not-a-version-at-all 12345")),
+		);
+		await expect(resolveVersion("stable")).rejects.toMatchObject({ code: "INVALID_VERSION" });
+	});
+
+	test("returns version string from valid response", async () => {
+		globalThis.fetch = makeMockFetch(() =>
+			Promise.resolve(new Response("7.22.1 1774276515")),
+		);
+		const version = await resolveVersion("stable");
+		expect(version).toBe("7.22.1");
+	});
+});
+
+describe("resolveAllVersions", () => {
+	const originalFetch = globalThis.fetch;
+
+	afterEach(() => {
+		globalThis.fetch = originalFetch;
+	});
+
+	test("returns versions keyed by channel from mocked server", async () => {
+		const channelMap: Record<string, string> = {
+			"NEWESTa7.stable": "7.22.1",
+			"NEWESTa7.long-term": "7.20.3",
+			"NEWESTa7.testing": "7.23beta5",
+			"NEWESTa7.development": "7.24rc1",
+		};
+
+		globalThis.fetch = makeMockFetch((url) => {
+			const urlStr = String(url);
+			for (const [key, version] of Object.entries(channelMap)) {
+				if (urlStr.includes(key)) {
+					return Promise.resolve(new Response(`${version} 1774276515`));
+				}
+			}
+			return Promise.resolve(new Response("", { status: 404 }));
+		});
+
+		const result = await resolveAllVersions();
+		expect(result.stable).toBe("7.22.1");
+		expect(result["long-term"]).toBe("7.20.3");
+		expect(result.testing).toBe("7.23beta5");
+		expect(result.development).toBe("7.24rc1");
 	});
 });
