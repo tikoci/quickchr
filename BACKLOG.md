@@ -837,6 +837,51 @@ quickchr start matrica-dev   --version development  --arch arm64 --port-base 923
 - [ ] `examples/matrica/README.md`
 - [ ] `examples/matrica/rb5009-arm64.rsc` (sample config with zerotier/container references)
 
+#### "trauks" - Testing an /app container (Latvian for "container")
+
+Simple example where an /app is test by bring it up in CHR, and the /app services offered.
+
+
+**Arch choice:** Both X86 and ARM64, to verify container is cross-platform.  Add `container` packages, with an extra user network for container to use (so both forwarded and "bridged" container networks can be tests).
+
+**Topology:** 
+
+```text
+quickchr start trauks-lt    --version stable   --arch arm64 --add-network --add-network 
+quickchr start trauks-st    --version stable   --arch x86 --add-network --add-network 
+```
+
+**Flow:**
+
+1. Start 2 CHRs in parallel, then on each:
+2. Install `container` packages on each
+3. Add tikoci/rosetta as /app container using QGA
+4. Verify configuration matches expected using QGA (including files)
+5. Act as MCP client to test /app container to verify it functional
+6. Remove /app to ensure it is cleaned up using QGA (including files)
+7. Reports test results and times
+
+**What this validates:**
+
+- Running a container works through QEMU
+- Real world need, testing a /app YAML from start to finish, including CI
+- Uses QGA as protocol
+
+**CI-testable:** 
+
+- GH workflow should be
+
+**Open**
+
+- If should use a "shared" since ports are not always knows.  For example, could assume just http expored.  For Rosetta as example `/app`, it needs two ports, with one used (http since)
+- If should add self-signed certs to show as secure even on CHR without automatic /ip/cloud.  Could doc, but should consider if example should be "complete" (since even if with /ip/cloud some users might want to self-signed or manually installed certs anyway).
+
+- [ ] `examples/trauks/trauks.test.ts` (bun:test) 
+- [ ] `examples/trauks/Makefile`
+- [ ] `examples/trauks/trauks.py` (Python, subprocess CLI)
+- [ ] `examples/trauks/README.md`
+- [ ] `examples/trauks/github-workflow.yaml` (CI only, but example of testing /app in GH) 
+
 #### Example Summary
 
 | Example | Arch | Root? | CI? | Network modes | Primary test |
@@ -845,6 +890,7 @@ quickchr start matrica-dev   --version development  --arch arm64 --port-base 923
 | **divi** | x86 | Yes | No | user + vmnet-shared + socket | VRRP failover, mixed network modes |
 | **solis** | x86 | No | Yes | user + socket (unconnected) | Sequential version migration, config drift |
 | **matrica** | arm64 | No | Partial | user + socket (unconnected) | Parallel version matrix, ARM64 packages |
+| **trauks** | arm64 + x86 | No | Own | user + user | Runs /app on X86 and ARM64, tests whole container lifecycle |
 
 ---
 
