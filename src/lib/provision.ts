@@ -111,62 +111,60 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 
 	const adminAuth = `Basic ${btoa("admin:")}`;
 
-	// Resolve the admin user's internal .id so we can PATCH by resource path.
-	let adminUser: Record<string, unknown> | undefined;
-	const findDeadline = Date.now() + 10_000;
-	while (Date.now() < findDeadline) {
-		try {
-			adminUser = await readUser(httpPort, adminAuth, "admin");
-			if (adminUser) break;
-		} catch {
-			// Transient REST errors — keep trying
-		}
-		await Bun.sleep(500);
-	}
-	if (!adminUser) {
-		throw new QuickCHRError("PROCESS_FAILED", "Admin user not found after 10s");
-	}
-	const adminId = String(adminUser[".id"] ?? "");
-	if (!adminId) {
-		throw new QuickCHRError("PROCESS_FAILED", "Admin user .id not found");
-	}
-
-	const setResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/${encodeURIComponent(adminId)}`, {
-		method: "PATCH",
+	// Use the RouterOS action endpoint /rest/user/disable — equivalent to the CLI
+	// `/user disable admin` command. Avoids PATCH + ID path encoding issues (RouterOS
+	// uses IDs like *1 which encodeURIComponent turns into %2A1, which RouteOS may not
+	// decode back, causing the PATCH to silently no-op against a phantom resource).
+	const disableResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/disable`, {
+		method: "POST",
 		headers: {
 			Authorization: adminAuth,
 			"Content-Type": "application/json",
 		},
-		body: JSON.stringify({ disabled: "yes" }),
+		body: JSON.stringify({ numbers: "admin" }),
 		signal: AbortSignal.timeout(10_000),
 	});
 
-	if (!setResp.ok) {
-		const body = await setResp.text();
+	if (!disableResp.ok) {
+		const body = await disableResp.text();
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`Failed to disable admin: HTTP ${setResp.status} — ${body}`,
+			`Failed to disable admin: HTTP ${disableResp.status} — ${body}`,
 		);
 	}
 
-	// Verify the disabled flag reads back as "true".
-	// Use alternate credentials if provided — after disabling admin, the admin
-	// account may stop authenticating on subsequent requests.
+	// Verify the change took effect.
+	// RouterOS REST uses "yes"/"no" strings for booleans (not JSON true/false).
+	// Use alternate credentials if provided — after disabling admin, admin creds
+	// may stop authenticating on subsequent requests.
 	const readAuth = verifyAuth ?? adminAuth;
-	const deadline = Date.now() + 20_000;
+	const deadline = Date.now() + 45_000;
 	while (Date.now() < deadline) {
+		// Primary: read admin user via alternate creds and check the disabled field.
+		// RouterOS omits disabled:"no" for enabled users; "yes" when actually disabled.
 		try {
 			const user = await readUser(httpPort, readAuth, "admin");
-			if (user && String(user.disabled) === "true") return;
+			const d = String(user?.disabled ?? "");
+			if (d === "yes" || d === "true") return;
 		} catch {
-			// Transient errors (401 from disabled admin, network blip) — retry
+			// Transient error (new user creds propagating, network blip) — fall through
 		}
+
+		// Secondary: if admin credentials get 401, admin auth is rejected = disabled.
+		try {
+			const probe = await fetch(`http://127.0.0.1:${httpPort}/rest/system/resource`, {
+				headers: { Authorization: adminAuth },
+				signal: AbortSignal.timeout(3000),
+			});
+			if (probe.status === 401) return;
+		} catch { /* ignore */ }
+
 		await Bun.sleep(500);
 	}
 
 	throw new QuickCHRError(
 		"PROCESS_FAILED",
-		"Admin disable request succeeded but admin user is still enabled after 20s",
+		"Admin disable timed out after 45s — admin user is still enabled",
 	);
 }
 
