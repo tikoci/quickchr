@@ -158,6 +158,32 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 - [ ] `state.ts` / `platform.ts`: Windows path logic (`LOCALAPPDATA`, `USERPROFILE`, PowerShell qemu paths) — needs Windows CI runner (tracked under P4)
 - [ ] `platform.ts`: KVM detection with `/dev/kvm` present/absent — Linux CI matrix should exercise both paths explicitly
 
+### Provisioning correctness — verify what you write
+
+Integration tests and internal provisioning code check `board-name` and similar REST fields in ways that are fragile. The rule is: **verify what we write by reading it back** — not just that the box is up. Today some checks (e.g. `board-name` assertions in tests) are probes for aliveness rather than correctness of a provisioning write. Real verification means: if `start()` applies device-mode, read the mode back and compare; if a user is created, read the user back and compare group/name; if a license is applied, read the level back and compare. Fragile liveness checks imply the *core* provisioning sequence may be fragile too. Action items:
+
+- [ ] Audit every REST assertion in integration tests — classify as "liveness check" or "write-verify". Liveness checks should be clearly labeled; write-verify assertions should be tight (field-level match, not just "came back as something").
+- [ ] Where provisioning claims to verify but the assertion is loose (e.g. `toContain`/`toBeDefined` on a critical field), tighten to exact match or remove the claim in comments.
+- [ ] If RouterOS sometimes returns a malformed first response (user-list quirk, expired-admin quirk) — file or reference a bug, add a code comment identifying it as a workaround, and don't paper over it with vague retries. Specific, documented workarounds beat silent resilience.
+- [ ] Consider an anchor test concept for provisioning: a reference CHR started under controlled conditions whose full REST state is snapshotted and diffed on each run. Differences surface RouterOS schema changes before they break production workflows.
+
+### RouterOS "expired admin" is not a REST blocker
+
+Multiple agents (and past code paths) have treated the admin account's `expired: true` flag as a REST API blocker and added workarounds accordingly. **It is not.** The `expired` flag only prompts a password-change screen at CLI/Winbox/SSH login (and even then can be bypassed with Ctrl-C). RouterOS REST API and API sockets are unaffected — authenticated requests with `admin:""` succeed on a fresh CHR image regardless of the expired flag. Workarounds built on this incorrect assumption (`clearAdminExpiry`, polling until `board-name` appears in shape-checks) add complexity without fixing a real problem.
+
+- [ ] Audit `provision.ts` and any code with comments referencing "expired" or "quirk" — identify what problem each workaround was *actually* observing and whether the workaround is still needed.
+- [ ] Update `.github/instructions/` and `.copilot/skills/routeros-qemu-chr/SKILL.md` to document that `expired: true` does not affect REST API, so future agents don't repeat the same wrong assumption.
+- [ ] If a genuine startup race (not the expired flag) causes early REST responses to return wrong data, identify the actual condition (timing, specific RouterOS version, specific endpoint) and write a targeted fix with a comment referencing the specific behavior.
+
+### `secureLogin` default and provisioning philosophy
+
+`secureLogin` currently defaults to `true`, meaning every `QuickCHR.start()` call auto-creates a `quickchr` managed user unless the caller opts out with `secureLogin: false`. This is the wrong default for a programmatic API: callers should specify what they need; unspecified features should be no-ops. The cascade: unintended provisioning adds latency, creates credentials that tests don't expect, and makes `resolveAuth()` non-deterministic for callers that haven't thought about auth. The right default is `false` — skip provisioning unless asked. Callers who want a managed account opt in explicitly. The wizard can still default to `true` for the interactive path.
+
+- [ ] Change `secureLogin` default to `false` in `provision()` and `_provisionInstance()` — provisioning should be explicit opt-in, not opt-out.
+- [ ] Review all `QuickCHR.start()` call sites (tests, examples, CLI) — add explicit `secureLogin: true` where the managed account is actually needed, remove `secureLogin: false` guards added as workarounds.
+- [ ] Consider renaming to `createManagedUser` or splitting into a separate `provision.user` option group for clarity (tracked here; don't rename without also updating wizard, CLI flags, and docs).
+- [ ] Provisioning as a whole: the current model bundles package install, device-mode, license, and user creation into a single `_provisionInstance` call. Consider making each step an explicit opt-in with no implicit activation. Goal: `start()` is fast and predictable by default; callers who need provisioning compose it explicitly.
+
 ---
 
 ## P2 — CLI & UX
@@ -456,7 +482,7 @@ The refactoring is not all-or-nothing. Incremental steps:
 ### Credentials
 
 - [x] **Credential overhaul** — replaced ~260 lines of OS-specific keychain code (`security` CLI / `secret-tool` / PowerShell) with `Bun.secrets` wrapper (`src/lib/secrets.ts`). Falls back to `~/.config/quickchr/` config files for Node.js / headless Linux compatibility.
-- [x] **Two credential scopes** — MikroTik web account (licensing via `com.quickchr.mikrotik-web` service) separated from per-instance CHR credentials (`com.quickchr.instance` service). Env vars renamed `MIKROTIK_WEB_ACCOUNT`/`MIKROTIK_WEB_PASSWORD` (legacy `MIKROTIK_ACCOUNT`/`MIKROTIK_PASSWORD` still accepted).
+- [x] **Two credential scopes** — MikroTik web account (licensing via `com.quickchr.mikrotik-web` service) separated from per-instance CHR credentials (`com.quickchr.instance` service). Env vars: `MIKROTIK_WEB_ACCOUNT`/`MIKROTIK_WEB_PASSWORD`.
 - [x] **quickchr managed account** — new default: auto-creates a `quickchr` user with a generated password on each CHR instance. Password saved to secret store. Replaces reliance on `admin:""`. Opt out with `--no-secure-login`. Wizard offers 3 choices: managed (default), custom user, or keep admin.
 - [x] **`resolveAuth()` async + secrets lookup** — auth resolution now checks instance secrets (priority 2 after explicit args, before machine.json state). `remove()` and `clean()` clean up instance credentials.
 - [ ] Credential profiles — save/restore username+password per machine or as a shared default. `rest()` and CLI commands auto-use stored credentials.
