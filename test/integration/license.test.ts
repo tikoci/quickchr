@@ -6,14 +6,14 @@ import { describe, test, expect, beforeAll } from "bun:test";
  * Core tests (QUICKCHR_INTEGRATION=1): boot a real CHR, query license info,
  * verify getLicenseInfo returns a free-tier result.
  *
- * License renewal tests (additionally require MIKROTIK_ACCOUNT + MIKROTIK_PASSWORD):
+ * License renewal tests (additionally require MIKROTIK_WEB_ACCOUNT + MIKROTIK_WEB_PASSWORD):
  * actually calls /system/license/renew against MikroTik.com servers.
  *
  * Package enumeration tests require only QUICKCHR_INTEGRATION=1 and network access.
  */
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
-const HAS_CREDS = !!process.env.MIKROTIK_ACCOUNT && !!process.env.MIKROTIK_PASSWORD;
+const HAS_CREDS = !!process.env.MIKROTIK_WEB_ACCOUNT && !!process.env.MIKROTIK_WEB_PASSWORD;
 
 async function cleanupMachine(name: string): Promise<void> {
 	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -72,8 +72,8 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		const { getLicenseInfo } = await import("../../src/lib/license.ts");
 
 		const arch = process.arch === "arm64" ? "arm64" : "x86";
-		const account = process.env.MIKROTIK_ACCOUNT ?? "";
-			const password = process.env.MIKROTIK_PASSWORD ?? "";
+		const account = process.env.MIKROTIK_WEB_ACCOUNT ?? "";
+			const password = process.env.MIKROTIK_WEB_PASSWORD ?? "";
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -108,8 +108,8 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		const { getLicenseInfo } = await import("../../src/lib/license.ts");
 
 		const arch = process.arch === "arm64" ? "arm64" : "x86";
-		const account = process.env.MIKROTIK_ACCOUNT ?? "";
-			const password = process.env.MIKROTIK_PASSWORD ?? "";
+		const account = process.env.MIKROTIK_WEB_ACCOUNT ?? "";
+			const password = process.env.MIKROTIK_WEB_PASSWORD ?? "";
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {

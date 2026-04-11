@@ -5,7 +5,7 @@
  *
  * 1. **MikroTik web account** — mikrotik.com login for CHR trial licensing.
  *    One set of credentials, no per-machine variation.
- *    Env vars: MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD (legacy: MIKROTIK_ACCOUNT / MIKROTIK_PASSWORD).
+ *    Env vars: MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD.
  *
  * 2. **Instance credentials** — per-CHR username/password for REST API, exec, SSH.
  *    Stored per machine name.  Created automatically during provisioning (the
@@ -35,8 +35,8 @@ const INSTANCE_SERVICE = "com.quickchr.instance";
  *  Returns null when no credentials are found anywhere. */
 export async function getStoredCredentials(): Promise<MikrotikCredentials | null> {
 	// Env vars — highest priority.  New names first, legacy fallback.
-	const envAccount = process.env.MIKROTIK_WEB_ACCOUNT ?? process.env.MIKROTIK_ACCOUNT;
-	const envPassword = process.env.MIKROTIK_WEB_PASSWORD ?? process.env.MIKROTIK_PASSWORD;
+	const envAccount = process.env.MIKROTIK_WEB_ACCOUNT;
+	const envPassword = process.env.MIKROTIK_WEB_PASSWORD;
 	if (envAccount && envPassword) {
 		return { account: envAccount, password: envPassword };
 	}

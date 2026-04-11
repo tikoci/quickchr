@@ -706,8 +706,8 @@ async function cmdStart(argv: string[]) {
 
 	// --license-* flags (credentials from env if not supplied)
 	const licenseLevel = flag(flags, "license-level");
-	const licenseAccount = flag(flags, "license-account") ?? process.env.MIKROTIK_WEB_ACCOUNT ?? process.env.MIKROTIK_ACCOUNT;
-	const licensePassword = flag(flags, "license-password") ?? process.env.MIKROTIK_WEB_PASSWORD ?? process.env.MIKROTIK_PASSWORD;
+	const licenseAccount = flag(flags, "license-account") ?? process.env.MIKROTIK_WEB_ACCOUNT;
+	const licensePassword = flag(flags, "license-password") ?? process.env.MIKROTIK_WEB_PASSWORD;
 	if (licenseLevel || licenseAccount) {
 		if (!licenseAccount || !licensePassword) {
 			console.error("Error: --license-level requires --license-account and --license-password (or MIKROTIK_WEB_ACCOUNT/MIKROTIK_WEB_PASSWORD env vars).");
@@ -1003,8 +1003,8 @@ async function cmdLicense(argv: string[]) {
 	}
 
 	// Resolve credentials: explicit flags → env vars → stored credentials
-	let account = flag(flags, "account") ?? process.env.MIKROTIK_WEB_ACCOUNT ?? process.env.MIKROTIK_ACCOUNT;
-	let password = flag(flags, "password") ?? process.env.MIKROTIK_WEB_PASSWORD ?? process.env.MIKROTIK_PASSWORD;
+	let account = flag(flags, "account") ?? process.env.MIKROTIK_WEB_ACCOUNT;
+	let password = flag(flags, "password") ?? process.env.MIKROTIK_WEB_PASSWORD;
 	const level = (flag(flags, "level") as import("../lib/types.ts").LicenseLevel | undefined) ?? "p1";
 
 	if (!account || !password) {
@@ -1248,7 +1248,7 @@ Options:
 
 Credential resolution order (highest priority first):
   1. --account / --password flags
-  2. MIKROTIK_ACCOUNT / MIKROTIK_PASSWORD environment variables
+  2. MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD environment variables
   3. OS native secret store (macOS Keychain, Linux GNOME Keyring, Windows Credential Manager)
   4. ~/.config/quickchr/credentials.json (fallback)`);
 			break;
