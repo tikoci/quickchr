@@ -326,16 +326,25 @@ export async function waitForBoot(
 	httpPort: number,
 	timeoutMs: number = 120_000,
 ): Promise<boolean> {
-	const url = `http://127.0.0.1:${httpPort}/`;
+	// Probe the REST API directly — RouterOS serves the root URL before /rest is ready,
+	// so probing / causes ECONNRESET on subsequent REST calls.
+	const url = `http://127.0.0.1:${httpPort}/rest/system/identity`;
 	const deadline = Date.now() + timeoutMs;
 
 	while (Date.now() < deadline) {
 		try {
 			const r = await fetch(url, { signal: AbortSignal.timeout(3000) });
-			// Any HTTP response (including 401 Unauthorized, 403 Forbidden) means
-			// RouterOS is up. Connection refused / timeout means still booting.
-			if (r.status > 0) return true;
-		} catch { /* not ready yet */ }
+			if (r.status > 0) {
+				// REST accepted the connection, but RouterOS may still be finalizing
+				// initialization (e.g. after a package install reboot), causing it to
+				// reset subsequent connections with ECONNRESET. Confirm stability by
+				// waiting briefly and checking again before declaring boot complete.
+				await Bun.sleep(4000);
+				const r2 = await fetch(url, { signal: AbortSignal.timeout(3000) });
+				if (r2.status > 0) return true;
+				// Not stable yet — fall through to continue polling
+			}
+		} catch { /* not ready yet, or stability check failed */ }
 		await Bun.sleep(2000);
 	}
 

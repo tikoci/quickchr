@@ -111,6 +111,9 @@ async function main() {
 			case "exec":
 				await cmdExec(args.slice(1));
 				break;
+			case "qga":
+				await cmdQga(args.slice(1));
+				break;
 			case "license":
 				await cmdLicense(args.slice(1));
 				break;
@@ -527,6 +530,204 @@ async function cmdExec(argv: string[]) {
 		if (!result.output.endsWith("\n")) {
 			process.stdout.write("\n");
 		}
+	}
+}
+
+async function cmdQga(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const name = positional[0];
+	const operation = positional[1];
+
+	const USAGE = `Usage: quickchr qga <name> <operation> [options]
+
+Operations:
+  ping                 Liveness check — confirm QGA is responding
+  info                 List supported QGA commands reported by the agent
+  osinfo               OS version, kernel, architecture
+  hostname             RouterOS identity name
+  time                 System time (nanoseconds since epoch)
+  timezone             Timezone offset from UTC
+  networks             Network interfaces with IP assignments
+  fsfreeze-status      Filesystem freeze state (thawed|frozen)
+  fsfreeze-freeze      Freeze filesystem for consistent snapshot
+  fsfreeze-thaw        Thaw a frozen filesystem
+  shutdown             Graceful VM shutdown (destructive)
+  file-write           Write a file to RouterOS root (--path <name> --data <content>)
+  file-read            Read a RouterOS root file (--path <name>)
+  exec                 Run RouterOS script via QGA (--script <cmd>)
+
+QGA is x86_64 only — ARM64 CHR support is planned pending MikroTik firmware.
+
+Options:
+  --timeout <seconds>  Operation timeout (default: 10)`;
+
+	if (!name || !operation) {
+		const running = await getRunningMachines();
+		if (running.length > 0) {
+			printMachineListWithTip("qga", running.filter((m) => m.arch !== "arm64"));
+		}
+		console.log(`\n${USAGE}`);
+		process.exit(1);
+	}
+
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const machine = QuickCHR.get(name);
+	if (!machine) {
+		console.error(`Machine "${name}" not found.`);
+		process.exit(1);
+	}
+	if (machine.state.status !== "running") {
+		console.error(`Machine "${name}" is not running. Start it first: quickchr start ${name}`);
+		process.exit(1);
+	}
+
+	const timeoutMs = flag(flags, "timeout") ? Number(flag(flags, "timeout")) * 1000 : 10_000;
+	const {
+		qgaPing,
+		qgaInfo,
+		qgaGetOsInfo,
+		qgaGetHostName,
+		qgaGetTime,
+		qgaGetTimezone,
+		qgaGetNetworkInterfaces,
+		qgaFsFreezeStatus,
+		qgaFsFreezeFreeze,
+		qgaFsFreezeThaw,
+		qgaShutdown,
+		qgaFileWrite,
+		qgaFileRead,
+		qgaExec,
+	} = await import("../lib/qga.ts");
+	const { join } = await import("node:path");
+	const socketPath = join(machine.state.machineDir, "qga.sock");
+
+	if (machine.state.arch === "arm64") {
+		console.error(`Error [QGA_UNSUPPORTED]: QEMU Guest Agent is not yet functional on ARM64 CHR.`);
+		console.error(`  ARM64 QGA support is planned pending MikroTik firmware — x86_64 machines work today.`);
+		process.exit(1);
+	}
+
+	switch (operation) {
+		case "ping": {
+			await qgaPing(socketPath, timeoutMs);
+			console.log("pong — QGA is responding");
+			break;
+		}
+		case "info": {
+			const commands = await qgaInfo(socketPath, timeoutMs);
+			const enabled = commands.filter((c) => c.enabled).map((c) => c.name).sort();
+			const disabled = commands.filter((c) => !c.enabled).map((c) => c.name).sort();
+			console.log(`Supported commands (${enabled.length} enabled):`);
+			for (const cmd of enabled) console.log(`  ${cmd}`);
+			if (disabled.length > 0) {
+				console.log(`Disabled commands (${disabled.length}):`);
+				for (const cmd of disabled) console.log(`  ${cmd}`);
+			}
+			break;
+		}
+		case "osinfo": {
+			const info = await qgaGetOsInfo(socketPath, timeoutMs);
+			console.log(`name:          ${info.name}`);
+			console.log(`pretty-name:   ${info.prettyName}`);
+			console.log(`id:            ${info.id}`);
+			console.log(`kernel:        ${info.kernelRelease}`);
+			console.log(`machine:       ${info.machine}`);
+			break;
+		}
+		case "hostname": {
+			const hostname = await qgaGetHostName(socketPath, timeoutMs);
+			console.log(hostname);
+			break;
+		}
+		case "time": {
+			const ns = await qgaGetTime(socketPath, timeoutMs);
+			const ms = Math.floor(ns / 1_000_000);
+			const date = new Date(ms);
+			console.log(`${ns} ns  (${date.toISOString()})`);
+			break;
+		}
+		case "timezone": {
+			const tz = await qgaGetTimezone(socketPath, timeoutMs);
+			const sign = tz.offset >= 0 ? "+" : "-";
+			const abs = Math.abs(tz.offset);
+			const h = String(Math.floor(abs / 3600)).padStart(2, "0");
+			const m = String(Math.floor((abs % 3600) / 60)).padStart(2, "0");
+			const display = tz.zone ? `${tz.zone} (UTC${sign}${h}:${m})` : `UTC${sign}${h}:${m}`;
+			console.log(display);
+			break;
+		}
+		case "networks": {
+			const ifaces = await qgaGetNetworkInterfaces(socketPath, timeoutMs);
+			for (const iface of ifaces) {
+				const mac = iface.mac ? `  mac: ${iface.mac}` : "";
+				console.log(`${iface.name}${mac}`);
+				for (const ip of iface.ipAddresses) {
+					console.log(`  ${ip.type}  ${ip.address}/${ip.prefix}`);
+				}
+			}
+			break;
+		}
+		case "fsfreeze-status": {
+			const status = await qgaFsFreezeStatus(socketPath, timeoutMs);
+			console.log(status);
+			break;
+		}
+		case "fsfreeze-freeze": {
+			const count = await qgaFsFreezeFreeze(socketPath, timeoutMs);
+			console.log(`${count} filesystem(s) frozen`);
+			break;
+		}
+		case "fsfreeze-thaw": {
+			const count = await qgaFsFreezeThaw(socketPath, timeoutMs);
+			console.log(`${count} filesystem(s) thawed`);
+			break;
+		}
+		case "shutdown": {
+			console.log(`Sending shutdown to "${name}"...`);
+			await qgaShutdown(socketPath, timeoutMs);
+			console.log(`Shutdown sent — machine will terminate shortly.`);
+			break;
+		}
+		case "file-write": {
+			const path = flag(flags, "path");
+			const data = flag(flags, "data");
+			if (!path || data === undefined) {
+				console.error(`Usage: quickchr qga ${name} file-write --path <filename> --data <content>`);
+				process.exit(1);
+			}
+			await qgaFileWrite(socketPath, path, data, timeoutMs);
+			console.log(`Written: ${path}`);
+			break;
+		}
+		case "file-read": {
+			const path = flag(flags, "path");
+			if (!path) {
+				console.error(`Usage: quickchr qga ${name} file-read --path <filename>`);
+				process.exit(1);
+			}
+			const content = await qgaFileRead(socketPath, path, timeoutMs);
+			process.stdout.write(content);
+			if (content && !content.endsWith("\n")) process.stdout.write("\n");
+			break;
+		}
+		case "exec": {
+			const script = flag(flags, "script");
+			if (!script) {
+				console.error(`Usage: quickchr qga ${name} exec --script <routeros-command>`);
+				process.exit(1);
+			}
+			const result = await qgaExec(socketPath, script, timeoutMs);
+			if (result.stdout) {
+				process.stdout.write(result.stdout);
+				if (!result.stdout.endsWith("\n")) process.stdout.write("\n");
+			}
+			if (result.stderr) process.stderr.write(result.stderr);
+			if (result.exitcode !== 0) process.exit(result.exitcode);
+			break;
+		}
+		default:
+			console.error(`Unknown QGA operation: ${operation}\n\n${USAGE}`);
+			process.exit(1);
 	}
 }
 

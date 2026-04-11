@@ -146,7 +146,15 @@ export interface ChrInstance {
 
 	monitor(command: string): Promise<string>;
 	serial(): { readable: ReadableStream; writable: WritableStream };
-	qga(command: string, args?: object): Promise<unknown>;
+	/**
+	 * Execute any raw QGA command.  Prefer the typed helpers (`qgaGetOsInfo`,
+	 * `qgaGetNetworkInterfaces`, etc.) exported from this package for common
+	 * operations.  Use this for advanced / one-off commands.
+	 *
+	 * x86_64 only — throws `QGA_UNSUPPORTED` on ARM64 until MikroTik ships
+	 * guest-agent support for that architecture.
+	 */
+	qga(command: QgaCommand, args?: object): Promise<unknown>;
 
 	rest(path: string, opts?: RequestInit): Promise<unknown>;
 	/** Run a RouterOS CLI command against the instance. */
@@ -276,6 +284,80 @@ export interface QgaExecResult {
 	stdout: string;
 	stderr: string;
 }
+
+/**
+ * All QGA commands supported by RouterOS CHR (x86_64 only).
+ *
+ * Use with {@link ChrInstance.qga} for raw access, or call the typed QGA
+ * helper functions (`qgaGetOsInfo`, `qgaGetNetworkInterfaces`, etc.).
+ *
+ * RouterOS implements these via its own QGA (version "2.10.50") — not stock
+ * qemu-ga. The `guest-exec` command only accepts `input-data` (RouterOS script),
+ * not `path`. File operations use flat RouterOS filenames only (no directories).
+ *
+ * x86_64 only — ARM64 CHR does not start the QGA userspace daemon (MikroTik
+ * bug, tracked; ARM64 support is planned once MikroTik publishes a fix).
+ */
+export type QgaCommand =
+	| "guest-ping"
+	| "guest-info"
+	| "guest-get-osinfo"
+	| "guest-get-host-name"
+	| "guest-get-time"
+	| "guest-get-timezone"
+	| "guest-network-get-interfaces"
+	| "guest-fsfreeze-status"
+	| "guest-fsfreeze-freeze"
+	| "guest-fsfreeze-thaw"
+	| "guest-shutdown"
+	| "guest-exec"
+	| "guest-exec-status"
+	| "guest-file-open"
+	| "guest-file-read"
+	| "guest-file-write"
+	| "guest-file-close"
+	| "guest-file-flush";
+
+/** OS information returned by {@link qgaGetOsInfo}. */
+export interface QgaOsInfo {
+	/** Always "routeros" */
+	id: string;
+	/** "RouterOS" */
+	name: string;
+	/** e.g. "RouterOS 7.22" */
+	prettyName: string;
+	/** Linux kernel release, e.g. "5.6.3-64" */
+	kernelRelease: string;
+	/** CPU architecture, e.g. "x86_64" */
+	machine: string;
+}
+
+/** Single IP address on a network interface (from {@link qgaGetNetworkInterfaces}). */
+export interface QgaNetworkIpAddress {
+	type: "ipv4" | "ipv6";
+	address: string;
+	prefix: number;
+}
+
+/** Network interface as seen by RouterOS (from {@link qgaGetNetworkInterfaces}). */
+export interface QgaNetworkInterface {
+	/** RouterOS interface name, e.g. "ether1" */
+	name: string;
+	/** MAC address, e.g. "0e:61:47:d8:43:2a" */
+	mac?: string;
+	ipAddresses: QgaNetworkIpAddress[];
+}
+
+/** Timezone information returned by {@link qgaGetTimezone}. */
+export interface QgaTimezone {
+	/** Offset from UTC in seconds (positive = east of UTC) */
+	offset: number;
+	/** IANA timezone name if reported by the guest */
+	zone?: string;
+}
+
+/** Filesystem freeze state returned by {@link qgaFsFreezeStatus}. */
+export type QgaFsFreezeStatus = "thawed" | "frozen";
 
 // --- CHR License ---
 

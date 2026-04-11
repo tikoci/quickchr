@@ -2,7 +2,25 @@ import { describe, test, expect, afterEach, beforeEach } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createServer, type Server, type Socket as NetSocket } from "node:net";
-import { stripSyncMarkers, parseQgaMessages, qgaSync, qgaExec, qgaProbe, qgaInfo } from "../../src/lib/qga.ts";
+import {
+	stripSyncMarkers,
+	parseQgaMessages,
+	qgaSync,
+	qgaExec,
+	qgaProbe,
+	qgaInfo,
+	qgaPing,
+	qgaGetOsInfo,
+	qgaGetHostName,
+	qgaGetTime,
+	qgaGetTimezone,
+	qgaGetNetworkInterfaces,
+	qgaFsFreezeStatus,
+	qgaFsFreezeFreeze,
+	qgaFsFreezeThaw,
+	qgaFileWrite,
+	qgaFileRead,
+} from "../../src/lib/qga.ts";
 
 const TMP = join(import.meta.dir, ".tmp-qga-test");
 
@@ -333,6 +351,260 @@ describe("QGA error handling", () => {
 			})).rejects.toThrow("Command not found");
 
 			socket.destroy();
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Typed high-level helpers
+// ---------------------------------------------------------------------------
+
+describe("qgaPing", () => {
+	test("resolves without error when guest-ping returns empty object", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-ping") client.write(JSON.stringify({ return: {} }) + "\n");
+		});
+		try {
+			await expect(qgaPing(sockPath, 5000)).resolves.toBeUndefined();
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+describe("qgaGetOsInfo", () => {
+	test("returns parsed OS info", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-get-osinfo") {
+				client.write(JSON.stringify({
+					return: {
+						id: "routeros",
+						name: "RouterOS",
+						"pretty-name": "RouterOS 7.22",
+						"kernel-release": "5.6.3-64",
+						machine: "x86_64",
+					},
+				}) + "\n");
+			}
+		});
+		try {
+			const info = await qgaGetOsInfo(sockPath, 5000);
+			expect(info.id).toBe("routeros");
+			expect(info.prettyName).toBe("RouterOS 7.22");
+			expect(info.kernelRelease).toBe("5.6.3-64");
+			expect(info.machine).toBe("x86_64");
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+describe("qgaGetHostName", () => {
+	test("returns host-name string", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-get-host-name") {
+				client.write(JSON.stringify({ return: { "host-name": "MikroTik" } }) + "\n");
+			}
+		});
+		try {
+			const hostname = await qgaGetHostName(sockPath, 5000);
+			expect(hostname).toBe("MikroTik");
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+describe("qgaGetTime", () => {
+	test("returns nanoseconds as number", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const ns = 1774041353160410000;
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-get-time") {
+				client.write(JSON.stringify({ return: ns }) + "\n");
+			}
+		});
+		try {
+			const result = await qgaGetTime(sockPath, 5000);
+			expect(result).toBe(ns);
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+describe("qgaGetTimezone", () => {
+	test("returns timezone with offset only", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-get-timezone") {
+				client.write(JSON.stringify({ return: { offset: 0 } }) + "\n");
+			}
+		});
+		try {
+			const tz = await qgaGetTimezone(sockPath, 5000);
+			expect(tz.offset).toBe(0);
+			expect(tz.zone).toBeUndefined();
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	test("returns timezone with zone name when present", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-get-timezone") {
+				client.write(JSON.stringify({ return: { offset: 7200, zone: "Europe/Riga" } }) + "\n");
+			}
+		});
+		try {
+			const tz = await qgaGetTimezone(sockPath, 5000);
+			expect(tz.offset).toBe(7200);
+			expect(tz.zone).toBe("Europe/Riga");
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+describe("qgaGetNetworkInterfaces", () => {
+	test("parses interface list with IP addresses", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-network-get-interfaces") {
+				client.write(JSON.stringify({
+					return: [
+						{
+							name: "ether1",
+							"hardware-address": "0e:61:47:d8:43:2a",
+							"ip-addresses": [
+								{ "ip-address-type": "ipv4", "ip-address": "10.0.2.15", prefix: 24 },
+							],
+						},
+						{
+							name: "lo",
+							"ip-addresses": [],
+						},
+					],
+				}) + "\n");
+			}
+		});
+		try {
+			const ifaces = await qgaGetNetworkInterfaces(sockPath, 5000);
+			expect(ifaces).toHaveLength(2);
+			expect(ifaces[0]!.name).toBe("ether1");
+			expect(ifaces[0]!.mac).toBe("0e:61:47:d8:43:2a");
+			expect(ifaces[0]!.ipAddresses).toHaveLength(1);
+			expect(ifaces[0]!.ipAddresses[0]).toEqual({ type: "ipv4", address: "10.0.2.15", prefix: 24 });
+			expect(ifaces[1]!.name).toBe("lo");
+			expect(ifaces[1]!.mac).toBeUndefined();
+			expect(ifaces[1]!.ipAddresses).toHaveLength(0);
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+describe("qgaFsFreezeStatus", () => {
+	test("returns thawed when filesystem is normal", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-fsfreeze-status") {
+				client.write(JSON.stringify({ return: "thawed" }) + "\n");
+			}
+		});
+		try {
+			const status = await qgaFsFreezeStatus(sockPath, 5000);
+			expect(status).toBe("thawed");
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+describe("qgaFsFreezeFreeze / qgaFsFreezeThaw", () => {
+	test("freeze returns count of frozen filesystems", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-fsfreeze-freeze") {
+				client.write(JSON.stringify({ return: 1 }) + "\n");
+			}
+		});
+		try {
+			const count = await qgaFsFreezeFreeze(sockPath, 5000);
+			expect(count).toBe(1);
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	test("thaw returns count of thawed filesystems", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-fsfreeze-thaw") {
+				client.write(JSON.stringify({ return: 1 }) + "\n");
+			}
+		});
+		try {
+			const count = await qgaFsFreezeThaw(sockPath, 5000);
+			expect(count).toBe(1);
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
+describe("qgaFileWrite / qgaFileRead", () => {
+	test("file write sends open+write+close sequence", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const commands: string[] = [];
+		let writtenData = "";
+
+		const server = await createMockQga(sockPath, (cmd, args, client) => {
+			commands.push(cmd);
+			if (cmd === "guest-file-open") {
+				client.write(JSON.stringify({ return: 42 }) + "\n");
+			} else if (cmd === "guest-file-write") {
+				const argsRecord = args as Record<string, string>;
+				writtenData = atob(argsRecord["buf-b64"] ?? "");
+				client.write(JSON.stringify({ return: { count: writtenData.length, eof: false } }) + "\n");
+			} else if (cmd === "guest-file-close") {
+				// Simulate the RouterOS quirk: empty response (no JSON sent back)
+				// Our implementation ignores close timeout — no response needed
+			}
+		});
+
+		try {
+			await qgaFileWrite(sockPath, "test.txt", "hello world", 5000);
+			expect(commands).toContain("guest-file-open");
+			expect(commands).toContain("guest-file-write");
+			expect(commands).toContain("guest-file-close");
+			expect(writtenData).toBe("hello world");
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	test("file read returns decoded content", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-file-open") {
+				client.write(JSON.stringify({ return: 7 }) + "\n");
+			} else if (cmd === "guest-file-read") {
+				client.write(JSON.stringify({ return: { "buf-b64": btoa("file content"), eof: true, count: 12 } }) + "\n");
+			} else if (cmd === "guest-file-close") {
+				// No response (quirk)
+			}
+		});
+
+		try {
+			const content = await qgaFileRead(sockPath, "test.txt", 5000);
+			expect(content).toBe("file content");
 		} finally {
 			await closeServer(server);
 		}

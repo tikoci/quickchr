@@ -13,6 +13,7 @@ import type {
 	ExecResult,
 	LicenseInput,
 	MachineState,
+	QgaCommand,
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
@@ -171,7 +172,7 @@ function createInstance(state: MachineState): ChrInstance {
 			return serialStreams(state.machineDir);
 		},
 
-		async qga(command: string, args?: object): Promise<unknown> {
+		async qga(command: QgaCommand, args?: object): Promise<unknown> {
 			return qgaCommand(state.machineDir, state.arch, command, args);
 		},
 
@@ -207,7 +208,7 @@ function createInstance(state: MachineState): ChrInstance {
 				if (state.arch === "arm64") {
 					throw new QuickCHRError(
 						"QGA_UNSUPPORTED",
-						"QEMU Guest Agent is not functional on ARM64 CHR (userspace daemon doesn't start)",
+						"QEMU Guest Agent is not yet functional on ARM64 CHR — MikroTik arm64 guest agent support is planned but not yet released",
 					);
 				}
 				const socketPath = join(state.machineDir, "qga.sock");

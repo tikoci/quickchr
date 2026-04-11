@@ -17,6 +17,13 @@
  */
 
 import { connect, type Socket } from "node:net";
+import type {
+	QgaCommand,
+	QgaFsFreezeStatus,
+	QgaNetworkInterface,
+	QgaOsInfo,
+	QgaTimezone,
+} from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 
 /** Result of a QGA guest-exec command. */
@@ -302,6 +309,264 @@ export async function qgaInfo(
 			name: String(cmd.name),
 			enabled: Boolean(cmd.enabled),
 		}));
+	} finally {
+		socket.destroy();
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Typed high-level helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Internal helper — sync the QGA socket, send one command, return the
+ * raw `return` value, then destroy the socket.
+ */
+async function qgaRun<T>(
+	socketPath: string,
+	command: QgaCommand,
+	args?: Record<string, unknown>,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
+	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
+	try {
+		const payload: Record<string, unknown> = { execute: command };
+		if (args) payload.arguments = args;
+		return await sendAndReceive(socket, payload, timeoutMs) as T;
+	} finally {
+		socket.destroy();
+	}
+}
+
+/**
+ * Liveness probe — succeeds if QGA responds to guest-ping.
+ * Throws on failure (use {@link qgaProbe} for a boolean version).
+ */
+export async function qgaPing(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<void> {
+	await qgaRun<unknown>(socketPath, "guest-ping", undefined, timeoutMs);
+}
+
+/**
+ * OS information including RouterOS version and kernel build.
+ *
+ * Typical response:
+ * ```json
+ * { "id": "routeros", "name": "RouterOS", "pretty-name": "RouterOS 7.22",
+ *   "kernel-release": "5.6.3-64", "machine": "x86_64" }
+ * ```
+ */
+export async function qgaGetOsInfo(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<QgaOsInfo> {
+	const raw = await qgaRun<Record<string, unknown>>(socketPath, "guest-get-osinfo", undefined, timeoutMs);
+	return {
+		id: String(raw.id),
+		name: String(raw.name),
+		prettyName: String(raw["pretty-name"]),
+		kernelRelease: String(raw["kernel-release"]),
+		machine: String(raw.machine),
+	};
+}
+
+/**
+ * RouterOS identity name (equivalent to `/system identity get name`).
+ */
+export async function qgaGetHostName(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<string> {
+	const raw = await qgaRun<Record<string, unknown>>(socketPath, "guest-get-host-name", undefined, timeoutMs);
+	return String(raw["host-name"]);
+}
+
+/**
+ * System time as nanoseconds since the Unix epoch.
+ */
+export async function qgaGetTime(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<number> {
+	return qgaRun<number>(socketPath, "guest-get-time", undefined, timeoutMs);
+}
+
+/**
+ * Timezone configuration.  RouterOS CHR defaults to UTC (offset = 0).
+ */
+export async function qgaGetTimezone(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<QgaTimezone> {
+	const raw = await qgaRun<Record<string, unknown>>(socketPath, "guest-get-timezone", undefined, timeoutMs);
+	return {
+		offset: Number(raw.offset),
+		zone: raw.zone ? String(raw.zone) : undefined,
+	};
+}
+
+/**
+ * Network interfaces as seen by RouterOS, including MAC addresses and IP
+ * assignments.  Equivalent to `/ip address print` combined with
+ * `/interface print`.
+ */
+export async function qgaGetNetworkInterfaces(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<QgaNetworkInterface[]> {
+	const raw = await qgaRun<Array<Record<string, unknown>>>(
+		socketPath,
+		"guest-network-get-interfaces",
+		undefined,
+		timeoutMs,
+	);
+	return raw.map((iface) => ({
+		name: String(iface.name),
+		mac: iface["hardware-address"] ? String(iface["hardware-address"]) : undefined,
+		ipAddresses: (iface["ip-addresses"] as Array<Record<string, unknown>> ?? []).map((ip) => ({
+			type: String(ip["ip-address-type"]) as "ipv4" | "ipv6",
+			address: String(ip["ip-address"]),
+			prefix: Number(ip.prefix),
+		})),
+	}));
+}
+
+/**
+ * Filesystem freeze state.  Returns "thawed" (normal) or "frozen"
+ * (held for snapshot consistency).
+ */
+export async function qgaFsFreezeStatus(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<QgaFsFreezeStatus> {
+	const status = await qgaRun<string>(socketPath, "guest-fsfreeze-status", undefined, timeoutMs);
+	return status as QgaFsFreezeStatus;
+}
+
+/**
+ * Freeze the RouterOS filesystem for consistent snapshot capture.
+ * Returns the number of frozen filesystems.
+ * Call {@link qgaFsFreezeThaw} immediately after capturing the snapshot.
+ */
+export async function qgaFsFreezeFreeze(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<number> {
+	return qgaRun<number>(socketPath, "guest-fsfreeze-freeze", undefined, timeoutMs);
+}
+
+/**
+ * Thaw a previously frozen filesystem.
+ * Returns the number of thawed filesystems.
+ */
+export async function qgaFsFreezeThaw(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<number> {
+	return qgaRun<number>(socketPath, "guest-fsfreeze-thaw", undefined, timeoutMs);
+}
+
+/**
+ * Initiate a graceful shutdown of the RouterOS VM.
+ *
+ * The QEMU process will terminate within a few seconds. The QGA socket
+ * may close before a response is received — this is expected and handled
+ * gracefully.
+ */
+export async function qgaShutdown(
+	socketPath: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<void> {
+	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
+	try {
+		// guest-shutdown may close the socket before sending a response. Ignore errors.
+		await sendAndReceive(socket, { execute: "guest-shutdown" }, timeoutMs).catch(() => {});
+	} finally {
+		socket.destroy();
+	}
+}
+
+/**
+ * Write text content to a flat RouterOS file via the guest agent.
+ *
+ * **Path constraints (RouterOS QGA quirk):** Only flat filenames are accepted —
+ * no directory separators, no disk prefixes (`flash/`, `disk1/`), no Unix
+ * absolute paths.  Example valid names: `"backup.rsc"`, `"config.txt"`.
+ *
+ * Files written here are visible in RouterOS `/file print` and can be
+ * executed with `/import`.
+ *
+ * `guest-file-close` may return an empty response (protocol quirk) —
+ * this is handled gracefully; the write still succeeds.
+ */
+export async function qgaFileWrite(
+	socketPath: string,
+	filename: string,
+	content: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<void> {
+	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
+	try {
+		const handle = await sendAndReceive(
+			socket,
+			{ execute: "guest-file-open", arguments: { path: filename, mode: "w" } },
+			timeoutMs,
+		) as number;
+
+		await sendAndReceive(
+			socket,
+			{ execute: "guest-file-write", arguments: { handle, "buf-b64": btoa(content) } },
+			timeoutMs,
+		);
+
+		// guest-file-close often returns empty response — ignore timeout
+		await sendAndReceive(
+			socket,
+			{ execute: "guest-file-close", arguments: { handle } },
+			2000,
+		).catch(() => {});
+	} finally {
+		socket.destroy();
+	}
+}
+
+/**
+ * Read text content from a flat RouterOS file via the guest agent.
+ *
+ * See {@link qgaFileWrite} for path format constraints.
+ * Maximum file size: 1 MiB.
+ */
+export async function qgaFileRead(
+	socketPath: string,
+	filename: string,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<string> {
+	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
+	try {
+		const handle = await sendAndReceive(
+			socket,
+			{ execute: "guest-file-open", arguments: { path: filename, mode: "r" } },
+			timeoutMs,
+		) as number;
+
+		const readResult = await sendAndReceive(
+			socket,
+			{ execute: "guest-file-read", arguments: { handle, count: 1_048_576 } },
+			timeoutMs,
+		) as Record<string, unknown>;
+
+		const content = readResult["buf-b64"] ? atob(readResult["buf-b64"] as string) : "";
+
+		// guest-file-close often returns empty response — ignore timeout
+		await sendAndReceive(
+			socket,
+			{ execute: "guest-file-close", arguments: { handle } },
+			2000,
+		).catch(() => {});
+
+		return content;
 	} finally {
 		socket.destroy();
 	}

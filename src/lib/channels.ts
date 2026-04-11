@@ -9,7 +9,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { connect } from "node:net";
-import type { Arch } from "./types.ts";
+import type { Arch, QgaCommand } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { qgaSync, qgaProbe } from "./qga.ts";
 
@@ -123,14 +123,14 @@ export function serialStreams(machineDir: string): {
 export async function qgaCommand(
 	machineDir: string,
 	arch: Arch,
-	command: string,
+	command: QgaCommand,
 	args?: object,
 	timeoutMs: number = 10000,
 ): Promise<unknown> {
 	if (arch === "arm64") {
 		throw new QuickCHRError(
 			"QGA_UNSUPPORTED",
-			"QEMU Guest Agent is not functional on ARM64 CHR (userspace daemon doesn't start)",
+			"QEMU Guest Agent is not yet functional on ARM64 CHR — MikroTik arm64 guest agent support is planned but not yet released",
 		);
 	}
 

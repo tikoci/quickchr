@@ -469,7 +469,9 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 - [x] QGA protocol implementation — `src/lib/qga.ts`: `qgaSync()` (handshake with 0xFF stripping), `qgaExec()` (base64 script execution with polling), `qgaProbe()` (availability detection), `qgaInfo()` (supported command listing). Wired into `instance.exec()` as `--via=qga` (x86 only). Unit tests in `test/unit/qga.test.ts` (20 tests), integration tests in `test/integration/exec.test.ts`.
 - [x] Integration tests for QGA on x86 — verify `guest-sync-delimited`, `qgaProbe`, `:put` exec, identity query, `guest-info` command listing.
-- [ ] QGA file operations — push config files via guest agent (x86 only today). `qga.ts` is structured to expand with `qgaFileWrite()`, `qgaFileRead()`.
+- [x] QGA file operations — `qgaFileWrite(socketPath, filename, content)` and `qgaFileRead(socketPath, filename)` in `qga.ts`. Write + read roundtrip confirmed working by mikropkl lab testing. Handles `guest-file-close` empty-response quirk gracefully. Callers must use flat RouterOS filenames (no paths).
+- [x] QGA typed API — `QgaCommand` union type in `types.ts` for IDE discoverability. High-level typed helpers exported from `qga.ts` and `src/index.ts`: `qgaPing`, `qgaGetOsInfo`, `qgaGetHostName`, `qgaGetTime`, `qgaGetTimezone`, `qgaGetNetworkInterfaces`, `qgaFsFreezeStatus`, `qgaFsFreezeFreeze`, `qgaFsFreezeThaw`, `qgaShutdown`, `qgaFileWrite`, `qgaFileRead`. `instance.qga(command: QgaCommand)` updated to use typed command names.
+- [x] `quickchr qga <name> <operation>` CLI command — exposes all QGA operations: `ping`, `info`, `osinfo`, `hostname`, `time`, `timezone`, `networks`, `fsfreeze-status`, `fsfreeze-freeze`, `fsfreeze-thaw`, `shutdown`, `file-write`, `file-read`, `exec`. Fails fast on ARM64 with informative message about planned support.
 - [ ] ARM64 QGA — MikroTik has an open bug for ARM64 guest agent support. Once fixed, extend tests to arm64. Be ready to test when the fix drops.
 - [ ] `--via=auto` smart routing — try REST first, fall back to QGA (x86), then console. Now that all three transports exist, `auto` can intelligently probe and select.
 

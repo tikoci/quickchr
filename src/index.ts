@@ -30,7 +30,13 @@ export type {
 	PackageManager,
 	PlatformInfo,
 	PortMapping,
+	QgaCommand,
 	QgaExecResult,
+	QgaFsFreezeStatus,
+	QgaNetworkInterface,
+	QgaNetworkIpAddress,
+	QgaOsInfo,
+	QgaTimezone,
 	ServiceName,
 	StartOptions,
 } from "./lib/types.ts";
@@ -46,7 +52,24 @@ export type { ResolvedAuth } from "./lib/auth.ts";
 export { restExecute } from "./lib/exec.ts";
 
 // QGA (QEMU Guest Agent) utilities
-export { qgaExec, qgaProbe, qgaSync, qgaInfo } from "./lib/qga.ts";
+export {
+	qgaExec,
+	qgaProbe,
+	qgaSync,
+	qgaInfo,
+	qgaPing,
+	qgaGetOsInfo,
+	qgaGetHostName,
+	qgaGetTime,
+	qgaGetTimezone,
+	qgaGetNetworkInterfaces,
+	qgaFsFreezeStatus,
+	qgaFsFreezeFreeze,
+	qgaFsFreezeThaw,
+	qgaShutdown,
+	qgaFileWrite,
+	qgaFileRead,
+} from "./lib/qga.ts";
 export type { QgaCommandInfo } from "./lib/qga.ts";
 
 // Console exec utilities

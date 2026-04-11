@@ -168,6 +168,51 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 		expect(names).toContain("guest-ping");
 	}, 30_000);
 
+	test("QGA: qgaPing returns true", async () => {
+		if (!isQgaAvailable) return;
+		expect(instance).toBeDefined();
+		const { qgaPing } = await import("../../src/lib/qga.ts");
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const socketPath = join(instance!.state.machineDir, "qga.sock");
+		const result = await qgaPing(socketPath, 10_000);
+		expect(result).toBe(true);
+	}, 30_000);
+
+	test("QGA: qgaGetOsInfo returns RouterOS identity", async () => {
+		if (!isQgaAvailable) return;
+		expect(instance).toBeDefined();
+		const { qgaGetOsInfo } = await import("../../src/lib/qga.ts");
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const socketPath = join(instance!.state.machineDir, "qga.sock");
+		const info = await qgaGetOsInfo(socketPath, 10_000);
+		expect(info.id).toBe("routeros");
+		expect(info.machine).toBe("x86_64");
+		expect(typeof info.version).toBe("string");
+	}, 30_000);
+
+	test("QGA: qgaGetNetworkInterfaces includes ether1", async () => {
+		if (!isQgaAvailable) return;
+		expect(instance).toBeDefined();
+		const { qgaGetNetworkInterfaces } = await import("../../src/lib/qga.ts");
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const socketPath = join(instance!.state.machineDir, "qga.sock");
+		const ifaces = await qgaGetNetworkInterfaces(socketPath, 10_000);
+		expect(Array.isArray(ifaces)).toBe(true);
+		const names = ifaces.map((i) => i["name"]);
+		expect(names.some((n) => n.startsWith("ether"))).toBe(true);
+	}, 30_000);
+
+	test("QGA: qgaGetHostName returns non-empty string", async () => {
+		if (!isQgaAvailable) return;
+		expect(instance).toBeDefined();
+		const { qgaGetHostName } = await import("../../src/lib/qga.ts");
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const socketPath = join(instance!.state.machineDir, "qga.sock");
+		const hostname = await qgaGetHostName(socketPath, 10_000);
+		expect(typeof hostname).toBe("string");
+		expect(hostname.length).toBeGreaterThan(0);
+	}, 30_000);
+
 	test("QGA: throws on arm64", async () => {
 		if (machineArch !== "arm64") return;
 		expect(instance).toBeDefined();
