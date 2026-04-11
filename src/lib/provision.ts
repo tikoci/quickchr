@@ -129,20 +129,25 @@ export async function createUser(
 	const expectedGroup = group.trim().toLowerCase();
 	const deadline = Date.now() + 15_000;
 	while (Date.now() < deadline) {
-		const user = await readUser(httpPort, auth, name);
-		if (user) {
-			const actualGroup = String(user.group ?? "").trim().toLowerCase();
-			if (!actualGroup) {
-				await Bun.sleep(500);
-				continue;
+		try {
+			const user = await readUser(httpPort, auth, name);
+			if (user) {
+				const actualGroup = String(user.group ?? "").trim().toLowerCase();
+				if (!actualGroup) {
+					await Bun.sleep(500);
+					continue;
+				}
+				if (actualGroup !== expectedGroup) {
+					throw new QuickCHRError(
+						"PROCESS_FAILED",
+						`User "${name}" created with unexpected group (expected=${expectedGroup}, actual=${actualGroup})`,
+					);
+				}
+				return;
 			}
-			if (actualGroup !== expectedGroup) {
-				throw new QuickCHRError(
-					"PROCESS_FAILED",
-					`User "${name}" created with unexpected group (expected=${expectedGroup}, actual=${actualGroup})`,
-				);
-			}
-			return;
+		} catch (e) {
+			// Rethrow deliberate group mismatch errors; retry transient HTTP failures
+			if (e instanceof QuickCHRError && e.message.includes("unexpected group")) throw e;
 		}
 
 		await Bun.sleep(500);
@@ -160,19 +165,46 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 
 	const adminAuth = `Basic ${btoa("admin:")}`;
 
-	// Use the RouterOS action endpoint /rest/user/disable — equivalent to the CLI
-	// `/user disable admin` command. PATCH /rest/user/<name-or-id> is unreliable:
-	// RouterOS user records are keyed by .id (e.g. *1), and encodeURIComponent
-	// turns that into %2A1 which RouterOS may silently treat as a phantom resource.
-	// The action endpoint accepts `numbers: "admin"` (the CLI-style name reference)
-	// and is the same path the Winbox/CLI use.
-	const disableResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/disable`, {
-		method: "POST",
+	// Prefer alternate credentials when available — RouterOS silently ignores
+	// a user disabling itself via REST PATCH (returns 200 but no-ops).
+	// The newly-created user with "full" group can disable admin reliably.
+	const actionAuth = verifyAuth ?? adminAuth;
+
+	// Look up admin's internal .id (e.g. "*1") so we can target it precisely.
+	// RouterOS REST action endpoints interpret `numbers` as position/ID, not name,
+	// so `numbers: "admin"` silently no-ops. PATCH by .id is reliable: the `*`
+	// in the ID is a sub-delimiter (RFC 3986 path segments) and is NOT
+	// percent-encoded by the WHATWG URL constructor or Bun's fetch.
+	//
+	// Retry the lookup: the /rest/user endpoint can return wrong data (non-array)
+	// during the REST startup quirk period, even after /rest/system/resource is
+	// stable. Poll until we get a valid admin record.
+	let adminUser: Record<string, unknown> | undefined;
+	const lookupDeadline = Date.now() + 15_000;
+	while (Date.now() < lookupDeadline) {
+		try {
+			adminUser = await readUser(httpPort, actionAuth, "admin");
+			if (adminUser?.[".id"]) break;
+		} catch {
+			// Transient error (HTTP 500 during startup, auth propagation) — retry
+		}
+		await Bun.sleep(500);
+	}
+	if (!adminUser) {
+		throw new QuickCHRError("PROCESS_FAILED", "Cannot disable admin: user not found in user list after 15s of retries");
+	}
+	const adminId = String(adminUser[".id"] ?? "");
+	if (!adminId) {
+		throw new QuickCHRError("PROCESS_FAILED", "Cannot disable admin: user record has no .id");
+	}
+
+	const disableResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/${adminId}`, {
+		method: "PATCH",
 		headers: {
-			Authorization: adminAuth,
+			Authorization: actionAuth,
 			"Content-Type": "application/json",
 		},
-		body: JSON.stringify({ numbers: "admin" }),
+		body: JSON.stringify({ disabled: "yes" }),
 		signal: AbortSignal.timeout(10_000),
 	});
 
@@ -184,21 +216,31 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 		);
 	}
 
-	// Verify the change took effect.
-	// RouterOS REST uses "yes"/"no" strings for booleans (not JSON true/false).
-	// Use alternate credentials if provided — after disabling admin, admin creds
-	// may stop authenticating on subsequent requests.
+	// Validate the PATCH response body — RouterOS returns the updated user object.
+	// If the response confirms disabled=true, we know the change was applied.
+	// If the response is unexpected (startup quirk returning wrong data), retry.
+	let patchConfirmed = false;
+	try {
+		const patchBody = await disableResp.json() as Record<string, unknown>;
+		const patchDisabled = String(patchBody?.disabled ?? "");
+		patchConfirmed = patchDisabled === "true" || patchDisabled === "yes";
+	} catch { /* non-JSON body — fall through to verification loop */ }
+
+	if (patchConfirmed) return;
+
+	// PATCH didn't confirm the change in its body — poll until the change is visible.
 	const readAuth = verifyAuth ?? adminAuth;
+	let lastDiag = "";
 	const deadline = Date.now() + 45_000;
 	while (Date.now() < deadline) {
 		// Primary: read admin user via alternate creds and check the disabled field.
-		// RouterOS omits disabled:"no" for enabled users; "yes" when actually disabled.
 		try {
 			const user = await readUser(httpPort, readAuth, "admin");
 			const d = String(user?.disabled ?? "");
 			if (d === "yes" || d === "true") return;
-		} catch {
-			// Transient error (new user creds propagating, network blip) — fall through
+			lastDiag = `readUser(auth=${verifyAuth ? "verifyAuth" : "adminAuth"}) returned disabled=${JSON.stringify(user?.disabled)}`;
+		} catch (e) {
+			lastDiag = `readUser threw: ${e instanceof Error ? e.message : String(e)}`;
 		}
 
 		// Secondary: if admin credentials get 401, admin auth is rejected = disabled.
@@ -215,7 +257,7 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 
 	throw new QuickCHRError(
 		"PROCESS_FAILED",
-		"Admin disable timed out after 45s — admin user is still enabled",
+		`Admin disable timed out after 45s — admin user is still enabled. Last diagnostic: ${lastDiag}`,
 	);
 }
 

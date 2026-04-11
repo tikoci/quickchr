@@ -293,8 +293,10 @@ describe.skipIf(SKIP)("matrica — parallel version matrix", () => {
 
 				// 3. Wait for reboot (QEMU process stays up; RouterOS reboots inside)
 				//    Give RouterOS time to shut down + apply config before polling.
+				//    4 parallel CHRs rebooting simultaneously are slower than a single
+				//    boot; use a generous timeout (240 s) to stay green under load.
 				await Bun.sleep(15_000);
-				const rebooted = await inst.waitForBoot(120_000);
+				const rebooted = await inst.waitForBoot(240_000);
 				expect(rebooted).toBe(true);
 
 				// 4. Export via SSH — `:export` is RouterOS CLI, not a REST endpoint
@@ -348,7 +350,7 @@ describe.skipIf(SKIP)("matrica — parallel version matrix", () => {
 				}
 			}
 		},
-		// reset + reboot per instance = up to 120s each, parallel
+		// reset + reboot per instance = up to 255s each (15s sleep + 240s waitForBoot), parallel
 		600_000,
 	);
 });

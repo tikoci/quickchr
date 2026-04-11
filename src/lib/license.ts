@@ -13,6 +13,9 @@
 import type { LicenseLevel, LicenseOptions } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 
+/** Default timeout for waiting for a license change to propagate (ms). */
+const LICENSE_VERIFY_TIMEOUT = 30_000;
+
 /** Apply or renew a CHR trial license via /system/license/renew.
  *  @param httpPort  REST API port (e.g. 9180)
  *  @param opts      MikroTik account credentials + desired level
@@ -57,6 +60,25 @@ export async function renewLicense(
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
 			`License renewal failed: HTTP ${response.status} — ${text}`,
+		);
+	}
+
+	// Verify the license change took effect by polling /system/license.
+	// MikroTik license activation involves a server round-trip and is not
+	// instantaneous — reading back immediately after a 200 response often
+	// still returns "free".
+	if (opts.level) {
+		const deadline = Date.now() + LICENSE_VERIFY_TIMEOUT;
+		while (Date.now() < deadline) {
+			try {
+				const info = await getLicenseInfo(httpPort, chrUser, chrPass);
+				if (info.level === opts.level) return;
+			} catch { /* transient read failure — keep polling */ }
+			await Bun.sleep(1000);
+		}
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`License renewal accepted but level did not change to "${opts.level}" within ${LICENSE_VERIFY_TIMEOUT / 1000}s`,
 		);
 	}
 }

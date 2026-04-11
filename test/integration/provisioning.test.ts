@@ -21,7 +21,7 @@ async function cleanupMachine(name: string): Promise<void> {
 
 describe.skipIf(SKIP)("user provisioning", () => {
 	beforeAll(async () => {
-		for (const name of ["integration-prov-bg", "integration-prov-fg", "integration-prov-managed"]) {
+		for (const name of ["integration-prov-bg", "integration-prov-disable", "integration-prov-fg", "integration-prov-managed"]) {
 			await cleanupMachine(name);
 		}
 	});
@@ -63,7 +63,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 				channel: "stable",
 				arch: "x86",
 				background: true,
-				name: "integration-prov-bg",
+				name: "integration-prov-disable",
 				user: { name: "skyfi", password: "SkyfiPass1" },
 				disableAdmin: true,
 			});
@@ -91,7 +91,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }
 			}
-			await cleanupMachine("integration-prov-bg");
+			await cleanupMachine("integration-prov-disable");
 		}
 	}, 180_000);
 
