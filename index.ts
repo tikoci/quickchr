@@ -28,3 +28,9 @@ export type {
 
 export { QuickCHRError } from "./src/lib/types.ts";
 export type { ErrorCode } from "./src/lib/types.ts";
+
+// MikroTik web account credential resolution (env vars → Bun.secrets → null).
+// Exported so consumers can apply licenses via chr.license() without
+// re-implementing the credential resolution chain.
+export { getStoredCredentials } from "./src/lib/credentials.ts";
+export type { MikrotikCredentials } from "./src/lib/credentials.ts";
