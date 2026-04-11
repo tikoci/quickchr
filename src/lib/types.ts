@@ -154,6 +154,14 @@ export interface ChrInstance {
 	/** Apply or renew a CHR trial license. */
 	license(opts: LicenseOptions): Promise<void>;
 
+	/** List extra packages available for this instance's version and arch.
+	 *  Downloads and caches the all_packages ZIP on the first call. */
+	availablePackages(): Promise<string[]>;
+	/** Install extra package(s), reboot, and wait until REST API is ready again.
+	 *  Accepts a single package name or an array. Returns the names that were
+	 *  actually installed (missing packages are skipped with a warning). */
+	installPackage(packages: string | string[]): Promise<string[]>;
+
 	/** Build an env-var map for spawning a subprocess against this instance.
 	 *  Includes QUICKCHR_* prefixed keys plus legacy URLBASE/BASICAUTH for compat.
 	 *  Resolves auth from the instance secret store, provisioned user, or admin default.

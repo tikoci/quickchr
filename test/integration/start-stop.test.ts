@@ -259,3 +259,71 @@ describe.skipIf(SKIP)("instance channels — serial console", () => {
 		}
 	}, 180_000);
 });
+
+describe.skipIf(SKIP)("instance-level package methods", () => {
+	beforeAll(async () => {
+		await cleanupMachine("integration-pkg-instance");
+	});
+
+	test("availablePackages() lists packages, installPackage(first+last) activates them", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch,
+				background: true,
+				name: "integration-pkg-instance",
+				secureLogin: false,
+			});
+
+			expect(instance.state.status).toBe("running");
+
+			// --- availablePackages() ---
+			const pkgs = await instance.availablePackages();
+			expect(Array.isArray(pkgs)).toBe(true);
+			expect(pkgs.length).toBeGreaterThan(0);
+			// Must be sorted and contain at least one well-known extra package
+			expect(pkgs).toContain("container");
+			// Verify sort order
+			const sorted = [...pkgs].sort();
+			expect(pkgs).toEqual(sorted);
+
+			// Second call must return from the local cache — same result, no network
+			const cached = await instance.availablePackages();
+			expect(cached).toEqual(pkgs);
+
+			// Pick the first and last package (alphabetical) as representative extremes
+			const first = pkgs[0];
+			const last = pkgs[pkgs.length - 1];
+			expect(first).toBeDefined();
+			expect(last).toBeDefined();
+			const toInstall = first === last ? [first] : [first, last];
+
+			// --- installPackage() ---
+			// This uploads via SCP, reboots, and waits for REST to come back up.
+			const installed = await instance.installPackage(toInstall);
+			expect(installed.length).toBe(toInstall.length);
+			expect(installed).toContain(first);
+			if (first !== last) expect(installed).toContain(last);
+
+			// Verify against /system/package that each package is actually active
+			const systemPkgs = await instance.rest("/system/package") as Array<Record<string, unknown>>;
+			expect(Array.isArray(systemPkgs)).toBe(true);
+
+			for (const pkg of installed) {
+				const entry = systemPkgs.find((p) => p.name === pkg);
+				expect(entry, `package "${pkg}" should appear in /system/package`).toBeDefined();
+				expect(entry?.disabled, `package "${pkg}" should not be disabled`).not.toBe("true");
+			}
+		} finally {
+			if (instance) {
+				// destroy() = stop() + remove() in one call
+				try { await instance.destroy(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-pkg-instance");
+		}
+	}, 720_000); // 12 min: image download (if needed) + boot + SCP upload + reboot + boot
+});

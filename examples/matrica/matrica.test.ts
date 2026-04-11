@@ -137,8 +137,8 @@ describe.skipIf(SKIP)("matrica — parallel version matrix", () => {
 
 			expect(instances.size).toBe(CHANNELS.length);
 		},
-		// LITE: native arch with HVF ≈ 30s. Full: 4 ARM64 under TCG ≈ 5 min.
-		LITE ? 120_000 : 300_000,
+		// LITE: native arch with HVF ≈ 30s. Full: 4 ARM64 + pkg reboot under TCG ≈ 8 min.
+		LITE ? 120_000 : 600_000,
 	);
 
 	test(

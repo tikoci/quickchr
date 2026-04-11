@@ -35,7 +35,7 @@ import {
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, type QemuLaunchConfig } from "./qemu.ts";
 import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
-import { installPackages, installAllPackages } from "./packages.ts";
+import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense } from "./license.ts";
 import { resolveAuth } from "./auth.ts";
@@ -248,6 +248,49 @@ function createInstance(state: MachineState): ChrInstance {
 				}
 				state.licenseLevel = opts.level;
 			}
+		},
+
+		async availablePackages(): Promise<string[]> {
+			return downloadAndListPackages(state.version, state.arch);
+		},
+
+		async installPackage(packages: string | string[]): Promise<string[]> {
+			const names = typeof packages === "string" ? [packages] : packages;
+			if (names.length === 0) return [];
+
+			const extractDir = await downloadPackages(state.version, state.arch);
+			const packagePaths: string[] = [];
+			const installed: string[] = [];
+			for (const pkg of names) {
+				const pkgPath = findPackageFile(extractDir, pkg);
+				if (!pkgPath) {
+					console.warn(`[quickchr] Package "${pkg}" not found in all_packages for ${state.version} (${state.arch})`);
+					continue;
+				}
+				packagePaths.push(pkgPath);
+				installed.push(pkg);
+			}
+			if (packagePaths.length === 0) return [];
+
+			await uploadPackages(packagePaths, ports.ssh);
+
+			// Reboot to activate packages
+			try {
+				const auth = await resolveAuth(state);
+				await fetch(`http://127.0.0.1:${ports.http}/rest/system/reboot`, {
+					method: "POST",
+					headers: { Authorization: auth.header },
+					signal: AbortSignal.timeout(5000),
+				});
+			} catch {
+				// Expected — connection drops during reboot
+			}
+
+			// Wait for the instance to come back up
+			const timeout = defaultBootTimeout(state.arch, true);
+			await waitForBoot(ports.http, timeout);
+
+			return installed;
 		},
 
 		async destroy(): Promise<void> {
@@ -811,7 +854,7 @@ export class QuickCHR {
 						`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s. Ensure QEMU was fully power-cycled and try again.`,
 					);
 				}
-				await waitForDeviceModeApi(httpPort, 30_000);
+				await waitForDeviceModeApi(httpPort, bootTimeout);
 			} else if (selfRebooted) {
 				// RouterOS applied the change and self-rebooted; wait for it to come back.
 				console.log("  Device-mode self-rebooted; waiting for CHR to recover...");
@@ -822,7 +865,7 @@ export class QuickCHR {
 						`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s.`,
 					);
 				}
-				await waitForDeviceModeApi(httpPort, 30_000);
+				await waitForDeviceModeApi(httpPort, bootTimeout);
 			}
 
 			const actual = await readDeviceMode(httpPort);

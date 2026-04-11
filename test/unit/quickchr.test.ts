@@ -139,4 +139,16 @@ describe("ChrInstance API surface (dryRun)", () => {
 		// Just verifying the type is accepted — no license renewal on dryRun
 		expect(instance).toBeDefined();
 	});
+
+	test("dryRun instance exposes availablePackages()", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		expect(typeof instance.availablePackages).toBe("function");
+	});
+
+	test("dryRun instance exposes installPackage()", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		expect(typeof instance.installPackage).toBe("function");
+	});
 });
