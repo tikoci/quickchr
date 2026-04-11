@@ -167,17 +167,23 @@ export async function runWizard(): Promise<void> {
 		clack.log.info("Not all features shown. Use CLI --device-mode-enable for additional settings.");
 	}
 
-	// 7. User setup
-	const addUser = await clack.confirm({
-		message: "Create a custom user?",
-		initialValue: false,
+	// 7. User setup — quickchr managed login is the default; keeps admin:empty as opt-in
+	const userChoice = await clack.select({
+		message: "CHR login setup:",
+		options: [
+			{ value: "managed", label: "quickchr managed login", hint: "auto-generated password (recommended)" },
+			{ value: "custom", label: "Custom user", hint: "you provide username + password" },
+			{ value: "admin", label: "Keep admin with no password", hint: "less secure" },
+		],
+		initialValue: "managed",
 	});
-	if (clack.isCancel(addUser)) { clack.cancel("Cancelled."); process.exit(0); }
+	if (clack.isCancel(userChoice)) { clack.cancel("Cancelled."); process.exit(0); }
 
 	let user: { name: string; password: string } | undefined;
 	let disableAdmin = false;
+	let secureLogin: boolean | undefined;
 
-	if (addUser) {
+	if (userChoice === "custom") {
 		const userName = await clack.text({
 			message: "Username:",
 			validate: (v) => {
@@ -199,7 +205,10 @@ export async function runWizard(): Promise<void> {
 		});
 		if (clack.isCancel(disable)) { clack.cancel("Cancelled."); process.exit(0); }
 		disableAdmin = disable;
+	} else if (userChoice === "admin") {
+		secureLogin = false;
 	}
+	// "managed" uses defaults (secureLogin=undefined → true)
 
 	// 8. License — optional trial license via MikroTik.com account.
 	//    Free CHR runs at 1 Mbps. A trial license unlocks 1/10 Gbps or unlimited.
@@ -293,6 +302,7 @@ export async function runWizard(): Promise<void> {
 		deviceMode,
 		user,
 		disableAdmin,
+		secureLogin,
 		license,
 		background: background as boolean,
 	};

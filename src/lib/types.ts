@@ -57,6 +57,8 @@ export interface MachineConfig {
 	deviceMode?: DeviceModeOptions;
 	user?: { name: string; password: string };
 	disableAdmin?: boolean;
+	/** Create a 'quickchr' managed account with a generated password.  Defaults to true. */
+	secureLogin?: boolean;
 	portBase: number;
 	excludePorts: ServiceName[];
 	extraPorts: PortMapping[];
@@ -87,6 +89,9 @@ export interface StartOptions {
 	installAllPackages?: boolean;
 	user?: { name: string; password: string };
 	disableAdmin?: boolean;
+	/** Create a 'quickchr' managed account with a generated password.  Defaults to true.
+	 *  Set to false to keep admin with no password (exec still works). */
+	secureLogin?: boolean;
 	portBase?: number;
 	excludePorts?: ServiceName[];
 	extraPorts?: PortMapping[];

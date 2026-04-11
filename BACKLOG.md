@@ -211,8 +211,8 @@ Meta:
 
 Environment:
   QUICKCHR_NO_PROMPT=1    Force non-interactive (bare 'quickchr' runs 'help' instead of 'setup')
-  MIKROTIK_ACCOUNT        MikroTik.com account email (for license via 'set')
-  MIKROTIK_PASSWORD       MikroTik.com password (for license via 'set')
+  MIKROTIK_WEB_ACCOUNT    MikroTik.com account email (for license via 'set')
+  MIKROTIK_WEB_PASSWORD   MikroTik.com password (for license via 'set')
 ```
 
 ### Command Details
@@ -260,7 +260,7 @@ Unified interface for machine properties that were previously separate commands 
 ```text
 # License
 quickchr set my-chr --license --account user@example.com --password secret
-quickchr set my-chr --license                    # uses MIKROTIK_ACCOUNT/PASSWORD env
+quickchr set my-chr --license                    # uses MIKROTIK_WEB_ACCOUNT/PASSWORD env
 
 # Device mode
 quickchr set my-chr --device-mode advanced
@@ -455,7 +455,12 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 ### Credentials
 
-- [ ] Credential profiles — save/restore username+password per machine or as a shared default. `rest()` and CLI commands auto-use stored credentials. Clack prompts handle the "which credential?" decision interactively.
+- [x] **Credential overhaul** — replaced ~260 lines of OS-specific keychain code (`security` CLI / `secret-tool` / PowerShell) with `Bun.secrets` wrapper (`src/lib/secrets.ts`). Falls back to `~/.config/quickchr/` config files for Node.js / headless Linux compatibility.
+- [x] **Two credential scopes** — MikroTik web account (licensing via `com.quickchr.mikrotik-web` service) separated from per-instance CHR credentials (`com.quickchr.instance` service). Env vars renamed `MIKROTIK_WEB_ACCOUNT`/`MIKROTIK_WEB_PASSWORD` (legacy `MIKROTIK_ACCOUNT`/`MIKROTIK_PASSWORD` still accepted).
+- [x] **quickchr managed account** — new default: auto-creates a `quickchr` user with a generated password on each CHR instance. Password saved to secret store. Replaces reliance on `admin:""`. Opt out with `--no-secure-login`. Wizard offers 3 choices: managed (default), custom user, or keep admin.
+- [x] **`resolveAuth()` async + secrets lookup** — auth resolution now checks instance secrets (priority 2 after explicit args, before machine.json state). `remove()` and `clean()` clean up instance credentials.
+- [ ] Credential profiles — save/restore username+password per machine or as a shared default. `rest()` and CLI commands auto-use stored credentials.
+- [ ] SSH key-based auth — generate/store SSH keys for CHR instances as alternative to password auth.
 
 ### Templates & Upgrade
 

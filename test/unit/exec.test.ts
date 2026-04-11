@@ -5,37 +5,37 @@ import { restExecute } from "../../src/lib/exec.ts";
 // --- resolveAuth tests ---
 
 describe("resolveAuth", () => {
-	test("explicit user+password overrides everything", () => {
-		const state = { user: { name: "prov", password: "provpass" }, disableAdmin: true };
-		const result = resolveAuth(state, "explicit", "secret");
+	test("explicit user+password overrides everything", async () => {
+		const state = { name: "test-chr", user: { name: "prov", password: "provpass" }, disableAdmin: true };
+		const result = await resolveAuth(state, "explicit", "secret");
 		expect(result.user).toBe("explicit");
 		expect(result.header).toBe(`Basic ${btoa("explicit:secret")}`);
 	});
 
-	test("explicit user with no password uses empty password", () => {
-		const state = { user: undefined, disableAdmin: false };
-		const result = resolveAuth(state, "admin");
+	test("explicit user with no password uses empty password", async () => {
+		const state = { name: "test-chr", user: undefined, disableAdmin: false };
+		const result = await resolveAuth(state, "admin");
 		expect(result.user).toBe("admin");
 		expect(result.header).toBe(`Basic ${btoa("admin:")}`);
 	});
 
-	test("uses provisioned user from state when no explicit override", () => {
-		const state = { user: { name: "myuser", password: "mypass" }, disableAdmin: false };
-		const result = resolveAuth(state);
+	test("uses provisioned user from state when no explicit override", async () => {
+		const state = { name: "test-chr", user: { name: "myuser", password: "mypass" }, disableAdmin: false };
+		const result = await resolveAuth(state);
 		expect(result.user).toBe("myuser");
 		expect(result.header).toBe(`Basic ${btoa("myuser:mypass")}`);
 	});
 
-	test("falls back to admin with empty password", () => {
-		const state = { user: undefined, disableAdmin: false };
-		const result = resolveAuth(state);
+	test("falls back to admin with empty password", async () => {
+		const state = { name: "test-chr", user: undefined, disableAdmin: false };
+		const result = await resolveAuth(state);
 		expect(result.user).toBe("admin");
 		expect(result.header).toBe(`Basic ${btoa("admin:")}`);
 	});
 
-	test("returns admin even when disableAdmin is true and no provisioned user", () => {
-		const state = { user: undefined, disableAdmin: true };
-		const result = resolveAuth(state);
+	test("returns admin even when disableAdmin is true and no provisioned user", async () => {
+		const state = { name: "test-chr", user: undefined, disableAdmin: true };
+		const result = await resolveAuth(state);
 		expect(result.user).toBe("admin");
 		// Caller will get 401 — we don't throw
 	});

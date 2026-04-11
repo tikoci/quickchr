@@ -437,6 +437,13 @@ async function cmdAdd(argv: string[]) {
 	}
 	opts.disableAdmin = flagBool(flags, "disable-admin");
 
+	// --secure-login / --no-secure-login
+	if (flags["secure-login"] === false) {
+		opts.secureLogin = false;
+	} else if (flagBool(flags, "secure-login")) {
+		opts.secureLogin = true;
+	}
+
 	const state = await QuickCHR.add(opts);
 
 	const { toChrPorts } = await import("../lib/network.ts");
@@ -699,11 +706,11 @@ async function cmdStart(argv: string[]) {
 
 	// --license-* flags (credentials from env if not supplied)
 	const licenseLevel = flag(flags, "license-level");
-	const licenseAccount = flag(flags, "license-account") ?? process.env.MIKROTIK_ACCOUNT;
-	const licensePassword = flag(flags, "license-password") ?? process.env.MIKROTIK_PASSWORD;
+	const licenseAccount = flag(flags, "license-account") ?? process.env.MIKROTIK_WEB_ACCOUNT ?? process.env.MIKROTIK_ACCOUNT;
+	const licensePassword = flag(flags, "license-password") ?? process.env.MIKROTIK_WEB_PASSWORD ?? process.env.MIKROTIK_PASSWORD;
 	if (licenseLevel || licenseAccount) {
 		if (!licenseAccount || !licensePassword) {
-			console.error("Error: --license-level requires --license-account and --license-password (or MIKROTIK_ACCOUNT/MIKROTIK_PASSWORD env vars).");
+			console.error("Error: --license-level requires --license-account and --license-password (or MIKROTIK_WEB_ACCOUNT/MIKROTIK_WEB_PASSWORD env vars).");
 			process.exit(1);
 		}
 		opts.license = {
@@ -721,6 +728,13 @@ async function cmdStart(argv: string[]) {
 	}
 
 	opts.disableAdmin = flagBool(flags, "disable-admin");
+
+	// --secure-login / --no-secure-login
+	if (flags["secure-login"] === false) {
+		opts.secureLogin = false;
+	} else if (flagBool(flags, "secure-login")) {
+		opts.secureLogin = true;
+	}
 
 	// Background default: true. Explicitly foreground only with --fg / --foreground / --no-background / --no-bg.
 	const wantFg =
@@ -989,8 +1003,8 @@ async function cmdLicense(argv: string[]) {
 	}
 
 	// Resolve credentials: explicit flags → env vars → stored credentials
-	let account = flag(flags, "account") ?? process.env.MIKROTIK_ACCOUNT;
-	let password = flag(flags, "password") ?? process.env.MIKROTIK_PASSWORD;
+	let account = flag(flags, "account") ?? process.env.MIKROTIK_WEB_ACCOUNT ?? process.env.MIKROTIK_ACCOUNT;
+	let password = flag(flags, "password") ?? process.env.MIKROTIK_WEB_PASSWORD ?? process.env.MIKROTIK_PASSWORD;
 	const level = (flag(flags, "level") as import("../lib/types.ts").LicenseLevel | undefined) ?? "p1";
 
 	if (!account || !password) {
@@ -1005,7 +1019,7 @@ async function cmdLicense(argv: string[]) {
 
 	if (!account || !password) {
 		if (isNoPrompt()) {
-			console.error("No credentials found. Set MIKROTIK_ACCOUNT and MIKROTIK_PASSWORD, or pass --account/--password.");
+			console.error("No credentials found. Set MIKROTIK_WEB_ACCOUNT and MIKROTIK_WEB_PASSWORD, or pass --account/--password.");
 			process.exit(1);
 		}
 
@@ -1099,8 +1113,8 @@ Commands:
   help [command]          Show help
 
 Environment:
-  MIKROTIK_ACCOUNT        MikroTik.com account email (for license)
-  MIKROTIK_PASSWORD       MikroTik.com password (for license)
+  MIKROTIK_WEB_ACCOUNT    MikroTik.com account email (for license)
+  MIKROTIK_WEB_PASSWORD   MikroTik.com password (for license)
 
 Run 'quickchr help <command>' for command-specific help.`);
 }
@@ -1124,6 +1138,7 @@ Options:
   --install-all-packages  Install all packages on first boot
   --add-user <u:p>      Create user on first boot (name:password)
   --disable-admin       Disable the default admin account on first boot
+  --no-secure-login     Keep admin with no password (skip managed account)
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
@@ -1182,6 +1197,7 @@ Options:
   --add-package <pkg>   Extra package to install (repeatable)
   --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
+  --no-secure-login     Keep admin with no password (skip managed account)
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
@@ -1189,8 +1205,8 @@ Options:
   --vmnet-bridge <if>   vmnet-bridge networking (macOS), e.g. en0
   --install-all-packages  Install all packages from all_packages.zip
   --license-level <l>   Apply trial license: p1 (1 Gbps), p10 (10 Gbps), unlimited
-  --license-account <a> MikroTik account email (or use MIKROTIK_ACCOUNT env var)
-  --license-password <p> MikroTik password (or use MIKROTIK_PASSWORD env var)
+  --license-account <a> MikroTik account email (or use MIKROTIK_WEB_ACCOUNT env var)
+  --license-password <p> MikroTik password (or use MIKROTIK_WEB_PASSWORD env var)
   --device-mode <m>     Configure device-mode: rose|advanced|basic|home|auto|skip
   --device-mode-enable <f>  Set one or more device-mode flags to yes
   --device-mode-disable <f> Set one or more device-mode flags to no

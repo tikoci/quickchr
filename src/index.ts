@@ -57,9 +57,10 @@ export { isQgaReady } from "./lib/channels.ts";
 export { renewLicense, getLicenseInfo } from "./lib/license.ts";
 export type { LicenseInfo } from "./lib/license.ts";
 
-// Credential utilities (OS keychain)
+// Credential utilities
 export { getStoredCredentials, saveCredentials, deleteCredentials, credentialStorageLabel } from "./lib/credentials.ts";
-export type { MikrotikCredentials } from "./lib/credentials.ts";
+export { getInstanceCredentials, saveInstanceCredentials, deleteInstanceCredentials } from "./lib/credentials.ts";
+export type { MikrotikCredentials, InstanceCredentials } from "./lib/credentials.ts";
 
 // Package utilities
 export { downloadPackages, listAvailablePackages, downloadAndListPackages, installPackages, installAllPackages } from "./lib/packages.ts";

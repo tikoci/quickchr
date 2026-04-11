@@ -21,7 +21,7 @@ async function cleanupMachine(name: string): Promise<void> {
 
 describe.skipIf(SKIP)("user provisioning", () => {
 	beforeAll(async () => {
-		for (const name of ["integration-prov-bg", "integration-prov-fg"]) {
+		for (const name of ["integration-prov-bg", "integration-prov-fg", "integration-prov-managed"]) {
 			await cleanupMachine(name);
 		}
 	});
@@ -127,6 +127,41 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			await cleanupMachine("integration-prov-fg");
 		}
 	}, 180_000);
+
+	test("default: quickchr managed account auto-created when no user specified", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { getInstanceCredentials } = await import("../../src/lib/credentials.ts");
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch: "x86",
+				background: true,
+				name: "integration-prov-managed",
+			});
+
+			// Instance credentials must have been saved to the secret store
+			const creds = await getInstanceCredentials("integration-prov-managed");
+			expect(creds).not.toBeNull();
+			expect(creds?.user).toBe("quickchr");
+
+			// The managed account must authenticate against the REST API
+			const resp = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{
+					headers: { Authorization: `Basic ${btoa(`${creds?.user}:${creds?.password}`)}` },
+					signal: AbortSignal.timeout(10_000),
+				},
+			);
+			expect(resp.status).toBe(200);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-managed");
+		}
+	}, 180_000);
 });
 
 describe.skipIf(SKIP)("provisioning corner cases", () => {
@@ -165,7 +200,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			}
 			await cleanupMachine("integration-prov-corner");
 		}
-	}, 180_000);
+	}, 300_000);
 
 	test("createUser sets the user group to 'full' by default", async () => {
 		// RouterOS has a concept of user groups. The library must place the new user
@@ -206,5 +241,5 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			}
 			await cleanupMachine("integration-prov-corner");
 		}
-	}, 180_000);
+	}, 300_000);
 });

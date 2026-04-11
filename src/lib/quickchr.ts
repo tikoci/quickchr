@@ -37,6 +37,7 @@ import { installPackages, installAllPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense } from "./license.ts";
 import { resolveAuth } from "./auth.ts";
+import { deleteInstanceCredentials, credentialStorageLabel } from "./credentials.ts";
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec } from "./console.ts";
@@ -89,6 +90,8 @@ function createInstance(state: MachineState): ChrInstance {
 			if (state.pid && isMachineRunning(state)) {
 				await stopQemu(state.pid);
 			}
+			// Clean up stored instance credentials
+			await deleteInstanceCredentials(state.name);
 			removeState(state.name);
 		},
 
@@ -107,6 +110,9 @@ function createInstance(state: MachineState): ChrInstance {
 			// Remove EFI vars to force re-creation
 			const efiVars = join(state.machineDir, "efi-vars.fd");
 			if (existsSync(efiVars)) rmSync(efiVars);
+
+			// Clean up stored instance credentials (re-provisioned on next start)
+			await deleteInstanceCredentials(state.name);
 
 			// Update state
 			const current = loadMachine(state.name);
@@ -135,7 +141,7 @@ function createInstance(state: MachineState): ChrInstance {
 			const url = `${restUrl}/rest${path.startsWith("/") ? path : "/" + path}`;
 			const headers = new Headers(opts?.headers);
 			if (!headers.has("Authorization")) {
-				const auth = resolveAuth(state);
+				const auth = await resolveAuth(state);
 				headers.set("Authorization", auth.header);
 			}
 			if (!headers.has("Content-Type") && opts?.body) {
@@ -148,11 +154,12 @@ function createInstance(state: MachineState): ChrInstance {
 				throw new Error(`REST ${response.status}: ${body}`);
 			}
 
-			const ct = response.headers.get("content-type") || "";
-			if (ct.includes("application/json")) {
-				return response.json();
+			const text = await response.text();
+			try {
+				return JSON.parse(text) as unknown;
+			} catch {
+				return text;
 			}
-			return response.text();
 		},
 
 		async exec(command: string, opts?: ExecOptions): Promise<ExecResult> {
@@ -171,7 +178,7 @@ function createInstance(state: MachineState): ChrInstance {
 			}
 
 			if (via === "console") {
-				const auth = resolveAuth(state, opts?.user, opts?.password);
+				const auth = await resolveAuth(state, opts?.user, opts?.password);
 				const result = await consoleExec(
 					state.machineDir,
 					command,
@@ -188,7 +195,7 @@ function createInstance(state: MachineState): ChrInstance {
 					`exec transport "${via}" is not yet implemented`,
 				);
 			}
-			const auth = resolveAuth(state, opts?.user, opts?.password);
+			const auth = await resolveAuth(state, opts?.user, opts?.password);
 			return restExecute(restUrl, auth, command, opts);
 		},
 
@@ -425,6 +432,7 @@ export class QuickCHR {
 					user: opts.user ?? existing.user,
 					disableAdmin: opts.disableAdmin ?? existing.disableAdmin,
 					license: opts.license,
+					secureLogin: opts.secureLogin,
 				};
 				const hasPending = !!(
 					pendingOpts.installAllPackages ||
@@ -507,7 +515,8 @@ export class QuickCHR {
 			opts.user ||
 			opts.disableAdmin ||
 			opts.license ||
-			hasDeviceModeProvisioning
+			hasDeviceModeProvisioning ||
+			opts.secureLogin !== false
 		);
 		const spawnInBackground = background || (!background && hasProvisioning);
 		const state: MachineState = {
@@ -574,6 +583,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				license: opts.license,
+				secureLogin: opts.secureLogin,
 			}, launchConfig);
 		}
 
@@ -609,6 +619,7 @@ export class QuickCHR {
 			user?: { name: string; password: string };
 			disableAdmin?: boolean;
 			license?: LicenseOptions;
+			secureLogin?: boolean;
 		},
 		launchConfig: QemuLaunchConfig,
 	): Promise<void> {
@@ -747,8 +758,22 @@ export class QuickCHR {
 			}
 		}
 
-		if (opts.user || opts.disableAdmin) {
-			await provision(chrPorts.http, opts.user, opts.disableAdmin);
+		if (opts.user || opts.disableAdmin || opts.secureLogin !== false) {
+			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin);
+			if (result.user) {
+				// Persist user info in state (password placeholder — real password in secret store)
+				const current = loadMachine(machineState.name);
+				if (current) {
+					current.user = { name: result.user.name, password: "(stored in secrets)" };
+					saveMachine(current);
+				}
+				machineState.user = { name: result.user.name, password: result.user.password };
+				if (!opts.user) {
+					// Auto-created quickchr account — show the password once
+					console.log(`  quickchr account created — user: ${result.user.name}, password: ${result.user.password}`);
+					console.log(`  Password saved to ${credentialStorageLabel()}`);
+				}
+			}
 		}
 	}
 
@@ -763,6 +788,7 @@ export class QuickCHR {
 			user?: { name: string; password: string };
 			disableAdmin?: boolean;
 			license?: LicenseOptions;
+			secureLogin?: boolean;
 		},
 	): Promise<ChrInstance> {
 		const lockPath = join(state.machineDir, ".start-lock");
@@ -781,7 +807,8 @@ export class QuickCHR {
 				provisioningOpts.deviceMode ||
 				provisioningOpts.user ||
 				provisioningOpts.disableAdmin ||
-				provisioningOpts.license
+				provisioningOpts.license ||
+				provisioningOpts.secureLogin !== false
 			)
 		);
 		// Always boot in background when provisioning is needed

@@ -3,9 +3,22 @@
  */
 
 import { QuickCHRError } from "./types.ts";
+import { saveInstanceCredentials } from "./credentials.ts";
+import { generatePassword } from "./password.ts";
+
+/** The default user name created by quickchr for managed CHR access. */
+export const QUICKCHR_USER = "quickchr";
+
+export interface ProvisionResult {
+	/** The user that was created (or null if none). */
+	user: { name: string; password: string } | null;
+}
 
 async function readUser(httpPort: number, auth: string, name: string): Promise<Record<string, unknown> | undefined> {
-	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/user?name=${encodeURIComponent(name)}`, {
+	// Fetch the full user list and filter client-side.  RouterOS REST filter
+	// query syntax differs across versions and is unreliable for name-based
+	// lookups; fetching all users is safe given the small number of entries.
+	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/user`, {
 		headers: { Authorization: auth },
 		signal: AbortSignal.timeout(5000),
 	});
@@ -14,16 +27,22 @@ async function readUser(httpPort: number, auth: string, name: string): Promise<R
 		const body = await response.text();
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`Failed to read user "${name}": HTTP ${response.status} — ${body}`,
+			`Failed to read user list: HTTP ${response.status} — ${body}`,
 		);
 	}
 
 	const users = await response.json() as Record<string, unknown>[];
-	if (!Array.isArray(users) || users.length === 0) return undefined;
-	return users.find((u) => String(u.name ?? "") === name) ?? users[0];
+	if (!Array.isArray(users)) return undefined;
+	return users.find((u) => u.name === name);
 }
 
-/** Wait for the REST API to become responsive. */
+/** Wait for the REST API to become responsive.
+ *
+ * On a fresh CHR image with an expired admin (forced-password-change-on-first-login),
+ * the REST API has a startup quirk where early GET /rest/system/resource requests
+ * return the /user list instead of the resource object — a 200 response but with
+ * the wrong payload. Poll until the response shape is the expected singleton object
+ * (has `board-name`) so callers downstream can trust it. */
 async function waitForRest(
 	httpPort: number,
 	timeoutMs: number = 60000,
@@ -37,7 +56,15 @@ async function waitForRest(
 				headers: { Authorization: auth },
 				signal: AbortSignal.timeout(3000),
 			});
-			if (response.ok) return;
+			if (response.ok) {
+				const body = await response.json().catch(() => null) as unknown;
+				// Expect a singleton object shaped like { "board-name": ..., "architecture-name": ..., ... }.
+				// Arrays (user list) or missing board-name mean the REST layer is still in
+				// its first-call bootstrap state — keep polling.
+				if (body && typeof body === "object" && !Array.isArray(body) && "board-name" in body) {
+					return;
+				}
+			}
 		} catch {
 			// Not ready yet
 		}
@@ -45,6 +72,27 @@ async function waitForRest(
 	}
 
 	throw new QuickCHRError("BOOT_TIMEOUT", "REST API did not become available");
+}
+
+/** Clear admin's expired-password flag by re-setting its password as admin itself.
+ *
+ * A fresh CHR image ships with admin marked `expired: true` (forced
+ * password change on first login). While expired, RouterOS REST will
+ * sometimes return the `/user` list as the body of unrelated GETs (notably
+ * `/system/resource`) — a startup quirk that breaks clients that trust the
+ * response shape. Running `/user/set admin password=""` via `/rest/execute`
+ * clears the expired flag without changing the effective password, ending
+ * the quirky period. */
+async function clearAdminExpiry(httpPort: number): Promise<void> {
+	const auth = `Basic ${btoa("admin:")}`;
+	try {
+		await fetch(`http://127.0.0.1:${httpPort}/rest/execute`, {
+			method: "POST",
+			headers: { Authorization: auth, "Content-Type": "application/json" },
+			body: JSON.stringify({ script: "/user/set admin password=\"\"", "as-string": "" }),
+			signal: AbortSignal.timeout(10_000),
+		});
+	} catch { /* best-effort — provisioning still works without this */ }
 }
 
 /** Create a user via the REST API. */
@@ -55,6 +103,7 @@ export async function createUser(
 	group: string = "full",
 ): Promise<void> {
 	await waitForRest(httpPort);
+	await clearAdminExpiry(httpPort);
 
 	const auth = `Basic ${btoa("admin:")}`;
 	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/user/add`, {
@@ -112,9 +161,11 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 	const adminAuth = `Basic ${btoa("admin:")}`;
 
 	// Use the RouterOS action endpoint /rest/user/disable — equivalent to the CLI
-	// `/user disable admin` command. Avoids PATCH + ID path encoding issues (RouterOS
-	// uses IDs like *1 which encodeURIComponent turns into %2A1, which RouteOS may not
-	// decode back, causing the PATCH to silently no-op against a phantom resource).
+	// `/user disable admin` command. PATCH /rest/user/<name-or-id> is unreliable:
+	// RouterOS user records are keyed by .id (e.g. *1), and encodeURIComponent
+	// turns that into %2A1 which RouterOS may silently treat as a phantom resource.
+	// The action endpoint accepts `numbers: "admin"` (the CLI-style name reference)
+	// and is the same path the Winbox/CLI use.
 	const disableResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/disable`, {
 		method: "POST",
 		headers: {
@@ -168,29 +219,54 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 	);
 }
 
-/** Run all provisioning steps based on the config. */
+/** Run all provisioning steps based on the config.
+ *
+ * When `user` is provided, creates that exact user. When `user` is omitted
+ * but `secureLogin` is true (or unset — it defaults to true), a `quickchr`
+ * managed account is created automatically with a generated password.
+ *
+ * Returns the user that was created (if any) so callers can display the
+ * password and store it.
+ */
 export async function provision(
 	httpPort: number,
+	machineName: string,
 	user?: { name: string; password: string },
 	shouldDisableAdmin?: boolean,
-): Promise<void> {
-	if (!user && !shouldDisableAdmin) return;
+	secureLogin?: boolean,
+): Promise<ProvisionResult> {
+	// Determine what user to create.
+	// Priority: explicit user > auto-create quickchr account (secureLogin defaults true)
+	let effectiveUser = user ?? null;
+	if (!effectiveUser && secureLogin !== false) {
+		effectiveUser = { name: QUICKCHR_USER, password: generatePassword() };
+	}
+
+	if (!effectiveUser && !shouldDisableAdmin) {
+		// No user, no disable — save admin:"" as instance creds for symmetry
+		await saveInstanceCredentials(machineName, "admin", "");
+		return { user: null };
+	}
 
 	await waitForRest(httpPort);
 
-	if (user) {
-		await createUser(httpPort, user.name, user.password);
+	if (effectiveUser) {
+		await createUser(httpPort, effectiveUser.name, effectiveUser.password);
+		// Persist to secret store so resolveAuth() picks it up
+		await saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
 	}
 
 	if (shouldDisableAdmin) {
-		if (!user) {
+		if (!effectiveUser) {
 			console.warn("Warning: disabling admin without creating another user — you may lose access");
 		}
 		// Pass the new user's auth for verification — after disabling admin,
 		// admin creds may stop working for REST queries.
-		const verifyAuth = user
-			? `Basic ${btoa(`${user.name}:${user.password}`)}`
+		const verifyAuth = effectiveUser
+			? `Basic ${btoa(`${effectiveUser.name}:${effectiveUser.password}`)}`
 			: undefined;
 		await disableAdmin(httpPort, verifyAuth);
 	}
+
+	return { user: effectiveUser };
 }
