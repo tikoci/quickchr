@@ -980,3 +980,69 @@ Items that don't fit cleanly into one priority tier.
 | tikoci/vscode-tikbook | VS Code extension; will use quickchr as backend (replacing UTM) |
 | `~/GitHub/chr-armed` | OCI/AWS CHR deployment. **Vendor from here:** serial console provisioning (`src/oracle/console.ts`) — full first-boot sequence handling (license Y/n, password change, `\r` not `\r\n`). Also: ARM64 CHR lacks AWS ENA driver (MikroTik bug reported) |
 | `~/Lab/tiktui` | Archived HTMX+SSE experiment; lesson: don't combine experiments in one project |
+
+### Library consumer friction (from restraml integration tests)
+
+The design intent of quickchr is one code base that handles "set up a CHR" for
+admins, testing, cloud, and library consumers — so many downstream tikoci
+projects can reach for it inside integration tests or bun scripts without
+re-rolling QEMU/provisioning glue. `restraml/scripts/deep-inspect-multi-arch.ts`
+is the first real external test of that surface (boots x86 + arm64 CHRs with
+all extra packages, applies p1 trial, spawns `deep-inspect.ts` as a subprocess
+against each). These are friction points it hit. None were blockers — all were
+worked around in the consumer — but each one is a place where a library ask
+should shift into quickchr itself, because the next consumer will hit the same
+thing.
+
+- [ ] **One-shot "start + license"** — common flow is boot → apply p1 trial →
+  use. Today that's `QuickCHR.start()` → `getStoredCredentials()` →
+  `instance.license({...})`, a three-step chain every caller re-writes.
+  Propose: `StartOptions.license: "p1" | "p10" | ...` which internally
+  resolves credentials via the existing `MIKROTIK_WEB_ACCOUNT` env vars or
+  `Bun.secrets` and applies the license before returning. Consumers that
+  want to bring their own credentials keep using `instance.license({...})`.
+  Unblocked by the Apr 2026 barrel-export of `getStoredCredentials`, but
+  that's the leaky form — this is the clean form.
+- [ ] **`instance.subprocessEnv()` helper** — "run a child process against
+  this CHR over REST" is a common integration-test pattern. Today callers
+  hand-roll `URLBASE` (concatenating `restUrl` + `/rest`) and `BASICAUTH`
+  (guessing the right user:pass string from `secureLogin`). A helper
+  returning `Record<string, string>` for the env avoids hand-rolled URL
+  mistakes and makes the pattern copy-pasteable:
+  `Bun.spawn([...], { env: { ...process.env, ...chr.subprocessEnv() } })`.
+  Should honor `secureLogin` and any provisioned user so callers don't have
+  to know which auth form is active.
+- [ ] **Clearer `start()` readiness contract.** With `installAllPackages: true`,
+  the returned instance is already REST-ready post-reboot — `waitForBoot()`
+  against it returns in ~2ms. That's fine behavior, but it wasn't obvious
+  from the type; restraml added a belt-and-suspenders `waitForBoot()` just
+  in case. Either the docstring on `start()` should explicitly state "the
+  returned instance is REST-reachable when `installAllPackages` is set", or
+  expose an explicit `ready: Promise<void>` on `ChrInstance` that resolves
+  once every provisioning step has settled. The goal: a caller reading the
+  types alone should know they don't need to add their own wait loop.
+- [ ] **Arch-aware defaults for `mem` and boot timeout.** restraml hardcodes
+  `arm64 ? 1024 : 512` MB and `arm64 ? 300s : 120s` wait because TCG on x86
+  needs the headroom. Either quickchr's own defaults could distinguish arches
+  (and let the caller override), or there could be an advisory
+  `QuickCHR.recommendedStartOptions({ arch, installAllPackages })` that
+  returns a sensible baseline for the caller to merge in. Prefer the former
+  — callers shouldn't have to know that TCG needs more memory.
+- [ ] **`stop({ destroy: true })` or explicit `destroy()`.** Today `stop()`
+  kills QEMU but leaves the machine directory on disk, which is right for
+  the `--keep-running` / post-mortem case but produces clutter when neither
+  flag is set. Orchestrators that spin up a throwaway CHR, crawl it, and
+  move on want a single call that fully cleans up. Could be an option on
+  `stop()` or a separate `instance.destroy()` that stops-then-removes.
+- [ ] **VM-load telemetry during a window** (future, speculative). The
+  restraml crawl sees ~0.7% `/console/inspect` batch timeouts symmetrically
+  across x86 and arm64 — almost certainly parallelism-induced RouterOS
+  slowdown, not client timing, since it's reproducible and load-shaped
+  rather than load-rate-shaped. If quickchr exposed CPU / memory samples
+  from the QGA or QEMU monitor control channel for a caller-specified time
+  window (`instance.captureLoad({ durationMs, interval })` → time-series),
+  consumers could correlate retries with guest load spikes and start
+  answering "how much parallelism is too much for `/console/inspect` on
+  this RouterOS build". Related to the P3 QGA section, but this is the
+  *library API consumer* angle — a bun test that kicks off N concurrent
+  calls wants a load fingerprint back.
