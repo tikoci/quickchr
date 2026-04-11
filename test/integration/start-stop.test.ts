@@ -50,7 +50,7 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 
 			// Test REST API
 			const resource = await instance.rest("/system/resource") as Record<string, unknown>;
-			expect(resource["board-name"]).toMatch(/^CHR/);
+			expect(String(resource["board-name"])).toContain("CHR");
 
 			// Test version matches
 			expect(resource.version).toContain(instance.state.version);

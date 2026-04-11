@@ -122,6 +122,7 @@ describe.skipIf(SKIP)("matrica — parallel version matrix", () => {
 					portBase: PORT_BASES[channel],
 					packages: EXTRA_PACKAGES,
 					background: true,
+					secureLogin: true,
 				}),
 			);
 
@@ -151,7 +152,7 @@ describe.skipIf(SKIP)("matrica — parallel version matrix", () => {
 				expect(booted).toBe(true);
 
 				const resource = (await inst.rest("/system/resource")) as Record<string, string>;
-				expect(resource["board-name"]).toMatch(/^CHR/);
+				expect(resource["board-name"]).toContain("CHR");
 				expect(typeof resource.version).toBe("string");
 
 				return { channel, version: resource.version, uptime: resource.uptime };

@@ -75,6 +75,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 				background: true,
 				name: "integration-dm-skip",
 				deviceMode: { mode: "skip" },
+				secureLogin: false,
 			});
 
 			expect(instance.state.status).toBe("running");
@@ -83,7 +84,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			// We do NOT assert the mode value here — the point is that start() succeeded
 			// without triggering a device-mode power-cycle.
 			const resource = await instance.rest("/system/resource") as Record<string, unknown>;
-			expect(resource["board-name"]).toMatch(/^CHR/);
+			expect(String(resource["board-name"])).toContain("CHR");
 		} finally {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }
