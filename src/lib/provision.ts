@@ -5,6 +5,7 @@
 import { QuickCHRError } from "./types.ts";
 import { saveInstanceCredentials } from "./credentials.ts";
 import { generatePassword } from "./password.ts";
+import { waitForBoot } from "./qemu.ts";
 
 /** The default user name created by quickchr for managed CHR access. */
 export const QUICKCHR_USER = "quickchr";
@@ -36,42 +37,20 @@ async function readUser(httpPort: number, auth: string, name: string): Promise<R
 	return users.find((u) => u.name === name);
 }
 
-/** Wait for the REST API to become responsive.
+/** Wait for the REST API to be fully ready on a fresh (unprovisioned) CHR.
  *
- * On a fresh CHR image with an expired admin (forced-password-change-on-first-login),
- * the REST API has a startup quirk where early GET /rest/system/resource requests
- * return the /user list instead of the resource object — a 200 response but with
- * the wrong payload. Poll until the response shape is the expected singleton object
- * (has `board-name`) so callers downstream can trust it. */
+ * Delegates to the shared waitForBoot which handles the "expired admin" quirk
+ * (fresh CHR returns /user list for all GETs) and requires two consecutive
+ * stable responses before declaring boot complete. */
 async function waitForRest(
 	httpPort: number,
-	timeoutMs: number = 60000,
+	timeoutMs: number = 60_000,
 ): Promise<void> {
-	const start = Date.now();
-	const auth = `Basic ${btoa("admin:")}`;
-
-	while (Date.now() - start < timeoutMs) {
-		try {
-			const response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/resource`, {
-				headers: { Authorization: auth },
-				signal: AbortSignal.timeout(3000),
-			});
-			if (response.ok) {
-				const body = await response.json().catch(() => null) as unknown;
-				// Expect a singleton object shaped like { "board-name": ..., "architecture-name": ..., ... }.
-				// Arrays (user list) or missing board-name mean the REST layer is still in
-				// its first-call bootstrap state — keep polling.
-				if (body && typeof body === "object" && !Array.isArray(body) && "board-name" in body) {
-					return;
-				}
-			}
-		} catch {
-			// Not ready yet
-		}
-		await Bun.sleep(1000);
+	// Provisioning always runs on a fresh CHR — use admin: (empty password)
+	const booted = await waitForBoot(httpPort, timeoutMs, `Basic ${btoa("admin:")}`);
+	if (!booted) {
+		throw new QuickCHRError("BOOT_TIMEOUT", "REST API did not become available");
 	}
-
-	throw new QuickCHRError("BOOT_TIMEOUT", "REST API did not become available");
 }
 
 /** Clear admin's expired-password flag by re-setting its password as admin itself.

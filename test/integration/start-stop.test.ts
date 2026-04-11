@@ -300,7 +300,8 @@ describe.skipIf(SKIP)("instance-level package methods", () => {
 			const last = pkgs[pkgs.length - 1];
 			expect(first).toBeDefined();
 			expect(last).toBeDefined();
-			const toInstall = first === last ? [first] : [first, last];
+			if (!first || !last) throw new Error("pkgs array was unexpectedly empty");
+			const toInstall: string[] = first === last ? [first] : [first, last];
 
 			// --- installPackage() ---
 			// This uploads via SCP, reboots, and waits for REST to come back up.

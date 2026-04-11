@@ -319,32 +319,71 @@ export async function stopMachineByName(_name: string, state: MachineState): Pro
 	return stopped;
 }
 
-/** Wait for RouterOS to boot by polling HTTP health check.
- * Accepts any HTTP response as "booted" — 401/403 (auth required) means
- * the server is up; connection errors mean it is still starting. */
+/**
+ * Wait for the RouterOS REST layer to be fully stable.
+ *
+ * RouterOS startup is staged from our perspective:
+ *   1. Connection refused — QEMU still booting
+ *   2. ECONNRESET — HTTP server started but REST subsystem not yet accepting
+ *   3. 401 from /rest — auth middleware is up; REST handler may still be initializing
+ *   4. 200 but wrong body — "expired admin" quirk: fresh CHR returns /user list for all GETs
+ *   5. 200 with correct body — REST is fully operational
+ *
+ * With proper credentials this function reaches stage 5 before returning. With
+ * unauthenticated or admin-disabled instances (where we get 401) it accepts
+ * stage 3 — auth rejection proves the REST layer responded, which is sufficient
+ * for callers that do not need body validation.
+ *
+ * Requires 2 consecutive successful probes to prevent false-positives during
+ * the brief window where RouterOS intermittently resets new connections
+ * immediately after coming up.
+ *
+ * @param httpPort  HTTP port of the CHR instance.
+ * @param timeoutMs Overall deadline (default 120 s).
+ * @param auth      HTTP Basic Authorization header to use for probes.
+ *                  Defaults to `admin:` (empty password) which works on fresh
+ *                  CHR images; pass instance credentials for post-reboot probes
+ *                  on provisioned machines so body validation can be performed.
+ */
 export async function waitForBoot(
 	httpPort: number,
 	timeoutMs: number = 120_000,
+	auth: string = `Basic ${btoa("admin:")}`,
 ): Promise<boolean> {
-	// Probe the REST API directly — RouterOS serves the root URL before /rest is ready,
-	// so probing / causes ECONNRESET on subsequent REST calls.
-	const url = `http://127.0.0.1:${httpPort}/rest/system/identity`;
+	const url = `http://127.0.0.1:${httpPort}/rest/system/resource`;
 	const deadline = Date.now() + timeoutMs;
+	let consecutiveReady = 0;
 
 	while (Date.now() < deadline) {
 		try {
-			const r = await fetch(url, { signal: AbortSignal.timeout(3000) });
-			if (r.status > 0) {
-				// REST accepted the connection, but RouterOS may still be finalizing
-				// initialization (e.g. after a package install reboot), causing it to
-				// reset subsequent connections with ECONNRESET. Confirm stability by
-				// waiting briefly and checking again before declaring boot complete.
-				await Bun.sleep(4000);
-				const r2 = await fetch(url, { signal: AbortSignal.timeout(3000) });
-				if (r2.status > 0) return true;
-				// Not stable yet — fall through to continue polling
+			const r = await fetch(url, {
+				headers: { Authorization: auth },
+				signal: AbortSignal.timeout(3000),
+			});
+
+			if (r.status === 401 || r.status === 403) {
+				// Auth rejected — the REST layer is up and responded, even though
+				// we cannot validate the body. Count as ready.
+				consecutiveReady++;
+			} else if (r.ok) {
+				// On a fresh CHR with an expired admin account, all GET requests
+				// return the /user list instead of the real resource. Only accept
+				// the response once the body is the expected singleton object.
+				const body = await r.json().catch(() => null) as unknown;
+				if (body && typeof body === "object" && !Array.isArray(body) && "board-name" in (body as object)) {
+					consecutiveReady++;
+				} else {
+					consecutiveReady = 0; // wrong body — still in startup quirk phase
+				}
+			} else {
+				consecutiveReady = 0;
 			}
-		} catch { /* not ready yet, or stability check failed */ }
+
+			if (consecutiveReady >= 2) return true;
+		} catch {
+			// ECONNRESET, connection refused, parse error — not ready yet
+			consecutiveReady = 0;
+		}
 		await Bun.sleep(2000);
 	}
 

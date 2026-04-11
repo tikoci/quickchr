@@ -29,10 +29,9 @@ export async function renewLicense(
 	chrPass = "",
 ): Promise<void> {
 	const auth = `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
-	const body: Record<string, string> = {
-		account: opts.account,
-		password: opts.password,
-	};
+	const body: Record<string, string> = {};
+	if (opts.account) body.account = opts.account;
+	if (opts.password) body.password = opts.password;
 	if (opts.level) {
 		body.level = opts.level;
 	}

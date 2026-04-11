@@ -107,7 +107,10 @@ function createInstance(state: MachineState): ChrInstance {
 		sshPort: ports.ssh,
 
 		async waitForBoot(timeoutMs?: number): Promise<boolean> {
-			return waitForBoot(ports.http, timeoutMs);
+			// Use resolved credentials so waitForBoot can validate the response body
+			// on authenticated machines (post-provisioning, post-install reboots).
+			const auth = await resolveAuth(state);
+			return waitForBoot(ports.http, timeoutMs, auth.header);
 		},
 
 		async stop(): Promise<void> {
@@ -178,27 +181,47 @@ function createInstance(state: MachineState): ChrInstance {
 
 		async rest(path: string, opts?: RequestInit): Promise<unknown> {
 			const url = `${restUrl}/rest${path.startsWith("/") ? path : "/" + path}`;
-			const headers = new Headers(opts?.headers);
-			if (!headers.has("Authorization")) {
-				const auth = await resolveAuth(state);
-				headers.set("Authorization", auth.header);
-			}
-			if (!headers.has("Content-Type") && opts?.body) {
-				headers.set("Content-Type", "application/json");
+
+			// Retry on ECONNRESET — RouterOS can transiently reset connections in the
+			// brief window immediately after boot or a reboot, even after waitForBoot
+			// returns. Three retries with 2 s backoff cover this window without hiding
+			// genuine errors (auth failures, 4xx/5xx codes are never retried).
+			const MAX_RETRIES = 3;
+			for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+				if (attempt > 0) await Bun.sleep(2000);
+
+				const headers = new Headers(opts?.headers);
+				if (!headers.has("Authorization")) {
+					const auth = await resolveAuth(state);
+					headers.set("Authorization", auth.header);
+				}
+				if (!headers.has("Content-Type") && opts?.body) {
+					headers.set("Content-Type", "application/json");
+				}
+
+				try {
+					const response = await fetch(url, { ...opts, headers });
+					if (!response.ok) {
+						const body = await response.text();
+						throw new Error(`REST ${response.status}: ${body}`);
+					}
+
+					const text = await response.text();
+					try {
+						return JSON.parse(text) as unknown;
+					} catch {
+						return text;
+					}
+				} catch (e) {
+					if (attempt < MAX_RETRIES && (e as { code?: string }).code === "ECONNRESET") {
+						console.warn(`[quickchr] rest(${path}): ECONNRESET on attempt ${attempt + 1}, retrying...`);
+						continue;
+					}
+					throw e;
+				}
 			}
 
-			const response = await fetch(url, { ...opts, headers });
-			if (!response.ok) {
-				const body = await response.text();
-				throw new Error(`REST ${response.status}: ${body}`);
-			}
-
-			const text = await response.text();
-			try {
-				return JSON.parse(text) as unknown;
-			} catch {
-				return text;
-			}
+			throw new Error("Unexpected exit from rest() retry loop");
 		},
 
 		async exec(command: string, opts?: ExecOptions): Promise<ExecResult> {
@@ -276,20 +299,26 @@ function createInstance(state: MachineState): ChrInstance {
 			await uploadPackages(packagePaths, ports.ssh);
 
 			// Reboot to activate packages
+			let rebootAuth: string;
 			try {
 				const auth = await resolveAuth(state);
+				rebootAuth = auth.header;
 				await fetch(`http://127.0.0.1:${ports.http}/rest/system/reboot`, {
 					method: "POST",
-					headers: { Authorization: auth.header },
+					headers: { Authorization: rebootAuth },
 					signal: AbortSignal.timeout(5000),
 				});
 			} catch {
 				// Expected — connection drops during reboot
+				rebootAuth ??= `Basic ${btoa("admin:")}`;
 			}
 
-			// Wait for the instance to come back up
+			// Wait for the instance to come back up.
+			// Pass resolved credentials so waitForBoot can validate the response body
+			// (not just check for a connection), preventing ECONNRESET on the first
+			// real REST call after the reboot completes.
 			const timeout = defaultBootTimeout(state.arch, true);
-			await waitForBoot(ports.http, timeout);
+			await waitForBoot(ports.http, timeout, rebootAuth);
 
 			return installed;
 		},
@@ -571,7 +600,7 @@ export class QuickCHR {
 					deviceMode: opts.deviceMode ?? existing.deviceMode,
 					user: opts.user ?? existing.user,
 					disableAdmin: opts.disableAdmin ?? existing.disableAdmin,
-					license: opts.license,
+					license: opts.license ? await resolveLicenseInput(opts.license) ?? undefined : undefined,
 					secureLogin: opts.secureLogin,
 				};
 				const hasPending = !!(
@@ -722,7 +751,7 @@ export class QuickCHR {
 				deviceMode: requestedDeviceMode,
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
-				license: opts.license,
+				license: opts.license ? await resolveLicenseInput(opts.license) ?? undefined : undefined,
 				secureLogin: opts.secureLogin,
 			}, launchConfig);
 		}
@@ -776,14 +805,10 @@ export class QuickCHR {
 
 		if (opts.installAllPackages) {
 			await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http);
-			await Bun.sleep(5000);
 			await instance.waitForBoot(bootTimeout);
-			await Bun.sleep(2000);
 		} else if (opts.packages && opts.packages.length > 0) {
 			await installPackages(opts.packages, machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http);
-			await Bun.sleep(5000);
 			await instance.waitForBoot(bootTimeout);
-			await Bun.sleep(2000);
 		}
 
 		if (hasDeviceModeProvisioning) {

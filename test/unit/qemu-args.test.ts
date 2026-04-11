@@ -379,11 +379,26 @@ describe("waitForBoot", () => {
 		expect(result).toBe(true);
 	});
 
-	test("returns true when HTTP server responds with 200", async () => {
-		mockBoot(() => Promise.resolve(new Response("OK", { status: 200 })));
+	test("returns true when HTTP server responds with 200 and valid board-name body", async () => {
+		mockBoot(() => Promise.resolve(new Response(
+			JSON.stringify({ "board-name": "CHR", "architecture-name": "x86_64" }),
+			{ status: 200 },
+		)));
 		const result = await waitForBoot(9199, 5000);
 		expect(result).toBe(true);
 	});
+
+	test("returns false when 200 response has user-list body (fresh CHR startup quirk)", async () => {
+		// Fresh CHR with expired admin returns the /user list for all GET requests
+		// until the REST layer finishes initializing.
+		mockBoot(() => Promise.resolve(new Response(
+			JSON.stringify([{ name: "admin", group: "full" }]),
+			{ status: 200 },
+		)));
+		// Short timeout — should expire without ever reaching board-name body
+		const result = await waitForBoot(9199, 50);
+		expect(result).toBe(false);
+	}, 10_000);
 
 	test("returns false when all polls fail within timeout", async () => {
 		mockBoot(() => Promise.reject(new Error("connection refused")));

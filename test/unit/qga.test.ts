@@ -497,13 +497,13 @@ describe("qgaGetNetworkInterfaces", () => {
 		try {
 			const ifaces = await qgaGetNetworkInterfaces(sockPath, 5000);
 			expect(ifaces).toHaveLength(2);
-			expect(ifaces[0]!.name).toBe("ether1");
-			expect(ifaces[0]!.mac).toBe("0e:61:47:d8:43:2a");
-			expect(ifaces[0]!.ipAddresses).toHaveLength(1);
-			expect(ifaces[0]!.ipAddresses[0]).toEqual({ type: "ipv4", address: "10.0.2.15", prefix: 24 });
-			expect(ifaces[1]!.name).toBe("lo");
-			expect(ifaces[1]!.mac).toBeUndefined();
-			expect(ifaces[1]!.ipAddresses).toHaveLength(0);
+			expect(ifaces[0]?.name).toBe("ether1");
+			expect(ifaces[0]?.mac).toBe("0e:61:47:d8:43:2a");
+			expect(ifaces[0]?.ipAddresses).toHaveLength(1);
+			expect(ifaces[0]?.ipAddresses[0]).toEqual({ type: "ipv4", address: "10.0.2.15", prefix: 24 });
+			expect(ifaces[1]?.name).toBe("lo");
+			expect(ifaces[1]?.mac).toBeUndefined();
+			expect(ifaces[1]?.ipAddresses).toHaveLength(0);
 		} finally {
 			await closeServer(server);
 		}

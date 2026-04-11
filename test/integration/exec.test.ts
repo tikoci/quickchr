@@ -174,8 +174,8 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 		const { qgaPing } = await import("../../src/lib/qga.ts");
 		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
 		const socketPath = join(instance!.state.machineDir, "qga.sock");
-		const result = await qgaPing(socketPath, 10_000);
-		expect(result).toBe(true);
+		await qgaPing(socketPath, 10_000);
+		// qgaPing returns void; if we reach here, the ping succeeded
 	}, 30_000);
 
 	test("QGA: qgaGetOsInfo returns RouterOS identity", async () => {
@@ -187,7 +187,7 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 		const info = await qgaGetOsInfo(socketPath, 10_000);
 		expect(info.id).toBe("routeros");
 		expect(info.machine).toBe("x86_64");
-		expect(typeof info.version).toBe("string");
+		expect(typeof info.prettyName).toBe("string");
 	}, 30_000);
 
 	test("QGA: qgaGetNetworkInterfaces includes ether1", async () => {
@@ -198,7 +198,7 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 		const socketPath = join(instance!.state.machineDir, "qga.sock");
 		const ifaces = await qgaGetNetworkInterfaces(socketPath, 10_000);
 		expect(Array.isArray(ifaces)).toBe(true);
-		const names = ifaces.map((i) => i["name"]);
+		const names = ifaces.map((i) => i.name);
 		expect(names.some((n) => n.startsWith("ether"))).toBe(true);
 	}, 30_000);
 
