@@ -82,6 +82,16 @@ export function findEfiFirmware(): EfiFirmwarePaths | undefined {
 	return undefined;
 }
 
+/** Whether guestArch requires cross-architecture emulation (TCG) on this host.
+ *  Cross-arch emulation is significantly slower and needs more memory/timeout.
+ *  arm64 guest on x86_64 host → TCG (slow).
+ *  x86 guest on any host → HVF or KVM when available (fast). */
+export function isCrossArchEmulation(guestArch: "x86" | "arm64"): boolean {
+	// x86 CHR is always runnable under HVF/KVM or TCG — never "slow" cross-arch.
+	// arm64 CHR on an arm64 host uses HVF/KVM; on an x86_64 host it falls back to TCG.
+	return guestArch === "arm64" && process.arch !== "arm64";
+}
+
 /** Detect available QEMU acceleration for a guest architecture. */
 export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 	const hostOs = process.platform;

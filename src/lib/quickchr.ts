@@ -6,15 +6,17 @@ import type {
 	Arch,
 	Channel,
 	ChrInstance,
+	ChrLoadSample,
 	DeviceModeOptions,
 	DoctorResult,
 	ExecOptions,
 	ExecResult,
+	LicenseInput,
 	MachineState,
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation } from "./platform.ts";
 import { resolveVersion, isValidVersion, generateMachineName } from "./versions.ts";
 import { buildPortMappings, findAvailablePortBlock, } from "./network.ts";
 import {
@@ -37,7 +39,7 @@ import { installPackages, installAllPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense } from "./license.ts";
 import { resolveAuth } from "./auth.ts";
-import { deleteInstanceCredentials, credentialStorageLabel } from "./credentials.ts";
+import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials } from "./credentials.ts";
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec } from "./console.ts";
@@ -54,6 +56,42 @@ import type { LicenseOptions } from "./types.ts";
 import { toChrPorts } from "./network.ts";
 import { existsSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+
+// --- Architecture-aware defaults ---
+
+/** Default mem (MiB) — more for cross-arch TCG emulation, less for native HVF/KVM. */
+function defaultMem(arch: Arch, override?: number): number {
+	return override ?? (isCrossArchEmulation(arch) ? 1024 : 512);
+}
+
+/** Default boot timeout — cross-arch TCG is much slower than native acceleration. */
+function defaultBootTimeout(arch: Arch, withPackages?: boolean): number {
+	const base = isCrossArchEmulation(arch) ? 300_000 : 120_000;
+	// Package reinstall adds a full reboot cycle — extend by the same factor.
+	return withPackages ? base * 2 : base;
+}
+
+// --- License helpers ---
+
+/** Resolve a LicenseInput to a full LicenseOptions, filling in credentials from
+ *  env vars / secret store when not provided by the caller. Returns null with a
+ *  warning when credentials cannot be found. */
+async function resolveLicenseInput(input: LicenseInput): Promise<LicenseOptions | null> {
+	const opts: LicenseOptions = typeof input === "string" ? { level: input } : { ...input };
+	if (opts.account && opts.password) return opts;
+	// Try to fill in missing credentials.
+	const stored = await getStoredCredentials();
+	if (stored) {
+		if (!opts.account) opts.account = stored.account;
+		if (!opts.password) opts.password = stored.password;
+		return opts;
+	}
+	console.warn(
+		"[quickchr] License skipped: no MikroTik web credentials found. " +
+		"Set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or run 'quickchr login'.",
+	);
+	return null;
+}
 
 /** Create a ChrInstance handle from persisted MachineState. */
 function createInstance(state: MachineState): ChrInstance {
@@ -211,6 +249,57 @@ function createInstance(state: MachineState): ChrInstance {
 				state.licenseLevel = opts.level;
 			}
 		},
+
+		async destroy(): Promise<void> {
+			await this.stop();
+			await this.remove();
+		},
+
+		async subprocessEnv(): Promise<Record<string, string>> {
+			const auth = await resolveAuth(state);
+			// auth.header is "Basic <base64>" — extract the raw user:pass.
+			const rawCreds = auth.header.startsWith("Basic ")
+				? Buffer.from(auth.header.slice(6), "base64").toString()
+				: `${auth.user}:`;
+			const restBase = `${restUrl}/rest`;
+			return {
+				QUICKCHR_NAME: state.name,
+				QUICKCHR_REST_URL: restUrl,
+				QUICKCHR_REST_BASE: restBase,
+				QUICKCHR_SSH_PORT: String(ports.ssh),
+				QUICKCHR_AUTH: rawCreds,
+				// Legacy compat keys used by restraml and similar consumers.
+				URLBASE: restBase,
+				BASICAUTH: rawCreds,
+			};
+		},
+
+		async queryLoad(): Promise<ChrLoadSample | null> {
+			try {
+				// Use QEMU monitor `info cpus` for CPU and `info balloon` for memory.
+				const [cpuOut, balloonOut] = await Promise.all([
+					monitorCommand(state.machineDir, "info cpus", 3000),
+					monitorCommand(state.machineDir, "info balloon", 3000),
+				]);
+				// `info cpus` output: "* CPU #0: ... thread_id=N\n  CPU #1: ..."
+				// Each CPU line contains a user/sys/idle percent breakdown — but the
+				// most portable field is just thread count (always present).
+				// Rough heuristic: count non-idle percentage from "info cpus" if it
+				// includes timing; fall back to 0 since QEMU monitor output varies by version.
+				let cpuPercent = 0;
+				const cpuMatch = cpuOut.match(/\buser=(\d+)%/);
+				if (cpuMatch) cpuPercent = Number(cpuMatch[1]);
+
+				// `info balloon` output: "balloon: actual=512 MB"
+				let memUsedMb = 0;
+				const memMatch = balloonOut.match(/actual=(\d+)/);
+				if (memMatch) memUsedMb = Number(memMatch[1]);
+
+				return { cpuPercent, memUsedMb };
+			} catch {
+				return null;
+			}
+		},
 	};
 }
 
@@ -356,7 +445,7 @@ export class QuickCHR {
 				version,
 				arch,
 				cpu: opts.cpu ?? 1,
-				mem: opts.mem ?? 512,
+				mem: defaultMem(arch, opts.mem),
 				network: opts.network ?? "user",
 				ports,
 				packages: opts.packages ?? [],
@@ -378,7 +467,14 @@ export class QuickCHR {
 		}
 	}
 
-	/** Start a new or existing CHR instance. */
+	/**
+	 * Start a new or existing CHR instance.
+	 *
+	 * The returned {@link ChrInstance} is REST-ready: all provisioning (packages, license,
+	 * device-mode, user) has completed before this promise resolves.
+	 * Callers do not need to call {@link ChrInstance.waitForBoot} again unless they have
+	 * stopped and restarted the instance manually.
+	 */
 	static async start(opts: StartOptions = {}): Promise<ChrInstance> {
 		// Validate name early (before any I/O) so callers get a fast, clear error
 		if (opts.name?.startsWith("-")) {
@@ -474,7 +570,7 @@ export class QuickCHR {
 				version,
 				arch,
 				cpu: opts.cpu ?? 1,
-				mem: opts.mem ?? 512,
+				mem: defaultMem(arch, opts.mem),
 				network: opts.network ?? "user",
 				ports,
 				packages: opts.packages ?? [],
@@ -524,7 +620,7 @@ export class QuickCHR {
 			version,
 			arch,
 			cpu: opts.cpu ?? 1,
-			mem: opts.mem ?? 512,
+			mem: defaultMem(arch, opts.mem),
 			network: opts.network ?? "user",
 			ports,
 			packages: opts.packages ?? [],
@@ -569,7 +665,7 @@ export class QuickCHR {
 
 		const instance = createInstance(state);
 
-		const bootTimeout = 120_000;
+		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages);
 		if (hasProvisioning) {
 			const booted = await instance.waitForBoot(bootTimeout);
 			if (!booted) {
@@ -628,7 +724,7 @@ export class QuickCHR {
 			console.warn(`[quickchr] Device-mode: ${warning}`);
 		}
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
-		const bootTimeout = 120_000;
+		const bootTimeout = defaultBootTimeout(machineState.arch, opts.installAllPackages || (opts.packages?.length ?? 0) > 0);
 		const chrPorts = toChrPorts(machineState.ports);
 
 		// Give SSH a moment to start after HTTP comes up
@@ -743,9 +839,10 @@ export class QuickCHR {
 
 		if (opts.license) {
 			console.log("Applying CHR license...");
-			try {
-				await renewLicense(chrPorts.http, opts.license);
-				const level = opts.license.level ?? "p1";
+			const resolvedLicense = await resolveLicenseInput(opts.license);
+			if (resolvedLicense) try {
+				await renewLicense(chrPorts.http, resolvedLicense);
+				const level = resolvedLicense.level ?? "p1";
 				const current = loadMachine(machineState.name);
 				if (current) {
 					current.licenseLevel = level;
@@ -844,7 +941,7 @@ export class QuickCHR {
 		const instance = createInstance(state);
 
 		if (hasProvisioning && provisioningOpts) {
-			const bootTimeout = 120_000;
+			const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts.installAllPackages);
 			const booted = await instance.waitForBoot(bootTimeout);
 			if (!booted) {
 				console.warn(`[quickchr] Warning: CHR did not respond within ${bootTimeout / 1000}s — skipping provisioning. Run 'quickchr status ${state.name}' to check once it's up.`);

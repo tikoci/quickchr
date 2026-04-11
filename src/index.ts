@@ -20,6 +20,8 @@ export type {
 	ExecOptions,
 	ExecResult,
 	ExecTransport,
+	ChrLoadSample,
+	LicenseInput,
 	LicenseLevel,
 	LicenseOptions,
 	MachineConfig,

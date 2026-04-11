@@ -98,8 +98,10 @@ export interface StartOptions {
 	network?: NetworkMode;
 	installDeps?: boolean;
 	dryRun?: boolean;
-	/** Apply a CHR trial license after boot via /system/license/renew. */
-	license?: LicenseOptions;
+	/** Apply a CHR trial license after boot via /system/license/renew.
+	 *  Pass a level string (e.g. "p1") to auto-resolve MikroTik credentials,
+	 *  or a LicenseOptions object to supply credentials explicitly. */
+	license?: LicenseInput;
 	/** Configure /system/device-mode after boot. If omitted, CHR boots with RouterOS defaults (mode=advanced). */
 	deviceMode?: DeviceModeOptions;
 }
@@ -116,6 +118,14 @@ export interface ChrPorts {
 	[key: string]: number;
 }
 
+/** Return value of ChrInstance.queryLoad(). */
+export interface ChrLoadSample {
+	/** Host CPU percent across all virtual CPUs (0–100 × vCPU count). */
+	cpuPercent: number;
+	/** Balloon-reported guest memory in use, in MiB. */
+	memUsedMb: number;
+}
+
 export interface ChrInstance {
 	name: string;
 	state: MachineState;
@@ -123,10 +133,16 @@ export interface ChrInstance {
 	restUrl: string;
 	sshPort: number;
 
+	/** Check or wait for REST API readiness.
+	 *  After `QuickCHR.start()` with provisioning options (installAllPackages, license, etc.),
+	 *  the returned instance is already REST-reachable — this returns immediately.
+	 *  Call this only when starting without provisioning, or as a safety check after a manual stop/restart. */
 	waitForBoot(timeoutMs?: number): Promise<boolean>;
 	stop(): Promise<void>;
 	remove(): Promise<void>;
 	clean(): Promise<void>;
+	/** Stop and permanently delete this instance (disk + state). Equivalent to stop() then remove(). */
+	destroy(): Promise<void>;
 
 	monitor(command: string): Promise<string>;
 	serial(): { readable: ReadableStream; writable: WritableStream };
@@ -137,6 +153,19 @@ export interface ChrInstance {
 	exec(command: string, opts?: ExecOptions): Promise<ExecResult>;
 	/** Apply or renew a CHR trial license. */
 	license(opts: LicenseOptions): Promise<void>;
+
+	/** Build an env-var map for spawning a subprocess against this instance.
+	 *  Includes QUICKCHR_* prefixed keys plus legacy URLBASE/BASICAUTH for compat.
+	 *  Resolves auth from the instance secret store, provisioned user, or admin default.
+	 *
+	 *  @example
+	 *  Bun.spawn(["bun", "my-script.ts"], { env: { ...process.env, ...await chr.subprocessEnv() } })
+	 */
+	subprocessEnv(): Promise<Record<string, string>>;
+
+	/** Sample QEMU guest load from the monitor. Returns null when the monitor is
+	 *  unavailable (machine stopped or running in foreground mode). */
+	queryLoad(): Promise<ChrLoadSample | null>;
 }
 
 // --- Platform ---
@@ -246,12 +275,21 @@ export interface QgaExecResult {
 export type LicenseLevel = "p1" | "p10" | "unlimited";
 export const LICENSE_LEVELS: LicenseLevel[] = ["p1", "p10", "unlimited"];
 
-/** Options passed to /system/license/renew. */
+/** Options passed to /system/license/renew.
+ *  `account` and `password` are optional: when omitted, quickchr resolves them
+ *  from env vars (MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD) or the secret store.
+ */
 export interface LicenseOptions {
-	account: string;
-	password: string;
+	account?: string;
+	password?: string;
 	level?: LicenseLevel;
 }
+
+/** License shorthand accepted by StartOptions.license.
+ *  A string value (e.g. "p1") auto-resolves MikroTik credentials from env vars
+ *  or the secret store.  An object lets the caller supply credentials explicitly.
+ */
+export type LicenseInput = LicenseLevel | LicenseOptions;
 
 // --- Device-mode ---
 

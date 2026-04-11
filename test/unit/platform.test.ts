@@ -7,6 +7,7 @@ import {
 	getQemuVersion,
 	requireQemu,
 	requireFirmware,
+	isCrossArchEmulation,
 } from "../../src/lib/platform.ts";
 
 describe("detectPackageManager", () => {
@@ -128,5 +129,33 @@ describe("requireFirmware", () => {
 		expect(() => requireFirmware()).toThrow(
 			expect.objectContaining({ code: "MISSING_FIRMWARE" }),
 		);
+	});
+});
+
+describe("isCrossArchEmulation", () => {
+	test("x86 guest is never cross-arch emulation", () => {
+		// x86 runs natively on x86_64 or via KVM/HVF — never TCG-only
+		expect(isCrossArchEmulation("x86")).toBe(false);
+	});
+
+	test("arm64 guest on arm64 host is not cross-arch", () => {
+		if (process.arch !== "arm64") {
+			console.log("Skipping: not running on arm64 host");
+			return;
+		}
+		expect(isCrossArchEmulation("arm64")).toBe(false);
+	});
+
+	test("arm64 guest on x86_64 host is cross-arch", () => {
+		if (process.arch === "arm64") {
+			console.log("Skipping: running on arm64 host");
+			return;
+		}
+		expect(isCrossArchEmulation("arm64")).toBe(true);
+	});
+
+	test("returns boolean", () => {
+		expect(typeof isCrossArchEmulation("x86")).toBe("boolean");
+		expect(typeof isCrossArchEmulation("arm64")).toBe("boolean");
 	});
 });
