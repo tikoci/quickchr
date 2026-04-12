@@ -45,14 +45,23 @@ export function detectPackageManager(): PackageManager {
 	return "unknown";
 }
 
+/** Find a command on PATH. Uses `where.exe` on Windows and `which` elsewhere. */
+function findCommandOnPath(cmd: string): string | undefined {
+	try {
+		const probe = process.platform === "win32" ? ["where.exe", cmd] : ["which", cmd];
+		const result = Bun.spawnSync(probe, { stdout: "pipe", stderr: "pipe" });
+		if (result.exitCode !== 0) return undefined;
+		const output = new TextDecoder().decode(result.stdout).trim();
+		const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+		return firstLine || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** Check if a command exists on PATH. */
 function commandExists(cmd: string): boolean {
-	try {
-		const result = Bun.spawnSync(["which", cmd], { stdout: "pipe", stderr: "pipe" });
-		return result.exitCode === 0;
-	} catch {
-		return false;
-	}
+	return findCommandOnPath(cmd) !== undefined;
 }
 
 /** Resolve the QEMU binary path for a given guest architecture. */
@@ -60,10 +69,8 @@ export function findQemuBinary(guestArch: "x86" | "arm64"): string | undefined {
 	const bin = guestArch === "x86" ? "qemu-system-x86_64" : "qemu-system-aarch64";
 
 	// Check PATH
-	const result = Bun.spawnSync(["which", bin], { stdout: "pipe", stderr: "pipe" });
-	if (result.exitCode === 0) {
-		return new TextDecoder().decode(result.stdout).trim();
-	}
+	const pathBin = findCommandOnPath(bin);
+	if (pathBin) return pathBin;
 
 	// Windows: check common install location
 	if (process.platform === "win32") {
@@ -152,15 +159,15 @@ export function getQemuInstallHint(pkgMgr?: PackageManager): string {
 		case "brew":
 			return "brew install qemu";
 		case "apt":
-			return "sudo apt install qemu-system-x86 qemu-system-arm qemu-efi-aarch64";
+			return "sudo apt install qemu-system-x86 qemu-system-arm qemu-efi-aarch64 qemu-utils";
 		case "dnf":
-			return "sudo dnf install qemu-kvm qemu-system-aarch64 edk2-aarch64";
+			return "sudo dnf install qemu-kvm qemu-system-aarch64 edk2-aarch64 qemu-img";
 		case "pacman":
 			return "sudo pacman -S qemu-full";
 		case "winget":
 			return "winget install QEMU.QEMU";
 		default:
-			return "Install QEMU (qemu-system-x86_64 and/or qemu-system-aarch64)";
+			return "Install QEMU (including qemu-system-* and qemu-img)";
 	}
 }
 
@@ -203,10 +210,8 @@ export async function detectPlatform(): Promise<PlatformInfo> {
 
 /** Resolve the qemu-img binary path. */
 export function findQemuImg(): string | undefined {
-	const result = Bun.spawnSync(["which", "qemu-img"], { stdout: "pipe", stderr: "pipe" });
-	if (result.exitCode === 0) {
-		return new TextDecoder().decode(result.stdout).trim();
-	}
+	const pathBin = findCommandOnPath("qemu-img");
+	if (pathBin) return pathBin;
 
 	// Windows: check common install location
 	if (process.platform === "win32") {

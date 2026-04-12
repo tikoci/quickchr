@@ -3,6 +3,7 @@ import {
 	detectPackageManager,
 	findQemuBinary,
 	findEfiFirmware,
+	findQemuImg,
 	getQemuInstallHint,
 	getQemuVersion,
 	requireQemu,
@@ -41,6 +42,15 @@ describe("findQemuBinary", () => {
 	});
 });
 
+describe("findQemuImg", () => {
+	test("returns path or undefined", () => {
+		const bin = findQemuImg();
+		if (bin) {
+			expect(bin).toContain("qemu-img");
+		}
+	});
+});
+
 describe("getQemuInstallHint", () => {
 	test("returns a string with install command", () => {
 		const hint = getQemuInstallHint();
@@ -56,11 +66,12 @@ describe("getQemuInstallHint", () => {
 
 	test("apt: returns apt install command", () => {
 		expect(getQemuInstallHint("apt")).toContain("apt install");
-		expect(getQemuInstallHint("apt")).toContain("qemu");
+		expect(getQemuInstallHint("apt")).toContain("qemu-utils");
 	});
 
 	test("dnf: returns dnf install command", () => {
 		expect(getQemuInstallHint("dnf")).toContain("dnf install");
+		expect(getQemuInstallHint("dnf")).toContain("qemu-img");
 	});
 
 	test("pacman: returns pacman command", () => {
@@ -73,7 +84,7 @@ describe("getQemuInstallHint", () => {
 	});
 
 	test("unknown: returns generic install note", () => {
-		expect(getQemuInstallHint("unknown")).toContain("Install QEMU");
+		expect(getQemuInstallHint("unknown")).toContain("qemu-img");
 	});
 });
 

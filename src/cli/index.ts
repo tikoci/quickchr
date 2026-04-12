@@ -372,6 +372,7 @@ function printMachineListWithTip(
 	tipCommand: string,
 	machines: Array<{ name: string; status: string; version: string; arch: string }>,
 	hintFn?: (m: { name: string; status: string }) => string | undefined,
+	allowAll = true,
 ) {
 	if (machines.length === 0) {
 		console.log("No matching instances.");
@@ -398,7 +399,9 @@ function printMachineListWithTip(
 		console.log(`  ${pad(r.name, wName)}  ${pad(r.status, wStatus)}  ${pad(r.version, wVersion)}  ${pad(r.arch, wArch)}${extra}`);
 	}
 	console.log();
-	console.log(`${dim("tip:")}  quickchr ${tipCommand} <name>  or  quickchr ${tipCommand} --all`);
+	console.log(allowAll
+		? `${dim("tip:")}  quickchr ${tipCommand} <name>  or  quickchr ${tipCommand} --all`
+		: `${dim("tip:")}  quickchr ${tipCommand} <name>`);
 }
 
 async function cmdAdd(argv: string[]) {
@@ -503,7 +506,7 @@ async function cmdExec(argv: string[]) {
 	if (!name || commandParts.length === 0) {
 		const running = await getRunningMachines();
 		if (running.length > 0) {
-			printMachineListWithTip("exec", running);
+			printMachineListWithTip("exec", running, undefined, false);
 			console.log(`\nUsage: quickchr exec <name> <command...>`);
 		} else {
 			console.error("Usage: quickchr exec <name> <command...>\n  Run a RouterOS CLI command on a running instance.");
@@ -569,7 +572,7 @@ Options:
 	if (!name || !operation) {
 		const running = await getRunningMachines();
 		if (running.length > 0) {
-			printMachineListWithTip("qga", running.filter((m) => m.arch !== "arm64"));
+			printMachineListWithTip("qga", running.filter((m) => m.arch !== "arm64"), undefined, false);
 		}
 		console.log(`\n${USAGE}`);
 		process.exit(1);
@@ -1261,7 +1264,7 @@ async function cmdDisk(argv: string[]) {
 	if (!name) {
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const machines = QuickCHR.list();
-		printMachineListWithTip("disk", machines);
+		printMachineListWithTip("disk", machines, undefined, false);
 		return;
 	}
 
@@ -1418,8 +1421,8 @@ Options:
   --arch <arch>         Architecture: arm64, x86 (default: host native)
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
-  --boot-size <size>    Resize boot disk (e.g., 512M, 2G) — converts to qcow2
-  --add-disk <size>     Add an extra blank qcow2 disk (repeatable)
+	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — requires qemu-img
+	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install on first boot (repeatable)
   --install-all-packages  Install all packages on first boot
   --add-user <u:p>      Create user on first boot (name:password)
@@ -1470,6 +1473,9 @@ Examples:
   <name>              Restart an existing stopped machine by name.
                       Omit to see a list of stopped machines.
 
+Creation flags below apply when using 'start' to create a new machine in one step.
+For a clearer create-then-boot flow, prefer 'quickchr add' followed by 'quickchr start <name>'.
+
 Options:
   --all                 Start all stopped machines
   --bg / --background   Run in background (default)
@@ -1480,8 +1486,8 @@ Options:
   --name <name>         Instance name
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
-  --boot-size <size>    Resize boot disk (e.g., 512M, 2G) — converts to qcow2
-  --add-disk <size>     Add an extra blank qcow2 disk (repeatable)
+	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — requires qemu-img
+	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install (repeatable)
   --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
@@ -1527,7 +1533,9 @@ and cached images.`);
 Show disk details (format, virtual size, actual size) for an instance.
 
   <name>      Show disks for a specific instance.
-              Omit to list all instances.`);
+	              Omit to list all instances.
+
+Install qemu-img to include virtual/actual size details in the output.`);
 			break;
 		case "license":
 			console.log(`quickchr license <name> [options]

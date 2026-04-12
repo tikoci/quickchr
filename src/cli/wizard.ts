@@ -95,10 +95,11 @@ export async function runWizard(): Promise<void> {
 	const extraDisks: string[] = [];
 
 	const { findQemuImg, getQemuInstallHint } = await import("../lib/platform.ts");
+	const { isValidDiskSize } = await import("../lib/disk.ts");
 	const qemuImg = findQemuImg();
 
 	if (!qemuImg) {
-		clack.log.warn(`Disk features (boot resize, extra disks) require qemu-img. ${getQemuInstallHint()}`);
+		clack.log.warn(`Disk features (boot resize, extra disks) require qemu-img. Run 'quickchr doctor' to confirm setup. ${getQemuInstallHint()}`);
 	} else {
 		const wantBootResize = await clack.confirm({
 			message: "Resize the boot disk? (default is ~128 MB)",
@@ -110,7 +111,7 @@ export async function runWizard(): Promise<void> {
 			const size = await clack.text({
 				message: "Boot disk size (e.g., 512M, 1G, 2G):",
 				validate: (v) => {
-					if (!/^\d+[KMGT]?$/i.test(v.trim())) return "Size like 512M, 1G, or 2048";
+					if (!isValidDiskSize(v)) return "Size like 512M, 1G, or 2048";
 				},
 			});
 			if (clack.isCancel(size)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -129,7 +130,7 @@ export async function runWizard(): Promise<void> {
 				const diskSize = await clack.text({
 					message: `Extra disk ${extraDisks.length + 1} size (e.g., 64M, 512M, 1G):`,
 					validate: (v) => {
-						if (!/^\d+[KMGT]?$/i.test(v.trim())) return "Size like 64M, 512M, or 1G";
+						if (!isValidDiskSize(v)) return "Size like 64M, 512M, or 1G";
 					},
 				});
 				if (clack.isCancel(diskSize)) { clack.cancel("Cancelled."); process.exit(0); }

@@ -457,8 +457,10 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 ### Disks
 
-- [ ] Extra disks — attach N additional blank qcow2 disks at specified sizes (`--disk 512M`), so RouterOS can format/use them. Simpler than resize; just append `-drive` + `-device` to QEMU args.
-- [ ] Disk resize support (`--disk-size 512M` for the primary disk)
+- [x] Extra disks — attach N additional blank qcow2 disks at specified sizes (`--add-disk 512M`), so RouterOS can format/use them. Implemented in CLI, wizard, library API, `quickchr disk`, and state persistence.
+- [x] Disk resize support (`--boot-size 512M` for the primary disk). Converts the boot disk to qcow2 before first boot and persists across `clean()`.
+- [ ] Integration test: `QuickCHR.add()` + first `start()` with `bootSize` / `extraDisks` should verify the disk artifacts exist and RouterOS sees the extra drives
+- [ ] Windows smoke test: global `bun install -g` + PATH detection for `qemu-system-*` and `qemu-img` in CI or a documented manual checklist
 
 ### Snapshots
 

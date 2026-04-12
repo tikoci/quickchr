@@ -67,9 +67,11 @@ export interface MachineConfig {
 	excludePorts: ServiceName[];
 	extraPorts: PortMapping[];
 	licenseLevel?: LicenseLevel;
-	/** Boot disk size override (e.g. "512M", "2G"). When set, boot disk is converted to qcow2. */
+	/** Boot disk size override (e.g. "512M", "2G"). Requires `qemu-img` on the host.
+	 *  When set, the boot disk is converted from raw to qcow2. */
 	bootSize?: string;
-	/** Extra disk sizes (e.g. ["512M", "1G"]). Always qcow2. */
+	/** Extra blank disk sizes (e.g. ["512M", "1G"]). Requires `qemu-img` on the host.
+	 *  Extra disks are always created as qcow2 images. */
 	extraDisks?: string[];
 	/** Format of the boot disk — raw by default, qcow2 when resized. */
 	bootDiskFormat?: BootDiskFormat;
@@ -114,9 +116,11 @@ export interface StartOptions {
 	license?: LicenseInput;
 	/** Configure /system/device-mode after boot. If omitted, CHR boots with RouterOS defaults (mode=advanced). */
 	deviceMode?: DeviceModeOptions;
-	/** Boot disk size override (e.g. "512M", "2G"). Converts boot disk to qcow2. */
+	/** Boot disk size override (e.g. "512M", "2G"). Requires `qemu-img` on the host.
+	 *  Converts the boot disk to qcow2 before first boot. */
 	bootSize?: string;
-	/** Extra blank disks to attach, specified as sizes (e.g. ["512M", "1G"]). Always qcow2. */
+	/** Extra blank disks to attach, specified as sizes (e.g. ["512M", "1G"]).
+	 *  Requires `qemu-img` on the host. Extra disks are always qcow2. */
 	extraDisks?: string[];
 }
 
@@ -249,6 +253,7 @@ export type ErrorCode =
 	| "INVALID_VERSION"
 	| "INVALID_ARCH"
 	| "INVALID_NAME"
+	| "INVALID_DISK_SIZE"
 	| "MACHINE_LOCKED"
 	| "EXEC_FAILED"
 	| "PROCESS_FAILED"

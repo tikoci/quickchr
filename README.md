@@ -8,6 +8,7 @@ CLI and library to download, launch, and manage MikroTik CHR virtual machines vi
 
 - [Bun](https://bun.sh) runtime
 - [QEMU](https://www.qemu.org) with `qemu-system-x86_64` and/or `qemu-system-aarch64`
+- `qemu-img` for disk resize and extra-disk features (`--boot-size`, `--add-disk`, `quickchr disk` size details)
 - UEFI firmware (edk2) for arm64 CHR
 
 Install QEMU:
@@ -17,10 +18,10 @@ Install QEMU:
 brew install qemu
 
 # Ubuntu/Debian
-sudo apt install qemu-system-x86 qemu-system-arm qemu-efi-aarch64
+sudo apt install qemu-system-x86 qemu-system-arm qemu-efi-aarch64 qemu-utils
 
 # Fedora/RHEL
-sudo dnf install qemu-kvm qemu-system-aarch64 edk2-aarch64
+sudo dnf install qemu-kvm qemu-system-aarch64 edk2-aarch64 qemu-img
 
 # Arch
 sudo pacman -S qemu-full
@@ -31,6 +32,15 @@ winget install QEMU.QEMU
 
 ### Install
 
+CLI:
+
+```bash
+bun install -g @tikoci/quickchr
+quickchr doctor
+```
+
+Library:
+
 ```bash
 bun add @tikoci/quickchr
 ```
@@ -38,14 +48,20 @@ bun add @tikoci/quickchr
 ### CLI Usage
 
 ```bash
-# Interactive wizard
-quickchr
+# Interactive setup wizard
+quickchr setup
 
-# Start a CHR (downloads image, allocates ports, boots)
-quickchr start --channel stable --arch arm64
+# Create a machine without starting it
+quickchr add --name my-chr --channel stable --arch arm64
 
-# Start with specific version
-quickchr start --version 7.22.1
+# Create with a resized boot disk and two extra blank disks
+quickchr add --name lab --boot-size 1G --add-disk 512M --add-disk 2G
+
+# Start an existing machine
+quickchr start my-chr
+
+# Create and start in one step
+quickchr start --name throwaway --version 7.22.1 --boot-size 2G
 
 # List instances
 quickchr list
@@ -62,6 +78,9 @@ quickchr stop --all
 # Reset disk to fresh image
 quickchr clean 7.22.1-arm64-1
 
+# Inspect disk layout
+quickchr disk lab
+
 # Remove instance entirely
 quickchr remove 7.22.1-arm64-1
 
@@ -69,7 +88,7 @@ quickchr remove 7.22.1-arm64-1
 quickchr doctor
 ```
 
-### Start Options
+### Create / Start Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
@@ -79,6 +98,8 @@ quickchr doctor
 | `--name <name>` | Instance name | Auto-generated |
 | `--cpu <n>` | CPU cores | 1 |
 | `--mem <mb>` | Memory in MB | 512 |
+| `--boot-size <size>` | Resize the boot disk before first boot. Requires `qemu-img`. | |
+| `--add-disk <size>` | Attach an extra blank qcow2 disk. Repeatable. Requires `qemu-img`. | |
 | `--background` | Run in background (default) | true |
 | `--foreground` | Foreground with serial on stdio |  |
 | `--add-package <pkg>` | Extra package (repeatable) |  |
@@ -109,6 +130,13 @@ In **foreground** mode, your terminal becomes the CHR serial console (like a VM'
 
 > **Note:** Background QEMU processes are true OS-level orphans — `quickchr` does not use shell job control (`&`). After the command returns you can close the terminal and QEMU keeps running. Use `quickchr stop <name>` to shut it down cleanly.
 
+### Disk Support
+
+- The CHR boot image starts as raw. Using `--boot-size` converts it to qcow2 and resizes it before first boot.
+- Extra disks from `--add-disk` are always created as blank qcow2 images.
+- `quickchr clean <name>` removes any resized boot disk and extra disks, then recreates them from the saved machine config.
+- `quickchr disk <name>` shows the stored disk layout. If `qemu-img` is installed, it also shows virtual and actual sizes.
+
 ### Library Usage
 
 ```typescript
@@ -116,9 +144,12 @@ import { QuickCHR } from "@tikoci/quickchr";
 
 // Start a CHR
 const chr = await QuickCHR.start({
+  name: "disk-lab",
   channel: "stable",
   arch: "arm64",
   mem: 512,
+  bootSize: "1G",
+  extraDisks: ["512M", "2G"],
 });
 
 // Wait for boot
@@ -130,6 +161,9 @@ console.log(info);
 
 // Stop
 await chr.stop();
+
+console.log(chr.state.bootDiskFormat); // "qcow2"
+console.log(chr.state.extraDisks);     // ["512M", "2G"]
 ```
 
 ### Use in Tests

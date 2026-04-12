@@ -35,7 +35,7 @@ import {
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, type QemuLaunchConfig } from "./qemu.ts";
-import { prepareBootDisk, prepareExtraDisks, cleanDiskFiles } from "./disk.ts";
+import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
@@ -154,12 +154,7 @@ function createInstance(state: MachineState): ChrInstance {
 			cleanDiskFiles(state.machineDir);
 
 			// Re-prepare disks if the machine had disk customizations
-			if (state.bootSize) {
-				await prepareBootDisk(state.machineDir, state.bootSize);
-			}
-			if (state.extraDisks && state.extraDisks.length > 0) {
-				await prepareExtraDisks(state.machineDir, state.extraDisks);
-			}
+			await ensureConfiguredDisks(state.machineDir, state.bootSize, state.extraDisks);
 
 			// Remove EFI vars to force re-creation
 			const efiVars = join(state.machineDir, "efi-vars.fd");
@@ -494,7 +489,8 @@ async function hardRebootMachine(
 export class QuickCHR {
 	/** Create a new CHR machine (download image, allocate ports, write config) without starting it.
 	 *  Provisioning options (packages, deviceMode, user, disableAdmin) are stored in machine.json
-	 *  and applied automatically on the first subsequent start(). */
+	 *  and applied automatically on the first subsequent start(). Disk options (`bootSize`,
+	 *  `extraDisks`) are materialized immediately and require `qemu-img` on the host. */
 	static async add(opts: StartOptions = {}): Promise<MachineState> {
 		if (opts.name?.startsWith("-")) {
 			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
@@ -514,6 +510,7 @@ export class QuickCHR {
 		const arch: Arch = opts.arch ?? hostArchToChr();
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
+		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks);
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -532,6 +529,7 @@ export class QuickCHR {
 		try {
 			const cachedImg = await ensureCachedImage(version, arch);
 			copyImageToMachine(cachedImg, machineDir);
+			const diskArtifacts = await ensureConfiguredDisks(machineDir, diskOpts.bootSize, diskOpts.extraDisks);
 
 			const state: MachineState = {
 				name,
@@ -549,9 +547,9 @@ export class QuickCHR {
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
-				bootSize: opts.bootSize,
-				extraDisks: opts.extraDisks,
-				bootDiskFormat: opts.bootSize ? "qcow2" : "raw",
+				bootSize: diskOpts.bootSize,
+				extraDisks: diskOpts.extraDisks,
+				bootDiskFormat: diskArtifacts.bootDisk.format,
 				createdAt: new Date().toISOString(),
 				status: "stopped",
 				machineDir,
@@ -569,7 +567,8 @@ export class QuickCHR {
 	 * The returned {@link ChrInstance} is REST-ready: all provisioning (packages, license,
 	 * device-mode, user) has completed before this promise resolves.
 	 * Callers do not need to call {@link ChrInstance.waitForBoot} again unless they have
-	 * stopped and restarted the instance manually.
+	 * stopped and restarted the instance manually. Disk options (`bootSize`, `extraDisks`)
+	 * apply when creating a new machine and require `qemu-img` on the host.
 	 */
 	static async start(opts: StartOptions = {}): Promise<ChrInstance> {
 		// Validate name early (before any I/O) so callers get a fast, clear error
@@ -598,6 +597,7 @@ export class QuickCHR {
 
 		// Resolve architecture
 		const arch: Arch = opts.arch ?? hostArchToChr();
+		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks);
 
 		// Check prerequisites
 		requireQemu(arch);
@@ -676,9 +676,9 @@ export class QuickCHR {
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
-				bootSize: opts.bootSize,
-				extraDisks: opts.extraDisks,
-				bootDiskFormat: opts.bootSize ? "qcow2" : "raw",
+				bootSize: diskOpts.bootSize,
+				extraDisks: diskOpts.extraDisks,
+				bootDiskFormat: diskOpts.bootSize ? "qcow2" : "raw",
 				createdAt: new Date().toISOString(),
 				status: "stopped",
 				machineDir,
@@ -698,10 +698,9 @@ export class QuickCHR {
 		copyImageToMachine(cachedImg, machineDir);
 
 		// Prepare disks (boot resize + extra disks)
-		const bootDisk = await prepareBootDisk(machineDir, opts.bootSize);
-		const extraDiskConfigs = opts.extraDisks && opts.extraDisks.length > 0
-			? await prepareExtraDisks(machineDir, opts.extraDisks)
-			: undefined;
+		const diskArtifacts = await ensureConfiguredDisks(machineDir, diskOpts.bootSize, diskOpts.extraDisks);
+		const bootDisk = diskArtifacts.bootDisk;
+		const extraDiskConfigs = diskArtifacts.extraDisks;
 
 		// Build machine config
 		const background = opts.background ?? true;
@@ -735,8 +734,8 @@ export class QuickCHR {
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
 			extraPorts: opts.extraPorts ?? [],
-			bootSize: opts.bootSize,
-			extraDisks: opts.extraDisks,
+			bootSize: diskOpts.bootSize,
+			extraDisks: diskOpts.extraDisks,
 			bootDiskFormat: bootDisk.format,
 			createdAt: new Date().toISOString(),
 			status: "running",
@@ -1032,19 +1031,9 @@ export class QuickCHR {
 			throw new QuickCHRError("MACHINE_NOT_FOUND", `Disk image not found for "${state.name}"`);
 		}
 
-		// Resolve boot disk: use qcow2 if previously resized, else raw
-		const bootDiskPath = state.bootDiskFormat === "qcow2"
-			? join(state.machineDir, "boot.qcow2")
-			: diskPath;
-		const bootDisk = { path: bootDiskPath, format: state.bootDiskFormat ?? "raw" as const };
-
-		// Resolve extra disks from persisted state
-		const extraDiskConfigs = state.extraDisks && state.extraDisks.length > 0
-			? state.extraDisks.map((_, i) => ({
-				path: join(state.machineDir, `disk${i + 1}.qcow2`),
-				format: "qcow2" as const,
-			}))
-			: undefined;
+		const diskArtifacts = await ensureConfiguredDisks(state.machineDir, state.bootSize, state.extraDisks);
+		const bootDisk = diskArtifacts.bootDisk;
+		const extraDiskConfigs = diskArtifacts.extraDisks;
 
 		const hasProvisioning = !!(
 			provisioningOpts && (

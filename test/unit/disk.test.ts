@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+	ensureConfiguredDisks,
 	prepareBootDisk,
 	prepareExtraDisks,
 	cleanDiskFiles,
@@ -108,6 +109,36 @@ describe("prepareExtraDisks", () => {
 	test("returns empty array for empty sizes", async () => {
 		const results = await prepareExtraDisks(TEST_DIR, []);
 		expect(results).toHaveLength(0);
+	});
+});
+
+describe("ensureConfiguredDisks", () => {
+	beforeEach(() => {
+		mkdirSync(TEST_DIR, { recursive: true });
+		writeFileSync(join(TEST_DIR, "disk.img"), Buffer.alloc(512));
+	});
+	afterEach(() => {
+		rmSync(TEST_DIR, { recursive: true, force: true });
+	});
+
+	test("returns raw boot disk when no disk customizations are requested", async () => {
+		const disks = await ensureConfiguredDisks(TEST_DIR);
+		expect(disks.bootDisk.format).toBe("raw");
+		expect(disks.bootDisk.path).toBe(join(TEST_DIR, "disk.img"));
+		expect(disks.extraDisks).toBeUndefined();
+	});
+
+	test("creates missing resized boot and extra disks from persisted config", async () => {
+		if (!hasQemuImg()) {
+			console.log("Skipping: qemu-img not installed");
+			return;
+		}
+		const disks = await ensureConfiguredDisks(TEST_DIR, "1G", ["256M", "512M"]);
+		expect(disks.bootDisk.format).toBe("qcow2");
+		expect(existsSync(join(TEST_DIR, "boot.qcow2"))).toBe(true);
+		expect(disks.extraDisks).toHaveLength(2);
+		expect(existsSync(join(TEST_DIR, "disk1.qcow2"))).toBe(true);
+		expect(existsSync(join(TEST_DIR, "disk2.qcow2"))).toBe(true);
 	});
 });
 

@@ -12,11 +12,52 @@ import type { BootDiskFormat } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { requireQemuImg } from "./platform.ts";
 
+const DISK_SIZE_RE = /^\d+[KMGT]?$/i;
+
 export interface DiskInfo {
 	format: string;
 	virtualSize: number;
 	actualSize: number;
 	filename: string;
+}
+
+/** True when a disk size string is valid for qemu-img (e.g. 512M, 1G, 2048). */
+export function isValidDiskSize(size: string): boolean {
+	return DISK_SIZE_RE.test(size.trim());
+}
+
+function normalizeDiskSize(size: string, label: string): string {
+	const normalized = size.trim();
+	if (!isValidDiskSize(normalized)) {
+		throw new QuickCHRError(
+			"INVALID_DISK_SIZE",
+			`Invalid ${label}: ${JSON.stringify(size)}. Use values like 64M, 512M, 1G, or 2048.`,
+		);
+	}
+	return normalized;
+}
+
+/** Normalize and validate disk-related options.
+ *  If any disk feature is requested, also validates that qemu-img is present. */
+export function normalizeDiskOptions(
+	bootSize?: string,
+	extraDisks?: string[],
+): { bootSize?: string; extraDisks?: string[] } {
+	if (!bootSize && (!extraDisks || extraDisks.length === 0)) {
+		return {
+			bootSize: bootSize?.trim() || undefined,
+			extraDisks,
+		};
+	}
+
+	requireQemuImg();
+
+	return {
+		bootSize: bootSize ? normalizeDiskSize(bootSize, "boot disk size") : undefined,
+		extraDisks: extraDisks && extraDisks.length > 0
+			? extraDisks.map((size, index) => normalizeDiskSize(size, `extra disk ${index + 1} size`))
+			: undefined,
+	};
 }
 
 /** Create a blank qcow2 disk image. */
@@ -119,6 +160,38 @@ export async function prepareExtraDisks(
 		results.push({ path: diskPath, format: "qcow2" });
 	}
 	return results;
+}
+
+/** Ensure disk artifacts referenced by machine state exist on disk.
+ *  Used both for new-machine creation and to heal older add()-created states
+ *  that predate eager disk materialization. */
+export async function ensureConfiguredDisks(
+	machineDir: string,
+	bootSize?: string,
+	extraDiskSizes?: string[],
+): Promise<{
+	bootDisk: { path: string; format: BootDiskFormat };
+	extraDisks?: { path: string; format: "qcow2" }[];
+}> {
+	const bootDisk = bootSize
+		? (existsSync(join(machineDir, "boot.qcow2"))
+			? { path: join(machineDir, "boot.qcow2"), format: "qcow2" as const }
+			: await prepareBootDisk(machineDir, bootSize))
+		: { path: join(machineDir, "disk.img"), format: "raw" as const };
+
+	let extraDisks: { path: string; format: "qcow2" }[] | undefined;
+	if (extraDiskSizes && extraDiskSizes.length > 0) {
+		extraDisks = [];
+		for (let i = 0; i < extraDiskSizes.length; i++) {
+			const diskPath = join(machineDir, `disk${i + 1}.qcow2`);
+			if (!existsSync(diskPath)) {
+				await createQcow2Disk(diskPath, extraDiskSizes[i] as string);
+			}
+			extraDisks.push({ path: diskPath, format: "qcow2" });
+		}
+	}
+
+	return { bootDisk, extraDisks };
 }
 
 /**
