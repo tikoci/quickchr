@@ -443,6 +443,7 @@ async function hardRebootMachine(
 	}
 
 	let method: "monitor" | "signal" = "monitor";
+
 	try {
 		await monitorCommand(state.machineDir, "quit", 4000);
 	} catch (e) {
@@ -816,61 +817,101 @@ export class QuickCHR {
 			await waitForDeviceModeApi(httpPort, 30_000);
 			console.log(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
 
-			const maxAttempts = 5;
-			let updateRequest: Promise<Response> | undefined;
-			let requiresPowerCycle = false;
-			let selfRebooted = false;
+			// Pre-check: if mode is already exactly what we want, skip update + power-cycle.
+			let alreadyActive = false;
+			try {
+				const beforeMode = await readDeviceMode(httpPort);
+				console.log(`[quickchr] Device-mode before update: ${JSON.stringify(beforeMode)}`);
+				alreadyActive = verifyDeviceMode(resolvedDeviceMode, beforeMode).ok;
+			} catch { /* CHR unexpectedly unreachable — proceed with update */ }
 
-			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-				const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
-				const outcome = await Promise.race([
-					request
-						.then(() => ({ kind: "resolved" as const }))
-						.catch((error: unknown) => ({ kind: "rejected" as const, error })),
-					Bun.sleep(2000).then(() => ({ kind: "pending" as const })),
-				]);
+			if (alreadyActive) {
+				console.log("  Device-mode already active; no power-cycle required.");
+			} else {
+				// Fire the update request. RouterOS either:
+				//  a) returns HTTP 200 quickly — rose triggers internal soft-reboot (writes
+				//     mode to disk); basic may return HTTP 200 without any disk write, OR
+				//  b) holds the HTTP connection open (pending) — staging was written to disk
+				//     on accept; the cold QEMU kill RSTs that connection, signalling RouterOS.
+				const updatePromise = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
+				let updateSettled = false;
+				let suppressUpdateErrors = false;
+				updatePromise.then(
+					(r) => {
+						updateSettled = true;
+						console.log(`[quickchr] Device-mode update response: HTTP ${r.status}`);
+					},
+					(e: unknown) => {
+						updateSettled = true;
+						if (!suppressUpdateErrors) {
+							const code = (e as NodeJS.ErrnoException)?.code;
+							if (code !== "ECONNRESET")
+								console.log(`[quickchr] Device-mode update error: ${e instanceof Error ? e.message : e}`);
+						}
+					},
+				);
 
-				if (outcome.kind === "rejected") {
-					throw (outcome.error instanceof Error)
-						? outcome.error
-						: new QuickCHRError("PROCESS_FAILED", `Device-mode update request failed: ${String(outcome.error)}`);
+				// Wait 5s — all settled promise callbacks run before this resumes, giving
+				// rose mode time to begin its internal soft-reboot (goes offline ~2-4s
+				// after the update).
+				await Bun.sleep(5000);
+
+				if (updateSettled) {
+					// HTTP 200 returned within 5s — determine which sub-case we are in by
+					// checking whether RouterOS is offline (rose internal soft-reboot) or
+					// still online (non-rose mode returning early without an internal reboot).
+					let routerOsOffline = false;
+					try {
+						await fetch(`http://127.0.0.1:${httpPort}/`, { signal: AbortSignal.timeout(2000) });
+					} catch {
+						routerOsOffline = true;
+					}
+
+					if (routerOsOffline) {
+						// Rose mode: internal soft-reboot is writing mode=rose to the disk image.
+						// Wait for the reboot to finish — after that, mode=rose is on disk and
+						// the subsequent QEMU cold power-cycle will boot into it.
+						console.log("[quickchr] Rose internal soft-reboot detected — waiting for completion");
+						const roseRebooted = await instance.waitForBoot(bootTimeout);
+						if (!roseRebooted) {
+							throw new QuickCHRError("BOOT_TIMEOUT", "RouterOS rose internal reboot timed out");
+						}
+						console.log("[quickchr] Rose internal reboot complete — mode=rose is on disk");
+					} else {
+						// Non-rose mode returned HTTP 200 quickly without going offline.
+						// The staging is in RouterOS memory. A warm reboot flushes config and
+						// preserves the pending-power-cycle staging so the cold QEMU kill can
+						// apply it on the next boot.
+						console.log("[quickchr] Quick-settle mode: warm-rebooting RouterOS to flush staged change to disk");
+						await fetch(`http://127.0.0.1:${httpPort}/rest/system/reboot`, {
+							method: "POST",
+							headers: {
+								Authorization: `Basic ${btoa("admin:")}`,
+								"Content-Type": "application/json",
+							},
+							body: "{}",
+							signal: AbortSignal.timeout(10_000),
+						}).catch(() => {}); // OK if connection drops — RouterOS already rebooting
+
+						const warmed = await instance.waitForBoot(bootTimeout);
+						if (!warmed) {
+							throw new QuickCHRError("BOOT_TIMEOUT", "RouterOS warm reboot timed out during device-mode staging");
+						}
+						console.log("[quickchr] Warm reboot complete — staged device-mode is on disk");
+					}
+				} else {
+					// Update still pending (RouterOS holding connection open). Staging was
+					// written to disk on accept. The QEMU monitor quit performs a graceful
+					// exit that RSTs all open TCP connections; RouterOS detects that RST
+					// as power-cycle confirmation and preserves the staged change on disk.
+					console.log("[quickchr] Device-mode pending — cold QEMU kill will trigger disk commit via RST");
+					suppressUpdateErrors = true; // QEMU kill will cause a connection error — suppress it
+					updatePromise.catch(() => {}); // suppress ECONNRESET from QEMU exit
 				}
 
-				if (outcome.kind === "pending") {
-					updateRequest = request;
-					requiresPowerCycle = true;
-					break;
-				}
-
-				// Update resolved quickly — RouterOS may have applied changes and self-rebooted.
-				// If readDeviceMode fails, treat it as a self-reboot and wait for CHR to recover.
-				let actualNow: Record<string, string>;
-				try {
-					actualNow = await readDeviceMode(httpPort);
-				} catch {
-					selfRebooted = true;
-					break;
-				}
-				const immediateVerification = verifyDeviceMode(resolvedDeviceMode, actualNow);
-				if (immediateVerification.ok) {
-					console.log("  Device-mode already active; no power-cycle required.");
-					break;
-				}
-
-				if (attempt === maxAttempts) {
-					throw new QuickCHRError(
-						"PROCESS_FAILED",
-						`Device-mode update did not enter pending confirmation state after ${maxAttempts} attempts; last mismatch: ${immediateVerification.mismatches.join("; ")}`,
-					);
-				}
-
-				console.warn(`[quickchr] Device-mode update returned early (attempt ${attempt}/${maxAttempts}); retrying...`);
-				await Bun.sleep(2000);
-			}
-
-			if (requiresPowerCycle) {
+				// Cold QEMU power-cycle: kill + restart. From RouterOS's perspective this
+				// is a hardware power-cycle that activates the staged device-mode change.
 				const rebootMethod = await hardRebootMachine(machineState, launchConfig);
-				updateRequest?.catch(() => {});
 				console.log(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
 
 				const rebooted = await instance.waitForBoot(bootTimeout);
@@ -881,29 +922,19 @@ export class QuickCHR {
 					);
 				}
 				await waitForDeviceModeApi(httpPort, bootTimeout);
-			} else if (selfRebooted) {
-				// RouterOS applied the change and self-rebooted; wait for it to come back.
-				console.log("  Device-mode self-rebooted; waiting for CHR to recover...");
-				const rebooted = await instance.waitForBoot(bootTimeout);
-				if (!rebooted) {
+
+				const actual = await readDeviceMode(httpPort);
+				console.log(`[quickchr] Device-mode post-reboot: ${JSON.stringify(actual)}`);
+				const verification = verifyDeviceMode(resolvedDeviceMode, actual);
+				if (!verification.ok) {
 					throw new QuickCHRError(
-						"BOOT_TIMEOUT",
-						`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s.`,
+						"PROCESS_FAILED",
+						`Device-mode verification failed after hard reboot: ${verification.mismatches.join("; ")}. Re-run start with explicit --device-mode flags or stop/start to force another power-cycle.`,
 					);
 				}
-				await waitForDeviceModeApi(httpPort, bootTimeout);
-			}
 
-			const actual = await readDeviceMode(httpPort);
-			const verification = verifyDeviceMode(resolvedDeviceMode, actual);
-			if (!verification.ok) {
-				throw new QuickCHRError(
-					"PROCESS_FAILED",
-					`Device-mode verification failed after hard reboot: ${verification.mismatches.join("; ")}. Re-run start with explicit --device-mode flags or stop/start to force another power-cycle.`,
-				);
+				console.log(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
 			}
-
-			console.log(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
 		}
 
 		if (opts.license) {

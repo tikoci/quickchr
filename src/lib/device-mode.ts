@@ -195,7 +195,9 @@ export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceM
 		payload[name] = value;
 	}
 
-	// No AbortSignal — RouterOS holds this open until power-cycle; we kill QEMU to confirm.
+	// No AbortSignal — RouterOS holds this connection open (default ~5m) while waiting
+	// for hard power-cycle confirmation. The caller fires-and-forgets, then kills QEMU.
+	// The pending request will reject with ECONNRESET when QEMU exits — that's expected.
 	return fetch(`http://127.0.0.1:${httpPort}/rest/system/device-mode/update`, {
 		method: "POST",
 		headers: {

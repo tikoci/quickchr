@@ -14,7 +14,7 @@ import type { LicenseLevel, LicenseOptions } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 
 /** Default timeout for waiting for a license change to propagate (ms). */
-const LICENSE_VERIFY_TIMEOUT = 30_000;
+const LICENSE_VERIFY_TIMEOUT = 90_000;
 
 /** Apply or renew a CHR trial license via /system/license/renew.
  *  @param httpPort  REST API port (e.g. 9180)
@@ -32,9 +32,11 @@ export async function renewLicense(
 	const body: Record<string, string> = {};
 	if (opts.account) body.account = opts.account;
 	if (opts.password) body.password = opts.password;
-	if (opts.level) {
-		body.level = opts.level;
-	}
+	if (opts.level) body.level = opts.level;
+	// duration=10s: ask RouterOS to wait up to 10s for the MikroTik license server
+	// before responding. Without this, RouterOS does one short internal poll (~1-2s)
+	// and returns before the activation has propagated, forcing a long polling loop.
+	body.duration = "10s";
 
 	let response: Response;
 	try {
@@ -45,7 +47,7 @@ export async function renewLicense(
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify(body),
-			signal: AbortSignal.timeout(30_000),
+			signal: AbortSignal.timeout(30_000), // 10s for RouterOS wait + 20s net overhead
 		});
 	} catch (e) {
 		throw new QuickCHRError(
@@ -62,18 +64,30 @@ export async function renewLicense(
 		);
 	}
 
-	// Verify the license change took effect by polling /system/license.
-	// MikroTik license activation involves a server round-trip and is not
-	// instantaneous — reading back immediately after a 200 response often
-	// still returns "free".
 	if (opts.level) {
+		// With duration=10s, RouterOS waited for the license server before responding.
+		// Parse the body for immediate confirmation before falling back to polling.
+		try {
+			const text = await response.text();
+			console.log(`[quickchr] License renew response body: ${text}`);
+			const data = JSON.parse(text) as Record<string, unknown>;
+			if (typeof data.level === "string" && data.level === opts.level) return;
+		} catch { /* ignore parse errors — fall through to polling */ }
+
+		// License server hasn't responded yet — poll until the level appears.
 		const deadline = Date.now() + LICENSE_VERIFY_TIMEOUT;
+		let pollCount = 0;
 		while (Date.now() < deadline) {
 			try {
 				const info = await getLicenseInfo(httpPort, chrUser, chrPass);
+				pollCount++;
+				console.log(`[quickchr] License poll #${pollCount}: level=${info.level}, want=${opts.level}`);
 				if (info.level === opts.level) return;
-			} catch { /* transient read failure — keep polling */ }
-			await Bun.sleep(1000);
+			} catch (e) {
+				pollCount++;
+				console.warn(`[quickchr] License poll #${pollCount} error: ${e instanceof Error ? e.message : String(e)}`);
+			}
+			await Bun.sleep(2000);
 		}
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
