@@ -16,6 +16,37 @@ import { QuickCHRError } from "./types.ts";
 /** Default timeout for waiting for a license change to propagate (ms). */
 const LICENSE_VERIFY_TIMEOUT = 90_000;
 
+/** Max attempts for the renew POST itself (retried on post-boot REST quirk). */
+const MAX_RENEW_ATTEMPTS = 3;
+
+/** Classify the response body from POST /rest/system/license/renew.
+ *
+ *  RouterOS returns different shapes depending on timing:
+ *  - Array of {".section", status} objects: the duration= streaming output.
+ *    Last entry with status="done" means the license server responded.
+ *  - Object with "board-name"/"architecture-name": system resource data —
+ *    a post-boot REST quirk where the endpoint isn't fully initialized yet.
+ *    The renewal was NOT actually initiated; the POST must be retried.
+ */
+function classifyRenewResponse(text: string): "done" | "pending" | "not-ready" {
+	try {
+		const data = JSON.parse(text);
+
+		if (Array.isArray(data)) {
+			const last = data[data.length - 1];
+			if (last && typeof last === "object" && last.status === "done") return "done";
+			return "pending";
+		}
+
+		if (data && typeof data === "object") {
+			// System resource data has board-name — not a license response.
+			if ("board-name" in data || "architecture-name" in data) return "not-ready";
+		}
+	} catch { /* unparseable — treat as pending */ }
+
+	return "pending";
+}
+
 /** Apply or renew a CHR trial license via /system/license/renew.
  *  @param httpPort  REST API port (e.g. 9180)
  *  @param opts      MikroTik account credentials + desired level
@@ -38,43 +69,58 @@ export async function renewLicense(
 	// and returns before the activation has propagated, forcing a long polling loop.
 	body.duration = "10s";
 
-	let response: Response;
-	try {
-		response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license/renew`, {
-			method: "POST",
-			headers: {
-				Authorization: auth,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify(body),
-			signal: AbortSignal.timeout(30_000), // 10s for RouterOS wait + 20s net overhead
-		});
-	} catch (e) {
-		throw new QuickCHRError(
-			"PROCESS_FAILED",
-			`License renewal request failed: ${e instanceof Error ? e.message : String(e)}`,
-		);
-	}
+	// Wait for the license subsystem to be ready — right after boot, RouterOS may
+	// return system resource data for all REST endpoints (see waitForBoot stage 4).
+	await waitForLicenseApi(httpPort, chrUser, chrPass);
 
-	if (!response.ok) {
-		const text = await response.text();
-		throw new QuickCHRError(
-			"PROCESS_FAILED",
-			`License renewal failed: HTTP ${response.status} — ${text}`,
-		);
-	}
-
-	if (opts.level) {
-		// With duration=10s, RouterOS waited for the license server before responding.
-		// Parse the body for immediate confirmation before falling back to polling.
+	for (let attempt = 1; attempt <= MAX_RENEW_ATTEMPTS; attempt++) {
+		let response: Response;
 		try {
-			const text = await response.text();
-			console.log(`[quickchr] License renew response body: ${text}`);
-			const data = JSON.parse(text) as Record<string, unknown>;
-			if (typeof data.level === "string" && data.level === opts.level) return;
-		} catch { /* ignore parse errors — fall through to polling */ }
+			response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license/renew`, {
+				method: "POST",
+				headers: {
+					Authorization: auth,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(body),
+				signal: AbortSignal.timeout(30_000), // 10s for RouterOS wait + 20s net overhead
+			});
+		} catch (e) {
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				`License renewal request failed: ${e instanceof Error ? e.message : String(e)}`,
+			);
+		}
 
-		// License server hasn't responded yet — poll until the level appears.
+		if (!response.ok) {
+			const text = await response.text();
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				`License renewal failed: HTTP ${response.status} — ${text}`,
+			);
+		}
+
+		const text = await response.text();
+		console.log(`[quickchr] License renew response body: ${text}`);
+		const result = classifyRenewResponse(text);
+
+		if (result === "not-ready") {
+			if (attempt < MAX_RENEW_ATTEMPTS) {
+				console.warn(`[quickchr] License renew attempt ${attempt}: got system resource data instead of renew status — retrying`);
+				await Bun.sleep(5000);
+				continue;
+			}
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				"License renew endpoint returned system resource data after multiple attempts — REST API not fully initialized",
+			);
+		}
+
+		if (!opts.level) return; // fire-and-forget, no level verification needed
+
+		// result is "done" or "pending" — poll until the level matches.
+		// "done" means the license server responded within the duration window;
+		// a single verification poll should suffice but we use the same loop.
 		const deadline = Date.now() + LICENSE_VERIFY_TIMEOUT;
 		let pollCount = 0;
 		while (Date.now() < deadline) {
@@ -94,6 +140,35 @@ export async function renewLicense(
 			`License renewal accepted but level did not change to "${opts.level}" within ${LICENSE_VERIFY_TIMEOUT / 1000}s`,
 		);
 	}
+}
+
+/** Wait until GET /rest/system/license returns actual license data.
+ *  Right after boot, RouterOS may return system resource data for all endpoints.
+ *  Real license data contains "system-id"; system resource data has "board-name". */
+async function waitForLicenseApi(
+	httpPort: number,
+	chrUser: string,
+	chrPass: string,
+	timeoutMs = 30_000,
+): Promise<void> {
+	const auth = `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
+	const deadline = Date.now() + timeoutMs;
+
+	while (Date.now() < deadline) {
+		try {
+			const r = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license`, {
+				headers: { Authorization: auth },
+				signal: AbortSignal.timeout(5000),
+			});
+			if (r.ok) {
+				const data = await r.json() as Record<string, unknown>;
+				if ("system-id" in data && !("board-name" in data)) return;
+			}
+		} catch { /* not ready */ }
+		await Bun.sleep(2000);
+	}
+	// Don't throw — the renew POST itself will detect and retry on bad responses.
+	console.warn("[quickchr] License API readiness check timed out — proceeding with renewal attempt");
 }
 
 /** Fetch the current license state from a running CHR.
@@ -131,6 +206,14 @@ export async function getLicenseInfo(
 	}
 
 	const info = await response.json() as LicenseInfo;
+	// Guard: if we got system resource data instead of license data (post-boot
+	// REST quirk), throw so callers retry rather than silently returning level=free.
+	if ("board-name" in info || "architecture-name" in info) {
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			"GET /rest/system/license returned system resource data — REST API not fully initialized",
+		);
+	}
 	// RouterOS REST omits default / empty fields. A CHR with no registered license
 	// is implicitly "free" — normalise to the explicit string so callers can always
 	// read info.level without special-casing undefined.

@@ -238,6 +238,14 @@ export async function readDeviceMode(httpPort: number): Promise<Record<string, s
 		throw new QuickCHRError("PROCESS_FAILED", "Invalid /system/device-mode REST response");
 	}
 
+	// Guard: system resource data instead of device-mode (post-boot REST quirk).
+	if ("board-name" in (record as Record<string, unknown>) || "architecture-name" in (record as Record<string, unknown>)) {
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			"GET /rest/system/device-mode returned system resource data — REST API not fully initialized",
+		);
+	}
+
 	const normalized: Record<string, string> = {};
 	for (const [key, value] of Object.entries(record)) {
 		normalized[norm(key)] = toYesNo(value);

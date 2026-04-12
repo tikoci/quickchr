@@ -105,15 +105,24 @@ afterEach(() => { globalThis.fetch = realFetch; });
 
 describe("renewLicense — error paths", () => {
 	test("throws PROCESS_FAILED on network error", async () => {
-		globalThis.fetch = (() => Promise.reject(new Error("Connection refused"))) as unknown as typeof fetch;
+		// Mock: readiness check returns valid license data, renew POST fails
+		globalThis.fetch = ((url: string) => {
+			if (String(url).includes("/rest/system/license") && !String(url).includes("/renew"))
+				return Promise.resolve(new Response(JSON.stringify({ "system-id": "TEST" }), { status: 200 }));
+			return Promise.reject(new Error("Connection refused"));
+		}) as unknown as typeof fetch;
 		const err = await renewLicense(9100, { account: "a@example.com", password: "pass", level: "p1" }).catch((e) => e);
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/Connection refused/);
 	});
 
 	test("throws PROCESS_FAILED on HTTP error response", async () => {
-		globalThis.fetch = (() =>
-			Promise.resolve(new Response("Bad credentials", { status: 401 }))) as unknown as typeof fetch;
+		// Mock: readiness check returns valid license data, renew POST returns 401
+		globalThis.fetch = ((url: string) => {
+			if (String(url).includes("/rest/system/license") && !String(url).includes("/renew"))
+				return Promise.resolve(new Response(JSON.stringify({ "system-id": "TEST" }), { status: 200 }));
+			return Promise.resolve(new Response("Bad credentials", { status: 401 }));
+		}) as unknown as typeof fetch;
 		const err = await renewLicense(9100, { account: "a@example.com", password: "wrong" }).catch((e) => e);
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/401/);

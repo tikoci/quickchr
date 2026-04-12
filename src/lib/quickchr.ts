@@ -262,7 +262,14 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async license(opts: LicenseOptions): Promise<void> {
-			await renewLicense(ports.http, opts);
+			const auth = await resolveAuth(state);
+			const rawCreds = auth.header.startsWith("Basic ")
+				? Buffer.from(auth.header.slice(6), "base64").toString()
+				: `${auth.user}:`;
+			const [chrUser, chrPass] = rawCreds.includes(":")
+				? [rawCreds.slice(0, rawCreds.indexOf(":")), rawCreds.slice(rawCreds.indexOf(":") + 1)]
+				: [rawCreds, ""];
+			await renewLicense(ports.http, opts, chrUser, chrPass);
 			// Persist the applied level in state
 			if (opts.level) {
 				const current = loadMachine(state.name);
