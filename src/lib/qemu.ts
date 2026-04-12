@@ -50,8 +50,12 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 		args.push("-accel", accel);
 	}
 
-	// CPU model (arm64 only — HVF needs -cpu host)
-	if (arch === "arm64") {
+	// CPU model overrides for HVF-backed guests.
+	if (arch === "x86") {
+		if (accel === "hvf") {
+			args.push("-cpu", "host");
+		}
+	} else {
 		if (accel === "hvf") {
 			args.push("-cpu", "host");
 		} else {

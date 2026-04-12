@@ -131,6 +131,15 @@ function closeServer(server: Server): Promise<void> {
 	return new Promise((resolve) => server.close(() => resolve()));
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (predicate()) return;
+		await Bun.sleep(20);
+	}
+	throw new Error(`Condition not met within ${timeoutMs}ms`);
+}
+
 describe("qgaSync", () => {
 	test("completes sync handshake with matching ID", async () => {
 		const sockPath = join(TMP, "qga.sock");
@@ -173,6 +182,27 @@ describe("qgaProbe", () => {
 	test("returns false when socket does not exist", async () => {
 		const result = await qgaProbe(join(TMP, "nonexistent.sock"), 1000);
 		expect(result).toBe(false);
+	});
+
+	test("returns false after the guest closes the socket without replying", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		let sawClose = false;
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-ping") {
+				client.end();
+			}
+			client.on("close", () => {
+				sawClose = true;
+			});
+		});
+
+		try {
+			const result = await qgaProbe(sockPath, 1000);
+			expect(result).toBe(false);
+			await waitFor(() => sawClose, 1000);
+		} finally {
+			await closeServer(server);
+		}
 	});
 });
 
@@ -369,6 +399,76 @@ describe("qgaPing", () => {
 		});
 		try {
 			await expect(qgaPing(sockPath, 5000)).resolves.toBeUndefined();
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	test("rejects promptly when the socket closes before a reply arrives", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-ping") {
+				client.end();
+			}
+		});
+
+		try {
+			await expect(qgaPing(sockPath, 5000)).rejects.toMatchObject({
+				code: "PROCESS_FAILED",
+				message: "QGA socket closed before a response was received",
+			});
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	test("releases a timed-out client so the next QGA session can connect", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		let activeConnections = 0;
+		let maxActiveConnections = 0;
+
+		const server = createServer((client) => {
+			activeConnections++;
+			maxActiveConnections = Math.max(maxActiveConnections, activeConnections);
+
+			let buffer = "";
+			let synced = false;
+
+			client.on("close", () => {
+				activeConnections--;
+			});
+
+			client.on("data", (data) => {
+				buffer += data.toString();
+				const lines = buffer.split("\n");
+				buffer = lines.pop() || "";
+
+				for (const line of lines) {
+					if (!line.trim()) continue;
+					const msg = JSON.parse(line.trim()) as { execute: string; arguments?: { id?: number } };
+					if (!synced && msg.execute === "guest-sync-delimited") {
+						synced = true;
+						client.write(JSON.stringify({ return: msg.arguments?.id }) + "\n");
+						continue;
+					}
+
+					if (msg.execute === "guest-info") {
+						client.write(JSON.stringify({ return: { supported_commands: [] } }) + "\n");
+					}
+				}
+			});
+		});
+
+		server.maxConnections = 1;
+		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
+
+		try {
+			await expect(qgaPing(sockPath, 250)).rejects.toMatchObject({ code: "BOOT_TIMEOUT" });
+			await waitFor(() => activeConnections === 0, 1000);
+
+			const commands = await qgaInfo(sockPath, 2000);
+			expect(commands).toEqual([]);
+			expect(maxActiveConnections).toBe(1);
 		} finally {
 			await closeServer(server);
 		}

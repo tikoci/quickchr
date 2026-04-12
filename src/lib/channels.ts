@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { connect } from "node:net";
 import type { Arch, QgaCommand } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
-import { qgaSync, qgaProbe } from "./qga.ts";
+import { qgaProbe, qgaRawCommand } from "./qga.ts";
 
 /** Send a command to the QEMU monitor via Unix socket and return the response. */
 export async function monitorCommand(
@@ -142,47 +142,7 @@ export async function qgaCommand(
 		);
 	}
 
-	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
-
-	return new Promise((resolve, reject) => {
-		const timeout = setTimeout(() => {
-			socket.destroy();
-			reject(new QuickCHRError("BOOT_TIMEOUT", "QGA command timed out"));
-		}, timeoutMs);
-
-		let buffer = "";
-
-		socket.on("data", (data) => {
-			buffer += data.toString().replace(/\xff/g, "");
-			const lines = buffer.split("\n");
-			buffer = lines.pop() || "";
-
-			for (const line of lines) {
-				if (!line.trim()) continue;
-				try {
-					const msg = JSON.parse(line.trim());
-					clearTimeout(timeout);
-					socket.destroy();
-					if (msg.error) {
-						reject(new QuickCHRError("PROCESS_FAILED", `QGA error: ${msg.error.desc || JSON.stringify(msg.error)}`));
-					} else {
-						resolve(msg.return);
-					}
-					return;
-				} catch { /* partial JSON, wait for more */ }
-			}
-		});
-
-		socket.on("error", (err) => {
-			clearTimeout(timeout);
-			reject(new QuickCHRError("PROCESS_FAILED", `QGA connection failed: ${err.message}`));
-		});
-
-		// Send the actual command now that sync completed
-		const payload: Record<string, unknown> = { execute: command };
-		if (args) payload.arguments = args;
-		socket.write(JSON.stringify(payload) + "\n");
-	});
+	return qgaRawCommand(socketPath, command, args as Record<string, unknown> | undefined, timeoutMs);
 }
 
 /** Check whether QGA is available and responding for a machine. */

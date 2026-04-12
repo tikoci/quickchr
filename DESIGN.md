@@ -152,7 +152,7 @@ Provisioning via REST API is preferred (simple HTTP calls). Serial console provi
 - **auto** (default) — currently REST only; future: try SSH first, fall back to REST `/execute`
 - **rest** (implemented) — POST to `/rest/execute` with `{"script": "<command>"}` (RouterOS 7.1+). No SSH needed. 60-second server-side timeout. Uses `resolveAuth()` for smart credential resolution.
 - **ssh** (planned) — full RouterOS CLI, supports interactive commands, requires `sshpass`
-- **qga** (planned) — QEMU Guest Agent commands (x86 only today, ARM64 pending MikroTik fix)
+- **qga** (implemented) — QEMU Guest Agent commands (x86 only today, ARM64 pending MikroTik fix)
 
 **Credential resolution** (`src/lib/auth.ts`): Priority order is (1) explicit `--user`/`--password` override, (2) provisioned user from `machine.json` (`state.user`), (3) CHR default `admin:` (empty password). Both `exec()` and `rest()` on ChrInstance use this.
 

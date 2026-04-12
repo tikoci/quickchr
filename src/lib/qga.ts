@@ -48,6 +48,41 @@ const EXEC_POLL_INTERVAL_MS = 500;
 /** Maximum number of guest-exec-status polls before giving up. */
 const EXEC_MAX_POLLS = 40; // 20s at 500ms intervals
 
+/** Best-effort close for a QGA socket so QEMU can accept a fresh client. */
+async function closeSocket(socket: Socket, waitMs: number = 250): Promise<void> {
+	if (socket.destroyed) return;
+
+	await new Promise<void>((resolve) => {
+		let settled = false;
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(fallback);
+			resolve();
+		};
+
+		const fallback = setTimeout(() => {
+			try {
+				socket.destroy();
+			} catch {
+				// Ignore forced-close failures during cleanup.
+			}
+			finish();
+		}, waitMs);
+		socket.once("close", finish);
+
+		try {
+			socket.end();
+		} catch {
+			try {
+				socket.destroy();
+			} catch {
+				// Ignore forced-close failures during cleanup.
+			}
+		}
+	});
+}
+
 /**
  * Strip 0xFF sync marker bytes from a buffer.
  * RouterOS QGA may emit these as delimiters between messages.
@@ -85,22 +120,38 @@ export function parseQgaMessages(buffer: string): { messages: unknown[]; remaind
  */
 function connectSocket(socketPath: string, timeoutMs: number): Promise<Socket> {
 	return new Promise((resolve, reject) => {
+		const socket = connect({ path: socketPath });
+		let settled = false;
+
+		const finish = (err?: QuickCHRError) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeout);
+			socket.removeListener("connect", onConnect);
+			socket.removeListener("error", onError);
+			if (err) reject(err);
+			else resolve(socket);
+		};
+
 		const timeout = setTimeout(() => {
-			socket.destroy();
-			reject(new QuickCHRError("BOOT_TIMEOUT", `QGA socket connect timed out after ${timeoutMs}ms`));
+			try {
+				socket.destroy();
+			} catch {
+				// Ignore timeout cleanup failures.
+			}
+			finish(new QuickCHRError("BOOT_TIMEOUT", `QGA socket connect timed out after ${timeoutMs}ms`));
 		}, timeoutMs);
 
-		const socket = connect({ path: socketPath });
+		const onConnect = () => {
+			finish();
+		};
 
-		socket.on("connect", () => {
-			clearTimeout(timeout);
-			resolve(socket);
-		});
+		const onError = (err: Error) => {
+			finish(new QuickCHRError("PROCESS_FAILED", `QGA connection failed: ${err.message}`));
+		};
 
-		socket.on("error", (err) => {
-			clearTimeout(timeout);
-			reject(new QuickCHRError("PROCESS_FAILED", `QGA connection failed: ${err.message}`));
-		});
+		socket.on("connect", onConnect);
+		socket.on("error", onError);
 	});
 }
 
@@ -114,11 +165,23 @@ function sendAndReceive(
 	timeoutMs: number,
 ): Promise<unknown> {
 	return new Promise((resolve, reject) => {
-		const timeout = setTimeout(() => {
-			reject(new QuickCHRError("BOOT_TIMEOUT", "QGA command timed out"));
-		}, timeoutMs);
-
+		let settled = false;
 		let buffer = "";
+
+		const finish = (result?: unknown, err?: QuickCHRError) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeout);
+			socket.removeListener("data", onData);
+			socket.removeListener("error", onError);
+			socket.removeListener("close", onClose);
+			if (err) reject(err);
+			else resolve(result);
+		};
+
+		const timeout = setTimeout(() => {
+			finish(undefined, new QuickCHRError("BOOT_TIMEOUT", "QGA command timed out"));
+		}, timeoutMs);
 
 		const onData = (data: Buffer) => {
 			buffer += data.toString();
@@ -126,24 +189,36 @@ function sendAndReceive(
 			buffer = remainder;
 
 			for (const msg of messages) {
-				clearTimeout(timeout);
-				socket.removeListener("data", onData);
 				const response = msg as Record<string, unknown>;
 				if (response.error) {
 					const err = response.error as Record<string, unknown>;
-					reject(new QuickCHRError(
+					finish(undefined, new QuickCHRError(
 						"PROCESS_FAILED",
 						`QGA error: ${err.desc || JSON.stringify(err)}`,
 					));
 				} else {
-					resolve(response.return);
+					finish(response.return);
 				}
 				return;
 			}
 		};
 
+		const onError = (err: Error) => {
+			finish(undefined, new QuickCHRError("PROCESS_FAILED", `QGA connection failed: ${err.message}`));
+		};
+
+		const onClose = () => {
+			finish(undefined, new QuickCHRError("PROCESS_FAILED", "QGA socket closed before a response was received"));
+		};
+
 		socket.on("data", onData);
-		socket.write(JSON.stringify(payload) + "\n");
+		socket.on("error", onError);
+		socket.on("close", onClose);
+		socket.write(JSON.stringify(payload) + "\n", (err?: Error | null) => {
+			if (err) {
+				finish(undefined, new QuickCHRError("PROCESS_FAILED", `QGA write failed: ${err.message}`));
+			}
+		});
 	});
 }
 
@@ -185,7 +260,7 @@ export async function qgaSync(
 
 		return { socket, syncId };
 	} catch (err) {
-		socket.destroy();
+		await closeSocket(socket);
 		throw err;
 	}
 }
@@ -255,7 +330,7 @@ export async function qgaExec(
 
 		throw new QuickCHRError("BOOT_TIMEOUT", `QGA guest-exec PID ${pid} did not exit within ${timeoutMs}ms`);
 	} finally {
-		socket.destroy();
+		await closeSocket(socket);
 	}
 }
 
@@ -277,7 +352,7 @@ export async function qgaProbe(
 			);
 			return true;
 		} finally {
-			socket.destroy();
+			await closeSocket(socket);
 		}
 	} catch {
 		return false;
@@ -310,8 +385,18 @@ export async function qgaInfo(
 			enabled: Boolean(cmd.enabled),
 		}));
 	} finally {
-		socket.destroy();
+		await closeSocket(socket);
 	}
+}
+
+/** Execute a raw QGA command and return its untyped `return` payload. */
+export async function qgaRawCommand(
+	socketPath: string,
+	command: QgaCommand,
+	args?: Record<string, unknown>,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<unknown> {
+	return qgaRun<unknown>(socketPath, command, args, timeoutMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +419,7 @@ async function qgaRun<T>(
 		if (args) payload.arguments = args;
 		return await sendAndReceive(socket, payload, timeoutMs) as T;
 	} finally {
-		socket.destroy();
+		await closeSocket(socket);
 	}
 }
 
@@ -484,7 +569,7 @@ export async function qgaShutdown(
 		// guest-shutdown may close the socket before sending a response. Ignore errors.
 		await sendAndReceive(socket, { execute: "guest-shutdown" }, timeoutMs).catch(() => {});
 	} finally {
-		socket.destroy();
+		await closeSocket(socket);
 	}
 }
 
@@ -528,7 +613,7 @@ export async function qgaFileWrite(
 			2000,
 		).catch(() => {});
 	} finally {
-		socket.destroy();
+		await closeSocket(socket);
 	}
 }
 
@@ -568,6 +653,6 @@ export async function qgaFileRead(
 
 		return content;
 	} finally {
-		socket.destroy();
+		await closeSocket(socket);
 	}
 }

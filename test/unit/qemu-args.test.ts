@@ -57,6 +57,7 @@ describe("buildQemuArgs", () => {
 			const machineIdx = args.indexOf("-M");
 			expect(args[machineIdx + 1]).toBe("pc");
 		} catch (e: unknown) {
+			// Skip if QEMU not installed
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
 				console.log("Skipping: QEMU not installed");
 				return;
@@ -237,6 +238,27 @@ describe("buildQemuArgs — acceleration", () => {
 				expect(cpuValue).toBe("host");
 			}
 			// kvm on Linux: also expects "host" but may vary — don't assert
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("x86 HVF uses host CPU model", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({ arch: "x86" }));
+			const accelValue = args[args.indexOf("-accel") + 1] ?? "";
+			const cpuIdx = args.indexOf("-cpu");
+			if (accelValue === "hvf") {
+				expect(cpuIdx).toBeGreaterThan(-1);
+				expect(args[cpuIdx + 1]).toBe("host");
+			} else {
+				expect(cpuIdx).toBe(-1);
+			}
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e &&
 				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {

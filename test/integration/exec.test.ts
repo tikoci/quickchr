@@ -36,6 +36,16 @@ async function waitForExecReady(
 	throw new Error(`Timed out waiting for /rest/execute readiness after ${timeoutMs}ms`);
 }
 
+async function waitForQgaReady(socketPath: string, timeoutMs: number): Promise<boolean> {
+	const { qgaProbe } = await import("../../src/lib/qga.ts");
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (await qgaProbe(socketPath, 5000)) return true;
+		await Bun.sleep(1000);
+	}
+	return false;
+}
+
 describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 	const MACHINE = "integration-exec-1";
 	let instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>> | undefined;
@@ -65,11 +75,15 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 
 		// Detect QGA availability once (x86 only; RouterOS CHR may not implement QGA).
 		if (machineArch === "x86") {
-			const { qgaProbe } = await import("../../src/lib/qga.ts");
 			const qgaSockPath = join(instance.state.machineDir, "qga.sock");
-			isQgaAvailable = await qgaProbe(qgaSockPath, 10_000);
+			isQgaAvailable = await waitForQgaReady(qgaSockPath, 30_000);
 			if (!isQgaAvailable) {
-				console.log("[exec.test] QGA daemon did not respond on this x86 instance — QGA tests will be skipped");
+				throw new Error(
+					`QGA did not become ready on x86 within 30s ` +
+					`(host=${process.platform}/${process.arch}). ` +
+					`This reproduces locally on macOS Intel with QEMU 10.2.2 ` +
+					`outside quickchr as well (mikropkl apple/OVMF path, HVF and TCG).`,
+				);
 			}
 		}
 	}, 240_000);
