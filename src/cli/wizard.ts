@@ -90,6 +90,61 @@ export async function runWizard(): Promise<void> {
 	});
 	if (clack.isCancel(mem)) { clack.cancel("Cancelled."); process.exit(0); }
 
+	// 4b. Disk configuration — requires qemu-img; skip gracefully if absent
+	let bootSize: string | undefined;
+	const extraDisks: string[] = [];
+
+	const { findQemuImg, getQemuInstallHint } = await import("../lib/platform.ts");
+	const qemuImg = findQemuImg();
+
+	if (!qemuImg) {
+		clack.log.warn(`Disk features (boot resize, extra disks) require qemu-img. ${getQemuInstallHint()}`);
+	} else {
+		const wantBootResize = await clack.confirm({
+			message: "Resize the boot disk? (default is ~128 MB)",
+			initialValue: false,
+		});
+		if (clack.isCancel(wantBootResize)) { clack.cancel("Cancelled."); process.exit(0); }
+
+		if (wantBootResize) {
+			const size = await clack.text({
+				message: "Boot disk size (e.g., 512M, 1G, 2G):",
+				validate: (v) => {
+					if (!/^\d+[KMGT]?$/i.test(v.trim())) return "Size like 512M, 1G, or 2048";
+				},
+			});
+			if (clack.isCancel(size)) { clack.cancel("Cancelled."); process.exit(0); }
+			bootSize = size.trim();
+		}
+
+		const wantExtraDisks = await clack.confirm({
+			message: "Add extra blank disks?",
+			initialValue: false,
+		});
+		if (clack.isCancel(wantExtraDisks)) { clack.cancel("Cancelled."); process.exit(0); }
+
+		if (wantExtraDisks) {
+			let addMore = true;
+			while (addMore) {
+				const diskSize = await clack.text({
+					message: `Extra disk ${extraDisks.length + 1} size (e.g., 64M, 512M, 1G):`,
+					validate: (v) => {
+						if (!/^\d+[KMGT]?$/i.test(v.trim())) return "Size like 64M, 512M, or 1G";
+					},
+				});
+				if (clack.isCancel(diskSize)) { clack.cancel("Cancelled."); process.exit(0); }
+				extraDisks.push(diskSize.trim());
+
+				const another = await clack.confirm({
+					message: "Add another disk?",
+					initialValue: false,
+				});
+				if (clack.isCancel(another)) { clack.cancel("Cancelled."); process.exit(0); }
+				addMore = another;
+			}
+		}
+	}
+
 	// 5. Extra packages — arch-specific list from 7.22.1 baseline.
 	//    Special value "__all__" means install everything from all_packages.zip
 	//    (useful for API schema generation — see restraml project).
@@ -297,6 +352,8 @@ export async function runWizard(): Promise<void> {
 		name: name || undefined,
 		cpu: Number(cpu),
 		mem: Number(mem),
+		bootSize,
+		extraDisks: extraDisks.length > 0 ? extraDisks : undefined,
 		packages,
 		installAllPackages,
 		deviceMode,

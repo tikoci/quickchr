@@ -7,7 +7,7 @@
 
 import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { Arch, MachineState, NetworkMode, PortMapping } from "./types.ts";
+import type { Arch, BootDiskFormat, MachineState, NetworkMode, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware } from "./platform.ts";
 import { buildHostfwdString } from "./network.ts";
@@ -16,7 +16,8 @@ import { ensureDir } from "./state.ts";
 export interface QemuLaunchConfig {
 	arch: Arch;
 	machineDir: string;
-	diskPath: string;
+	bootDisk: { path: string; format: BootDiskFormat };
+	extraDisks?: { path: string; format: "qcow2" }[];
 	mem: number;
 	cpu: number;
 	ports: Record<string, PortMapping>;
@@ -26,7 +27,7 @@ export interface QemuLaunchConfig {
 
 /** Build the full QEMU command-line arguments array. */
 export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]> {
-	const { arch, machineDir, diskPath, mem, cpu, ports, network, background } = config;
+	const { arch, machineDir, bootDisk, extraDisks, mem, cpu, ports, network, background } = config;
 
 	const qemuBin = requireQemu(arch);
 	const accel = await detectAccel(arch);
@@ -74,16 +75,32 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 		);
 	}
 
-	// Disk drive
+	// Boot disk drive
 	if (arch === "arm64") {
 		// ARM64: MUST use explicit virtio-blk-pci (not if=virtio which maps to MMIO)
 		args.push(
-			"-drive", `file=${diskPath},format=raw,if=none,id=drive0`,
+			"-drive", `file=${bootDisk.path},format=${bootDisk.format},if=none,id=drive0`,
 			"-device", "virtio-blk-pci,drive=drive0",
 		);
 	} else {
 		// x86: if=virtio is fine (maps to PCI on q35/pc)
-		args.push("-drive", `file=${diskPath},format=raw,if=virtio`);
+		args.push("-drive", `file=${bootDisk.path},format=${bootDisk.format},if=virtio`);
+	}
+
+	// Extra disks
+	if (extraDisks && extraDisks.length > 0) {
+		for (let i = 0; i < extraDisks.length; i++) {
+			const disk = extraDisks[i] as { path: string; format: "qcow2" };
+			const driveId = `drive${i + 1}`;
+			if (arch === "arm64") {
+				args.push(
+					"-drive", `file=${disk.path},format=${disk.format},if=none,id=${driveId}`,
+					"-device", `virtio-blk-pci,drive=${driveId}`,
+				);
+			} else {
+				args.push("-drive", `file=${disk.path},format=${disk.format},if=virtio`);
+			}
+		}
 	}
 
 	// Networking

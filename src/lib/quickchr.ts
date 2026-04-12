@@ -17,7 +17,7 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg } from "./platform.ts";
 import { resolveVersion, isValidVersion, generateMachineName } from "./versions.ts";
 import { buildPortMappings, findAvailablePortBlock, } from "./network.ts";
 import {
@@ -35,6 +35,7 @@ import {
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, type QemuLaunchConfig } from "./qemu.ts";
+import { prepareBootDisk, prepareExtraDisks, cleanDiskFiles } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
@@ -148,6 +149,17 @@ function createInstance(state: MachineState): ChrInstance {
 			}
 			const destPath = join(state.machineDir, "disk.img");
 			copyFileSync(imgPath, destPath);
+
+			// Clean up disk files (boot.qcow2, extra disks)
+			cleanDiskFiles(state.machineDir);
+
+			// Re-prepare disks if the machine had disk customizations
+			if (state.bootSize) {
+				await prepareBootDisk(state.machineDir, state.bootSize);
+			}
+			if (state.extraDisks && state.extraDisks.length > 0) {
+				await prepareExtraDisks(state.machineDir, state.extraDisks);
+			}
 
 			// Remove EFI vars to force re-creation
 			const efiVars = join(state.machineDir, "efi-vars.fd");
@@ -537,6 +549,9 @@ export class QuickCHR {
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
+				bootSize: opts.bootSize,
+				extraDisks: opts.extraDisks,
+				bootDiskFormat: opts.bootSize ? "qcow2" : "raw",
 				createdAt: new Date().toISOString(),
 				status: "stopped",
 				machineDir,
@@ -661,6 +676,9 @@ export class QuickCHR {
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
+				bootSize: opts.bootSize,
+				extraDisks: opts.extraDisks,
+				bootDiskFormat: opts.bootSize ? "qcow2" : "raw",
 				createdAt: new Date().toISOString(),
 				status: "stopped",
 				machineDir,
@@ -677,7 +695,13 @@ export class QuickCHR {
 
 		// Download and prepare image
 		const cachedImg = await ensureCachedImage(version, arch);
-		const diskPath = copyImageToMachine(cachedImg, machineDir);
+		copyImageToMachine(cachedImg, machineDir);
+
+		// Prepare disks (boot resize + extra disks)
+		const bootDisk = await prepareBootDisk(machineDir, opts.bootSize);
+		const extraDiskConfigs = opts.extraDisks && opts.extraDisks.length > 0
+			? await prepareExtraDisks(machineDir, opts.extraDisks)
+			: undefined;
 
 		// Build machine config
 		const background = opts.background ?? true;
@@ -711,6 +735,9 @@ export class QuickCHR {
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
 			extraPorts: opts.extraPorts ?? [],
+			bootSize: opts.bootSize,
+			extraDisks: opts.extraDisks,
+			bootDiskFormat: bootDisk.format,
 			createdAt: new Date().toISOString(),
 			status: "running",
 			machineDir,
@@ -720,7 +747,8 @@ export class QuickCHR {
 		const launchConfig: QemuLaunchConfig = {
 			arch,
 			machineDir,
-			diskPath,
+			bootDisk,
+			extraDisks: extraDiskConfigs,
 			mem: state.mem,
 			cpu: state.cpu,
 			ports: state.ports,
@@ -1004,6 +1032,20 @@ export class QuickCHR {
 			throw new QuickCHRError("MACHINE_NOT_FOUND", `Disk image not found for "${state.name}"`);
 		}
 
+		// Resolve boot disk: use qcow2 if previously resized, else raw
+		const bootDiskPath = state.bootDiskFormat === "qcow2"
+			? join(state.machineDir, "boot.qcow2")
+			: diskPath;
+		const bootDisk = { path: bootDiskPath, format: state.bootDiskFormat ?? "raw" as const };
+
+		// Resolve extra disks from persisted state
+		const extraDiskConfigs = state.extraDisks && state.extraDisks.length > 0
+			? state.extraDisks.map((_, i) => ({
+				path: join(state.machineDir, `disk${i + 1}.qcow2`),
+				format: "qcow2" as const,
+			}))
+			: undefined;
+
 		const hasProvisioning = !!(
 			provisioningOpts && (
 				provisioningOpts.installAllPackages ||
@@ -1021,7 +1063,8 @@ export class QuickCHR {
 		const launchConfig: QemuLaunchConfig = {
 			arch: state.arch,
 			machineDir: state.machineDir,
-			diskPath,
+			bootDisk,
+			extraDisks: extraDiskConfigs,
 			mem: state.mem,
 			cpu: state.cpu,
 			ports: state.ports,
@@ -1217,6 +1260,22 @@ export class QuickCHR {
 				label: "sshpass",
 				status: "warn",
 				detail: "not found — required for extra package upload (brew install sshpass / apt install sshpass)",
+			});
+		}
+
+		// qemu-img (optional, for disk resize and extra disks)
+		const qemuImgPath = findQemuImg();
+		if (qemuImgPath) {
+			checks.push({
+				label: "qemu-img",
+				status: "ok",
+				detail: qemuImgPath,
+			});
+		} else {
+			checks.push({
+				label: "qemu-img",
+				status: "warn",
+				detail: `not found — required for --boot-size and --add-disk (${getQemuInstallHint()})`,
 			});
 		}
 

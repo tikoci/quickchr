@@ -41,6 +41,10 @@ export const SERVICE_NAMES = Object.keys(SERVICE_PORTS) as ServiceName[];
 export const PORTS_PER_BLOCK = 10;
 export const DEFAULT_PORT_BASE = 9100;
 
+// --- Disk ---
+
+export type BootDiskFormat = "raw" | "qcow2";
+
 // --- Machine State ---
 
 export interface MachineConfig {
@@ -63,6 +67,12 @@ export interface MachineConfig {
 	excludePorts: ServiceName[];
 	extraPorts: PortMapping[];
 	licenseLevel?: LicenseLevel;
+	/** Boot disk size override (e.g. "512M", "2G"). When set, boot disk is converted to qcow2. */
+	bootSize?: string;
+	/** Extra disk sizes (e.g. ["512M", "1G"]). Always qcow2. */
+	extraDisks?: string[];
+	/** Format of the boot disk — raw by default, qcow2 when resized. */
+	bootDiskFormat?: BootDiskFormat;
 }
 
 export interface MachineState extends MachineConfig {
@@ -104,6 +114,10 @@ export interface StartOptions {
 	license?: LicenseInput;
 	/** Configure /system/device-mode after boot. If omitted, CHR boots with RouterOS defaults (mode=advanced). */
 	deviceMode?: DeviceModeOptions;
+	/** Boot disk size override (e.g. "512M", "2G"). Converts boot disk to qcow2. */
+	bootSize?: string;
+	/** Extra blank disks to attach, specified as sizes (e.g. ["512M", "1G"]). Always qcow2. */
+	extraDisks?: string[];
 }
 
 // --- Instance (runtime handle) ---
@@ -199,6 +213,7 @@ export interface PlatformInfo {
 	packageManager: PackageManager;
 	qemuBinX86?: string;
 	qemuBinArm64?: string;
+	qemuImg?: string;
 	efiFirmware?: EfiFirmwarePaths;
 	accelAvailable: string[];
 }

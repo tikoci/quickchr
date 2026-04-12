@@ -24,7 +24,7 @@ function makeConfig(overrides: Partial<QemuLaunchConfig> = {}): QemuLaunchConfig
 	return {
 		arch: "arm64",
 		machineDir: "/tmp/quickchr-test-machine",
-		diskPath: "/tmp/quickchr-test-machine/disk.img",
+		bootDisk: { path: "/tmp/quickchr-test-machine/disk.img", format: "raw" },
 		mem: 512,
 		cpu: 1,
 		ports,
@@ -237,6 +237,116 @@ describe("buildQemuArgs — acceleration", () => {
 				expect(cpuValue).toBe("host");
 			}
 			// kvm on Linux: also expects "host" but may vary — don't assert
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+});
+
+describe("buildQemuArgs — boot disk format", () => {
+	test("boot disk uses raw format in drive arg", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				bootDisk: { path: "/tmp/quickchr-test-machine/disk.img", format: "raw" },
+			}));
+			const driveArg = args.find((a) => a.includes("disk.img"));
+			expect(driveArg).toBeDefined();
+			expect(driveArg).toContain("format=raw");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("boot disk uses qcow2 format in drive arg", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				bootDisk: { path: "/tmp/quickchr-test-machine/boot.qcow2", format: "qcow2" },
+			}));
+			const driveArg = args.find((a) => a.includes("boot.qcow2"));
+			expect(driveArg).toBeDefined();
+			expect(driveArg).toContain("format=qcow2");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+});
+
+describe("buildQemuArgs — extra disks", () => {
+	test("arm64 extra disks use virtio-blk-pci with sequential IDs", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				arch: "arm64",
+				extraDisks: [
+					{ path: "/tmp/quickchr-test-machine/extra-0.qcow2", format: "qcow2" },
+					{ path: "/tmp/quickchr-test-machine/extra-1.qcow2", format: "qcow2" },
+				],
+			}));
+			// Extra disk 0 → drive1, extra disk 1 → drive2
+			const drive1Arg = args.find((a) => a.includes("extra-0.qcow2"));
+			expect(drive1Arg).toBeDefined();
+			expect(drive1Arg).toContain("id=drive1");
+			expect(drive1Arg).toContain("if=none");
+			expect(args).toContain("virtio-blk-pci,drive=drive1");
+
+			const drive2Arg = args.find((a) => a.includes("extra-1.qcow2"));
+			expect(drive2Arg).toBeDefined();
+			expect(drive2Arg).toContain("id=drive2");
+			expect(args).toContain("virtio-blk-pci,drive=drive2");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("x86 extra disks use if=virtio", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				arch: "x86",
+				extraDisks: [
+					{ path: "/tmp/quickchr-test-machine/extra-0.qcow2", format: "qcow2" },
+				],
+			}));
+			const driveArg = args.find((a) => a.includes("extra-0.qcow2"));
+			expect(driveArg).toBeDefined();
+			expect(driveArg).toContain("if=virtio");
+			expect(driveArg).toContain("format=qcow2");
+			// x86 should NOT have virtio-blk-pci for extra disks
+			expect(args).not.toContain("virtio-blk-pci,drive=drive1");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("no extra disk args when extraDisks is undefined", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({ extraDisks: undefined }));
+			// Only boot disk (drive0) should exist, no drive1
+			const drive1Args = args.filter((a) => a.includes("drive1"));
+			expect(drive1Args).toHaveLength(0);
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e &&
 				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {

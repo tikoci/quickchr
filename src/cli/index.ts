@@ -117,6 +117,9 @@ async function main() {
 			case "license":
 				await cmdLicense(args.slice(1));
 				break;
+			case "disk":
+				await cmdDisk(args.slice(1));
+				break;
 			case "setup":
 				await cmdSetup();
 				break;
@@ -420,6 +423,8 @@ async function cmdAdd(argv: string[]) {
 		network: flag(flags, "vmnet-shared") !== undefined ? "vmnet-shared"
 			: flag(flags, "vmnet-bridge") ? { type: "vmnet-bridge" as const, iface: flag(flags, "vmnet-bridge") as string }
 			: undefined,
+		bootSize: flag(flags, "boot-size"),
+		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 	};
 
 	const deviceModeValue = flag(flags, "device-mode");
@@ -885,6 +890,8 @@ async function cmdStart(argv: string[]) {
 		network: flag(flags, "vmnet-shared") !== undefined ? "vmnet-shared"
 			: flag(flags, "vmnet-bridge") ? { type: "vmnet-bridge" as const, iface: flag(flags, "vmnet-bridge") as string }
 			: undefined,
+		bootSize: flag(flags, "boot-size"),
+		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 		installDeps: flagBool(flags, "install-deps"),
 		dryRun: flagBool(flags, "dry-run"),
 	};
@@ -1247,6 +1254,81 @@ async function cmdLicense(argv: string[]) {
 	console.log(`License applied: ${level}`);
 }
 
+async function cmdDisk(argv: string[]) {
+	const { positional } = parseFlags(argv);
+	const name = positional[0];
+
+	if (!name) {
+		const { QuickCHR } = await import("../lib/quickchr.ts");
+		const machines = QuickCHR.list();
+		printMachineListWithTip("disk", machines);
+		return;
+	}
+
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { bold, dim } = await import("./format.ts");
+	const { getDiskInfo } = await import("../lib/disk.ts");
+	const { join } = await import("node:path");
+	const { existsSync } = await import("node:fs");
+	const { findQemuImg } = await import("../lib/platform.ts");
+
+	const machine = QuickCHR.get(name);
+	if (!machine) {
+		console.error(`Machine "${name}" not found.`);
+		process.exit(1);
+	}
+
+	const state = machine.state;
+	const qemuImg = findQemuImg();
+
+	const formatSize = (bytes: number) => {
+		if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+		if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+		return `${(bytes / 1024).toFixed(1)} KB`;
+	};
+
+	console.log(bold(`Disks for ${name}\n`));
+
+	// Boot disk
+	const bootPath = state.bootDiskFormat === "qcow2"
+		? join(state.machineDir, "boot.qcow2")
+		: join(state.machineDir, "disk.img");
+	const bootFormat = state.bootDiskFormat ?? "raw";
+
+	if (qemuImg && existsSync(bootPath)) {
+		try {
+			const info = await getDiskInfo(bootPath);
+			console.log(`  boot    ${bootFormat.padEnd(6)}  virtual: ${formatSize(info.virtualSize).padEnd(10)}  actual: ${formatSize(info.actualSize)}`);
+		} catch {
+			console.log(`  boot    ${bootFormat.padEnd(6)}  ${bootPath}`);
+		}
+	} else {
+		console.log(`  boot    ${bootFormat.padEnd(6)}  ${bootPath}`);
+	}
+
+	// Extra disks
+	if (state.extraDisks && state.extraDisks.length > 0) {
+		for (let i = 0; i < state.extraDisks.length; i++) {
+			const diskPath = join(state.machineDir, `disk${i + 1}.qcow2`);
+			const label = `disk${i + 1}`;
+			if (qemuImg && existsSync(diskPath)) {
+				try {
+					const info = await getDiskInfo(diskPath);
+					console.log(`  ${label.padEnd(6)}  qcow2   virtual: ${formatSize(info.virtualSize).padEnd(10)}  actual: ${formatSize(info.actualSize)}`);
+				} catch {
+					console.log(`  ${label.padEnd(6)}  qcow2   ${diskPath}`);
+				}
+			} else {
+				console.log(`  ${label.padEnd(6)}  qcow2   ${dim("(not created)")}`);
+			}
+		}
+	}
+
+	if (!qemuImg) {
+		console.log(dim(`\n  (install qemu-img for disk size details)`));
+	}
+}
+
 async function cmdDoctor() {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { statusIcon, bold } = await import("./format.ts");
@@ -1309,6 +1391,7 @@ Commands:
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
   license <name>          Apply/renew CHR trial license
+  disk <name>             Show disk details for an instance
   doctor                  Check prerequisites
   version                 Show version info
   help [command]          Show help
@@ -1335,6 +1418,8 @@ Options:
   --arch <arch>         Architecture: arm64, x86 (default: host native)
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
+  --boot-size <size>    Resize boot disk (e.g., 512M, 2G) — converts to qcow2
+  --add-disk <size>     Add an extra blank qcow2 disk (repeatable)
   --add-package <pkg>   Extra package to install on first boot (repeatable)
   --install-all-packages  Install all packages on first boot
   --add-user <u:p>      Create user on first boot (name:password)
@@ -1395,6 +1480,8 @@ Options:
   --name <name>         Instance name
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
+  --boot-size <size>    Resize boot disk (e.g., 512M, 2G) — converts to qcow2
+  --add-disk <size>     Add an extra blank qcow2 disk (repeatable)
   --add-package <pkg>   Extra package to install (repeatable)
   --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
@@ -1431,7 +1518,16 @@ Options:
 			console.log(`quickchr doctor
 
 Check system prerequisites: QEMU binaries, firmware, acceleration,
-sshpass (for package upload), data directories, and cached images.`);
+sshpass (for package upload), qemu-img (for disk operations), data directories,
+and cached images.`);
+			break;
+		case "disk":
+			console.log(`quickchr disk <name>
+
+Show disk details (format, virtual size, actual size) for an instance.
+
+  <name>      Show disks for a specific instance.
+              Omit to list all instances.`);
 			break;
 		case "license":
 			console.log(`quickchr license <name> [options]

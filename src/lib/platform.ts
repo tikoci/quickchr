@@ -185,6 +185,7 @@ export async function detectPlatform(): Promise<PlatformInfo> {
 
 	const qemuBinX86 = findQemuBinary("x86");
 	const qemuBinArm64 = findQemuBinary("arm64");
+	const qemuImg = findQemuImg();
 	const efiFirmware = findEfiFirmware();
 	const accelAvailable = await detectAllAccel();
 
@@ -194,9 +195,39 @@ export async function detectPlatform(): Promise<PlatformInfo> {
 		packageManager,
 		qemuBinX86,
 		qemuBinArm64,
+		qemuImg,
 		efiFirmware,
 		accelAvailable,
 	};
+}
+
+/** Resolve the qemu-img binary path. */
+export function findQemuImg(): string | undefined {
+	const result = Bun.spawnSync(["which", "qemu-img"], { stdout: "pipe", stderr: "pipe" });
+	if (result.exitCode === 0) {
+		return new TextDecoder().decode(result.stdout).trim();
+	}
+
+	// Windows: check common install location
+	if (process.platform === "win32") {
+		const winPath = "C:\\Program Files\\qemu\\qemu-img.exe";
+		if (existsSync(winPath)) return winPath;
+	}
+
+	return undefined;
+}
+
+/** Validate that qemu-img is available; throws MISSING_QEMU if not found. */
+export function requireQemuImg(): string {
+	const bin = findQemuImg();
+	if (!bin) {
+		throw new QError(
+			"MISSING_QEMU",
+			"qemu-img not found (required for disk operations)",
+			getQemuInstallHint(),
+		);
+	}
+	return bin;
 }
 
 /** Validate that the required QEMU binary is available for the given architecture. */

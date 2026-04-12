@@ -10,6 +10,7 @@ export { QuickCHR } from "./lib/quickchr.ts";
 // Types
 export type {
 	Arch,
+	BootDiskFormat,
 	Channel,
 	ChrInstance,
 	ChrPorts,
@@ -43,6 +44,10 @@ export type {
 
 export { QuickCHRError } from "./lib/types.ts";
 export type { ErrorCode } from "./lib/types.ts";
+
+// Disk utilities
+export { getDiskInfo, createQcow2Disk } from "./lib/disk.ts";
+export type { DiskInfo } from "./lib/disk.ts";
 
 // Auth utilities
 export { resolveAuth } from "./lib/auth.ts";
