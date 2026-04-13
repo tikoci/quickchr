@@ -530,7 +530,7 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 ## P5 — Networking
 
-See [networking-strawman.md](./docs/networking-strawman.md) for background.
+See [networking reference](./docs/networking.md) for platform internals (QEMU networking, socket_vmnet, TAP, Windows).
 
 Platform priority: macOS (focus: local) & Linux (focus: CI) → Windows.
 
@@ -553,7 +553,48 @@ The core tension: different use cases need different network modes, each with di
 
 **Key insight: `user` + `socket` are the universal rootless pair.** The default is one `user` network (management via REST API hostfwd). Multi-CHR topologies add `socket` links for inter-VM data-plane connectivity. This combination is cross-platform, rootless, CI-friendly, and covers the majority of use cases (testing, training, tooling, CI). vmnet/TAP are "upgrades" for scenarios needing real LAN presence or host-visible broadcast domains. Rootless should be the default path — if someone sees three CHRs routing OSPF from `make` or `bun test`, *then* they'll be willing to `sudo` something for the next step. (Compare: Multipass requires a privileged daemon just to start — "Waiting for daemon..." with no workaround if launchd is unhappy.)
 
-For network admins familiar with GNS3/EVE-NG — quickchr rootless topologies are not trying to replace those tools for large-scale simulation. The sweet spot is 2-5 CHRs with realistic routing/VPN configs, automatable from a Makefile or test script, runnable in CI. The fun "two-cute-by-half" tricks (PPPoE over socket, VXLAN overlays, IPSec site-to-site — all rootless) are worth calling out in MANUAL.md for network engineers who'll appreciate the cleverness.
+For network admins familiar with GNS3/EVE-NG — quickchr rootless topologies are not trying to replace those tools for large-scale simulation. The sweet spot is 2-5 CHRs with realistic routing/VPN configs, automatable from a Makefile or test script, runnable in CI. The fun "two-cute-by-half" tricks (PPPoE over socket, VXLAN overlays, IPSec site-to-site — all rootless) are worth calling out in MANUAL.md for network engineers who'll appreciate the cleverness. See [networking reference](./docs/networking.md) for detailed topology recipes.
+
+#### Cross-Platform Network Abstraction
+
+The `--add-network` scheme operates at a level above QEMU's `-netdev` — like common hypervisors (VirtualBox, UTM, Multipass) that abstract into "host-only", "shared/NAT", and "bridged". The same `--add-network` flag expresses *intent*, and quickchr resolves it to the best available mechanism on the current platform. This is the key design principle: **you should be able to construct a cross-platform `--add-network` command** that works on macOS, Linux, and (eventually) Windows — quickchr adapts to whatever networking infrastructure is available.
+
+**Generic specifiers** (cross-platform):
+
+| Specifier | Intent | Root? |
+|-----------|--------|-------|
+| `user` | Management NIC with port forwarding (SLIRP) | No |
+| `socket::<name>` | Named inter-VM L2 link | No |
+| `shared` | NAT network; CHR gets DHCP IP from host | Depends on platform driver |
+| `bridged:<ifname>` | Bridge to a physical interface | Depends on platform driver |
+
+**Convenience aliases** (resolve to `bridged:<detected-interface>`):
+
+| Alias | Detection | Notes |
+|-------|-----------|-------|
+| `wifi` | macOS: Wi-Fi `en*`; Linux: `wlan*`/`wlp*` | First wireless interface |
+| `ethernet` | macOS: Ethernet `en*`; Linux: `eth*`/`enp*` | First wired interface, fail if none |
+| `auto` | `ethernet` then `wifi` fallback | First wired, then wireless |
+
+**Platform resolution for `shared`:**
+
+| Step | macOS | Linux |
+|------|-------|-------|
+| Preferred | `socket_vmnet` shared daemon → QEMU runs unprivileged | User-owned TAP (e.g. `tap-chr-shared`) exists → use it |
+| Fallback | Running as root → QEMU built-in `-netdev vmnet-shared` | Running as root → create TAP + iptables NAT |
+| Fail | Error with setup hint: `brew install socket_vmnet` | Error with TAP creation instructions |
+
+**Platform resolution for `bridged:<ifname>`:**
+
+| Step | macOS | Linux |
+|------|-------|-------|
+| Preferred | `socket_vmnet` bridged daemon for `<ifname>` → unprivileged | User-owned TAP on bridge containing `<ifname>` |
+| Fallback | Root → QEMU built-in `-netdev vmnet-bridged,ifname=<iface>` | Root → create TAP, add to bridge |
+| Fail | Error with socket_vmnet bridged setup instructions | Error with bridge/TAP creation instructions |
+
+**Network downgrade:** If infrastructure isn't available and quickchr isn't root, it warns and degrades to `user`. `quickchr list` shows the downgrade: `ether2: shared → user (socket_vmnet not found)`. No silent failures.
+
+**Windows:** `user` and `socket` work cross-platform. `shared` and `bridged` require TAP-Windows adapter (admin install once). Document the path; don't automate Windows networking config. Not a priority until macOS and Linux are solid.
 
 #### CLI Design: `--add-network`
 
@@ -579,18 +620,27 @@ quickchr start rb-sim --emulate-device rb5009
 quickchr start headless --no-network
 ```
 
-**Network specifier syntax** — uses `:` separators (prefix:type:name):
+**Network specifier syntax:**
+
+*Cross-platform specifiers (preferred — see "Cross-Platform Network Abstraction" above for resolution chains):*
 
 | Specifier | Resolves to | Root? | Notes |
 |-----------|------------|-------|-------|
 | `user` | `-netdev user,hostfwd=...` | No | Management NIC with port forwarding |
 | `socket::<name>` | `-netdev socket,listen=:<auto-port>` or `connect` | No | Named socket. First machine to use a name listens, others connect. Port auto-allocated and tracked in `~/.local/share/quickchr/networks/<name>.json` |
+| `shared` | Platform-resolved (see resolution chain) | Varies | NAT network with DHCP. Prefers rootless driver (socket_vmnet, user-owned TAP) |
+| `bridged:<ifname>` | Platform-resolved (see resolution chain) | Varies | Bridge to physical interface. Also accepts aliases: `wifi`, `ethernet`, `auto` |
+
+*Explicit specifiers (advanced — bypass platform resolution):*
+
+| Specifier | Resolves to | Root? | Notes |
+|-----------|------------|-------|-------|
 | `socket:listen:<port>` | `-netdev socket,listen=:<port>` | No | Explicit port, listen side |
 | `socket:connect:<port>` | `-netdev socket,connect=127.0.0.1:<port>` | No | Explicit port, connect side |
 | `socket:mcast:<group>:<port>` | `-netdev socket,mcast=<group>:<port>` | No | Multicast socket, shared L2 segment |
-| `:shared:<name>` | `-netdev vmnet-shared` (macOS) | Yes | Named shared network. Discovered via `quickchr networks`, not created per-machine |
-| `:bridge:<ifname>` | `-netdev vmnet-bridged,ifname=<iface>` (macOS) or `-netdev tap,ifname=<tap>` (Linux) | Yes | Bridge to host interface. Same specifier, platform-resolved |
-| `<tap-name>` | `-netdev tap,ifname=<tap>` | Yes | Direct TAP name (Linux). Discovered via `quickchr networks` |
+| `vmnet-shared` | `-netdev vmnet-shared` | Yes (whole QEMU) | macOS only. QEMU built-in — entire QEMU as root |
+| `vmnet-bridged:<ifname>` | `-netdev vmnet-bridged,ifname=<iface>` | Yes (whole QEMU) | macOS only. QEMU built-in bridged |
+| `tap:<ifname>` | `-netdev tap,ifname=<tap>,script=no` | No (if user-owned) | Linux only. Pre-created TAP device |
 
 **Named sockets (`socket::<name>`)** are the key usability improvement over explicit ports. quickchr tracks named socket state in `~/.local/share/quickchr/networks/<name>.json` — which port, which machine is listen vs connect. This avoids port conflicts and makes configs readable:
 
@@ -602,9 +652,9 @@ quickchr start branch-b --add-network user --add-network socket::hub-to-b
 
 **Multi-NIC mapping in QEMU:** Each `--add-network` adds a `-netdev`/`-device virtio-net-pci` pair. RouterOS sees them as `ether1` (first `--add-network`), `ether2`, etc. Ordering is deterministic and matches the order of flags on the command line.
 
-**Cross-platform portability:** If `~/.local/share/quickchr` is synced between Mac and Linux, rootless configs (user + socket) work unchanged. Privileged configs (`:bridge:en0`) use the same specifier but resolve differently per platform — document the TAP naming convention so Linux users can create TAPs matching macOS interface names.
+**Cross-platform portability:** If `~/.local/share/quickchr` is synced between Mac and Linux, rootless configs (user + socket) work unchanged. Generic specifiers (`shared`, `bridged:en0`) use the same syntax but resolve differently per platform. Document the TAP naming convention so Linux users can create TAPs that align with the quickchr scheme.
 
-**Network downgrade:** If a machine config references `:bridge:en0` but quickchr isn't running as root (or the interface doesn't exist), show a yellow warning and downgrade to `user` or `socket`. `quickchr list` and `quickchr status` should clearly indicate downgraded networks (e.g., `ether2: :bridge:en0 → user (no root)`).
+**Network downgrade:** If a machine config references `shared` or `bridged:en0` but quickchr can't resolve it (no socket_vmnet, no TAP, not root), show a yellow warning and downgrade to `user`. `quickchr list` clearly indicates downgraded networks (e.g., `ether2: shared → user (socket_vmnet not found)`). See "Cross-Platform Network Abstraction" for the full resolution chain.
 
 #### `quickchr networks` — Discovery Command
 
@@ -612,19 +662,25 @@ Inspired by `multipass networks`. Lists available network interfaces and named s
 
 ```text
 $ quickchr networks
-TYPE          NAME            STATUS    NOTES
-user          (default)       always    hostfwd port forwarding
-socket        hub-to-a        active    listen:4001 (hub), connect (branch-a)
-socket        hub-to-b        active    listen:4002 (hub), connect (branch-b)
-vmnet-shared  shared0         available macOS vmnet (requires root)
-bridge        en0             available Ethernet (Realtek), 1Gbps, connected
-bridge        en1             available Wi-Fi (AirPort), 802.11ac
-tap           tap0            available Linux TAP (pre-configured)
+TYPE            NAME            STATUS       NOTES
+user            (default)       always       hostfwd port forwarding
+socket          hub-to-a        active       listen:4001 (hub), connect (branch-a)
+socket          hub-to-b        active       listen:4002 (hub), connect (branch-b)
+shared          (socket_vmnet)  available    via socket_vmnet daemon (no root for QEMU)
+bridged         en0             available    Ethernet (Realtek), 1Gbps — alias: ethernet
+bridged         en1             available    Wi-Fi (AirPort), 802.11ac — alias: wifi
+
+$ quickchr networks   # on Linux
+TYPE            NAME            STATUS       NOTES
+user            (default)       always       hostfwd port forwarding
+shared          tap-chr-shared  available    user-owned TAP + NAT
+bridged         eth0            available    TAP on br0 — alias: ethernet
 ```
 
 - [ ] `quickchr networks` — list available networks. `--format json|table` output.
-- [ ] macOS: enumerate physical interfaces only (Multipass learned the hard way — listing virtual bridges QEMU can't actually bridge to caused bugs). Filter via `networksetup -listallhardwareports`.
-- [ ] Linux: `ip link show type tun` for TAPs, `ip link show type bridge` for bridges.
+- [ ] macOS: detect socket_vmnet daemon (check socket files in `$(brew --prefix)/var/run/`). Show as `shared (socket_vmnet)` when available.
+- [ ] macOS: enumerate physical interfaces via `networksetup -listallhardwareports`. Filter out virtual/bridge interfaces (Multipass learned the hard way — listing bridges QEMU can't bridge to caused bugs). Show interface aliases (wifi, ethernet).
+- [ ] Linux: `ip link show type tun` for TAPs, `ip link show type bridge` for bridges. Show which are user-owned.
 - [ ] Show active named sockets with port allocations and connected machines.
 
 #### `--emulate-device` — Hardware Profiles
@@ -645,8 +701,11 @@ quickchr start rb-sim --emulate-device rb5009
 - [ ] Extend `NetworkMode` type: `network: NetworkMode` → `networks: NetworkConfig[]`. Each entry has type, name, and platform-resolved QEMU args.
 - [ ] Semantics: zero flags = `[user]`. Any flags = exactly what you specified (count of flags = count of NICs). `--no-network` = `[]`.
 - [ ] Named socket state management: `~/.local/share/quickchr/networks/<name>.json` tracks port, listen machine, connect machines.
-- [ ] Wizard: detect available modes and only show viable options. If not root, show `user` and `socket` only. If macOS + root, add `:shared:` and `:bridge:<ifname>`.
-- [ ] Store in `machine.json`/`.yaml` as `networks: [...]` array. Re-applicable on restart.
+- [ ] Platform resolution engine: resolve generic specifiers (`shared`, `bridged:<ifname>`, aliases) to platform-specific QEMU args per the resolution chains above. Core function: `resolveNetworkSpecifier(spec, platform, isRoot) → { qemuArgs, wrapper?, downgraded? }`.
+- [ ] Interface alias resolution: `wifi` → detect wireless interface; `ethernet` → detect wired interface; `auto` → wired then wireless. Use `networksetup -listallhardwareports` (macOS) or `ip link` (Linux).
+- [ ] Network downgrade: if `shared`/`bridged` can't resolve, warn and degrade to `user`. Store both the requested specifier and actual resolved mode so `quickchr list` can show the downgrade.
+- [ ] Wizard: detect available modes and only show viable options. Rootless: show `user` and `socket`. If socket_vmnet detected (macOS) or user-owned TAPs exist (Linux): show `shared` and `bridged`. If root: show all.
+- [ ] Store in `machine.json`/`.yaml` as `networks: [...]` array with the original specifier (not the resolved form). Re-resolve on restart so platform changes (e.g. socket_vmnet installed) are picked up.
 - [ ] CI (GitHub Actions): `user` + `socket` only (no root). Document.
 
 #### sudo Handling
@@ -656,13 +715,7 @@ quickchr start rb-sim --emulate-device rb5009
 
 #### Creative Networking Tricks (RouterOS-side, no root needed)
 
-These use RouterOS's own tunneling capabilities to create "real" interfaces over rootless socket/user networks. Worth documenting in MANUAL.md as "rootless network topology" recipes:
-
-- **VXLAN over socket:** Two CHRs connected via `socket` get L2 adjacency. RouterOS VXLAN on top creates additional overlay segments. This is the standard enterprise pattern (underlay + overlay) and works perfectly rootless.
-- **PPPoE server/client over socket:** One CHR as PPPoE server, another as client. Client gets a dynamic `pppoe-out1` interface with an IP from the server's pool. Creates routed point-to-point links. Useful for testing PPPoE configurations (common in ISP/WISP deployments).
-- **EoIP/GRE tunnels:** RouterOS EoIP creates L2 tunnels over L3. Useful for extending broadcast domains across routed socket links.
-- **IPSec/L2TP/PPTP VPN:** Build VPN tunnels between CHRs over socket links. Tests the full VPN stack without any host configuration. IPSec site-to-site is especially common in MikroTik deployments.
-- **VRRP over vmnet-shared:** Requires root, but the VIP floats on a real macOS network segment. This is the one scenario where rootless socket mode genuinely can't substitute — VRRP needs a shared broadcast domain visible to the host.
+RouterOS's own tunneling capabilities (VXLAN, PPPoE, EoIP/GRE, IPSec/L2TP, VRRP) work over rootless `socket` links to create advanced topologies without host privilege. Worth documenting in MANUAL.md as "rootless topology" recipes — see [networking reference](./docs/networking.md) for detailed examples. The one exception: **VRRP requires `shared` or `bridged`** because the VIP must float on a broadcast domain visible to the host.
 
 ### Multipass Comparison Notes
 
@@ -674,13 +727,21 @@ Reviewed Multipass (Canonical) as a reference for multi-VM CLI design. Key lesso
 
 ### macOS
 
-- [ ] vmnet-shared and vmnet-bridge via `:shared:` and `:bridge:<ifname>`: generate correct `-netdev vmnet-shared,id=netN` or `-netdev vmnet-bridged,id=netN,ifname=<iface>`. Reference: `~/GitHub/mikropkl` `qemu.sh` and `qemu.cfg`. Key: QEMU vmnet is macOS-only (`vmnet.framework`). vmnet-bridged only works with physical interfaces — filter in `quickchr networks`.
-- [ ] vmnet-shared and vmnet-bridged are **discovered, not created** per-machine. They exist as macOS platform capabilities. quickchr references them; it doesn't manage them. (Contrast with named sockets, which quickchr does manage.)
+**socket_vmnet is the preferred path for `shared` and `bridged` on macOS.** It splits privilege: the `socket_vmnet` daemon runs as root (via launchd), QEMU runs as the user. This is how Lima, Rancher Desktop, and Podman Desktop handle macOS networking. QEMU's built-in `-netdev vmnet-shared` / `vmnet-bridged` is the fallback — it works but requires the entire QEMU process to run as root (`sudo quickchr start`). See [networking reference](./docs/networking.md) for socket_vmnet internals, install steps, and multi-NIC fd passthrough details.
+
+- [ ] Detect `socket_vmnet_client` binary (Homebrew: `$(brew --prefix)/opt/socket_vmnet/bin/socket_vmnet_client`)
+- [ ] Detect running socket_vmnet daemons: check for shared socket at `$(brew --prefix)/var/run/socket_vmnet` and bridged sockets at `$(brew --prefix)/var/run/socket_vmnet.bridged.<iface>`
+- [ ] When `shared` specifier resolves on macOS: socket_vmnet first → vmnet-shared (root) → error with install hint
+- [ ] When `bridged:<ifname>` resolves: socket_vmnet bridged for that interface → vmnet-bridged (root) → error
+- [ ] `socket_vmnet_client` wraps the QEMU spawn: `Bun.spawn([socketVmnetClientBin, socketPath, qemuBin, ...qemuArgs])` — QEMU args use `-netdev socket,id=netN,fd=3` instead of `-netdev vmnet-shared`
+- [ ] Multi-NIC with two socket_vmnet networks: chained `socket_vmnet_client` calls, fd=3 then fd=4. Verify exact fd numbering before implementing (open question in networking reference)
+- [ ] vmnet-bridged only works with physical interfaces — filter virtual/bridge interfaces in `quickchr networks` (learned from Multipass bugs)
+- [ ] Reference: `~/GitHub/mikropkl` `qemu.sh` and `qemu.cfg` for working vmnet examples on Intel Mac
 
 ### Linux
 
-- [ ] TAP networking via `--add-network <tap-name>` or `:bridge:<ifname>`: philosophy is **discover and present**, don't configure. `quickchr networks` shows available TAPs and bridges. Don't edit `/etc/network/` or manage bridge creation — an agent can figure out the right TAP for a given OS in one prompt better than a generic script.
-- [ ] Cross-platform config hint: document TAP naming convention so Linux users can create TAPs matching macOS interface names (e.g., name a TAP `en0`) for portable machine configs.
+- [ ] TAP networking: `shared` and `bridged:<ifname>` resolve to TAP devices on Linux (see resolution chain above). Philosophy is **discover and present**, don't configure. `quickchr networks` shows available TAPs and bridges. Don't edit `/etc/network/` or manage bridge creation — an agent can figure out the right TAP for a given OS in one prompt better than a generic script. Explicit `tap:<ifname>` specifier available as escape hatch.
+- [ ] Well-known TAP convention: document creating `tap-chr-shared` (for `shared` specifier resolution) and bridge-attached TAPs for `bridged`. Linux users who follow the convention get the same `--add-network shared` experience as macOS users with socket_vmnet.
 - [ ] CI (GitHub Actions): rootless only (`user` + `socket`). No TAP in CI unless runner has pre-configured TAPs (self-hosted runners).
 
 ### Windows (low priority, document the scheme)
@@ -769,21 +830,21 @@ quickchr start branch-b --add-network user --add-network socket::hub-b
 **Topology:**
 
 ```text
-sudo quickchr start chr-a --add-network user --add-network :shared:vrrp-lan --add-network socket::divi-sync
-sudo quickchr start chr-b --add-network user --add-network :shared:vrrp-lan --add-network socket::divi-sync
+sudo quickchr start chr-a --add-network user --add-network shared --add-network socket::divi-sync
+sudo quickchr start chr-b --add-network user --add-network shared --add-network socket::divi-sync
 
      [macOS host / LAN]
             |
-     :shared:vrrp-lan (vmnet-shared on macOS, TAP+bridge on Linux)
+     shared (vmnet-shared on macOS, TAP+bridge on Linux)
        |          |
   +---------+ +---------+
   |  CHR-A  | |  CHR-B  |
   | ether1  | | ether1  | user (mgmt, hostfwd)
-  | ether2  | | ether2  | :shared:vrrp-lan (VRRP)
+  | ether2  | | ether2  | shared (VRRP)
   | ether3  | | ether3  | socket::divi-sync (VXLAN sync)
   +---------+ +---------+
        |          |
-    VRRP VIP floats on :shared:vrrp-lan
+    VRRP VIP floats on shared
     VXLAN tunnel over socket::divi-sync
 ```
 
@@ -794,11 +855,11 @@ sudo quickchr start chr-b --add-network user --add-network :shared:vrrp-lan --ad
 
 **What this validates:**
 
-- `:shared:` and `socket::` mixed network modes with root
+- `shared` and `socket::` mixed network modes with root
 - VRRP failover: stop CHR-A, verify VIP migrates to CHR-B (test via host ping to VIP)
 - VXLAN over socket: internal sync channel between routers
 
-**Linux equivalent:** Replace vmnet-shared with a TAP interface attached to a bridge. quickchr doesn't create the bridge — user sets it up, quickchr discovers and uses it.
+**Linux equivalent:** The same `--add-network shared` command works — quickchr resolves to a TAP interface instead of vmnet. quickchr discovers existing TAPs and bridges; it doesn't create them.
 
 **Why root is unavoidable here:** VRRP sends gratuitous ARP on a shared broadcast domain. The host (or other LAN devices) need to see the VIP. Socket mode provides inter-VM L2 but is invisible to the host. vmnet-shared (or TAP+bridge) puts CHR traffic on a network the host participates in.
 

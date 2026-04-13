@@ -1,7 +1,9 @@
-# quickchr Networking — Research & Design
+# quickchr Networking — Platform Reference
 
-> **Status:** Research document. Not all features described here are implemented.
-> This is a living spec that drives the `--add-network` and `quickchr network add` implementation.
+> **Status:** Reference document for QEMU networking internals across platforms.
+> Design decisions and implementation checklist live in [BACKLOG.md](../BACKLOG.md) § P5 — Networking.
+> This document covers *how things work under the hood* — what QEMU does, how each
+> platform's networking stack operates, and what quickchr's resolution engine maps to.
 
 ---
 
@@ -408,9 +410,15 @@ Windows networking for QEMU is messy. The rootless path (user-mode) works well. 
 
 ---
 
-## Design: `quickchr network add`
+## Reference: `quickchr network add` (future)
 
-The strawman from the backlog (`sudo quickchr network add wifibridge --type bridged --iface en0`) maps cleanly to the research above. Here's the refined design.
+> **Note:** The primary networking model is **resolution-based discovery** — generic specifiers
+> (`shared`, `bridged:<ifname>`) resolve to available platform infrastructure at start time.
+> See [BACKLOG.md](../BACKLOG.md) § P5 "Cross-Platform Network Abstraction" for the current design.
+>
+> The `quickchr network add` command below is a **future extension** for one-time setup of
+> privileged infrastructure (installing socket_vmnet launchd services, creating persistent TAPs).
+> It does not conflict with the resolution model — it *creates* the infrastructure that resolution *discovers*.
 
 ### Registry File
 
@@ -599,30 +607,11 @@ macOS CI runners (GitHub-hosted) do NOT have `socket_vmnet` and do not have the 
 
 ## Creative Rootless Topology Tricks
 
-These are RouterOS-side techniques that build advanced networks on top of the rootless `user` + `socket` pair:
+RouterOS's own tunneling capabilities work over rootless `user` + `socket` links. These are documented as topology recipes in MANUAL.md (future). Key patterns:
 
-### VXLAN Overlay on Socket Links
-
-```
-VM-A --(socket)-- VM-B                   # L2 underlay (rootless)
-VM-A: /interface/vxlan add ... vni=100   # VXLAN tunnel
-VM-B: /interface/vxlan add ... vni=100   # VXLAN tunnel
-```
-
-Creates a standard enterprise underlay/overlay topology without any host privilege.
-
-### PPPoE over Socket
-
-```
-VM-hub:  /interface/pppoe-server/server add interface=ether2 ...
-VM-spoke: /interface/pppoe-client add interface=ether2 ...
-```
-
-Spoke gets `pppoe-out1` with IP from hub's pool. Simulates ISP/WISP PPPoE link. Completely rootless.
-
-### IPSec Site-to-Site over Socket
-
-Both CHRs on the socket segment; configure IPSec peers using the socket-assigned IPs. Full MikroTik IPSec stack (IKE, ESP, policies) all in-guest. No host-side VPN configuration.
+- **VXLAN overlay on socket links** — standard enterprise underlay/overlay, completely rootless
+- **PPPoE server/client over socket** — simulates ISP/WISP PPPoE links
+- **IPSec site-to-site over socket** — full MikroTik IPSec stack, no host-side VPN config
 
 ### VRRP over vmnet-shared / bridge
 
@@ -630,29 +619,13 @@ VRRP needs a shared broadcast domain visible to the host. This is the one scenar
 
 ---
 
-## Implementation Roadmap
-
-Rough order of operations, each step independent and shippable:
-
-1. **`quickchr networks` / `list` command enhancement** — read and display registered networks from `~/.local/share/quickchr/networks/`. No actual creation yet.  
-2. **socket::name named socket registry** — already designed in BACKLOG. Implement port tracking and network JSON files. This proves the registry pattern before adding privileged modes.
-3. **socket_vmnet integration (macOS, shared mode)** — detect `socket_vmnet_client`, modify `spawnQemu` to wrap with it when a `socket_vmnet-shared` network is registered. Change QEMU args from `-netdev vmnet-shared` to `-netdev socket,id=net0,fd=3`. Unit-testable (mock socket path). This replaces the current `vmnet-shared` implementation and eliminates the need for `sudo qemu`.
-4. **`sudo quickchr network add` (macOS shared)** — install/start socket_vmnet launchd service, write registry entry. Test on macOS.
-5. **`sudo quickchr network add` (macOS bridged)** — install socket_vmnet bridged launchd plist, write registry.
-6. **socket_vmnet integration (macOS, bridged mode)** — same as step 3 but use bridged socket path. MAC auto-generation.
-7. **`sudo quickchr network add` (Linux TAP)** — `ip tuntap add ... user $SUDO_USER`, write registry, optionally write systemd unit.
-8. **TAP networking (Linux)** — `-netdev tap,ifname=...,script=no,downscript=no`. Test on Linux CI.
-9. **bridge helper (Linux)** — detect qemu-bridge-helper, support `-netdev bridge,br=...`.
-10. **`quickchr doctor` additions** — all the checks from the dependency detection table.
-11. **Windows** — defer until platform CI is confirmed. TAP-Windows detection + user-mode fallback docs.
-
----
-
 ## Open Questions
+
+These are tracked here as platform-level questions. Implementation items are in [BACKLOG.md](../BACKLOG.md) § P5.
 
 - **socket_vmnet fd numbering with multi-NIC:** Need to verify the exact fd passthrough mechanism when chaining two `socket_vmnet_client` calls. Test before committing to the multi-NIC socket_vmnet design.
 - **ARM64 CHR `--add-network` NIC limit:** RouterOS arm64 CHR has been observed to support up to 9 VirtIO-net NICs on `virt` machine. Verify the exact limit before documenting it.
 - **Persistent TAP on Linux reboot:** Decide between systemd-networkd, udev, or explicit systemd service for persistence. `systemd-networkd` .netdev files are the cleanest but require network daemon config.
 - **Docker networks as underlay:** Podman/Docker's `macvlan` networks can bridge containers to a physical interface without user-land TAP management. Interesting for CI (Docker-in-Docker style). Worth exploring as an alternative to raw TAP for Linux CI.
-- **socket_vmnet host-only mode:** Useful for test topologies where you want host ↔ CHR but no internet. Maps to a `host` network type. Design the specifier (e.g., `--add-network host-only`).
+- **socket_vmnet host-only mode:** Useful for test topologies where you want host ↔ CHR but no internet. Maps to a `host-only` specifier (analogous to VirtualBox "host-only adapter").
 - **Multicast socket networks (mcast):** QEMU socket multicast lets any number of VMs join a shared L2 segment without a listen/connect asymmetry. Could simplify the named socket registry design.

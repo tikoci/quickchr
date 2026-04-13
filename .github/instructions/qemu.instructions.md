@@ -33,8 +33,14 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 ## Networking
 
 - User mode: `-netdev user,id=net0,hostfwd=...`
-- vmnet-shared: `-netdev vmnet-shared,id=net0` (macOS only)
-- vmnet-bridge: `-netdev vmnet-bridged,id=net0,ifname=en0` (macOS only)
+- Socket (inter-VM L2): `-netdev socket,id=net1,listen=:4001` / `connect=127.0.0.1:4001`
+- socket_vmnet (macOS, preferred): `-netdev socket,id=net0,fd=3` — QEMU launched via `socket_vmnet_client <socket_path> qemu-system-*`. Daemon runs as root, QEMU runs unprivileged
+- vmnet-shared (macOS, fallback): `-netdev vmnet-shared,id=net0` — requires entire QEMU as root
+- vmnet-bridged (macOS, fallback): `-netdev vmnet-bridged,id=net0,ifname=en0` — requires root
+- TAP (Linux): `-netdev tap,id=net0,ifname=tap-chr0,script=no,downscript=no` — pre-created user-owned TAP
+
+**Resolution order for `--add-network shared`:** socket_vmnet daemon → vmnet-shared (root) → error
+**Resolution order for `--add-network bridged:<iface>`:** socket_vmnet bridged → vmnet-bridged (root) → error
 
 ## Channels (background mode)
 
