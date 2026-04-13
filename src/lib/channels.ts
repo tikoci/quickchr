@@ -12,6 +12,7 @@ import { connect } from "node:net";
 import type { Arch, QgaCommand } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { qgaProbe, qgaRawCommand } from "./qga.ts";
+import { qgaKvmWarning } from "./platform.ts";
 
 /** Send a command to the QEMU monitor via Unix socket and return the response. */
 export async function monitorCommand(
@@ -118,8 +119,8 @@ export function serialStreams(machineDir: string): {
 }
 
 /** Send a QGA (QEMU Guest Agent) command via Unix socket. x86 only.
- *  Delegates to qga.ts for protocol handling — this wrapper adds the
- *  arch guard and socket path resolution. */
+ *  Delegates to qga.ts for protocol handling — this wrapper adds arch guard,
+ *  KVM availability warning, and socket path resolution. */
 export async function qgaCommand(
 	machineDir: string,
 	arch: Arch,
@@ -132,6 +133,11 @@ export async function qgaCommand(
 			"QGA_UNSUPPORTED",
 			"QEMU Guest Agent is not yet functional on ARM64 CHR — MikroTik arm64 guest agent support is planned but not yet released",
 		);
+	}
+
+	const kvmWarning = qgaKvmWarning();
+	if (kvmWarning) {
+		console.warn(`[quickchr] ${kvmWarning}`);
 	}
 
 	const socketPath = join(machineDir, "qga.sock");

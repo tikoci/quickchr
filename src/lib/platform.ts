@@ -89,6 +89,24 @@ export function findEfiFirmware(): EfiFirmwarePaths | undefined {
 	return undefined;
 }
 
+/**
+ * Returns a warning string when QGA is attempted on a non-KVM platform, or null on Linux.
+ *
+ * RouterOS CHR only starts its guest agent daemon under KVM hypervisors. Under macOS (HVF)
+ * or Windows, the QGA port is presented correctly by QEMU but the guest never opens it.
+ * Linux with /dev/kvm is the confirmed working environment. If MikroTik changes this
+ * behaviour in a future build, remove this warning.
+ */
+export function qgaKvmWarning(): string | null {
+	if (process.platform === "linux") return null;
+	const plat = process.platform === "darwin" ? "macOS (HVF)" : "Windows";
+	return (
+		`QGA requires KVM — RouterOS guest agent only starts under KVM hypervisors. ` +
+		`On ${plat} it will likely time out. ` +
+		`Attempting anyway — remove this warning if a future RouterOS build changes behaviour.`
+	);
+}
+
 /** Whether guestArch requires cross-architecture emulation (TCG) on this host.
  *  Cross-arch emulation is significantly slower and needs more memory/timeout.
  *  arm64 guest on x86_64 host → TCG (slow).

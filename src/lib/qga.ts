@@ -6,7 +6,10 @@
  * qemu-ga) that supports guest-exec with `input-data` (base64-encoded
  * RouterOS script), file operations, and system queries.
  *
- * x86 only — ARM64 CHR does not start the QGA userspace daemon.
+ * KVM required — RouterOS CHR only starts the QGA daemon under KVM hypervisors.
+ * On macOS (HVF) or Windows, QEMU presents the virtio-serial port correctly
+ * but the guest never opens it (confirmed by investigation 2026-04-12).
+ * ARM64 CHR does not implement QGA at all (MikroTik feature, pending).
  *
  * Protocol notes (from mikropkl Lab testing):
  * - First message must be `guest-sync-delimited` to flush stale data
@@ -139,7 +142,7 @@ function connectSocket(socketPath: string, timeoutMs: number): Promise<Socket> {
 			} catch {
 				// Ignore timeout cleanup failures.
 			}
-			finish(new QuickCHRError("BOOT_TIMEOUT", `QGA socket connect timed out after ${timeoutMs}ms`));
+			finish(new QuickCHRError("QGA_TIMEOUT", `QGA socket connect timed out after ${timeoutMs}ms — guest agent may not be running (requires KVM on Linux)`));
 		}, timeoutMs);
 
 		const onConnect = () => {
@@ -180,7 +183,7 @@ function sendAndReceive(
 		};
 
 		const timeout = setTimeout(() => {
-			finish(undefined, new QuickCHRError("BOOT_TIMEOUT", "QGA command timed out"));
+			finish(undefined, new QuickCHRError("QGA_TIMEOUT", "QGA command timed out — guest agent may not be running (requires KVM on Linux)"));
 		}, timeoutMs);
 
 		const onData = (data: Buffer) => {

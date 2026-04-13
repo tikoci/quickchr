@@ -78,11 +78,10 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 			const qgaSockPath = join(instance.state.machineDir, "qga.sock");
 			isQgaAvailable = await waitForQgaReady(qgaSockPath, 30_000);
 			if (!isQgaAvailable) {
-				throw new Error(
-					`QGA did not become ready on x86 within 30s ` +
-					`(host=${process.platform}/${process.arch}). ` +
-					`This reproduces locally on macOS Intel with QEMU 10.2.2 ` +
-					`outside quickchr as well (mikropkl apple/OVMF path, HVF and TCG).`,
+				console.warn(
+					`[exec.test] QGA not available on ${process.platform}/${process.arch} within 30s. ` +
+					`RouterOS CHR guest agent requires KVM — expected on macOS (HVF) and Windows. ` +
+					`QGA tests will be skipped.`,
 				);
 			}
 		}

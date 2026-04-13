@@ -17,7 +17,7 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg, qgaKvmWarning } from "./platform.ts";
 import { resolveVersion, isValidVersion, generateMachineName } from "./versions.ts";
 import { buildPortMappings, findAvailablePortBlock, } from "./network.ts";
 import {
@@ -240,6 +240,10 @@ function createInstance(state: MachineState): ChrInstance {
 						"QGA_UNSUPPORTED",
 						"QEMU Guest Agent is not yet functional on ARM64 CHR — MikroTik arm64 guest agent support is planned but not yet released",
 					);
+				}
+				const kvmWarning = qgaKvmWarning();
+				if (kvmWarning) {
+					console.warn(`[quickchr] ${kvmWarning}`);
 				}
 				const socketPath = join(state.machineDir, "qga.sock");
 				const result = await qgaExec(socketPath, command, opts?.timeout ?? 30_000);

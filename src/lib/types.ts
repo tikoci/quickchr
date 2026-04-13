@@ -245,6 +245,7 @@ export type ErrorCode =
 	| "PORT_CONFLICT"
 	| "BOOT_TIMEOUT"
 	| "QGA_UNSUPPORTED"
+	| "QGA_TIMEOUT"
 	| "DOWNLOAD_FAILED"
 	| "MACHINE_EXISTS"
 	| "MACHINE_NOT_FOUND"
@@ -315,8 +316,9 @@ export interface QgaExecResult {
  * qemu-ga. The `guest-exec` command only accepts `input-data` (RouterOS script),
  * not `path`. File operations use flat RouterOS filenames only (no directories).
  *
- * x86_64 only — ARM64 CHR does not start the QGA userspace daemon (MikroTik
- * bug, tracked; ARM64 support is planned once MikroTik publishes a fix).
+ * QGA requires KVM — RouterOS only starts the guest agent daemon under KVM hypervisors.
+ * On macOS (HVF) and Windows, the daemon never starts; calls will time out.
+ * ARM64 CHR does not implement QGA at all (MikroTik feature, pending).
  */
 export type QgaCommand =
 	| "guest-ping"

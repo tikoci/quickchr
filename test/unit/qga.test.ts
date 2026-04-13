@@ -463,7 +463,7 @@ describe("qgaPing", () => {
 		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
 
 		try {
-			await expect(qgaPing(sockPath, 250)).rejects.toMatchObject({ code: "BOOT_TIMEOUT" });
+			await expect(qgaPing(sockPath, 250)).rejects.toMatchObject({ code: "QGA_TIMEOUT" });
 			await waitFor(() => activeConnections === 0, 1000);
 
 			const commands = await qgaInfo(sockPath, 2000);

@@ -564,7 +564,7 @@ Operations:
   file-read            Read a RouterOS root file (--path <name>)
   exec                 Run RouterOS script via QGA (--script <cmd>)
 
-QGA is x86_64 only — ARM64 CHR support is planned pending MikroTik firmware.
+QGA requires KVM on x86_64 — may not respond on macOS (HVF) or Windows. ARM64 CHR support is pending MikroTik implementation.
 
 Options:
   --timeout <seconds>  Operation timeout (default: 10)`;
@@ -611,8 +611,15 @@ Options:
 
 	if (machine.state.arch === "arm64") {
 		console.error(`Error [QGA_UNSUPPORTED]: QEMU Guest Agent is not yet functional on ARM64 CHR.`);
-		console.error(`  ARM64 QGA support is planned pending MikroTik firmware — x86_64 machines work today.`);
+		console.error(`  ARM64 QGA support is pending MikroTik implementation — x86_64 machines work today.`);
 		process.exit(1);
+	}
+
+	// x86 on non-KVM platforms (macOS HVF, Windows): warn but proceed
+	if (process.platform !== "linux") {
+		const platform = process.platform === "darwin" ? "macOS (HVF)" : "Windows";
+		console.warn(`Warning [QGA_TIMEOUT]: QGA requires KVM — RouterOS guest agent only starts under KVM hypervisors.`);
+		console.warn(`  On ${platform} it will likely time out. Attempting anyway.`);
 	}
 
 	switch (operation) {
@@ -1457,7 +1464,7 @@ Uses the REST /execute endpoint (no SSH needed).
   <command...>        RouterOS CLI command to execute.
 
 Options:
-  --via <transport>   Transport: auto, rest (default: auto)
+  --via <transport>   Transport: auto, rest, qga (default: auto) — qga requires KVM
   --user <user>       Override username
   --password <pass>   Override password
   --timeout <secs>    Timeout in seconds (default: 30)

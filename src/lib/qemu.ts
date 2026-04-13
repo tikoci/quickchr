@@ -179,7 +179,7 @@ function buildChannelArgs(
 		);
 	}
 
-	// QGA — x86 only (arm64 has a bug where the userspace daemon doesn't start)
+	// QGA channel — x86 only. RouterOS QGA requires KVM; arm64 CHR does not implement QGA.
 	if (arch === "x86") {
 		args.push(
 			"-device", "virtio-serial-pci,id=virtio-serial-qga",
