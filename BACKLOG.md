@@ -530,7 +530,9 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 ## P5 — Networking
 
-Platform priority: macOS → Linux → Windows.
+See [networking-strawman.md](./docs/networking-strawman.md) for background.
+
+Platform priority: macOS (focus: local) & Linux (focus: CI) → Windows.
 
 ### Networking Rationalization
 
@@ -648,7 +650,7 @@ quickchr start rb-sim --emulate-device rb5009
 
 #### sudo Handling
 
-- [ ] quickchr should NOT prompt for sudo itself. Require `sudo quickchr start ...` when vmnet or TAP is needed. More transparent, avoids privilege escalation surprises, matches mikropkl's `sudo qemu-system-*` pattern. The wizard detects root and adjusts available options.
+- [ ] quickchr should NOT prompt for sudo itself, unless it clear that's is the user's intent.  `sudo quickchr start ...` when vmnet or TAP is needed should work.  More transparent, avoids privilege escalation surprises, matches mikropkl's `sudo qemu-system-*` pattern. The wizard detects root and adjusts available options.
 - [ ] **No daemon.** quickchr runs QEMU directly as a child process (foreground) or detached process (background). No launchd/systemd service required for basic operation. This is a deliberate contrast to Multipass's daemon architecture — no "Waiting for daemon..." failure mode, no socket permissions, no gRPC complexity. Daemonization (P4) is an optional promotion for long-running instances, not a requirement.
 
 #### Creative Networking Tricks (RouterOS-side, no root needed)
