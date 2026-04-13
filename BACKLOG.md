@@ -547,6 +547,7 @@ The core tension: different use cases need different network modes, each with di
 | `vmnet-shared` | macOS | Yes (`sudo`) | Yes (DHCP from vmnet) | Yes | Yes (shared NAT) | Tested on Intel Mac (`~/GitHub/mikropkl`). macOS's built-in NAT network via `vmnet.framework` |
 | `vmnet-bridged` | macOS | Yes (`sudo`) | Yes (from LAN DHCP) | Yes (same bridge) | Yes (LAN peer) | Needs `ifname` selection (e.g. `en0`). Real LAN presence |
 | `tap` | Linux | Yes (or CAP_NET_ADMIN) | Depends on bridge config | Yes (same bridge) | Depends | User configures bridge externally; quickchr discovers + presents available TAPs |
+| `socket_vmnet` | macOS | Yes, but at `brew install`/launchd-changes | Yes (default NAT, custom launchd for more shared/bridging) | Yes | Yes | Use if present, show custom launchd.plists using it |
 
 ### Rootless Network Topologies
 
