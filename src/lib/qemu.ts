@@ -7,7 +7,7 @@
 
 import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { Arch, BootDiskFormat, MachineState, NetworkMode, PortMapping } from "./types.ts";
+import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware } from "./platform.ts";
 import { buildHostfwdString } from "./network.ts";
@@ -21,13 +21,16 @@ export interface QemuLaunchConfig {
 	mem: number;
 	cpu: number;
 	ports: Record<string, PortMapping>;
-	network: NetworkMode;
+	/** @deprecated Use `networks` instead. */
+	network?: NetworkMode;
+	/** Network interfaces with resolved QEMU args. */
+	networks: NetworkConfig[];
 	background: boolean;
 }
 
 /** Build the full QEMU command-line arguments array. */
 export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]> {
-	const { arch, machineDir, bootDisk, extraDisks, mem, cpu, ports, network, background } = config;
+	const { arch, machineDir, bootDisk, extraDisks, mem, cpu, ports, networks, background } = config;
 
 	const qemuBin = requireQemu(arch);
 	const accel = await detectAccel(arch);
@@ -108,7 +111,7 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 	}
 
 	// Networking
-	buildNetworkArgs(args, ports, network);
+	buildNetworkArgs(args, ports, networks);
 
 	// Display
 	args.push("-display", "none");
@@ -119,32 +122,61 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 	return args;
 }
 
-/** Build networking arguments. */
+/** Build networking arguments from NetworkConfig array. */
 function buildNetworkArgs(
 	args: string[],
 	ports: Record<string, PortMapping>,
-	network: NetworkMode,
+	networks: NetworkConfig[],
 ): void {
-	if (network === "vmnet-shared") {
-		args.push(
-			"-netdev", "vmnet-shared,id=net0",
-			"-device", "virtio-net-pci,netdev=net0",
-		);
-	} else if (typeof network === "object" && network.type === "vmnet-bridge") {
-		args.push(
-			"-netdev", `vmnet-bridged,id=net0,ifname=${network.iface}`,
-			"-device", "virtio-net-pci,netdev=net0",
-			// Also add a shared interface for management access
-			"-netdev", "vmnet-shared,id=net1",
-			"-device", "virtio-net-pci,netdev=net1",
-		);
-	} else {
-		// User-mode networking with port forwarding
-		const hostfwd = buildHostfwdString(ports);
-		args.push(
-			"-netdev", `user,id=net0${hostfwd ? "," + hostfwd : ""}`,
-			"-device", "virtio-net-pci,netdev=net0",
-		);
+	for (const net of networks) {
+		// If resolution produced QEMU args, use those directly
+		if (net.resolved?.qemuNetdevArgs) {
+			args.push(...net.resolved.qemuNetdevArgs);
+			continue;
+		}
+
+		// Fallback: build args from specifier (legacy path and simple cases)
+		const spec = net.specifier;
+		const id = net.id;
+
+		if (spec === "vmnet-shared") {
+			args.push(
+				"-netdev", `vmnet-shared,id=${id}`,
+				"-device", `virtio-net-pci,netdev=${id}`,
+			);
+		} else if (typeof spec === "object" && spec.type === "vmnet-bridged") {
+			args.push(
+				"-netdev", `vmnet-bridged,id=${id},ifname=${spec.iface}`,
+				"-device", `virtio-net-pci,netdev=${id}`,
+			);
+		} else if (typeof spec === "object" && spec.type === "socket-listen") {
+			args.push(
+				"-netdev", `socket,id=${id},listen=:${spec.port}`,
+				"-device", `virtio-net-pci,netdev=${id}`,
+			);
+		} else if (typeof spec === "object" && spec.type === "socket-connect") {
+			args.push(
+				"-netdev", `socket,id=${id},connect=127.0.0.1:${spec.port}`,
+				"-device", `virtio-net-pci,netdev=${id}`,
+			);
+		} else if (typeof spec === "object" && spec.type === "socket-mcast") {
+			args.push(
+				"-netdev", `socket,id=${id},mcast=${spec.group}:${spec.port}`,
+				"-device", `virtio-net-pci,netdev=${id}`,
+			);
+		} else if (typeof spec === "object" && spec.type === "tap") {
+			args.push(
+				"-netdev", `tap,id=${id},ifname=${spec.ifname},script=no,downscript=no`,
+				"-device", `virtio-net-pci,netdev=${id}`,
+			);
+		} else {
+			// Default: user-mode networking with port forwarding (only on the first user NIC)
+			const hostfwd = buildHostfwdString(ports);
+			args.push(
+				"-netdev", `user,id=${id}${hostfwd ? "," + hostfwd : ""}`,
+				"-device", `virtio-net-pci,netdev=${id}`,
+			);
+		}
 	}
 }
 
@@ -213,6 +245,29 @@ function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: st
 	}
 }
 
+/** Extract socket_vmnet wrapper from resolved networks (at most one allowed). */
+export function extractWrapper(
+	networks: NetworkConfig[],
+): { command: string; args: string[] } | undefined {
+	const wrappers: string[][] = [];
+	for (const n of networks) {
+		if (n.resolved?.wrapper) {
+			wrappers.push(n.resolved.wrapper);
+		}
+	}
+	if (wrappers.length > 1) {
+		throw new QuickCHRError(
+			"INVALID_NETWORK",
+			"Multiple networks require socket_vmnet wrapper — only one is supported per VM",
+		);
+	}
+	const w = wrappers[0];
+	if (!w || w.length === 0) return undefined;
+	const [command, ...wrapperArgs] = w;
+	if (!command) return undefined;
+	return { command, args: wrapperArgs };
+}
+
 /** Parse QEMU log output and produce a human-friendly error message. */
 export function buildQemuErrorMessage(log: string): string {
 	if (log.includes("Permission denied")) {
@@ -232,6 +287,7 @@ export async function spawnQemu(
 	qemuArgs: string[],
 	machineDir: string,
 	background: boolean,
+	wrapper?: { command: string; args: string[] },
 ): Promise<{ pid: number; process?: ReturnType<typeof Bun.spawn> }> {
 	ensureDir(machineDir);
 
@@ -242,11 +298,19 @@ export async function spawnQemu(
 
 	if (!bin) throw new QuickCHRError("SPAWN_FAILED", "Empty QEMU args");
 
+	let spawnCmd: string[];
+	if (wrapper) {
+		console.log(`[quickchr] Using socket_vmnet wrapper: ${wrapper.command} ${wrapper.args.join(" ")}`);
+		spawnCmd = [wrapper.command, ...wrapper.args, bin, ...args];
+	} else {
+		spawnCmd = [bin, ...args];
+	}
+
 	if (background) {
 		// Open log file as an fd — more reliable than BunFile for subprocess stdio.
 		// After spawn, close parent's copy; child process inherits its own copy.
 		const logFd = openSync(logPath, "a");
-		const proc = Bun.spawn([bin, ...args], {
+		const proc = Bun.spawn(spawnCmd, {
 			stdout: logFd,
 			stderr: logFd,
 			stdin: "ignore",
@@ -278,7 +342,7 @@ export async function spawnQemu(
 	}
 
 	// Foreground — stdin/stdout connected to terminal. Blocks until QEMU exits.
-	const proc = Bun.spawn([bin, ...args], {
+	const proc = Bun.spawn(spawnCmd, {
 		stdout: "inherit",
 		stderr: "inherit",
 		stdin: "inherit",

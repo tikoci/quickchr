@@ -12,10 +12,72 @@ export const ARCHES: Arch[] = ["arm64", "x86"];
 
 // --- Networking ---
 
+/** @deprecated Use NetworkSpecifier instead. Kept for backward compatibility with old machine.json files. */
 export type NetworkMode =
 	| "user"
 	| "vmnet-shared"
 	| { type: "vmnet-bridge"; iface: string };
+
+/**
+ * Network specifier — expresses user intent for a network interface.
+ * Generic specifiers (user, socket, shared, bridged) are cross-platform;
+ * explicit specifiers (vmnet-shared, vmnet-bridged, tap) bypass platform resolution.
+ */
+export type NetworkSpecifier =
+	| "user"
+	| { type: "socket"; name: string }
+	| { type: "socket-listen"; port: number }
+	| { type: "socket-connect"; port: number }
+	| { type: "socket-mcast"; group: string; port: number }
+	| "shared"
+	| { type: "bridged"; iface: string }
+	| "vmnet-shared"
+	| { type: "vmnet-bridged"; iface: string }
+	| { type: "tap"; ifname: string };
+
+/** Result of resolving a NetworkSpecifier on a specific platform. */
+export interface ResolvedNetwork {
+	/** QEMU -netdev and -device argument pairs. */
+	qemuNetdevArgs: string[];
+	/** Optional wrapper command (e.g. socket_vmnet_client). When set, QEMU is spawned as a child of this wrapper. */
+	wrapper?: string[];
+	/** If the specifier was downgraded (e.g. shared → user), details are here. */
+	downgraded?: { from: string; reason: string };
+	/** MAC address override for deterministic addressing (socket_vmnet DHCP). */
+	mac?: string;
+}
+
+/** A single network interface in a machine's config. */
+export interface NetworkConfig {
+	/** The user-specified intent (stored in machine.json for re-resolution on restart). */
+	specifier: NetworkSpecifier;
+	/** QEMU netdev id (net0, net1, ...). */
+	id: string;
+	/** Resolved QEMU args (populated at launch time, not persisted). */
+	resolved?: ResolvedNetwork;
+}
+
+/** Physical network interface detected on the host. */
+export interface HostInterface {
+	/** OS device name (e.g. en0, eth0). */
+	device: string;
+	/** Human-readable port name (e.g. "Wi-Fi", "Thunderbolt 1"). */
+	name: string;
+	/** MAC address. */
+	mac?: string;
+	/** Interface alias for --add-network convenience: "wifi", "ethernet", or undefined. */
+	alias?: "wifi" | "ethernet";
+}
+
+/** socket_vmnet daemon availability on macOS. */
+export interface SocketVmnetInfo {
+	/** Path to socket_vmnet_client binary. */
+	client: string;
+	/** Path to shared daemon socket (if running). */
+	sharedSocket?: string;
+	/** Map of interface name → bridged daemon socket path (if running). */
+	bridgedSockets: Record<string, string>;
+}
 
 export interface PortMapping {
 	name: string;
@@ -53,7 +115,10 @@ export interface MachineConfig {
 	arch: Arch;
 	cpu: number;
 	mem: number;
-	network: NetworkMode;
+	/** @deprecated Use `networks` instead. Kept for backward compat with old machine.json. */
+	network?: NetworkMode;
+	/** Network interfaces for this machine. Default: single user-mode NIC. */
+	networks: NetworkConfig[];
 	ports: Record<string, PortMapping>;
 	packages: string[];
 	/** Install all packages from all_packages.zip on first boot. */
@@ -107,7 +172,12 @@ export interface StartOptions {
 	portBase?: number;
 	excludePorts?: ServiceName[];
 	extraPorts?: PortMapping[];
+	/** @deprecated Use `networks` instead. Kept for backward compatibility. */
 	network?: NetworkMode;
+	/** Network interfaces. Each entry becomes a NIC on the CHR.
+	 *  Default (when omitted): single user-mode NIC.
+	 *  When specified: count of entries = count of NICs (explicit control). */
+	networks?: NetworkSpecifier[];
 	installDeps?: boolean;
 	dryRun?: boolean;
 	/** Apply a CHR trial license after boot via /system/license/renew.
@@ -220,6 +290,7 @@ export interface PlatformInfo {
 	qemuImg?: string;
 	efiFirmware?: EfiFirmwarePaths;
 	accelAvailable: string[];
+	socketVmnet?: SocketVmnetInfo;
 }
 
 // --- Doctor ---
@@ -258,7 +329,10 @@ export type ErrorCode =
 	| "MACHINE_LOCKED"
 	| "EXEC_FAILED"
 	| "PROCESS_FAILED"
-	| "SPAWN_FAILED";
+	| "SPAWN_FAILED"
+	| "NETWORK_UNAVAILABLE"
+	| "INVALID_NETWORK"
+	| "STATE_ERROR";
 
 export class QuickCHRError extends Error {
 	code: ErrorCode;

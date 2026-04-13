@@ -813,7 +813,28 @@ async function cmdSetup() {
 	}
 
 	if (choice === "networks") {
-		clack.log.warn("Network configuration is not yet implemented. Use --vmnet-shared / --vmnet-bridge flags with 'add'.");
+		const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
+		const platform = await detectPlatform();
+		const isMacOS = platform.os === "darwin";
+		const hasSocketVmnet = !!platform.socketVmnet;
+
+		clack.log.info("Network types available on this system:");
+		clack.log.step("  user — port forwarding (always available, default)");
+		if (isMacOS && hasSocketVmnet) {
+			clack.log.step("  shared — rootless shared network via socket_vmnet");
+		}
+		if (isMacOS) {
+			clack.log.step("  bridged:<iface> — bridge to a physical interface");
+			const ifaces = detectPhysicalInterfaces();
+			if (ifaces.length > 0) {
+				for (const i of ifaces) {
+					clack.log.step(`    ${i.device} — ${i.name}${i.alias ? ` (${i.alias})` : ""}`);
+				}
+			}
+		}
+		clack.log.step("  socket::<name> — named L2 link between VMs");
+
+		clack.log.info("Use these with: quickchr add --add-network <spec>");
 		clack.outro("");
 		return;
 	}

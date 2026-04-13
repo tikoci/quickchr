@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync
 import { join, } from "node:path";
 import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
+import { networkModeToConfigs } from "./network.ts";
 
 /** Get the quickchr data directory root. */
 export function getDataDir(): string {
@@ -53,7 +54,15 @@ export function loadMachine(name: string): MachineState | undefined {
 	const path = machineJsonPath(name);
 	if (!existsSync(path)) return undefined;
 	const data = readFileSync(path, "utf-8");
-	return JSON.parse(data) as MachineState;
+	const state = JSON.parse(data) as MachineState;
+	// Migrate legacy `network` field → `networks` array
+	if (!state.networks && (state as Record<string, unknown>).network) {
+		const legacy = (state as Record<string, unknown>).network as MachineState["networks"][0]["specifier"] | "user" | "vmnet-shared" | { type: "vmnet-bridge"; iface: string };
+		state.networks = networkModeToConfigs(legacy as Parameters<typeof networkModeToConfigs>[0]);
+	} else if (!state.networks) {
+		state.networks = [{ specifier: "user", id: "net0" }];
+	}
+	return state;
 }
 
 /** Load all machine states. */

@@ -2,7 +2,7 @@
  * Interactive wizard for quickchr — walks user through starting a CHR.
  */
 
-import type { Arch, Channel, DeviceModeOptions, LicenseLevel, LicenseOptions, StartOptions } from "../lib/types.ts";
+import type { Arch, Channel, DeviceModeOptions, LicenseLevel, LicenseOptions, NetworkSpecifier, StartOptions } from "../lib/types.ts";
 import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
 
 /** Run the interactive wizard using @clack/prompts. */
@@ -334,7 +334,85 @@ export async function runWizard(): Promise<void> {
 			license = { account: licAccount, password: licPassword, level: licLevel };
 	}
 
-	// 9. Background/foreground
+	// 9. Networks — build up NetworkSpecifier[] interactively
+	const networks: NetworkSpecifier[] = [];
+	const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
+	const { parseNetworkSpecifier } = await import("../lib/network.ts");
+	const platform = await detectPlatform();
+	const isMacOS = platform.os === "darwin";
+	const hasSocketVmnet = !!platform.socketVmnet;
+
+	const wantNetwork = await clack.confirm({
+		message: "Configure networking? (default is user-mode with port forwarding)",
+		initialValue: false,
+	});
+	if (clack.isCancel(wantNetwork)) { clack.cancel("Cancelled."); process.exit(0); }
+
+	if (wantNetwork) {
+		let addMore = true;
+		while (addMore) {
+			const netOptions: Array<{ value: string; label: string; hint?: string }> = [
+				{ value: "user", label: "user", hint: "port forwarding (default)" },
+			];
+			if (isMacOS && hasSocketVmnet) {
+				netOptions.push({ value: "shared", label: "shared", hint: "rootless shared network via socket_vmnet" });
+			}
+			if (isMacOS) {
+				netOptions.push({ value: "bridged", label: "bridged", hint: "bridge to a physical interface" });
+			}
+			netOptions.push({ value: "socket", label: "socket", hint: "named L2 link between VMs" });
+
+			const netType = await clack.select({
+				message: `Network ${networks.length + 1} type:`,
+				options: netOptions,
+			});
+			if (clack.isCancel(netType)) { clack.cancel("Cancelled."); process.exit(0); }
+
+			if (netType === "user") {
+				networks.push("user");
+			} else if (netType === "shared") {
+				networks.push("shared");
+			} else if (netType === "bridged") {
+				const ifaces = detectPhysicalInterfaces();
+				if (ifaces.length === 0) {
+					clack.log.warn("No physical interfaces detected. Enter device name manually.");
+					const manualIface = await clack.text({
+						message: "Interface device name (e.g. en0):",
+						validate: (v) => { if (!v.trim()) return "Required"; },
+					});
+					if (clack.isCancel(manualIface)) { clack.cancel("Cancelled."); process.exit(0); }
+					networks.push(parseNetworkSpecifier(`bridged:${manualIface}`));
+				} else {
+					const ifaceChoice = await clack.select({
+						message: "Bridge to which interface?",
+						options: ifaces.map((i) => ({
+							value: i.device,
+							label: `${i.device} — ${i.name}`,
+							hint: i.alias ?? undefined,
+						})),
+					});
+					if (clack.isCancel(ifaceChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+					networks.push(parseNetworkSpecifier(`bridged:${ifaceChoice}`));
+				}
+			} else if (netType === "socket") {
+				const socketName = await clack.text({
+					message: "Socket link name (VMs sharing a name get L2 connectivity):",
+					validate: (v) => { if (!v.trim()) return "Required"; },
+				});
+				if (clack.isCancel(socketName)) { clack.cancel("Cancelled."); process.exit(0); }
+				networks.push(parseNetworkSpecifier(`socket::${socketName}`));
+			}
+
+			const another = await clack.confirm({
+				message: "Add another network interface?",
+				initialValue: false,
+			});
+			if (clack.isCancel(another)) { clack.cancel("Cancelled."); process.exit(0); }
+			addMore = another;
+		}
+	}
+
+	// 10. Background/foreground
 	const background = await clack.select({
 		message: "Run mode:",
 		options: [
@@ -345,7 +423,7 @@ export async function runWizard(): Promise<void> {
 	});
 	if (clack.isCancel(background)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	// 10. Confirm
+	// 11. Confirm
 	const opts: StartOptions = {
 		version,
 		channel,
@@ -362,6 +440,7 @@ export async function runWizard(): Promise<void> {
 		disableAdmin,
 		secureLogin,
 		license,
+		networks: networks.length > 0 ? networks : undefined,
 		background: background as boolean,
 	};
 
@@ -369,8 +448,11 @@ export async function runWizard(): Promise<void> {
 	const deviceModeSummary = deviceMode
 		? ` (device-mode: ${deviceMode.mode}${deviceMode.enable?.length ? `, +${deviceMode.enable.join(",")}` : ""})`
 		: "";
+	const netSummary = networks.length > 0
+		? ` (nets: ${networks.map((n) => typeof n === "string" ? n : n.type).join(",")})`
+		: "";
 	const confirm = await clack.confirm({
-		message: `Start CHR ${version ?? `(${channel})`} ${arch}${pkgSummary ? ` ${pkgSummary}` : ""}${license ? ` (license: ${license.level})` : ""}${deviceModeSummary}?`,
+		message: `Start CHR ${version ?? `(${channel})`} ${arch}${pkgSummary ? ` ${pkgSummary}` : ""}${license ? ` (license: ${license.level})` : ""}${deviceModeSummary}${netSummary}?`,
 	});
 	if (clack.isCancel(confirm) || !confirm) { clack.cancel("Cancelled."); process.exit(0); }
 

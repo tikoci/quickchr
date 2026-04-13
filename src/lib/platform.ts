@@ -2,8 +2,8 @@
  * Platform detection — OS, arch, package manager, QEMU paths, firmware, acceleration.
  */
 
-import { existsSync } from "node:fs";
-import type { EfiFirmwarePaths, PackageManager, PlatformInfo, } from "./types.ts";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import type { EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo } from "./types.ts";
 import { QuickCHRError as QError } from "./types.ts";
 
 /** UEFI firmware search paths by platform. */
@@ -202,6 +202,67 @@ export function getQemuVersion(binaryPath: string): string | undefined {
 	return undefined;
 }
 
+/** Socket search directories for socket_vmnet daemons. */
+const SOCKET_VMNET_SOCKET_DIRS = [
+	"/usr/local/var/run",
+	"/opt/homebrew/var/run",
+	"/var/run",
+];
+
+/** Candidate paths for socket_vmnet_client binary. */
+const SOCKET_VMNET_CLIENT_PATHS = [
+	"/opt/homebrew/opt/socket_vmnet/bin/socket_vmnet_client",
+	"/usr/local/opt/socket_vmnet/bin/socket_vmnet_client",
+];
+
+function isSocket(path: string): boolean {
+	try {
+		return statSync(path).isSocket();
+	} catch {
+		return false;
+	}
+}
+
+/** Detect socket_vmnet installation and running daemons (macOS only). */
+export function detectSocketVmnet(): SocketVmnetInfo | undefined {
+	if (process.platform !== "darwin") return undefined;
+
+	const client =
+		SOCKET_VMNET_CLIENT_PATHS.find((p) => existsSync(p)) ??
+		findCommandOnPath("socket_vmnet_client");
+	if (!client) return undefined;
+
+	let sharedSocket: string | undefined;
+	const bridgedSockets: Record<string, string> = {};
+
+	for (const dir of SOCKET_VMNET_SOCKET_DIRS) {
+		if (!existsSync(dir)) continue;
+
+		const sharedPath = `${dir}/socket_vmnet`;
+		if (!sharedSocket && isSocket(sharedPath)) {
+			sharedSocket = sharedPath;
+		}
+
+		try {
+			for (const entry of readdirSync(dir)) {
+				const match = entry.match(/^socket_vmnet\.bridged\.(.+)$/);
+				if (!match) continue;
+				const fullPath = `${dir}/${entry}`;
+				if (isSocket(fullPath) && match[1]) {
+					const iface = match[1];
+					if (!(iface in bridgedSockets)) {
+						bridgedSockets[iface] = fullPath;
+					}
+				}
+			}
+		} catch {
+			// directory not readable
+		}
+	}
+
+	return { client, sharedSocket, bridgedSockets };
+}
+
 /** Gather full platform information. */
 export async function detectPlatform(): Promise<PlatformInfo> {
 	const os = process.platform as "darwin" | "linux" | "win32";
@@ -213,6 +274,7 @@ export async function detectPlatform(): Promise<PlatformInfo> {
 	const qemuImg = findQemuImg();
 	const efiFirmware = findEfiFirmware();
 	const accelAvailable = await detectAllAccel();
+	const socketVmnet = detectSocketVmnet();
 
 	return {
 		os,
@@ -223,6 +285,7 @@ export async function detectPlatform(): Promise<PlatformInfo> {
 		qemuImg,
 		efiFirmware,
 		accelAvailable,
+		socketVmnet,
 	};
 }
 
@@ -277,4 +340,90 @@ export function requireFirmware(): EfiFirmwarePaths {
 		);
 	}
 	return fw;
+}
+
+const VIRTUAL_PORT_PATTERNS = [
+	"bluetooth pan",
+	"thunderbolt bridge",
+	"vpn",
+	"multipass",
+];
+
+/** Detect physical network interfaces on the host. macOS only (Linux/Windows return []). */
+export function detectPhysicalInterfaces(): HostInterface[] {
+	if (process.platform !== "darwin") return [];
+
+	const result = Bun.spawnSync(["networksetup", "-listallhardwareports"], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	if (result.exitCode !== 0) return [];
+
+	const output = new TextDecoder().decode(result.stdout);
+	const blocks = output.split(/\n\n+/).filter(Boolean);
+	const interfaces: HostInterface[] = [];
+	let assignedWifi = false;
+	let assignedEthernet = false;
+
+	for (const block of blocks) {
+		const portMatch = block.match(/^Hardware Port:\s*(.+)$/m);
+		const deviceMatch = block.match(/^Device:\s*(\S+)$/m);
+		const macMatch = block.match(/^Ethernet Address:\s*(\S+)$/m);
+
+		if (!portMatch || !deviceMatch) continue;
+
+		const name = portMatch[1].trim();
+		const device = deviceMatch[1].trim();
+		const mac = macMatch?.[1]?.trim();
+
+		const nameLower = name.toLowerCase();
+		if (VIRTUAL_PORT_PATTERNS.some((p) => nameLower.includes(p))) continue;
+
+		let alias: "wifi" | "ethernet" | undefined;
+		if (!assignedWifi && nameLower === "wi-fi") {
+			alias = "wifi";
+			assignedWifi = true;
+		} else if (
+			!assignedEthernet &&
+			(nameLower === "ethernet" || nameLower === "usb ethernet")
+		) {
+			alias = "ethernet";
+			assignedEthernet = true;
+		}
+
+		interfaces.push({ device, name, mac: mac !== "(null)" ? mac : undefined, alias });
+	}
+
+	return interfaces;
+}
+
+const KNOWN_ALIASES = new Set(["wifi", "ethernet", "auto"]);
+
+/** Resolve a convenience alias ("wifi", "ethernet", "auto") to a device name. */
+export function resolveInterfaceAlias(
+	alias: string,
+	interfaces?: HostInterface[],
+): string {
+	if (!KNOWN_ALIASES.has(alias)) return alias;
+
+	const ifaces = interfaces ?? detectPhysicalInterfaces();
+
+	if (alias === "auto") {
+		const eth = ifaces.find((i) => i.alias === "ethernet");
+		if (eth) return eth.device;
+		const wifi = ifaces.find((i) => i.alias === "wifi");
+		if (wifi) return wifi.device;
+		throw new QError(
+			"NETWORK_UNAVAILABLE",
+			"No physical network interface found for 'auto' — no ethernet or wifi detected",
+		);
+	}
+
+	const match = ifaces.find((i) => i.alias === alias);
+	if (match) return match.device;
+
+	throw new QError(
+		"NETWORK_UNAVAILABLE",
+		`No interface found for alias '${alias}' — run 'quickchr doctor' to see available interfaces`,
+	);
 }

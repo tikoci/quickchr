@@ -28,7 +28,7 @@ function makeConfig(overrides: Partial<QemuLaunchConfig> = {}): QemuLaunchConfig
 		mem: 512,
 		cpu: 1,
 		ports,
-		network: "user",
+		networks: [{ specifier: "user", id: "net0" }],
 		background: true,
 		...overrides,
 	};
@@ -111,7 +111,7 @@ describe("buildQemuArgs", () => {
 
 	test("includes hostfwd for user networking", async () => {
 		try {
-			const args = await buildQemuArgs(makeConfig({ network: "user" }));
+			const args = await buildQemuArgs(makeConfig({ networks: [{ specifier: "user", id: "net0" }] }));
 			const netdevArg = args.find((a) => a.startsWith("user,id=net0"));
 			expect(netdevArg).toBeDefined();
 			expect(netdevArg).toContain("hostfwd=tcp::9100-:80");
@@ -383,7 +383,7 @@ describe("buildQemuArgs — extra disks", () => {
 describe("buildQemuArgs — network modes", () => {
 	test("vmnet-shared produces vmnet-shared netdev", async () => {
 		try {
-			const args = await buildQemuArgs(makeConfig({ arch: "x86", network: "vmnet-shared" }));
+			const args = await buildQemuArgs(makeConfig({ arch: "x86", networks: [{ specifier: "vmnet-shared", id: "net0" }] }));
 			const netdevArg = args.find((a) => a.startsWith("vmnet-shared,id=net0"));
 			expect(netdevArg).toBeDefined();
 			// Also has a virtio-net-pci device attached
@@ -400,7 +400,10 @@ describe("buildQemuArgs — network modes", () => {
 	test("vmnet-bridge produces vmnet-bridged netdev with iface", async () => {
 		try {
 			const args = await buildQemuArgs(
-				makeConfig({ arch: "x86", network: { type: "vmnet-bridge", iface: "en0" } }),
+				makeConfig({ arch: "x86", networks: [
+					{ specifier: { type: "vmnet-bridged", iface: "en0" }, id: "net0" },
+					{ specifier: "vmnet-shared", id: "net1" },
+				] }),
 			);
 			const netdevArg = args.find((a) => a.includes("vmnet-bridged,id=net0"));
 			expect(netdevArg).toBeDefined();
@@ -408,6 +411,129 @@ describe("buildQemuArgs — network modes", () => {
 			// vmnet-bridge also adds a shared interface for OOB management
 			const sharedNetdev = args.find((a) => a.startsWith("vmnet-shared,id=net1"));
 			expect(sharedNetdev).toBeDefined();
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("resolved networks with qemuNetdevArgs are passed through directly", async () => {
+		try {
+			const preResolved = [{
+				specifier: "user" as const,
+				id: "net0",
+				resolved: {
+					qemuNetdevArgs: [
+						"-netdev", "user,id=net0,hostfwd=tcp::9100-:80",
+						"-device", "virtio-net-pci,netdev=net0",
+					],
+				},
+			}];
+			const args = await buildQemuArgs(makeConfig({ arch: "x86", networks: preResolved }));
+			expect(args).toContain("user,id=net0,hostfwd=tcp::9100-:80");
+			expect(args).toContain("virtio-net-pci,netdev=net0");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e &&
+				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+				console.log("Skipping: QEMU/firmware not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("multi-NIC: 2+ networks generate correct args for each", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				arch: "x86",
+				networks: [
+					{ specifier: "user", id: "net0" },
+					{ specifier: { type: "socket-listen", port: 4001 }, id: "net1" },
+				],
+			}));
+			// First NIC: user mode
+			const userNetdev = args.find((a) => a.startsWith("user,id=net0"));
+			expect(userNetdev).toBeDefined();
+			expect(args).toContain("virtio-net-pci,netdev=net0");
+			// Second NIC: socket listen
+			const socketNetdev = args.find((a) => a.includes("socket,id=net1,listen=:4001"));
+			expect(socketNetdev).toBeDefined();
+			expect(args).toContain("virtio-net-pci,netdev=net1");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("socket-listen fallback generates listen arg", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				arch: "x86",
+				networks: [{ specifier: { type: "socket-listen", port: 5001 }, id: "net0" }],
+			}));
+			const netdevArg = args.find((a) => a.includes("socket,id=net0,listen=:5001"));
+			expect(netdevArg).toBeDefined();
+			expect(args).toContain("virtio-net-pci,netdev=net0");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("socket-connect fallback generates connect arg", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				arch: "x86",
+				networks: [{ specifier: { type: "socket-connect", port: 5001 }, id: "net0" }],
+			}));
+			const netdevArg = args.find((a) => a.includes("socket,id=net0,connect=127.0.0.1:5001"));
+			expect(netdevArg).toBeDefined();
+			expect(args).toContain("virtio-net-pci,netdev=net0");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("socket-mcast fallback generates mcast arg", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				arch: "x86",
+				networks: [{ specifier: { type: "socket-mcast", group: "230.0.0.1", port: 4001 }, id: "net0" }],
+			}));
+			const netdevArg = args.find((a) => a.includes("socket,id=net0,mcast=230.0.0.1:4001"));
+			expect(netdevArg).toBeDefined();
+			expect(args).toContain("virtio-net-pci,netdev=net0");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+	});
+
+	test("tap fallback generates tap arg", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({
+				arch: "x86",
+				networks: [{ specifier: { type: "tap", ifname: "tap-chr0" }, id: "net0" }],
+			}));
+			const netdevArg = args.find((a) => a.includes("tap,id=net0,ifname=tap-chr0,script=no,downscript=no"));
+			expect(netdevArg).toBeDefined();
+			expect(args).toContain("virtio-net-pci,netdev=net0");
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
 				console.log("Skipping: QEMU not installed");
@@ -450,7 +576,7 @@ function makeMachineState(overrides: Partial<MachineState> = {}): MachineState {
 		arch: "x86",
 		cpu: 1,
 		mem: 512,
-		network: "user",
+		networks: [{ specifier: "user", id: "net0" }],
 		ports: {},
 		packages: [],
 		portBase: 9100,

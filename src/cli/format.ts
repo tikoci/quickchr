@@ -84,6 +84,27 @@ export function formatPorts(ports: Record<string, { host: number; guest: number 
 		.join(" ");
 }
 
+/** Format a network config array for display. */
+export function formatNetworks(networks: { specifier: unknown; id: string }[]): string {
+	if (!networks || networks.length === 0) return "none";
+	return networks.map((n) => {
+		const spec = n.specifier;
+		if (typeof spec === "string") return spec;
+		if (typeof spec === "object" && spec !== null) {
+			const s = spec as Record<string, unknown>;
+			if (s.type === "vmnet-bridged") return `vmnet-bridge (${s.iface})`;
+			if (s.type === "bridged") return `bridged (${s.iface})`;
+			if (s.type === "socket-listen") return `socket:listen:${s.port}`;
+			if (s.type === "socket-connect") return `socket:connect:${s.port}`;
+			if (s.type === "socket-mcast") return `socket:mcast:${s.group}:${s.port}`;
+			if (s.type === "socket-named") return `socket::${s.name}`;
+			if (s.type === "tap") return `tap:${s.ifname}`;
+			return JSON.stringify(spec);
+		}
+		return String(spec);
+	}).join(", ");
+}
+
 /** Format a clickable URL (some terminals support this). */
 export function link(url: string, label?: string): string {
 	const col = c();

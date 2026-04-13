@@ -27,7 +27,9 @@ export type {
 	LicenseOptions,
 	MachineConfig,
 	MachineState,
+	NetworkConfig,
 	NetworkMode,
+	NetworkSpecifier,
 	PackageManager,
 	PlatformInfo,
 	PortMapping,
@@ -43,7 +45,10 @@ export type {
 } from "./lib/types.ts";
 
 export { QuickCHRError } from "./lib/types.ts";
-export type { ErrorCode } from "./lib/types.ts";
+export type { ErrorCode, HostInterface } from "./lib/types.ts";
+
+// Interface detection
+export { detectPhysicalInterfaces, resolveInterfaceAlias } from "./lib/platform.ts";
 
 // Disk utilities
 export { getDiskInfo, createQcow2Disk } from "./lib/disk.ts";

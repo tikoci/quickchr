@@ -28,7 +28,7 @@ function makeMachine(name: string, portBase: number = 9100): MachineState {
 		arch: "arm64",
 		cpu: 1,
 		mem: 512,
-		network: "user",
+		networks: [{ specifier: "user", id: "net0" }],
 		ports: {},
 		packages: [],
 		portBase,
@@ -190,6 +190,147 @@ describe("refreshAllStatuses", () => {
 		// Persisted state should also be updated
 		expect(loadMachine("dead-machine")?.status).toBe("stopped");
 		expect(loadMachine("dead-machine")?.pid).toBeUndefined();
+	});
+});
+
+// ── State migration: legacy `network` → `networks` array ────────────
+
+describe("state migration — legacy network field", () => {
+	test('old machine.json with network: "user" → migrated to networks array', () => {
+		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "legacy-user");
+		mkdirSync(machineDir, { recursive: true });
+		const oldState = {
+			name: "legacy-user",
+			version: "7.22.1",
+			arch: "arm64",
+			cpu: 1,
+			mem: 512,
+			network: "user",
+			ports: {},
+			packages: [],
+			portBase: 9100,
+			excludePorts: [],
+			extraPorts: [],
+			createdAt: new Date().toISOString(),
+			status: "stopped",
+			machineDir,
+		};
+		writeFileSync(join(machineDir, "machine.json"), JSON.stringify(oldState));
+
+		const loaded = loadMachine("legacy-user");
+		expect(loaded).toBeDefined();
+		expect(loaded?.networks).toEqual([{ specifier: "user", id: "net0" }]);
+	});
+
+	test('old machine.json with network: "vmnet-shared" → migrated correctly', () => {
+		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "legacy-vmnet");
+		mkdirSync(machineDir, { recursive: true });
+		const oldState = {
+			name: "legacy-vmnet",
+			version: "7.22.1",
+			arch: "arm64",
+			cpu: 1,
+			mem: 512,
+			network: "vmnet-shared",
+			ports: {},
+			packages: [],
+			portBase: 9100,
+			excludePorts: [],
+			extraPorts: [],
+			createdAt: new Date().toISOString(),
+			status: "stopped",
+			machineDir,
+		};
+		writeFileSync(join(machineDir, "machine.json"), JSON.stringify(oldState));
+
+		const loaded = loadMachine("legacy-vmnet");
+		expect(loaded).toBeDefined();
+		expect(loaded?.networks).toEqual([{ specifier: "vmnet-shared", id: "net0" }]);
+	});
+
+	test("old machine.json with no network field → defaults to user", () => {
+		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "legacy-none");
+		mkdirSync(machineDir, { recursive: true });
+		const oldState = {
+			name: "legacy-none",
+			version: "7.22.1",
+			arch: "arm64",
+			cpu: 1,
+			mem: 512,
+			ports: {},
+			packages: [],
+			portBase: 9100,
+			excludePorts: [],
+			extraPorts: [],
+			createdAt: new Date().toISOString(),
+			status: "stopped",
+			machineDir,
+		};
+		writeFileSync(join(machineDir, "machine.json"), JSON.stringify(oldState));
+
+		const loaded = loadMachine("legacy-none");
+		expect(loaded).toBeDefined();
+		expect(loaded?.networks).toEqual([{ specifier: "user", id: "net0" }]);
+	});
+
+	test("old machine.json with vmnet-bridge object → migrated to bridged + shared", () => {
+		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "legacy-bridge");
+		mkdirSync(machineDir, { recursive: true });
+		const oldState = {
+			name: "legacy-bridge",
+			version: "7.22.1",
+			arch: "arm64",
+			cpu: 1,
+			mem: 512,
+			network: { type: "vmnet-bridge", iface: "en0" },
+			ports: {},
+			packages: [],
+			portBase: 9100,
+			excludePorts: [],
+			extraPorts: [],
+			createdAt: new Date().toISOString(),
+			status: "stopped",
+			machineDir,
+		};
+		writeFileSync(join(machineDir, "machine.json"), JSON.stringify(oldState));
+
+		const loaded = loadMachine("legacy-bridge");
+		expect(loaded).toBeDefined();
+		expect(loaded?.networks).toHaveLength(2);
+		expect(loaded?.networks[0]).toEqual({
+			specifier: { type: "vmnet-bridged", iface: "en0" },
+			id: "net0",
+		});
+		expect(loaded?.networks[1]).toEqual({
+			specifier: "vmnet-shared",
+			id: "net1",
+		});
+	});
+
+	test("new machine.json with networks field → no migration needed", () => {
+		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "new-format");
+		mkdirSync(machineDir, { recursive: true });
+		const newState = {
+			name: "new-format",
+			version: "7.22.1",
+			arch: "arm64",
+			cpu: 1,
+			mem: 512,
+			networks: [{ specifier: "vmnet-shared", id: "net0" }],
+			ports: {},
+			packages: [],
+			portBase: 9100,
+			excludePorts: [],
+			extraPorts: [],
+			createdAt: new Date().toISOString(),
+			status: "stopped",
+			machineDir,
+		};
+		writeFileSync(join(machineDir, "machine.json"), JSON.stringify(newState));
+
+		const loaded = loadMachine("new-format");
+		expect(loaded).toBeDefined();
+		expect(loaded?.networks).toEqual([{ specifier: "vmnet-shared", id: "net0" }]);
 	});
 });
 

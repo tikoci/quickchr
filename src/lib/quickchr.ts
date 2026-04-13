@@ -17,9 +17,9 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg, qgaKvmWarning } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg, qgaKvmWarning, detectSocketVmnet } from "./platform.ts";
 import { resolveVersion, isValidVersion, generateMachineName } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString } from "./network.ts";
 import {
 	getUsedPortBases,
 	saveMachine,
@@ -34,7 +34,7 @@ import {
 	getDataDir,
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
@@ -45,6 +45,7 @@ import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec } from "./console.ts";
+import { createNamedSocket, getNamedSocket, addSocketMember, removeSocketMember } from "./socket-registry.ts";
 import {
 	formatDeviceModeSelection,
 	readDeviceMode,
@@ -71,6 +72,37 @@ function defaultBootTimeout(arch: Arch, withPackages?: boolean): number {
 	const base = isCrossArchEmulation(arch) ? 300_000 : 120_000;
 	// Package reinstall adds a full reboot cycle — extend by the same factor.
 	return withPackages ? base * 2 : base;
+}
+
+// --- Socket registry lifecycle helpers ---
+
+function getSocketNamedNetworks(state: MachineState): string[] {
+	return state.networks
+		.filter((n) => typeof n.specifier === "object" && n.specifier.type === "socket")
+		.map((n) => (n.specifier as { type: "socket"; name: string }).name);
+}
+
+function registerSocketMembers(state: MachineState): void {
+	for (const name of getSocketNamedNetworks(state)) {
+		try {
+			if (!getNamedSocket(name)) {
+				createNamedSocket(name);
+			}
+			addSocketMember(name, state.name);
+		} catch (e) {
+			console.warn(`[quickchr] Warning: failed to register socket member "${state.name}" on "${name}": ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
+}
+
+function unregisterSocketMembers(state: MachineState): void {
+	for (const name of getSocketNamedNetworks(state)) {
+		try {
+			removeSocketMember(name, state.name);
+		} catch (e) {
+			console.warn(`[quickchr] Warning: failed to unregister socket member "${state.name}" from "${name}": ${e instanceof Error ? e.message : String(e)}`);
+		}
+	}
 }
 
 // --- License helpers ---
@@ -118,6 +150,7 @@ function createInstance(state: MachineState): ChrInstance {
 			if (state.pid) {
 				await stopQemu(state.pid);
 			}
+			unregisterSocketMembers(state);
 			// Update persisted state
 			const current = loadMachine(state.name);
 			if (current) {
@@ -133,6 +166,7 @@ function createInstance(state: MachineState): ChrInstance {
 			if (state.pid && isMachineRunning(state)) {
 				await stopQemu(state.pid);
 			}
+			unregisterSocketMembers(state);
 			// Clean up stored instance credentials
 			await deleteInstanceCredentials(state.name);
 			removeState(state.name);
@@ -480,7 +514,8 @@ async function hardRebootMachine(
 		background: true,
 	};
 	const qemuArgs = await buildQemuArgs(restartConfig);
-	const { pid } = await spawnQemu(qemuArgs, state.machineDir, true);
+	const wrapper = extractWrapper(restartConfig.networks);
+	const { pid } = await spawnQemu(qemuArgs, state.machineDir, true, wrapper);
 	state.pid = pid;
 	state.status = "running";
 	state.lastStartedAt = new Date().toISOString();
@@ -541,7 +576,7 @@ export class QuickCHR {
 				arch,
 				cpu: opts.cpu ?? 1,
 				mem: defaultMem(arch, opts.mem),
-				network: opts.network ?? "user",
+				networks: resolveStartNetworks(opts.networks, opts.network),
 				ports,
 				packages: opts.packages ?? [],
 				installAllPackages: opts.installAllPackages,
@@ -671,7 +706,7 @@ export class QuickCHR {
 				arch,
 				cpu: opts.cpu ?? 1,
 				mem: defaultMem(arch, opts.mem),
-				network: opts.network ?? "user",
+				networks: resolveStartNetworks(opts.networks, opts.network),
 				ports,
 				packages: opts.packages ?? [],
 				deviceMode: requestedDeviceMode,
@@ -729,7 +764,7 @@ export class QuickCHR {
 			arch,
 			cpu: opts.cpu ?? 1,
 			mem: defaultMem(arch, opts.mem),
-			network: opts.network ?? "user",
+			networks: resolveStartNetworks(opts.networks, opts.network),
 			ports,
 			packages: opts.packages ?? [],
 			deviceMode: requestedDeviceMode,
@@ -747,6 +782,10 @@ export class QuickCHR {
 		};
 
 		// Build QEMU args and spawn
+		const platform = await detectPlatform();
+		const hostfwd = buildHostfwdString(state.ports);
+		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+
 		const launchConfig: QemuLaunchConfig = {
 			arch,
 			machineDir,
@@ -755,12 +794,15 @@ export class QuickCHR {
 			mem: state.mem,
 			cpu: state.cpu,
 			ports: state.ports,
-			network: state.network,
+			networks: resolvedNetworks,
 			background: spawnInBackground,
 		};
 
+		registerSocketMembers(state);
+
 		const qemuArgs = await buildQemuArgs(launchConfig);
-		const { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground);
+		const wrapper = extractWrapper(resolvedNetworks);
+		const { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper);
 
 		// Foreground (no provisioning): spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
@@ -1042,6 +1084,10 @@ export class QuickCHR {
 		// Always boot in background when provisioning is needed
 		const spawnBackground = hasProvisioning ? true : background;
 
+		const platform = await detectPlatform();
+		const hostfwd = buildHostfwdString(state.ports);
+		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+
 		const launchConfig: QemuLaunchConfig = {
 			arch: state.arch,
 			machineDir: state.machineDir,
@@ -1050,12 +1096,15 @@ export class QuickCHR {
 			mem: state.mem,
 			cpu: state.cpu,
 			ports: state.ports,
-			network: state.network,
+			networks: resolvedNetworks,
 			background: spawnBackground,
 		};
 
+		registerSocketMembers(state);
+
 		const qemuArgs = await buildQemuArgs(launchConfig);
-		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground);
+		const wrapper = extractWrapper(resolvedNetworks);
+		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground, wrapper);
 
 		// Foreground without provisioning: spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
@@ -1259,6 +1308,28 @@ export class QuickCHR {
 				status: "warn",
 				detail: `not found — required for --boot-size and --add-disk (${getQemuInstallHint()})`,
 			});
+		}
+
+		// socket_vmnet (macOS only — rootless shared/bridged networking)
+		if (process.platform === "darwin") {
+			const vmnet = detectSocketVmnet();
+			if (vmnet) {
+				const parts = [vmnet.client];
+				if (vmnet.sharedSocket) parts.push(`shared: ${vmnet.sharedSocket}`);
+				const bridgedIfaces = Object.keys(vmnet.bridgedSockets);
+				if (bridgedIfaces.length > 0) parts.push(`bridged: ${bridgedIfaces.join(", ")}`);
+				checks.push({
+					label: "socket_vmnet",
+					status: vmnet.sharedSocket ? "ok" : "warn",
+					detail: parts.join(" — "),
+				});
+			} else {
+				checks.push({
+					label: "socket_vmnet",
+					status: "warn",
+					detail: "not found (optional, for rootless shared/bridged networking — brew install socket_vmnet)",
+				});
+			}
 		}
 
 		return {
