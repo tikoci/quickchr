@@ -3,7 +3,8 @@
  * quickchr CLI entry point — command router.
  */
 
-import type { StartOptions, Arch, Channel, ServiceName } from "../lib/types.ts";
+import type { StartOptions, Arch, Channel, ServiceName, NetworkSpecifier } from "../lib/types.ts";
+import { parseNetworkSpecifier } from "../lib/network.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -74,6 +75,34 @@ function csvList(values: string[]): string[] {
 	return [...new Set(values.flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean))];
 }
 
+/** Build networks array from --add-network, --no-network, and legacy vmnet flags. */
+function buildNetworks(flags: Record<string, string | boolean | string[]>): NetworkSpecifier[] | undefined {
+	const specs: NetworkSpecifier[] = [];
+
+	// Legacy flags first
+	if (flag(flags, "vmnet-shared") !== undefined) {
+		specs.push(parseNetworkSpecifier("shared"));
+	}
+	const bridgeIface = flag(flags, "vmnet-bridge");
+	if (bridgeIface) {
+		specs.push(parseNetworkSpecifier(`bridged:${bridgeIface}`));
+	}
+
+	// New --add-network flags
+	for (const raw of flagList(flags, "add-network")) {
+		specs.push(parseNetworkSpecifier(raw));
+	}
+
+	// --no-network → explicitly empty
+	if (flags.network === false) {
+		return [];
+	}
+
+	// Nothing specified → undefined (library decides defaults)
+	if (specs.length === 0) return undefined;
+	return specs;
+}
+
 /** True when interactive prompts must be suppressed (e.g. LLM / CI / pipe). */
 function isNoPrompt(): boolean {
 	return !!process.env.QUICKCHR_NO_PROMPT || !process.stdout.isTTY || !process.stdin.isTTY;
@@ -125,6 +154,10 @@ async function main() {
 				break;
 			case "doctor":
 				await cmdDoctor();
+				break;
+			case "networks":
+			case "net":
+				await cmdNetworks(args.slice(1));
 				break;
 			case "version":
 			case "--version":
@@ -407,7 +440,7 @@ function printMachineListWithTip(
 async function cmdAdd(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { bold, formatPorts, dim } = await import("./format.ts");
+	const { bold, formatPorts, formatNetworks, dim } = await import("./format.ts");
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
@@ -423,9 +456,7 @@ async function cmdAdd(argv: string[]) {
 			...(flags.winbox === false ? ["winbox" as ServiceName] : []),
 			...(flags["api-ssl"] === false ? ["api-ssl" as ServiceName] : []),
 		],
-		network: flag(flags, "vmnet-shared") !== undefined ? "vmnet-shared"
-			: flag(flags, "vmnet-bridge") ? { type: "vmnet-bridge" as const, iface: flag(flags, "vmnet-bridge") as string }
-			: undefined,
+		networks: buildNetworks(flags),
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 	};
@@ -462,6 +493,7 @@ async function cmdAdd(argv: string[]) {
 	console.log(`${bold(state.name)} created`);
 	console.log(`  Version: ${state.version} (${state.arch})`);
 	console.log(`  CPU/Mem: ${state.cpu} vCPU${state.cpu > 1 ? "s" : ""}, ${state.mem} MB`);
+	console.log(`  Network: ${formatNetworks(state.networks ?? [])}`);
 	console.log(`  Ports:   ${formatPorts(state.ports)}`);
 	console.log(`  REST:    http://127.0.0.1:${ports.http}  ${dim("(after start)")}`);
 	console.log(`  Dir:     ${dim(state.machineDir)}`);
@@ -881,7 +913,7 @@ async function cmdStart(argv: string[]) {
 
 	// Build start options from flags
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, formatPorts, link, bold, dim } = await import("./format.ts");
+	const { statusIcon, formatPorts, formatNetworks, link, bold, dim } = await import("./format.ts");
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
@@ -897,9 +929,7 @@ async function cmdStart(argv: string[]) {
 			...(flags.winbox === false ? ["winbox" as ServiceName] : []),
 			...(flags["api-ssl"] === false ? ["api-ssl" as ServiceName] : []),
 		],
-		network: flag(flags, "vmnet-shared") !== undefined ? "vmnet-shared"
-			: flag(flags, "vmnet-bridge") ? { type: "vmnet-bridge" as const, iface: flag(flags, "vmnet-bridge") as string }
-			: undefined,
+		networks: buildNetworks(flags),
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 		installDeps: flagBool(flags, "install-deps"),
@@ -1004,6 +1034,7 @@ async function cmdStart(argv: string[]) {
 	} else {
 		console.log(`${statusIcon("running")} ${bold(instance.name)} started`);
 		console.log(`  Version: ${instance.state.version} (${instance.state.arch})`);
+		console.log(`  Network: ${formatNetworks(instance.state.networks ?? [])}`);
 		console.log(`  Ports:   ${formatPorts(instance.state.ports)}`);
 		console.log(`  REST:    ${link(instance.restUrl)}`);
 		console.log(`  SSH:     ssh admin@127.0.0.1 -p ${instance.sshPort}`);
@@ -1051,7 +1082,7 @@ async function cmdStop(argv: string[]) {
 
 async function cmdList() {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { table, statusIcon, formatPorts, dim } = await import("./format.ts");
+	const { table, statusIcon, formatPorts, formatNetworks, dim } = await import("./format.ts");
 
 	const machines = QuickCHR.list();
 
@@ -1060,12 +1091,13 @@ async function cmdList() {
 		return;
 	}
 
-	const headers = ["", "Name", "Version", "Arch", "Ports", "PID"];
+	const headers = ["", "Name", "Version", "Arch", "Network", "Ports", "PID"];
 	const rows = machines.map((m) => [
 		statusIcon(m.status),
 		m.name,
 		m.version,
 		m.arch,
+		formatNetworks(m.networks ?? []),
 		formatPorts(m.ports),
 		m.pid ? String(m.pid) : dim("—"),
 	]);
@@ -1075,7 +1107,7 @@ async function cmdList() {
 
 async function cmdStatus(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, bold, dim, link, formatPorts } = await import("./format.ts");
+	const { statusIcon, bold, dim, link, formatPorts, formatNetworks } = await import("./format.ts");
 
 	const name = argv[0];
 
@@ -1094,7 +1126,7 @@ async function cmdStatus(argv: string[]) {
 	console.log(`\n${statusIcon(s.status)} ${bold(s.name)}`);
 	console.log(`  Version:    ${s.version} (${s.arch})`);
 	console.log(`  CPU/Mem:    ${s.cpu} vCPU${s.cpu > 1 ? "s" : ""}, ${s.mem} MB`);
-	console.log(`  Network:    ${typeof s.network === "string" ? s.network : `vmnet-bridge (${s.network.iface})`}`);
+	console.log(`  Network:    ${formatNetworks(s.networks)}`);
 	console.log(`  Ports:      ${formatPorts(s.ports)}`);
 	console.log(`  Status:     ${s.status}${s.pid ? ` (PID ${s.pid})` : ""}`);
 	console.log(`  Created:    ${new Date(s.createdAt).toLocaleString()}`);
@@ -1339,6 +1371,202 @@ async function cmdDisk(argv: string[]) {
 	}
 }
 
+async function cmdNetworks(argv: string[]) {
+	const subcmd = argv[0];
+
+	if (subcmd === "help" || subcmd === "--help" || subcmd === "-h") {
+		showNetworksHelp();
+		return;
+	}
+
+	if (subcmd === "interfaces") {
+		await showInterfaces();
+		return;
+	}
+
+	if (subcmd === "sockets") {
+		await handleSockets(argv.slice(1));
+		return;
+	}
+
+	if (subcmd && subcmd !== "--help") {
+		console.error(`Unknown networks subcommand: ${subcmd}\nRun 'quickchr networks help' for usage.`);
+		process.exit(1);
+	}
+
+	await showNetworkOverview();
+}
+
+async function showNetworkOverview() {
+	const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
+	const { listNamedSockets } = await import("../lib/socket-registry.ts");
+	const { statusIcon, bold, dim } = await import("./format.ts");
+
+	const platform = await detectPlatform();
+	const interfaces = detectPhysicalInterfaces();
+	const sockets = listNamedSockets();
+	const vmnet = platform.socketVmnet;
+
+	const osLabel = platform.os === "darwin" ? "macOS" : platform.os === "linux" ? "Linux" : "Windows";
+
+	console.log(bold("Network Capabilities:\n"));
+
+	console.log(`  Platform:       ${osLabel} (${platform.os}/${platform.hostArch})`);
+
+	if (platform.os === "darwin") {
+		if (vmnet) {
+			console.log(`  socket_vmnet:   ${statusIcon("ok")} installed (${dim(vmnet.client)})`);
+			if (vmnet.sharedSocket) {
+				console.log(`    Shared daemon:  ${statusIcon("ok")} running (${dim(vmnet.sharedSocket)})`);
+			} else {
+				console.log(`    Shared daemon:  ${statusIcon("error")} not running`);
+			}
+			const bridgedEntries = Object.entries(vmnet.bridgedSockets);
+			if (bridgedEntries.length > 0) {
+				console.log(`    Bridged daemons:`);
+				for (const [iface, sock] of bridgedEntries) {
+					console.log(`      ${iface}: ${dim(sock)}`);
+				}
+			} else {
+				console.log("    Bridged daemons: none");
+			}
+		} else {
+			console.log(`  socket_vmnet:   ${statusIcon("error")} not installed`);
+			console.log(`    Hint: brew install socket_vmnet`);
+		}
+	} else {
+		console.log(`  socket_vmnet:   ${dim("n/a (macOS only)")}`);
+	}
+
+	console.log();
+
+	if (interfaces.length > 0) {
+		console.log("  Physical Interfaces:");
+		for (const iface of interfaces) {
+			const aliasStr = iface.alias ? dim(`  (alias: ${iface.alias})`) : "";
+			console.log(`    ${iface.device.padEnd(6)}${iface.name}${aliasStr}`);
+		}
+	} else {
+		console.log(`  Physical Interfaces: ${dim("none detected")}`);
+	}
+
+	console.log();
+	console.log("  Available Specifiers:");
+	console.log("    user              User-mode networking with port forwarding (default)");
+	if (platform.os === "darwin") {
+		if (vmnet?.sharedSocket) {
+			console.log("    shared            Shared network via socket_vmnet (rootless)");
+		} else if (vmnet) {
+			console.log(`    shared            ${dim("Shared daemon not running")}`);
+		} else {
+			console.log(`    shared            ${dim("Requires socket_vmnet")}`);
+		}
+		console.log("    bridged:<iface>   Bridge to host interface (e.g., bridged:en0, bridged:wifi)");
+	}
+	console.log("    socket::<name>    Named L2 link between CHR instances");
+	console.log("    socket:listen:<port>  QEMU socket listen");
+	console.log("    socket:connect:<port> QEMU socket connect");
+	console.log("    socket:mcast:<group>:<port>  Multicast socket");
+
+	console.log();
+	if (sockets.length > 0) {
+		console.log("  Named Sockets:");
+		for (const s of sockets) {
+			const members = s.members.length > 0 ? dim(`  members: ${s.members.join(", ")}`) : "";
+			console.log(`    ${s.name.padEnd(16)}${s.mode} port:${s.port}${members}`);
+		}
+	} else {
+		console.log("  Named Sockets:");
+		console.log("    (none)");
+	}
+}
+
+async function showInterfaces() {
+	const { detectPhysicalInterfaces } = await import("../lib/platform.ts");
+	const { table, dim } = await import("./format.ts");
+
+	const interfaces = detectPhysicalInterfaces();
+	if (interfaces.length === 0) {
+		console.log("No physical interfaces detected.");
+		return;
+	}
+
+	const rows = interfaces.map((iface) => [
+		iface.device,
+		iface.name,
+		iface.alias ?? "",
+		iface.mac ?? dim("n/a"),
+	]);
+	console.log(table(["Device", "Name", "Alias", "MAC"], rows));
+}
+
+async function handleSockets(argv: string[]) {
+	const { listNamedSockets, createNamedSocket, removeNamedSocket } = await import("../lib/socket-registry.ts");
+	const { bold, dim, table: fmtTable } = await import("./format.ts");
+
+	const action = argv[0];
+
+	if (!action) {
+		const sockets = listNamedSockets();
+		if (sockets.length === 0) {
+			console.log("No named sockets.");
+			return;
+		}
+		const rows = sockets.map((s) => [
+			s.name,
+			s.mode,
+			String(s.port),
+			s.mcastGroup ?? "",
+			s.members.join(", ") || dim("none"),
+		]);
+		console.log(fmtTable(["Name", "Mode", "Port", "Group", "Members"], rows));
+		return;
+	}
+
+	if (action === "create") {
+		const name = argv[1];
+		if (!name) {
+			console.error("Usage: quickchr networks sockets create <name>");
+			process.exit(1);
+		}
+		const entry = createNamedSocket(name);
+		console.log(`Created named socket: ${bold(entry.name)} (${entry.mode} port:${entry.port})`);
+		return;
+	}
+
+	if (action === "remove") {
+		const name = argv[1];
+		if (!name) {
+			console.error("Usage: quickchr networks sockets remove <name>");
+			process.exit(1);
+		}
+		const removed = removeNamedSocket(name);
+		if (removed) {
+			console.log(`Removed named socket: ${bold(name)}`);
+		} else {
+			console.error(`Named socket "${name}" not found.`);
+			process.exit(1);
+		}
+		return;
+	}
+
+	console.error(`Unknown sockets subcommand: ${action}\nRun 'quickchr networks help' for usage.`);
+	process.exit(1);
+}
+
+function showNetworksHelp() {
+	console.log(`quickchr networks — network discovery and socket management
+
+Usage:
+  quickchr networks                     Show network overview
+  quickchr networks interfaces          List physical interfaces
+  quickchr networks sockets             List named sockets
+  quickchr networks sockets create <n>  Create a named socket
+  quickchr networks sockets remove <n>  Remove a named socket
+
+Aliases: quickchr net`);
+}
+
 async function cmdDoctor() {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { statusIcon, bold } = await import("./format.ts");
@@ -1402,6 +1630,7 @@ Commands:
   clean [<name>|--all]    Reset instance disk to fresh image
   license <name>          Apply/renew CHR trial license
   disk <name>             Show disk details for an instance
+  networks                Network discovery & socket management
   doctor                  Check prerequisites
   version                 Show version info
   help [command]          Show help
@@ -1439,8 +1668,11 @@ Options:
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
   --device-mode <m>     Set device-mode on first boot: rose|advanced|basic|home|auto|skip
-  --vmnet-shared        vmnet-shared networking (macOS)
-  --vmnet-bridge <if>   vmnet-bridge networking (macOS), e.g. en0`);
+  --add-network <spec>  Add a network NIC (repeatable). Specs: user, shared, bridged:<if>,
+                        socket::<name>, tap:<if>. Default: single user NIC.
+  --no-network          Start with no NICs (headless)
+  --vmnet-shared        [deprecated] Use --add-network shared
+  --vmnet-bridge <if>   [deprecated] Use --add-network bridged:<if>`);
 			break;
 		case "setup":
 			console.log(`quickchr setup
@@ -1502,8 +1734,11 @@ Options:
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
-  --vmnet-shared        vmnet-shared networking (macOS)
-  --vmnet-bridge <if>   vmnet-bridge networking (macOS), e.g. en0
+  --add-network <spec>  Add a network NIC (repeatable). Specs: user, shared, bridged:<if>,
+                        socket::<name>, tap:<if>. Default: single user NIC.
+  --no-network          Start with no NICs (headless)
+  --vmnet-shared        [deprecated] Use --add-network shared
+  --vmnet-bridge <if>   [deprecated] Use --add-network bridged:<if>
   --install-all-packages  Install all packages from all_packages.zip
   --license-level <l>   Apply trial license: p1 (1 Gbps), p10 (10 Gbps), unlimited
   --license-account <a> MikroTik account email (or use MIKROTIK_WEB_ACCOUNT env var)
@@ -1577,6 +1812,10 @@ Credential resolution order (highest priority first):
   <name>      Remove an instance (stops if running, deletes disk and state).
               Omit to see a list of instances.
   --all       Remove all instances.`);
+			break;
+		case "networks":
+		case "net":
+			showNetworksHelp();
 			break;
 		default:
 			console.log(`No detailed help for '${command}'.`);
