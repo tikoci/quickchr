@@ -90,6 +90,10 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 - [x] Better error messages for common QEMU failures (EFI size mismatch, permission denied)
 - [x] Retry download on transient network errors
 - [x] Machine name validation — reject names starting with `-` to prevent flag confusion (e.g. `quickchr start -fg` creating a machine named `-fg`)
+- [ ] API error hints: include head/tail of `qemu.log` in spawn-failure errors so LLM agents get actionable context without needing to read files. Consider structured error payloads with `{ code, message, hint, diagnostics? }` shape.
+- [ ] `/system/shutdown` exec returns HTTP 400 — handle gracefully in `exec()`. RouterOS closes the connection during shutdown; treat as expected behavior, not error.
+- [ ] ether1 DHCP ordering: when `user + shared`, ether1 = SLiRP (10.x.x.x), ether2 = vmnet shared (DHCP from macOS). RouterOS only auto-creates DHCP client on ether1 — shared network may not get an IP without manual config. Investigate: does SLiRP work for provisioning without an IP assigned? If yes, document. If no, add DHCP client provisioning for ether2+ in provisioning code.
+- [ ] Wizard: show post-start credential access info when managed login is used — explain `quickchr exec <cmd>`, `quickchr get <machine> creds`, or API method to retrieve credentials. Important for bridged VMs where localhost port forwarding isn't the only access path.
 
 ### Docs & Project
 
@@ -677,9 +681,9 @@ shared          tap-chr-shared  available    user-owned TAP + NAT
 bridged         eth0            available    TAP on br0 — alias: ethernet
 ```
 
-- [ ] `quickchr networks` — list available networks. `--format json|table` output.
-- [ ] macOS: detect socket_vmnet daemon (check socket files in `$(brew --prefix)/var/run/`). Show as `shared (socket_vmnet)` when available.
-- [ ] macOS: enumerate physical interfaces via `networksetup -listallhardwareports`. Filter out virtual/bridge interfaces (Multipass learned the hard way — listing bridges QEMU can't bridge to caused bugs). Show interface aliases (wifi, ethernet).
+- [x] `quickchr networks` — list available networks. `--format json|table` output.
+- [x] macOS: detect socket_vmnet daemon (check socket files in `$(brew --prefix)/var/run/`). Show as `shared (socket_vmnet)` when available.
+- [x] macOS: enumerate physical interfaces via `networksetup -listallhardwareports`. Filter out virtual/bridge interfaces (Multipass learned the hard way — listing bridges QEMU can't bridge to caused bugs). Show interface aliases (wifi, ethernet).
 - [ ] Linux: `ip link show type tun` for TAPs, `ip link show type bridge` for bridges. Show which are user-owned.
 - [ ] Show active named sockets with port allocations and connected machines.
 
@@ -697,15 +701,15 @@ quickchr start rb-sim --emulate-device rb5009
 
 #### `--add-network` Implementation
 
-- [ ] Implement `--add-network` CLI flag (repeatable). Parse the specifier syntax above.
-- [ ] Extend `NetworkMode` type: `network: NetworkMode` → `networks: NetworkConfig[]`. Each entry has type, name, and platform-resolved QEMU args.
-- [ ] Semantics: zero flags = `[user]`. Any flags = exactly what you specified (count of flags = count of NICs). `--no-network` = `[]`.
-- [ ] Named socket state management: `~/.local/share/quickchr/networks/<name>.json` tracks port, listen machine, connect machines.
-- [ ] Platform resolution engine: resolve generic specifiers (`shared`, `bridged:<ifname>`, aliases) to platform-specific QEMU args per the resolution chains above. Core function: `resolveNetworkSpecifier(spec, platform, isRoot) → { qemuArgs, wrapper?, downgraded? }`.
-- [ ] Interface alias resolution: `wifi` → detect wireless interface; `ethernet` → detect wired interface; `auto` → wired then wireless. Use `networksetup -listallhardwareports` (macOS) or `ip link` (Linux).
-- [ ] Network downgrade: if `shared`/`bridged` can't resolve, warn and degrade to `user`. Store both the requested specifier and actual resolved mode so `quickchr list` can show the downgrade.
-- [ ] Wizard: detect available modes and only show viable options. Rootless: show `user` and `socket`. If socket_vmnet detected (macOS) or user-owned TAPs exist (Linux): show `shared` and `bridged`. If root: show all.
-- [ ] Store in `machine.json`/`.yaml` as `networks: [...]` array with the original specifier (not the resolved form). Re-resolve on restart so platform changes (e.g. socket_vmnet installed) are picked up.
+- [x] Implement `--add-network` CLI flag (repeatable). Parse the specifier syntax above.
+- [x] Extend `NetworkMode` type: `network: NetworkMode` → `networks: NetworkConfig[]`. Each entry has type, name, and platform-resolved QEMU args.
+- [x] Semantics: zero flags = `[user]`. Any flags = exactly what you specified (count of flags = count of NICs). `--no-network` = `[]`.
+- [x] Named socket state management: `~/.local/share/quickchr/networks/<name>.json` tracks port, listen machine, connect machines.
+- [x] Platform resolution engine: resolve generic specifiers (`shared`, `bridged:<ifname>`, aliases) to platform-specific QEMU args per the resolution chains above. Core function: `resolveNetworkSpecifier(spec, platform, isRoot) → { qemuArgs, wrapper?, downgraded? }`.
+- [x] Interface alias resolution: `wifi` → detect wireless interface; `ethernet` → detect wired interface; `auto` → wired then wireless. Use `networksetup -listallhardwareports` (macOS) or `ip link` (Linux).
+- [x] Network downgrade: if `shared`/`bridged` can't resolve, warn and degrade to `user`. Store both the requested specifier and actual resolved mode so `quickchr list` can show the downgrade.
+- [x] Wizard: detect available modes and only show viable options. Rootless: show `user` and `socket`. If socket_vmnet detected (macOS) or user-owned TAPs exist (Linux): show `shared` and `bridged`. If root: show all. **Wizard restructured: networking before provisioning, user/SLiRP always included, socket_vmnet retry loop, provisioning gate question.**
+- [x] Store in `machine.json`/`.yaml` as `networks: [...]` array with the original specifier (not the resolved form). Re-resolve on restart so platform changes (e.g. socket_vmnet installed) are picked up.
 - [ ] CI (GitHub Actions): `user` + `socket` only (no root). Document.
 
 #### sudo Handling
@@ -729,11 +733,11 @@ Reviewed Multipass (Canonical) as a reference for multi-VM CLI design. Key lesso
 
 **socket_vmnet is the preferred path for `shared` and `bridged` on macOS.** It splits privilege: the `socket_vmnet` daemon runs as root (via launchd), QEMU runs as the user. This is how Lima, Rancher Desktop, and Podman Desktop handle macOS networking. QEMU's built-in `-netdev vmnet-shared` / `vmnet-bridged` is the fallback — it works but requires the entire QEMU process to run as root (`sudo quickchr start`). See [networking reference](./docs/networking.md) for socket_vmnet internals, install steps, and multi-NIC fd passthrough details.
 
-- [ ] Detect `socket_vmnet_client` binary (Homebrew: `$(brew --prefix)/opt/socket_vmnet/bin/socket_vmnet_client`)
-- [ ] Detect running socket_vmnet daemons: check for shared socket at `$(brew --prefix)/var/run/socket_vmnet` and bridged sockets at `$(brew --prefix)/var/run/socket_vmnet.bridged.<iface>`
-- [ ] When `shared` specifier resolves on macOS: socket_vmnet first → vmnet-shared (root) → error with install hint
-- [ ] When `bridged:<ifname>` resolves: socket_vmnet bridged for that interface → vmnet-bridged (root) → error
-- [ ] `socket_vmnet_client` wraps the QEMU spawn: `Bun.spawn([socketVmnetClientBin, socketPath, qemuBin, ...qemuArgs])` — QEMU args use `-netdev socket,id=netN,fd=3` instead of `-netdev vmnet-shared`
+- [x] Detect `socket_vmnet_client` binary (Homebrew: `$(brew --prefix)/opt/socket_vmnet/bin/socket_vmnet_client`)
+- [x] Detect running socket_vmnet daemons: check for shared socket at `$(brew --prefix)/var/run/socket_vmnet` and bridged sockets at `$(brew --prefix)/var/run/socket_vmnet.bridged.<iface>`. **Now uses pgrep to verify process is alive (socket file persists after daemon stops).**
+- [x] When `shared` specifier resolves on macOS: socket_vmnet first → vmnet-shared (root) → error with install hint
+- [x] When `bridged:<ifname>` resolves: socket_vmnet bridged for that interface → vmnet-bridged (root) → error
+- [x] `socket_vmnet_client` wraps the QEMU spawn: `Bun.spawn([socketVmnetClientBin, socketPath, qemuBin, ...qemuArgs])` — QEMU args use `-netdev socket,id=netN,fd=3` instead of `-netdev vmnet-shared`
 - [ ] Multi-NIC with two socket_vmnet networks: chained `socket_vmnet_client` calls, fd=3 then fd=4. Verify exact fd numbering before implementing (open question in networking reference)
 - [ ] vmnet-bridged only works with physical interfaces — filter virtual/bridge interfaces in `quickchr networks` (learned from Multipass bugs)
 - [ ] Reference: `~/GitHub/mikropkl` `qemu.sh` and `qemu.cfg` for working vmnet examples on Intel Mac
