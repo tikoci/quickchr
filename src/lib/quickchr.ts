@@ -92,7 +92,7 @@ function registerSocketMembers(state: MachineState): void {
 			}
 			addSocketMember(name, state.name);
 		} catch (e) {
-			console.warn(`[quickchr] Warning: failed to register socket member "${state.name}" on "${name}": ${e instanceof Error ? e.message : String(e)}`);
+			console.warn(`Warning: failed to register socket member "${state.name}" on "${name}": ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 }
@@ -102,7 +102,7 @@ function unregisterSocketMembers(state: MachineState): void {
 		try {
 			removeSocketMember(name, state.name);
 		} catch (e) {
-			console.warn(`[quickchr] Warning: failed to unregister socket member "${state.name}" from "${name}": ${e instanceof Error ? e.message : String(e)}`);
+			console.warn(`Warning: failed to unregister socket member "${state.name}" from "${name}": ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 }
@@ -123,7 +123,7 @@ async function resolveLicenseInput(input: LicenseInput): Promise<LicenseOptions 
 		return opts;
 	}
 	console.warn(
-		"[quickchr] License skipped: no MikroTik web credentials found. " +
+		"License skipped: no MikroTik web credentials found. " +
 		"Set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or run 'quickchr login'.",
 	);
 	return null;
@@ -257,7 +257,7 @@ function createInstance(state: MachineState): ChrInstance {
 					}
 				} catch (e) {
 					if (attempt < MAX_RETRIES && (e as { code?: string }).code === "ECONNRESET") {
-						console.warn(`[quickchr] rest(${path}): ECONNRESET on attempt ${attempt + 1}, retrying...`);
+						console.warn(`rest(${path}): ECONNRESET on attempt ${attempt + 1}, retrying...`);
 						continue;
 					}
 					throw e;
@@ -279,7 +279,7 @@ function createInstance(state: MachineState): ChrInstance {
 				}
 				const kvmWarning = qgaKvmWarning();
 				if (kvmWarning) {
-					console.warn(`[quickchr] ${kvmWarning}`);
+					console.warn(kvmWarning);
 				}
 				const socketPath = join(state.machineDir, "qga.sock");
 				const result = await qgaExec(socketPath, command, opts?.timeout ?? 30_000);
@@ -342,7 +342,7 @@ function createInstance(state: MachineState): ChrInstance {
 			for (const pkg of names) {
 				const pkgPath = findPackageFile(extractDir, pkg);
 				if (!pkgPath) {
-					console.warn(`[quickchr] Package "${pkg}" not found in all_packages for ${state.version} (${state.arch})`);
+					console.warn(`Package "${pkg}" not found in all_packages for ${state.version} (${state.arch})`);
 					continue;
 				}
 				packagePaths.push(pkgPath);
@@ -502,7 +502,7 @@ async function hardRebootMachine(
 		await monitorCommand(state.machineDir, "quit", 4000);
 	} catch (e) {
 		method = "signal";
-		console.warn(`[quickchr] Device-mode: monitor quit failed, falling back to process terminate (${e instanceof Error ? e.message : String(e)})`);
+		console.warn(`Device-mode: monitor quit failed, falling back to process terminate (${e instanceof Error ? e.message : String(e)})`);
 	}
 
 	const exited = await waitForPidExit(state.pid, 5000);
@@ -622,7 +622,7 @@ export class QuickCHR {
 		const requestedDeviceMode = opts.deviceMode;
 		const resolvedDeviceMode = resolveDeviceModeOptions(requestedDeviceMode);
 		for (const warning of resolvedDeviceMode.warnings) {
-			logger.warn(`[quickchr] Device-mode: ${warning}`);
+			logger.warn(`Device-mode: ${warning}`);
 		}
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 
@@ -901,7 +901,7 @@ export class QuickCHR {
 		const log = logger ?? createLogger();
 		const resolvedDeviceMode = resolveDeviceModeOptions(opts.deviceMode);
 		for (const warning of resolvedDeviceMode.warnings) {
-			log.warn(`[quickchr] Device-mode: ${warning}`);
+			log.warn(`Device-mode: ${warning}`);
 		}
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 		const bootTimeout = defaultBootTimeout(machineState.arch, opts.installAllPackages || (opts.packages?.length ?? 0) > 0);
@@ -997,7 +997,7 @@ export class QuickCHR {
 						);
 					}
 
-					log.warn(`[quickchr] Device-mode update returned early without activation (attempt ${attempt}/${maxAttempts}); retrying...`);
+					log.warn(`Device-mode update returned early without activation (attempt ${attempt}/${maxAttempts}); retrying...`);
 					await Bun.sleep(2000);
 				}
 
@@ -1046,7 +1046,7 @@ export class QuickCHR {
 				machineState.licenseLevel = level;
 				log.status(`  License applied: free → ${level}`);
 			} catch (e) {
-				log.warn(`[quickchr] License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
+				log.warn(`License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		}
 
@@ -1061,8 +1061,8 @@ export class QuickCHR {
 				}
 				machineState.user = { name: result.user.name, password: result.user.password };
 				if (!opts.user) {
-					// Auto-created quickchr account — show the password once
-					log.status(`  quickchr account created — user: ${result.user.name}, password: ${result.user.password}`);
+					// Auto-created quickchr account — credential display is handled by the caller (wizard/CLI)
+					log.status(`  quickchr account created (user: ${result.user.name})`);
 					log.status(`  Password saved to ${credentialStorageLabel()}`);
 				}
 			}

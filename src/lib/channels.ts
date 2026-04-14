@@ -137,7 +137,7 @@ export async function qgaCommand(
 
 	const kvmWarning = qgaKvmWarning();
 	if (kvmWarning) {
-		console.warn(`[quickchr] ${kvmWarning}`);
+		console.warn(kvmWarning);
 	}
 
 	const socketPath = join(machineDir, "qga.sock");

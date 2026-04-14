@@ -40,11 +40,8 @@ const PORT_BASES: Record<Channel, number> = {
 	development: 9230,
 };
 
-// LITE mode: match native arch (HVF, fast) and skip extra packages.
-// Full mode: ARM64 with zerotier + container (may use TCG on x86 hosts).
-const CHR_ARCH = LITE
-	? (process.arch === "arm64" ? "arm64" as const : "x86" as const)
-	: "arm64" as const;
+// Always match native arch for HVF acceleration — cross-arch TCG is too slow for CI.
+const CHR_ARCH = process.arch === "arm64" ? "arm64" as const : "x86" as const;
 const EXTRA_PACKAGES = LITE ? [] : ["zerotier", "container"];
 
 /** SSH options to skip host key checking for ephemeral test instances. */

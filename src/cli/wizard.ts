@@ -172,9 +172,10 @@ export async function runWizard(): Promise<void> {
 	// Only offer additional networks if the platform has options beyond user-mode
 	const hasNetworkOptions = isMacOS || process.platform === "linux";
 	if (hasNetworkOptions) {
+		const defaultYes = isMacOS && hasSocketVmnet;
 		const wantExtra = await clack.confirm({
 			message: "Add a real network? (the CHR already has localhost port forwarding for REST/SSH/WinBox)",
-			initialValue: false,
+			initialValue: defaultYes,
 		});
 		if (clack.isCancel(wantExtra)) { clack.cancel("Cancelled."); process.exit(0); }
 
@@ -191,7 +192,7 @@ export async function runWizard(): Promise<void> {
 				netOptions.push({ value: "socket", label: "socket", hint: "named L2 link between VMs" });
 
 				const netType = await clack.select({
-					message: `Additional network type:`,
+					message: "Network mode:",
 					options: netOptions,
 				});
 				if (clack.isCancel(netType)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -488,15 +489,22 @@ export async function runWizard(): Promise<void> {
 		background: background as boolean,
 	};
 
-	const pkgSummary = installAllPackages ? "all packages" : packages.length > 0 ? `+${packages.join(",")}` : "";
-	const deviceModeSummary = deviceMode
-		? ` (device-mode: ${deviceMode.mode}${deviceMode.enable?.length ? `, +${deviceMode.enable.join(",")}` : ""})`
-		: "";
-	const netSummary = networks.length > 0
-		? ` (nets: ${networks.map((n) => typeof n === "string" ? n : n.type).join(",")})`
-		: "";
+	const pkgSummary = installAllPackages ? "all packages" : packages.length > 0 ? `pkgs: ${packages.join(", ")}` : "";
+	const netSummary = networks.map((n) => typeof n === "string" ? n : n.type).join(", ");
+
+	// Build a readable multi-line summary for the confirmation prompt
+	const summaryParts = [`${version ?? channel} / ${arch}`];
+	if (netSummary) summaryParts.push(`networks: ${netSummary}`);
+	if (pkgSummary) summaryParts.push(pkgSummary);
+	if (deviceMode) {
+		const features = deviceMode.enable?.length ? ` +${deviceMode.enable.join(",")}` : "";
+		summaryParts.push(`device-mode: ${deviceMode.mode}${features}`);
+	}
+	if (license) summaryParts.push(`license: ${license.level}`);
+	if (user) summaryParts.push(`login: ${user.name}`);
+
 	const confirm = await clack.confirm({
-		message: `Start CHR ${version ?? `(${channel})`} ${arch}${pkgSummary ? ` ${pkgSummary}` : ""}${license ? ` (license: ${license.level})` : ""}${deviceModeSummary}${netSummary}?`,
+		message: `Start CHR? (${summaryParts.join(" · ")})`,
 	});
 	if (clack.isCancel(confirm) || !confirm) { clack.cancel("Cancelled."); process.exit(0); }
 

@@ -194,7 +194,7 @@ export interface StartOptions {
 	extraDisks?: string[];
 	/** Progress callback for status messages during start.
 	 *  If not provided, messages go to console.log.
-	 *  Debug-level messages (prefixed [quickchr]) are only emitted when QUICKCHR_DEBUG=1. */
+	 *  Debug-level messages (prefixed [debug]) are only emitted when QUICKCHR_DEBUG=1. */
 	onProgress?: (message: string) => void;
 }
 

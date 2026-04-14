@@ -2,7 +2,7 @@
  * Structured logging for quickchr library code.
  * Routes messages through onProgress callback when provided,
  * falls back to console.log/console.warn.
- * Debug messages ([quickchr] prefix) are suppressed unless QUICKCHR_DEBUG=1.
+ * Debug messages are suppressed unless QUICKCHR_DEBUG=1.
  */
 
 const isDebug = () => process.env.QUICKCHR_DEBUG === "1";
@@ -31,7 +31,7 @@ export function createLogger(onProgress?: (message: string) => void): ProgressLo
 			if (onProgress) {
 				onProgress(`[debug] ${message}`);
 			} else {
-				console.log(`[quickchr] ${message}`);
+				console.error(`[debug] ${message}`);
 			}
 		},
 		warn(message: string) {

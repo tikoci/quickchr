@@ -109,7 +109,7 @@ export async function renewLicense(
 
 		if (result === "not-ready") {
 			if (attempt < MAX_RENEW_ATTEMPTS) {
-				log.warn(`[quickchr] License renew attempt ${attempt}: got system resource data instead of renew status — retrying`);
+				log.warn(`License renew attempt ${attempt}: got system resource data instead of renew status — retrying`);
 				await Bun.sleep(5000);
 				continue;
 			}
@@ -134,7 +134,7 @@ export async function renewLicense(
 				if (info.level === opts.level) return;
 			} catch (e) {
 				pollCount++;
-				log.warn(`[quickchr] License poll #${pollCount} error: ${e instanceof Error ? e.message : String(e)}`);
+				log.warn(`License poll #${pollCount} error: ${e instanceof Error ? e.message : String(e)}`);
 			}
 			await Bun.sleep(2000);
 		}
@@ -171,7 +171,7 @@ async function waitForLicenseApi(
 		await Bun.sleep(2000);
 	}
 	// Don't throw — the renew POST itself will detect and retry on bad responses.
-	console.warn("[quickchr] License API readiness check timed out — proceeding with renewal attempt");
+	console.warn("License API readiness check timed out — proceeding with renewal attempt");
 }
 
 /** Fetch the current license state from a running CHR.
