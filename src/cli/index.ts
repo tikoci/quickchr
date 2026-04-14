@@ -809,7 +809,7 @@ async function cmdSetup() {
 		message: "What would you like to do?",
 		options: [
 			{ value: "create", label: "Create a new machine" },
-			{ value: "manage", label: "Manage machines (start / stop / remove)" },
+			{ value: "manage", label: "Manage machines (start / stop / remove / disks / snapshots)" },
 			{ value: "networks", label: "Configure networks" },
 		],
 	});
@@ -848,215 +848,240 @@ async function cmdSetup() {
 	}
 
 	// Manage flow
-	const { statusIcon, bold } = await import("./format.ts");
+	const { statusIcon, bold, link, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 	const diskSummary = (m: typeof machines[number]): string => {
 		const bootFormat = m.bootDiskFormat ?? (m.bootSize ? "qcow2" : "raw");
 		const boot = m.bootSize ? `${m.bootSize} (${bootFormat})` : `default (~128M, ${bootFormat})`;
 		const extraCount = m.extraDisks?.length ?? 0;
 		return extraCount > 0 ? `${boot} + ${extraCount} extra` : boot;
 	};
-	const selected = await clack.select({
-		message: "Select machine:",
-		options: machines.map((m) => ({
-			value: m.name,
-			label: m.name,
-			hint: `${statusIcon(m.status)} ${m.version} (${m.arch}) • disk: ${diskSummary(m)}`,
-		})),
-	});
-	if (clack.isCancel(selected)) { clack.cancel("Cancelled."); return; }
 
-	const target = machines.find((m) => m.name === selected);
-	if (!target) return;
+	let machineList = machines;
 
-	const { statusIcon: si } = await import("./format.ts");
-	const bootFormat = target.bootDiskFormat ?? (target.bootSize ? "qcow2" : "raw");
-	const canSnapshot = bootFormat === "qcow2";
+	// Machine selection loop — loops until user explicitly backs out
+	while (true) {
+		if (machineList.length === 0) {
+			clack.log.info("No machines. Create one with 'quickchr add'.");
+			break;
+		}
 
-	const runningActions = [
-		{ value: "stop", label: "Stop" },
-		...(canSnapshot
-			? [{ value: "snapshots", label: "Snapshots  (save / load / delete / list)" }]
-			: []),
-		{ value: "remove", label: "Remove  (stop first, then delete)" },
-	];
-	const stoppedActions = [
-		{ value: "start", label: "Start" },
-		...(canSnapshot
-			? [{ value: "snapshots", label: "Snapshots  (list only — start machine for save/load/delete)" }]
-			: []),
-		{ value: "remove", label: "Remove" },
-	];
-	const actions = target.status === "running" ? runningActions : stoppedActions;
+		const selectedName = await clack.select({
+			message: "Select machine:",
+			options: [
+				...machineList.map((m) => ({
+					value: m.name,
+					label: m.name,
+					hint: `${statusIcon(m.status)} ${m.version} (${m.arch}) • disk: ${diskSummary(m)}`,
+				})),
+				{ value: "back", label: "← Back" },
+			],
+		});
+		if (clack.isCancel(selectedName) || selectedName === "back") break;
 
-	clack.note(
-		`Boot disk: ${target.bootSize ? `${target.bootSize} (${bootFormat})` : `default (~128M, ${bootFormat})`}` +
-		(canSnapshot ? "" : "  ⚠ no snapshots (raw disk)") + "\n" +
-		`Extra disks: ${target.extraDisks && target.extraDisks.length > 0 ? target.extraDisks.join(", ") : "none"}`,
-		`${target.name} disk layout`,
-	);
+		// Capture disk layout once — disk format doesn't change between actions
+		const foundTarget = machineList.find((m) => m.name === selectedName);
+		if (!foundTarget) continue; // shouldn't happen; re-show machine select
+		let target = foundTarget;
+		const bootFormat = target.bootDiskFormat ?? (target.bootSize ? "qcow2" : "raw");
+		const canSnapshot = bootFormat === "qcow2";
 
-	const action = await clack.select({
-		message: `${bold(target.name)} — ${target.status}. Choose action:`,
-		options: actions,
-	});
-	if (clack.isCancel(action)) { clack.cancel("Cancelled."); return; }
+		clack.note(
+			`Boot disk: ${target.bootSize ? `${target.bootSize} (${bootFormat})` : `default (~128M, ${bootFormat})`}` +
+			(canSnapshot ? "" : "  ⚠ no snapshots (raw disk)") + "\n" +
+			`Extra disks: ${target.extraDisks && target.extraDisks.length > 0 ? target.extraDisks.join(", ") : "none"}`,
+			`${target.name} disk layout`,
+		);
 
-	const { link, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
-	const instance = QuickCHR.get(target.name);
-	if (!instance) { clack.log.error(machineNotFoundMessage(target.name)); return; }
-
-	if (action === "start") {
-		const spinner = clack.spinner();
-		spinner.start(`Starting ${target.name}...`);
-		const started = await QuickCHR.start({ name: target.name, background: true });
-		spinner.stop(`${si("running")} ${bold(started.name)} started`);
-		const creds = await resolveDisplayCredentials(started.state);
-		clack.note(`REST: ${link(formatRestUrl(started.ports.http, creds.user, creds.password))}\nSSH:  ${formatSshCommand(creds.user, started.sshPort)}`, "Instance details");
-	} else if (action === "stop") {
-		await instance.stop();
-		clack.log.success(`${bold(target.name)} stopped`);
-	} else if (action === "snapshots") {
-		const { formatSnapshotTable, formatDiskSize } = await import("../lib/disk.ts");
-		const MAX_WIZARD_SNAPSHOTS = 16;
-		const isRunning = target.status === "running";
-
+		// Action loop — refreshes machine status on each iteration
 		while (true) {
-			const snapshotOptions = isRunning
-				? [
-					{ value: "list", label: "List snapshots" },
-					{ value: "save", label: "Save snapshot" },
-					{ value: "load", label: "Load (restore) snapshot" },
-					{ value: "delete", label: "Delete snapshot" },
-					{ value: "back", label: "Back" },
-				]
-				: [
-					{ value: "list", label: "List snapshots" },
-					{ value: "back", label: "Back  (start machine first for save/load/delete)" },
-				];
+			machineList = QuickCHR.list();
+			const refreshed = machineList.find((m) => m.name === selectedName);
+			if (!refreshed) break; // machine removed externally
+			target = refreshed;
 
-			const snapshotAction = await clack.select({
-				message: `${bold(target.name)} snapshots:`,
-				options: snapshotOptions,
+			const isRunning = target.status === "running";
+
+			const runningActions = [
+				{ value: "stop", label: "Stop" },
+				...(canSnapshot ? [{ value: "snapshots", label: "Snapshots  (save / load / delete / list)" }] : []),
+				{ value: "remove", label: "Remove  (stop first, then delete)" },
+				{ value: "back", label: "← Back to machine list" },
+			];
+			const stoppedActions = [
+				{ value: "start", label: "Start" },
+				...(canSnapshot ? [{ value: "snapshots", label: "Snapshots  (list only — start for save / load / delete)" }] : []),
+				{ value: "remove", label: "Remove" },
+				{ value: "back", label: "← Back to machine list" },
+			];
+			const actions = isRunning ? runningActions : stoppedActions;
+
+			const action = await clack.select({
+				message: `${bold(target.name)} — ${target.status}. Choose action:`,
+				options: actions,
 			});
-			if (clack.isCancel(snapshotAction) || snapshotAction === "back") break;
+			if (clack.isCancel(action) || action === "back") break;
 
-			if (snapshotAction === "list") {
-				const snaps = await instance.snapshot.list();
-				if (snaps.length === 0) {
-					clack.log.info("No snapshots yet. Use \"Save snapshot\" to create one.");
-				} else {
-					clack.note(formatSnapshotTable(snaps), `${target.name} — ${snaps.length} snapshot${snaps.length === 1 ? "" : "s"}`);
-					if (snaps.length > MAX_WIZARD_SNAPSHOTS) {
-						clack.log.warn(`Showing ${MAX_WIZARD_SNAPSHOTS} of ${snaps.length}. Use 'quickchr snapshot ${target.name} list' for full output.`);
+			const instance = QuickCHR.get(target.name);
+			if (!instance) { clack.log.error(machineNotFoundMessage(target.name)); break; }
+
+			if (action === "start") {
+				const spinner = clack.spinner();
+				spinner.start(`Starting ${target.name}...`);
+				const started = await QuickCHR.start({ name: target.name, background: true });
+				spinner.stop(`${statusIcon("running")} ${bold(started.name)} started`);
+				const creds = await resolveDisplayCredentials(started.state);
+				clack.note(`REST: ${link(formatRestUrl(started.ports.http, creds.user, creds.password))}\nSSH:  ${formatSshCommand(creds.user, started.sshPort)}`, "Instance details");
+			} else if (action === "stop") {
+				await instance.stop();
+				clack.log.success(`${bold(target.name)} stopped`);
+			} else if (action === "snapshots") {
+				const { formatSnapshotTable, formatDiskSize } = await import("../lib/disk.ts");
+				const MAX_WIZARD_SNAPSHOTS = 16;
+
+				// Pre-fetch snapshot list so unavailable actions (load/delete) are hidden
+				const snapSpinner = clack.spinner();
+				snapSpinner.start("Loading snapshots...");
+				let snaps = await instance.snapshot.list();
+				snapSpinner.stop(`${snaps.length} snapshot${snaps.length === 1 ? "" : "s"}`);
+
+				// Snapshot action loop — "back" returns to machine action menu
+				while (true) {
+					const hasSnaps = snaps.length > 0;
+					const snapshotOptions = isRunning
+						? [
+							{ value: "list", label: "List snapshots" },
+							{ value: "save", label: "Save snapshot" },
+							...(hasSnaps ? [{ value: "load", label: "Load (restore) snapshot" }] : []),
+							...(hasSnaps ? [{ value: "delete", label: "Delete snapshot" }] : []),
+							{ value: "back", label: "← Back" },
+						]
+						: [
+							{ value: "list", label: "List snapshots" },
+							{ value: "back", label: "← Back  (start machine for save / load / delete)" },
+						];
+
+					const snapshotAction = await clack.select({
+						message: `${bold(target.name)} snapshots:`,
+						options: snapshotOptions,
+					});
+					if (clack.isCancel(snapshotAction) || snapshotAction === "back") break;
+
+					if (snapshotAction === "list") {
+						if (snaps.length === 0) {
+							clack.log.info("No snapshots yet. Use \"Save snapshot\" to create one.");
+						} else {
+							const displaySnaps = snaps.slice(0, MAX_WIZARD_SNAPSHOTS);
+							clack.note(formatSnapshotTable(displaySnaps), `${target.name} — ${snaps.length} snapshot${snaps.length === 1 ? "" : "s"}`);
+							if (snaps.length > MAX_WIZARD_SNAPSHOTS) {
+								clack.log.warn(`Showing ${MAX_WIZARD_SNAPSHOTS} of ${snaps.length}. Use 'quickchr snapshot ${target.name} list' for full output.`);
+							}
+						}
+						snaps = await instance.snapshot.list();
+						continue;
+					}
+
+					if (snapshotAction === "save") {
+						const defaultName = new Date().toISOString().replace(/:/g, "-").replace(/\..+$/, "Z");
+						const snapName = await clack.text({
+							message: "Snapshot name:",
+							placeholder: defaultName,
+							defaultValue: defaultName,
+							validate: (v) => {
+								if (!v.trim()) return "Snapshot name is required";
+								if (/\s/.test(v)) return "Use a name without spaces";
+							},
+						});
+						if (clack.isCancel(snapName)) continue;
+
+						const spinner = clack.spinner();
+						spinner.start(`Saving snapshot ${snapName}...`);
+						try {
+							const snap = await instance.snapshot.save(snapName);
+							spinner.stop(`Saved snapshot ${bold(snap.name)} (${formatDiskSize(snap.vmStateSize)})`);
+							snaps = await instance.snapshot.list();
+						} catch (e) {
+							spinner.stop("Failed to save snapshot");
+							clack.log.error(e instanceof Error ? e.message : String(e));
+						}
+						continue;
+					}
+
+					if (snapshotAction === "load") {
+						const displaySnaps = snaps.slice(0, MAX_WIZARD_SNAPSHOTS);
+						const selectedSnap = await clack.select({
+							message: "Select snapshot to load:",
+							options: displaySnaps.map((s) => ({
+								value: s.name,
+								label: s.name,
+								hint: `${formatDiskSize(s.vmStateSize)} — ${s.date.replace("T", " ").replace(/:\d{2}(?:\.\d+)?Z$/, "").replace("Z", "")}`,
+							})),
+						});
+						if (clack.isCancel(selectedSnap)) continue;
+
+						const confirmed = await clack.confirm({
+							message: `Load snapshot ${bold(selectedSnap)}? Current runtime state will be replaced.`,
+							initialValue: false,
+						});
+						if (clack.isCancel(confirmed) || !confirmed) continue;
+
+						const spinner = clack.spinner();
+						spinner.start(`Loading snapshot ${selectedSnap}...`);
+						try {
+							await instance.snapshot.load(selectedSnap);
+							const booted = await instance.waitForBoot(120_000);
+							spinner.stop(booted
+								? `Loaded snapshot ${bold(selectedSnap)}`
+								: `Loaded snapshot ${bold(selectedSnap)} (boot readiness check timed out)`);
+						} catch (e) {
+							spinner.stop("Failed to load snapshot");
+							clack.log.error(e instanceof Error ? e.message : String(e));
+						}
+						continue;
+					}
+
+					if (snapshotAction === "delete") {
+						const displaySnaps = snaps.slice(0, MAX_WIZARD_SNAPSHOTS);
+						const selectedSnap = await clack.select({
+							message: "Select snapshot to delete:",
+							options: displaySnaps.map((s) => ({
+								value: s.name,
+								label: s.name,
+								hint: `${formatDiskSize(s.vmStateSize)} — ${s.date.replace("T", " ").replace(/:\d{2}(?:\.\d+)?Z$/, "").replace("Z", "")}`,
+							})),
+						});
+						if (clack.isCancel(selectedSnap)) continue;
+
+						const confirmed = await clack.confirm({
+							message: `Delete snapshot ${bold(selectedSnap)}?`,
+							initialValue: false,
+						});
+						if (clack.isCancel(confirmed) || !confirmed) continue;
+
+						try {
+							await instance.snapshot.delete(selectedSnap);
+							clack.log.success(`Deleted snapshot ${bold(selectedSnap)}`);
+							snaps = await instance.snapshot.list();
+						} catch (e) {
+							clack.log.error(e instanceof Error ? e.message : String(e));
+						}
 					}
 				}
-				continue;
-			}
-
-			if (snapshotAction === "save") {
-				const defaultName = new Date().toISOString().replace(/:/g, "-").replace(/\..+$/, "Z");
-				const snapName = await clack.text({
-					message: "Snapshot name:",
-					placeholder: defaultName,
-					defaultValue: defaultName,
-					validate: (v) => {
-						if (!v.trim()) return "Snapshot name is required";
-						if (/\s/.test(v)) return "Use a name without spaces";
-					},
-				});
-				if (clack.isCancel(snapName)) continue;
-
-				const spinner = clack.spinner();
-				spinner.start(`Saving snapshot ${snapName}...`);
-				try {
-					const snap = await instance.snapshot.save(snapName);
-					spinner.stop(`Saved snapshot ${bold(snap.name)} (${formatDiskSize(snap.vmStateSize)})`);
-				} catch (e) {
-					spinner.stop(`Failed to save snapshot`);
-					clack.log.error(e instanceof Error ? e.message : String(e));
-				}
-				continue;
-			}
-
-			if (snapshotAction === "load") {
-				const snaps = await instance.snapshot.list();
-				if (snaps.length === 0) {
-					clack.log.info("No snapshots to load. Save one first.");
-					continue;
-				}
-				const displaySnaps = snaps.slice(0, MAX_WIZARD_SNAPSHOTS);
-				const selected = await clack.select({
-					message: "Select snapshot to load:",
-					options: displaySnaps.map((s) => ({
-						value: s.name,
-						label: s.name,
-						hint: `${formatDiskSize(s.vmStateSize)} — ${s.date.replace("T", " ").replace(/:\d{2}(?:\.\d+)?Z$/, "").replace("Z", "")}`,
-					})),
-				});
-				if (clack.isCancel(selected)) continue;
-
+				// snapshot loop exited via "← Back" → continue action loop
+			} else if (action === "remove") {
 				const confirmed = await clack.confirm({
-					message: `Load snapshot ${bold(selected)}? Current runtime state will be replaced.`,
+					message: `Remove ${bold(target.name)} and its disk? This cannot be undone.`,
 					initialValue: false,
 				});
-				if (clack.isCancel(confirmed) || !confirmed) continue;
-
-				const spinner = clack.spinner();
-				spinner.start(`Loading snapshot ${selected}...`);
-				try {
-					await instance.snapshot.load(selected);
-					const booted = await instance.waitForBoot(120_000);
-					if (booted) {
-						spinner.stop(`Loaded snapshot ${bold(selected)}`);
-					} else {
-						spinner.stop(`Loaded snapshot ${bold(selected)} (boot readiness check timed out)`);
-					}
-				} catch (e) {
-					spinner.stop(`Failed to load snapshot`);
-					clack.log.error(e instanceof Error ? e.message : String(e));
+				if (!clack.isCancel(confirmed) && confirmed) {
+					await instance.remove();
+					clack.log.success(`${bold(target.name)} removed`);
+					break; // machine is gone — exit action loop
 				}
-				continue;
-			}
-
-			if (snapshotAction === "delete") {
-				const snaps = await instance.snapshot.list();
-				if (snaps.length === 0) {
-					clack.log.info("No snapshots to delete.");
-					continue;
-				}
-				const displaySnaps = snaps.slice(0, MAX_WIZARD_SNAPSHOTS);
-				const selected = await clack.select({
-					message: "Select snapshot to delete:",
-					options: displaySnaps.map((s) => ({
-						value: s.name,
-						label: s.name,
-						hint: `${formatDiskSize(s.vmStateSize)} — ${s.date.replace("T", " ").replace(/:\d{2}(?:\.\d+)?Z$/, "").replace("Z", "")}`,
-					})),
-				});
-				if (clack.isCancel(selected)) continue;
-
-				const confirmed = await clack.confirm({
-					message: `Delete snapshot ${bold(selected)}?`,
-					initialValue: false,
-				});
-				if (clack.isCancel(confirmed) || !confirmed) continue;
-
-				try {
-					await instance.snapshot.delete(selected);
-					clack.log.success(`Deleted snapshot ${bold(selected)}`);
-				} catch (e) {
-					clack.log.error(e instanceof Error ? e.message : String(e));
-				}
+				// declined: stay in action loop
 			}
 		}
-	} else if (action === "remove") {
-		const confirmed = await clack.confirm({ message: `Remove ${bold(target.name)} and its disk? This cannot be undone.`, initialValue: false });
-		if (!clack.isCancel(confirmed) && confirmed) {
-			await instance.remove();
-			clack.log.success(`${bold(target.name)} removed`);
-		} else {
-			clack.cancel("Cancelled.");
-		}
+
+		machineList = QuickCHR.list();
 	}
 
 	clack.outro("Done!");
