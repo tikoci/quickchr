@@ -1490,6 +1490,43 @@ export class QuickCHR {
 			}
 		}
 
+		// Shell detection — always informational; useful for bug reports
+		const { detectCurrentShell, shellBinary, completionStatusFor } = await import("./completions.ts");
+		const shellInfo = detectCurrentShell();
+		const binary = shellBinary(shellInfo);
+		const shellDetail = shellInfo.version
+			? `${binary} ${shellInfo.version} (${shellInfo.shell})`
+			: shellInfo.shell || "unknown";
+		checks.push({
+			label: "Shell",
+			status: "ok",
+			detail: shellDetail,
+		});
+
+		// Shell completions — warn if not installed for the current shell
+		if (shellInfo.supported) {
+			const compStatus = completionStatusFor(binary as import("./completions.ts").SupportedShell);
+			if (compStatus.installed) {
+				checks.push({
+					label: "Shell completions",
+					status: "ok",
+					detail: `${binary}: installed at ${compStatus.path}`,
+				});
+			} else {
+				checks.push({
+					label: "Shell completions",
+					status: "warn",
+					detail: `${binary}: not installed — run 'quickchr completions --install'`,
+				});
+			}
+		} else {
+			checks.push({
+				label: "Shell completions",
+				status: "warn",
+				detail: `${binary || "unknown shell"}: not a supported shell (bash/zsh/fish) — manual install required`,
+			});
+		}
+
 		return {
 			checks,
 			ok: checks.every((c) => c.status !== "error"),

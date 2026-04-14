@@ -426,9 +426,9 @@ $ quickchr setup
 
 Shell completions replace interactive selectors as the "discovery" mechanism for machine names and flags. Higher priority now that commands are non-interactive.
 
-- [ ] Completions for bash, zsh, fish — subcommands, machine names (from state dir), `--flag` options
-- [ ] Explore generating completions without requiring Homebrew/package install (standalone shell script that reads `~/.local/share/quickchr/machines/` for names)
-- [ ] Machine name completion should be context-aware: `start` completes to stopped machines, `stop` completes to running machines, etc.
+- [x] Completions for bash, zsh, fish — subcommands, machine names (from state dir), `--flag` options. `quickchr completions --install` (auto-detects shell), `--uninstall`, `--status`, `--dry-run`. No new deps — pure string generation. Idempotent rc-file patching. Works without Homebrew (falls back to XDG/user dirs).
+- [x] Explore generating completions without requiring Homebrew/package install (standalone shell script that reads `~/.local/share/quickchr/machines/` for names) — done via hidden `quickchr completions --machines` / `--running` flags called by the scripts.
+- [x] Machine name completion should be context-aware: `start` completes to stopped machines, `stop` completes to running machines, etc.
 
 ### Output & Display
 

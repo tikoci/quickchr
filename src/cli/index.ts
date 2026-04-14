@@ -156,6 +156,9 @@ async function main() {
 			case "setup":
 				await cmdSetup();
 				break;
+			case "completions":
+				await cmdCompletions(args.slice(1));
+				break;
 			case "doctor":
 				await cmdDoctor();
 				break;
@@ -1867,6 +1870,103 @@ Usage:
 Aliases: quickchr net`);
 }
 
+async function cmdCompletions(argv: string[]) {
+	const { flags } = parseFlags(argv);
+	const {
+		installCompletions,
+		uninstallCompletions,
+		allCompletionStatuses,
+		completionStatusFor,
+		detectCurrentShell,
+		shellBinary,
+		listMachineNamesForCompletion,
+		listRunningMachineNamesForCompletion,
+	} = await import("../lib/completions.ts");
+	type SupportedShell = import("../lib/completions.ts").SupportedShell;
+
+	// Hidden flags used by the completion scripts themselves
+	if (flags.machines === true) {
+		const names = listMachineNamesForCompletion();
+		if (names.length > 0) console.log(names.join("\n"));
+		return;
+	}
+	if (flags.running === true) {
+		const names = listRunningMachineNamesForCompletion();
+		if (names.length > 0) console.log(names.join("\n"));
+		return;
+	}
+
+	const shellInfo = detectCurrentShell();
+	const binary = shellBinary(shellInfo);
+
+	if (flags.install === true) {
+		const shellOverride = flag(flags, "shell") as SupportedShell | undefined;
+		const targetShell: SupportedShell = shellOverride ?? (shellInfo.supported ? binary as SupportedShell : undefined) ?? "bash";
+		const dryRun = flagBool(flags, "dry-run");
+
+		if (dryRun) {
+			const { completionInstallPath } = await import("../lib/completions.ts");
+			const loc = completionInstallPath(targetShell);
+			console.log(`Would write: ${loc.file}`);
+			if (loc.rcLine && loc.rcFile) {
+				console.log(`Would append to ${loc.rcFile}:`);
+				console.log(`  ${loc.rcLine}`);
+			}
+			return;
+		}
+
+		const result = installCompletions(targetShell, { dryRun: false });
+		if (result.alreadyInstalled) {
+			console.log(`Completions already installed (refreshed): ${result.file}`);
+		} else {
+			console.log(`Installed ${result.shell} completions: ${result.file}`);
+		}
+		if (result.rcLine && result.rcFile) {
+			console.log(`Added to ${result.rcFile}:`);
+			console.log(`  ${result.rcLine}`);
+		}
+		console.log("Restart your shell or open a new terminal to activate completions.");
+		return;
+	}
+
+	if (flags.uninstall === true) {
+		const shellOverride = flag(flags, "shell") as SupportedShell | undefined;
+		const targetShell: SupportedShell = shellOverride ?? (shellInfo.supported ? binary as SupportedShell : undefined) ?? "bash";
+
+		const result = uninstallCompletions(targetShell);
+		if (result.removed) {
+			console.log(`Removed ${targetShell} completions: ${result.file}`);
+			if (result.rcLine && result.rcFile) {
+				console.log(`Removed line from ${result.rcFile}:`);
+				console.log(`  ${result.rcLine}`);
+			}
+		} else {
+			console.log(`Completions were not installed for ${targetShell}.`);
+		}
+		return;
+	}
+
+	// Default: show status for all shells
+	const statuses = allCompletionStatuses();
+	console.log("Shell completion status:\n");
+	for (const s of statuses) {
+		const mark = s.installed ? "✓" : "✗";
+		const note = s.installed ? "installed" : "not installed";
+		console.log(`  ${mark} ${s.shell.padEnd(5)}  ${note.padEnd(15)}  ${s.path}`);
+	}
+
+	const detected = completionStatusFor(shellInfo.supported ? binary as SupportedShell : "bash");
+	console.log();
+	if (!shellInfo.supported) {
+		console.log(`Current shell (${binary}) is not supported for auto-install.`);
+		console.log(`Supported: bash, zsh, fish`);
+	} else if (!detected.installed) {
+		console.log(`Run 'quickchr completions --install' to install for ${binary}.`);
+	} else {
+		console.log(`Completions active. Restart shell if recently installed.`);
+	}
+}
+
 async function cmdDoctor() {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { statusIcon, bold } = await import("./format.ts");
@@ -1932,6 +2032,7 @@ Commands:
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
   networks                Network discovery & socket management
+  completions             Manage shell completions (Tab completion)
   doctor                  Check prerequisites
   version                 Show version info
   help [command]          Show help
@@ -2070,7 +2171,22 @@ Options:
 
 Check system prerequisites: QEMU binaries, firmware, acceleration,
 sshpass (for package upload), qemu-img (for disk operations), data directories,
-and cached images.`);
+and cached images. Also reports the current shell and completion install status.`);
+			break;
+		case "completions":
+			console.log(`quickchr completions [options]
+
+Manage shell Tab completions for quickchr.
+
+Options:
+  --install             Install completions for the detected shell
+  --install --shell <s> Install for a specific shell: bash, zsh, fish
+  --uninstall           Remove completions (and undo rc-file changes)
+  --status              Show install status for all shells
+  --dry-run             Show what --install would do without writing anything
+
+Machine name completions are always up to date — the scripts call quickchr
+at completion time to list your machines.`);
 			break;
 		case "disk":
 			console.log(`quickchr disk <name>

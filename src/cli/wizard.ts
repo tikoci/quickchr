@@ -630,6 +630,28 @@ export async function runWizard(): Promise<void> {
 
 		clack.note(details.join("\n"), "Instance details");
 
+		// Offer to install shell completions if not already installed
+		const { detectCurrentShell, shellBinary, completionStatusFor, installCompletions } = await import("../lib/completions.ts");
+		const shellInfo = detectCurrentShell();
+		const binary = shellBinary(shellInfo);
+		if (shellInfo.supported) {
+			const compStatus = completionStatusFor(binary as import("../lib/completions.ts").SupportedShell);
+			if (!compStatus.installed) {
+				const wantCompletions = await clack.confirm({
+					message: `Install shell completions? (adds Tab completion for quickchr commands and machine names)`,
+					initialValue: true,
+				});
+				if (!clack.isCancel(wantCompletions) && wantCompletions) {
+					const result = installCompletions(binary as import("../lib/completions.ts").SupportedShell);
+					clack.log.success(`Installed ${binary} completions: ${result.file}`);
+					if (result.rcLine && result.rcFile) {
+						clack.log.info(`Added to ${result.rcFile}: ${result.rcLine}`);
+					}
+					clack.log.info("Restart your shell or open a new terminal to activate.");
+				}
+			}
+		}
+
 		clack.outro("Done!");
 	} catch (e: unknown) {
 		spinner.stop("Failed", 1);
