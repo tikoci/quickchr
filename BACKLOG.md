@@ -948,7 +948,7 @@ quickchr start matrica-dev   --version development  --arch arm64 --port-base 923
 
 **CI-testable:** Partially. ARM64 on x86 GitHub runners = TCG, very slow for 4 parallel VMs. Set `MATRICA_LITE=1` for a 2-channel variant that matches native arch (HVF on Apple Silicon) and skips extra packages — boots in ~30s instead of ~5min.
 
-- [x] `examples/matrica/matrica.test.ts` (bun:test) — LITE mode (`MATRICA_LITE=1`): 2 channels, native arch, no extra packages. Full mode: 4 ARM64 channels with zerotier + container.
+- [x] `examples/matrica/matrica.test.ts` (bun:test) — LITE mode (`MATRICA_LITE=1`): 2 channels, native arch, no extra packages. Full mode: all 4 channels with native arch + zerotier + container.
 - [x] `examples/matrica/matrica.test.ts` — exec() test: identity + `:serialize` JSON on all instances (exercises exec from a different consumer than integration tests)
 - [ ] `examples/matrica/Makefile`
 - [ ] `examples/matrica/matrica.py` (Python, subprocess CLI)
@@ -956,6 +956,33 @@ quickchr start matrica-dev   --version development  --arch arm64 --port-base 923
 - [ ] `examples/matrica/rb5009-arm64.rsc` (sample config with zerotier/container references)
 
 #### "trauks" - Testing an /app container (Latvian for "container")
+
+#### "vienkāršs" - Simple single-machine example (Latvian for "simple")
+
+Minimal example: one CHR, platform-native arch, no extra packages, basic REST API call. Designed as a quick-start / smoke-test and the simplest possible `examples/**` entry.
+
+**Topology:** Single CHR matching host arch (x86 on Intel, arm64 on Apple Silicon).
+
+```text
+quickchr start vienk --version stable
+```
+
+**Flow:**
+1. Start one CHR with defaults (native arch, no extra packages)
+2. Wait for boot, verify REST API responds
+3. Run a few `/system/resource/print`, `/interface/print` calls
+4. Stop and remove
+
+**What this validates:**
+- Basic start/stop/remove lifecycle
+- REST API connectivity via SLiRP port forwarding
+- Platform-native arch with hardware acceleration
+- Good first example for users learning the tool
+
+**CI-testable:** Yes — fast (~15s with KVM/HVF), no extra packages, no cross-arch. Ideal for both x86 and ARM64 runners.
+
+- [ ] `examples/vienk/vienk.test.ts`
+- [ ] `examples/vienk/README.md`
 
 Simple example where an /app is test by bring it up in CHR, and the /app services offered.
 
