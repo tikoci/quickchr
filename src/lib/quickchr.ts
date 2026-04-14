@@ -26,6 +26,7 @@ import {
 	loadMachine,
 	removeMachine as removeState,
 	getMachineDir,
+	getMachinesDir,
 	listMachineNames,
 	refreshAllStatuses,
 	isMachineRunning,
@@ -57,7 +58,7 @@ import {
 } from "./device-mode.ts";
 import type { LicenseOptions } from "./types.ts";
 import { toChrPorts } from "./network.ts";
-import { existsSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // --- Architecture-aware defaults ---
@@ -852,6 +853,13 @@ export class QuickCHR {
 		}
 
 			return instance;
+		} catch (err) {
+			// Clean up orphaned machine directory if spawn failed before machine.json was saved
+			const machineJsonPath = join(machineDir, "machine.json");
+			if (!existsSync(machineJsonPath)) {
+				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
+			}
+			throw err;
 		} finally {
 			try { unlinkSync(lockPath); } catch { /* ignore */ }
 		}
@@ -1328,6 +1336,33 @@ export class QuickCHR {
 					label: "socket_vmnet",
 					status: "warn",
 					detail: "not found (optional, for rootless shared/bridged networking — brew install socket_vmnet)",
+				});
+			}
+		}
+
+		// Orphaned machine directories (have files but no machine.json)
+		const machinesDir = getMachinesDir();
+		if (existsSync(machinesDir)) {
+			const dirs = readdirSync(machinesDir, { withFileTypes: true })
+				.filter(e => e.isDirectory());
+			const orphans: string[] = [];
+			for (const dir of dirs) {
+				const mjPath = join(machinesDir, dir.name, "machine.json");
+				if (!existsSync(mjPath)) {
+					orphans.push(dir.name);
+				}
+			}
+			if (orphans.length > 0) {
+				checks.push({
+					label: "Orphaned machine dirs",
+					status: "warn",
+					detail: `${orphans.length} dir(s) without machine.json: ${orphans.join(", ")}. Remove manually: rm -rf ${machinesDir}/<name>`,
+				});
+			} else {
+				checks.push({
+					label: "Machine state",
+					status: "ok",
+					detail: `${dirs.length} machine(s), no orphans`,
 				});
 			}
 		}
