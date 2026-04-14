@@ -146,154 +146,276 @@ export async function runWizard(): Promise<void> {
 		}
 	}
 
-	// 5. Extra packages — arch-specific list from 7.22.1 baseline.
-	//    Special value "__all__" means install everything from all_packages.zip
-	//    (useful for API schema generation — see restraml project).
-	const pkgOptions = [
-		{
-			value: "__all__",
-			label: "All packages",
-			hint: "installs everything from all_packages.zip — best for API schema generation",
-		},
-		...knownPackagesForArch(arch as Arch).map((p) => ({ value: p, label: p })),
-	];
-	const pkgSelection = await clack.multiselect({
-		message: "Extra packages (space to toggle, enter to confirm):",
-		options: pkgOptions,
-		required: false,
-	});
-	if (clack.isCancel(pkgSelection)) { clack.cancel("Cancelled."); process.exit(0); }
+	// ── 5. Networking ────────────────────────────────────────────────────
+	// User/SLiRP is always included (localhost port forwarding for REST, SSH, etc.).
+	// The wizard only asks about *additional* networks. To remove the user-mode
+	// interface, use `quickchr start --no-network --add-network <spec>`.
+	const networks: NetworkSpecifier[] = ["user"];
+	const { detectPlatform, detectPhysicalInterfaces, isSocketVmnetDaemonRunning } = await import("../lib/platform.ts");
+	const { parseNetworkSpecifier } = await import("../lib/network.ts");
+	const platform = await detectPlatform();
+	const isMacOS = platform.os === "darwin";
+	const hasSocketVmnet = !!platform.socketVmnet;
 
-	const installAllPackages = (pkgSelection as string[]).includes("__all__");
-	const packages = installAllPackages ? [] : (pkgSelection as string[]);
-
-	// 6. Device mode — opt-in; CHR ships with mode=advanced by default.
-	//    Device-mode provisioning requires a hard power-cycle, so only do it when the user
-	//    actually needs features beyond what the default advanced mode provides (e.g. containers).
-	//    See: https://help.mikrotik.com/docs/spaces/ROS/pages/93749258/Device-mode
-	const wantDeviceMode = await clack.confirm({
-		message: "Configure device-mode? (needed for containers and some restricted features)",
-		initialValue: false,
-	});
-	if (clack.isCancel(wantDeviceMode)) { clack.cancel("Cancelled."); process.exit(0); }
-
-	let deviceMode: DeviceModeOptions | undefined;
-	if (wantDeviceMode) {
-		const modeChoice = await clack.select({
-			message: "Device-mode profile:",
-			options: [
-				{ value: "rose", label: "rose", hint: "includes container; recommended for most users" },
-				{ value: "advanced", label: "advanced", hint: "CHR default — no container" },
-				{ value: "basic", label: "basic" },
-				{ value: "home", label: "home" },
-			],
-			initialValue: "rose",
+	// Only offer additional networks if the platform has options beyond user-mode
+	const hasNetworkOptions = isMacOS || process.platform === "linux";
+	if (hasNetworkOptions) {
+		const wantExtra = await clack.confirm({
+			message: "Add a real network? (the CHR already has localhost port forwarding for REST/SSH/WinBox)",
+			initialValue: false,
 		});
-		if (clack.isCancel(modeChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+		if (clack.isCancel(wantExtra)) { clack.cancel("Cancelled."); process.exit(0); }
 
-		deviceMode = { mode: modeChoice as string };
+		if (wantExtra) {
+			let addMore = true;
+			while (addMore) {
+				const netOptions: Array<{ value: string; label: string; hint?: string }> = [];
+				if (isMacOS && hasSocketVmnet) {
+					netOptions.push({ value: "shared", label: "shared", hint: "routable IP via socket_vmnet (pingable from host)" });
+				}
+				if (isMacOS) {
+					netOptions.push({ value: "bridged", label: "bridged", hint: "bridge to a physical interface (e.g. Wi-Fi)" });
+				}
+				netOptions.push({ value: "socket", label: "socket", hint: "named L2 link between VMs" });
 
-		// Offer extra features that are always disabled regardless of mode.
-		// MikroTik docs: traffic-gen, partitions, routerboard are ❌ in all modes.
-		// container is ❌ in all modes except rose.
-		// We show the subset most useful for CHR users — CLI --device-mode-enable
-		// handles the rest (partitions, install-any-version).
-		const extraFeatures = modeChoice === "rose"
-			? [
-				{ value: "traffic-gen", label: "traffic-gen", hint: "/tool traffic-gen" },
-				{ value: "routerboard", label: "routerboard", hint: "/system routerboard settings" },
-			]
-			: [
-				{ value: "container", label: "container", hint: "/container — required for running containers" },
-				{ value: "traffic-gen", label: "traffic-gen", hint: "/tool traffic-gen" },
-				{ value: "routerboard", label: "routerboard", hint: "/system routerboard settings" },
-			];
+				const netType = await clack.select({
+					message: `Additional network type:`,
+					options: netOptions,
+				});
+				if (clack.isCancel(netType)) { clack.cancel("Cancelled."); process.exit(0); }
 
-		const enableExtras = await clack.multiselect({
-			message: `Enable extra features beyond ${modeChoice} mode? (space to toggle, enter to confirm)`,
-			options: extraFeatures,
-			required: false,
-		});
-		if (clack.isCancel(enableExtras)) { clack.cancel("Cancelled."); process.exit(0); }
+				if (netType === "shared") {
+					if (networks.includes("shared")) {
+						clack.log.warn("Only one shared network is supported.");
+						continue;
+					}
+					// Block until socket_vmnet daemon is running — don't proceed with a known-bad config
+					let daemonOk = false;
+					while (!daemonOk) {
+						const socketPath = platform.socketVmnet?.sharedSocket;
+						if (socketPath && isSocketVmnetDaemonRunning(socketPath)) {
+							daemonOk = true;
+						} else {
+							clack.log.warn("socket_vmnet daemon is not running.");
+							const retry = await clack.select({
+								message: "What would you like to do?",
+								options: [
+									{ value: "retry", label: "Check again", hint: "after running: sudo brew services start socket_vmnet" },
+									{ value: "skip", label: "Skip shared network", hint: "continue without it" },
+								],
+							});
+							if (clack.isCancel(retry)) { clack.cancel("Cancelled."); process.exit(0); }
+							if (retry === "skip") break;
+							// Refresh platform detection for retry
+							const refreshed = await detectPlatform();
+							Object.assign(platform, refreshed);
+						}
+					}
+					if (daemonOk) {
+						networks.push("shared");
+					}
+				} else if (netType === "bridged") {
+					const ifaces = detectPhysicalInterfaces();
+					if (ifaces.length === 0) {
+						clack.log.warn("No physical interfaces detected. Enter device name manually.");
+						const manualIface = await clack.text({
+							message: "Interface device name (e.g. en0):",
+							validate: (v) => { if (!v.trim()) return "Required"; },
+						});
+						if (clack.isCancel(manualIface)) { clack.cancel("Cancelled."); process.exit(0); }
+						networks.push(parseNetworkSpecifier(`bridged:${manualIface}`));
+					} else {
+						const ifaceChoice = await clack.select({
+							message: "Bridge to which interface?",
+							options: ifaces.map((i) => ({
+								value: i.device,
+								label: `${i.device} — ${i.name}`,
+								hint: i.alias ?? undefined,
+							})),
+						});
+						if (clack.isCancel(ifaceChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+						networks.push(parseNetworkSpecifier(`bridged:${ifaceChoice}`));
+					}
+				} else if (netType === "socket") {
+					const socketName = await clack.text({
+						message: "Socket link name (VMs sharing a name get L2 connectivity):",
+						validate: (v) => { if (!v.trim()) return "Required"; },
+					});
+					if (clack.isCancel(socketName)) { clack.cancel("Cancelled."); process.exit(0); }
+					networks.push(parseNetworkSpecifier(`socket::${socketName}`));
+				}
 
-		if ((enableExtras as string[]).length > 0) {
-			deviceMode.enable = enableExtras as string[];
+				const another = await clack.confirm({
+					message: "Add another network?",
+					initialValue: false,
+				});
+				if (clack.isCancel(another)) { clack.cancel("Cancelled."); process.exit(0); }
+				addMore = another;
+			}
 		}
-
-		clack.log.info("Not all features shown. Use CLI --device-mode-enable for additional settings.");
 	}
 
-	// 7. User setup — quickchr managed login is the default; keeps admin:empty as opt-in
-	const userChoice = await clack.select({
-		message: "CHR login setup:",
-		options: [
-			{ value: "managed", label: "quickchr managed login", hint: "auto-generated password (recommended)" },
-			{ value: "custom", label: "Custom user", hint: "you provide username + password" },
-			{ value: "admin", label: "Keep admin with no password", hint: "less secure" },
-		],
-		initialValue: "managed",
-	});
-	if (clack.isCancel(userChoice)) { clack.cancel("Cancelled."); process.exit(0); }
-
+	// ── 6. Provisioning gate ─────────────────────────────────────────────
+	// Everything after this point (packages, device-mode, login, license)
+	// requires booting the CHR and connecting via REST API.
+	let installAllPackages = false;
+	let packages: string[] = [];
+	let deviceMode: DeviceModeOptions | undefined;
 	let user: { name: string; password: string } | undefined;
 	let disableAdmin = false;
 	let secureLogin: boolean | undefined;
-
-	if (userChoice === "custom") {
-		const userName = await clack.text({
-			message: "Username:",
-			validate: (v) => {
-				if (!v.trim()) return "Required";
-			},
-		});
-		if (clack.isCancel(userName)) { clack.cancel("Cancelled."); process.exit(0); }
-
-		const userPass = await clack.password({
-			message: "Password:",
-		});
-		if (clack.isCancel(userPass)) { clack.cancel("Cancelled."); process.exit(0); }
-
-		user = { name: userName, password: userPass };
-
-		const disable = await clack.confirm({
-			message: "Disable the default admin user?",
-			initialValue: false,
-		});
-		if (clack.isCancel(disable)) { clack.cancel("Cancelled."); process.exit(0); }
-		disableAdmin = disable;
-	} else if (userChoice === "admin") {
-		secureLogin = false;
-	}
-	// "managed" uses defaults (secureLogin=undefined → true)
-
-	// 8. License — optional trial license via MikroTik.com account.
-	//    Free CHR runs at 1 Mbps. A trial license unlocks 1/10 Gbps or unlimited.
 	let license: LicenseOptions | undefined;
 
-	const wantLicense = await clack.confirm({
-		message: "Apply a CHR trial license? (unlocks speed above 1 Mbps)",
-		initialValue: false,
+	const wantProvision = await clack.confirm({
+		message: "Configure the router after boot? (packages, login, device-mode, license)",
+		initialValue: true,
 	});
-	if (clack.isCancel(wantLicense)) { clack.cancel("Cancelled."); process.exit(0); }
+	if (clack.isCancel(wantProvision)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	if (wantLicense) {
-		// Check for stored credentials first
-		const { getStoredCredentials, saveCredentials, credentialStorageLabel } = await import("../lib/credentials.ts");
-		const stored = await getStoredCredentials();
+	if (wantProvision) {
+		// 6a. Extra packages
+		const pkgChoice = await clack.select({
+			message: "Install extra packages?",
+			options: [
+				{ value: "none", label: "No extra packages" },
+				{ value: "all", label: "All packages", hint: "installs everything available" },
+				{ value: "custom", label: "Choose packages" },
+			],
+			initialValue: "none",
+		});
+		if (clack.isCancel(pkgChoice)) { clack.cancel("Cancelled."); process.exit(0); }
 
-		let licAccount = "";
-		let licPassword = "";
-
-		if (stored) {
-			const useStored = await clack.confirm({
-				message: `Use saved credentials for ${stored.account} (${credentialStorageLabel()})?`,
-				initialValue: true,
+		if (pkgChoice === "all") {
+			installAllPackages = true;
+		} else if (pkgChoice === "custom") {
+			const pkgOptions = knownPackagesForArch(arch as Arch).map((p) => ({ value: p, label: p }));
+			const pkgSelection = await clack.multiselect({
+				message: "Select packages (space to toggle, enter to confirm):",
+				options: pkgOptions,
+				required: false,
 			});
-			if (clack.isCancel(useStored)) { clack.cancel("Cancelled."); process.exit(0); }
+			if (clack.isCancel(pkgSelection)) { clack.cancel("Cancelled."); process.exit(0); }
+			packages = pkgSelection as string[];
+		}
 
-			if (useStored) {
-				licAccount = stored.account;
-				licPassword = stored.password;
+		// 6b. Device mode
+		const wantDeviceMode = await clack.confirm({
+			message: "Configure device-mode? (needed for containers and some restricted features)",
+			initialValue: false,
+		});
+		if (clack.isCancel(wantDeviceMode)) { clack.cancel("Cancelled."); process.exit(0); }
+
+		if (wantDeviceMode) {
+			const modeChoice = await clack.select({
+				message: "Device-mode profile:",
+				options: [
+					{ value: "rose", label: "rose", hint: "includes container; recommended for most users" },
+					{ value: "advanced", label: "advanced", hint: "CHR default — no container" },
+					{ value: "basic", label: "basic" },
+					{ value: "home", label: "home" },
+				],
+				initialValue: "rose",
+			});
+			if (clack.isCancel(modeChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+
+			deviceMode = { mode: modeChoice as string };
+
+			// All features that are disabled regardless of mode.
+			const extraFeatures = modeChoice === "rose"
+				? [
+					{ value: "traffic-gen", label: "traffic-gen", hint: "/tool traffic-gen" },
+					{ value: "routerboard", label: "routerboard", hint: "/system routerboard settings" },
+					{ value: "install-any-version", label: "install-any-version", hint: "allow downgrade/sidegrade" },
+					{ value: "partitions", label: "partitions", hint: "/partitions support" },
+				]
+				: [
+					{ value: "container", label: "container", hint: "/container — required for running containers" },
+					{ value: "traffic-gen", label: "traffic-gen", hint: "/tool traffic-gen" },
+					{ value: "routerboard", label: "routerboard", hint: "/system routerboard settings" },
+					{ value: "install-any-version", label: "install-any-version", hint: "allow downgrade/sidegrade" },
+					{ value: "partitions", label: "partitions", hint: "/partitions support" },
+				];
+
+			const enableExtras = await clack.multiselect({
+				message: `Enable extra features beyond ${modeChoice} mode? (space to toggle, enter to confirm)`,
+				options: extraFeatures,
+				required: false,
+			});
+			if (clack.isCancel(enableExtras)) { clack.cancel("Cancelled."); process.exit(0); }
+
+			if ((enableExtras as string[]).length > 0) {
+				deviceMode.enable = enableExtras as string[];
+			}
+		}
+
+		// 6c. User setup
+		const userChoice = await clack.select({
+			message: "CHR login setup:",
+			options: [
+				{ value: "managed", label: "quickchr managed login", hint: "auto-generated password, disables admin (recommended)" },
+				{ value: "custom", label: "Custom user", hint: "you provide username + password" },
+				{ value: "admin", label: "Keep admin with no password", hint: "less secure" },
+			],
+			initialValue: "managed",
+		});
+		if (clack.isCancel(userChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+
+		if (userChoice === "custom") {
+			const userName = await clack.text({
+				message: "Username:",
+				validate: (v) => { if (!v.trim()) return "Required"; },
+			});
+			if (clack.isCancel(userName)) { clack.cancel("Cancelled."); process.exit(0); }
+
+			const userPass = await clack.password({ message: "Password:" });
+			if (clack.isCancel(userPass)) { clack.cancel("Cancelled."); process.exit(0); }
+
+			user = { name: userName, password: userPass };
+			disableAdmin = true;
+		} else if (userChoice === "managed") {
+			disableAdmin = true;
+		} else {
+			// "admin" — keep admin with no password
+			secureLogin = false;
+		}
+
+		// 6d. License
+		const wantLicense = await clack.confirm({
+			message: "Apply a CHR trial license? (unlocks speed above 1 Mbps)",
+			initialValue: false,
+		});
+		if (clack.isCancel(wantLicense)) { clack.cancel("Cancelled."); process.exit(0); }
+
+		if (wantLicense) {
+			const { getStoredCredentials, saveCredentials, credentialStorageLabel } = await import("../lib/credentials.ts");
+			const stored = await getStoredCredentials();
+
+			let licAccount = "";
+			let licPassword = "";
+
+			if (stored) {
+				const useStored = await clack.confirm({
+					message: `Use saved credentials for ${stored.account} (${credentialStorageLabel()})?`,
+					initialValue: true,
+				});
+				if (clack.isCancel(useStored)) { clack.cancel("Cancelled."); process.exit(0); }
+
+				if (useStored) {
+					licAccount = stored.account;
+					licPassword = stored.password;
+				} else {
+					const acct = await clack.text({ message: "MikroTik account (email):", validate: (v) => v.trim() ? undefined : "Required" });
+					if (clack.isCancel(acct)) { clack.cancel("Cancelled."); process.exit(0); }
+					const pass = await clack.password({ message: "MikroTik password:" });
+					if (clack.isCancel(pass)) { clack.cancel("Cancelled."); process.exit(0); }
+					licAccount = acct;
+					licPassword = pass;
+					const saveCreds = await clack.confirm({ message: "Save these credentials?", initialValue: true });
+					if (!clack.isCancel(saveCreds) && saveCreds) {
+						await saveCredentials(licAccount, licPassword);
+						clack.log.success(`Saved to ${credentialStorageLabel()}`);
+					}
+				}
 			} else {
 				const acct = await clack.text({ message: "MikroTik account (email):", validate: (v) => v.trim() ? undefined : "Required" });
 				if (clack.isCancel(acct)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -307,163 +429,18 @@ export async function runWizard(): Promise<void> {
 					clack.log.success(`Saved to ${credentialStorageLabel()}`);
 				}
 			}
-		} else {
-			const acct = await clack.text({ message: "MikroTik account (email):", validate: (v) => v.trim() ? undefined : "Required" });
-			if (clack.isCancel(acct)) { clack.cancel("Cancelled."); process.exit(0); }
-			const pass = await clack.password({ message: "MikroTik password:" });
-			if (clack.isCancel(pass)) { clack.cancel("Cancelled."); process.exit(0); }
-			licAccount = acct;
-			licPassword = pass;
-			const saveCreds = await clack.confirm({ message: "Save these credentials?", initialValue: true });
-			if (!clack.isCancel(saveCreds) && saveCreds) {
-				await saveCredentials(licAccount, licPassword);
-				clack.log.success(`Saved to ${credentialStorageLabel()}`);
-			}
-		}
 
-		const licLevel = await clack.select({
-			message: "License level:",
-			options: [
-				{ value: "p1", label: "p1 — 1 Gbps", hint: "trial, 60 days" },
-				{ value: "p10", label: "p10 — 10 Gbps", hint: "trial, 60 days" },
-				{ value: "unlimited", label: "unlimited — no cap", hint: "trial, 60 days" },
-			] as Array<{ value: LicenseLevel; label: string; hint: string }>,
-			initialValue: "p1" as LicenseLevel,
-		});
-		if (clack.isCancel(licLevel)) { clack.cancel("Cancelled."); process.exit(0); }
+			const licLevel = await clack.select({
+				message: "License level:",
+				options: [
+					{ value: "p1", label: "p1 — 1 Gbps", hint: "trial, 60 days" },
+					{ value: "p10", label: "p10 — 10 Gbps", hint: "trial, 60 days" },
+					{ value: "unlimited", label: "unlimited — no cap", hint: "trial, 60 days" },
+				] as Array<{ value: LicenseLevel; label: string; hint: string }>,
+				initialValue: "p1" as LicenseLevel,
+			});
+			if (clack.isCancel(licLevel)) { clack.cancel("Cancelled."); process.exit(0); }
 			license = { account: licAccount, password: licPassword, level: licLevel };
-	}
-
-	// 9. Networks — build up NetworkSpecifier[] interactively
-	const networks: NetworkSpecifier[] = [];
-	const { detectPlatform, detectPhysicalInterfaces, isSocketVmnetDaemonRunning } = await import("../lib/platform.ts");
-	const { parseNetworkSpecifier, hasUserModeNetwork } = await import("../lib/network.ts");
-	const platform = await detectPlatform();
-	const isMacOS = platform.os === "darwin";
-	const hasSocketVmnet = !!platform.socketVmnet;
-	const socketVmnetRunning = hasSocketVmnet && !!platform.socketVmnet?.sharedSocket
-		? isSocketVmnetDaemonRunning(platform.socketVmnet.sharedSocket)
-		: false;
-
-	// Determine if any provisioning steps were requested (requires user-mode network)
-	const hasProvisioningNeeds = !!(
-		installAllPackages ||
-		packages.length > 0 ||
-		deviceMode ||
-		secureLogin !== false ||
-		user ||
-		disableAdmin ||
-		license
-	);
-
-	const wantNetwork = await clack.confirm({
-		message: "Configure networking? (default is user-mode with port forwarding)",
-		initialValue: false,
-	});
-	if (clack.isCancel(wantNetwork)) { clack.cancel("Cancelled."); process.exit(0); }
-
-	if (wantNetwork) {
-		let addMore = true;
-		while (addMore) {
-			const netOptions: Array<{ value: string; label: string; hint?: string }> = [
-				{ value: "user", label: "user", hint: "port forwarding (default)" },
-			];
-			if (isMacOS && hasSocketVmnet) {
-				if (socketVmnetRunning) {
-					netOptions.push({ value: "shared", label: "shared", hint: "rootless shared network via socket_vmnet" });
-				} else {
-					netOptions.push({ value: "shared", label: "shared", hint: "socket_vmnet installed but daemon not running — sudo brew services start socket_vmnet" });
-				}
-			}
-			if (isMacOS) {
-				netOptions.push({ value: "bridged", label: "bridged", hint: "bridge to a physical interface" });
-			}
-			netOptions.push({ value: "socket", label: "socket", hint: "named L2 link between VMs" });
-
-			const netType = await clack.select({
-				message: `Network ${networks.length + 1} type:`,
-				options: netOptions,
-			});
-			if (clack.isCancel(netType)) { clack.cancel("Cancelled."); process.exit(0); }
-
-			if (netType === "user") {
-				if (networks.includes("user")) {
-					clack.log.warn("Only one user-mode network is supported. Please choose a different type.");
-					continue;
-				}
-				networks.push("user");
-			} else if (netType === "shared") {
-				if (networks.includes("shared")) {
-					clack.log.warn("Only one shared network is supported.");
-					continue;
-				}
-				if (!socketVmnetRunning) {
-					clack.log.warn("socket_vmnet daemon is not running. This network will fail at start. Start it first: sudo brew services start socket_vmnet");
-				}
-				if (hasProvisioningNeeds) {
-					clack.log.warn("Shared networking does not forward localhost ports — provisioning (packages, login, device-mode) requires a user-mode interface too. Add 'user' as well.");
-				}
-				networks.push("shared");
-			} else if (netType === "bridged") {
-				const ifaces = detectPhysicalInterfaces();
-				if (ifaces.length === 0) {
-					clack.log.warn("No physical interfaces detected. Enter device name manually.");
-					const manualIface = await clack.text({
-						message: "Interface device name (e.g. en0):",
-						validate: (v) => { if (!v.trim()) return "Required"; },
-					});
-					if (clack.isCancel(manualIface)) { clack.cancel("Cancelled."); process.exit(0); }
-					networks.push(parseNetworkSpecifier(`bridged:${manualIface}`));
-				} else {
-					const ifaceChoice = await clack.select({
-						message: "Bridge to which interface?",
-						options: ifaces.map((i) => ({
-							value: i.device,
-							label: `${i.device} — ${i.name}`,
-							hint: i.alias ?? undefined,
-						})),
-					});
-					if (clack.isCancel(ifaceChoice)) { clack.cancel("Cancelled."); process.exit(0); }
-					networks.push(parseNetworkSpecifier(`bridged:${ifaceChoice}`));
-				}
-			} else if (netType === "socket") {
-				const socketName = await clack.text({
-					message: "Socket link name (VMs sharing a name get L2 connectivity):",
-					validate: (v) => { if (!v.trim()) return "Required"; },
-				});
-				if (clack.isCancel(socketName)) { clack.cancel("Cancelled."); process.exit(0); }
-				networks.push(parseNetworkSpecifier(`socket::${socketName}`));
-			}
-
-			const another = await clack.confirm({
-				message: "Add another network interface?",
-				initialValue: false,
-			});
-			if (clack.isCancel(another)) { clack.cancel("Cancelled."); process.exit(0); }
-			addMore = another;
-		}
-
-		// After network loop: if provisioning was requested but no user-mode interface is
-		// present, provisioning will fail at start-time. Offer to add one now so the user
-		// doesn't reach the hard error.
-		if (hasProvisioningNeeds && !hasUserModeNetwork(
-			networks.map((specifier, i) => ({ specifier, id: `net${i}` })),
-		)) {
-			clack.log.warn(
-				"Provisioning (packages, login setup, device-mode, license) requires a user-mode " +
-				"interface for localhost port access. The current network selection has none.",
-			);
-			const addUser = await clack.confirm({
-				message: "Add a user-mode interface (port forwarding) alongside the current networks?",
-				initialValue: true,
-			});
-			if (clack.isCancel(addUser)) { clack.cancel("Cancelled."); process.exit(0); }
-			if (addUser) {
-				networks.unshift("user");
-				clack.log.success("Added user-mode interface as net0.");
-			} else {
-				clack.log.warn("Provisioning options will be ignored — starting with current networks only.");
-			}
 		}
 	}
 
