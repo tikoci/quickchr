@@ -49,10 +49,25 @@
 <summary>CI & Publish (done)</summary>
 
 - [x] CI matrix: linux/x86_64 + linux/aarch64; macOS optional via dispatch
-- [x] Coverage enforcement: 75% funcs / 60% lines (warn, not hard-fail)
+- [x] Coverage enforcement: 75% funcs / 60% lines (warn, not hard-fail). Actual Apr 2026 baseline: **92.48% funcs / 83.02% lines** — well above thresholds.
 - [x] CI artifacts: coverage-report (14d), integration-logs-{platform} (7d)
 - [x] Step summaries written to `$GITHUB_STEP_SUMMARY`
 - [x] `publish.yml` runs lint (biome & tsc --noEmit) + unit tests before npm publish
+
+</details>
+
+<details>
+<summary>Wizard / CLI UX polish (Apr 2026, done)</summary>
+
+- [x] Shell completions (bash/zsh/fish) — `quickchr completions --install`, context-aware machine name completion. **zsh verified; bash/fish untested on real shells** (see `Pre-GitHub Push` below).
+- [x] Wizard main-menu loop — returns to home after each action instead of exiting
+- [x] Wizard `Back` option at every submenu; brew-style snapshot hints
+- [x] Snapshot API + CLI + wizard UX (`savevm`/`loadvm`/`delvm`/list, `--json` output, 16-item cap, qcow2 guard)
+- [x] Disk management: `--boot-size`, `--add-disk` (repeatable), `quickchr disk <name>`, integration-tested
+- [x] Status/info shows credentials for managed user (`d451df1`)
+- [x] Spinner interleaving fix via `onProgress` callback (`a1fa7c3`)
+- [x] Orphaned machine-dir detection in `doctor` with cleanup on spawn failure
+- [x] socket_vmnet daemon detection with `pgrep` (socket file persists after daemon exit)
 
 </details>
 
@@ -61,6 +76,51 @@
 ## P1 — Ship Shape
 
 Tighten before expanding. These are preconditions for most items below.
+
+### Pre-GitHub Push (ship readiness)
+
+Before the first `git push` to `tikoci/quickchr`, tidy the repo so first-time visitors (humans + agents) find what they expect. Most items here are low-effort "brew-style" grooming — not design work.
+
+**Repo hygiene:**
+
+- [ ] Add `LICENSE` file at repo root — `package.json` declares MIT but no root `LICENSE` exists; GitHub's license detector needs the file
+- [ ] Remove or populate stale `test.jpg` (0-byte file at repo root, committed Apr 6 — residue from an experiment)
+- [ ] Reconcile `/index.ts` vs `/src/index.ts` — root one is out-of-sync with the real barrel (`src/index.ts`). `package.json` points to `src/index.ts`. Delete the root file or make it a re-export alias.
+- [ ] `.gitignore`: confirm `.venv/`, `coverage/`, `*.jpg` (if experimental) are excluded; Python venv is currently untracked but should be explicit
+- [ ] Bump `package.json` version from `0.1.0` before first publish. Decide: pre-release (`0.1.0-rc.1`) or `0.2.0`?
+
+**Docs drift (README is stale):**
+
+- [ ] Update `README.md` CLI examples — add `setup`, `snapshot`/`snap`, `exec`, `console`, `qga`, `networks`, `completions`. The current README still centers on `start` wizard-style and omits most commands added since
+- [ ] Update `README.md` flag table — add `--add-network` (the big recent addition), remove/rename `--fg`/`--foreground` to match current CLI, document `--emulate-device` placeholder
+- [ ] Fix port-layout offsets note — README table shows +0..+5 but storage layout docs elsewhere imply +0..+9; pick one and match reality
+- [ ] Split `README.md` → `CONTRIBUTING.md` (dev setup, `bun run check`, integration test policy) — already tracked under "Docs & Project" but grouped here so it gets done together
+- [ ] Add `CHANGELOG.md` (or decide against it explicitly) — a short "Unreleased" section now seeds the discipline for future releases
+- [ ] Consider `SECURITY.md` — minimal pointer ("report via GitHub security advisories") is enough
+
+**Agent-facing discoverability (user flagged this):**
+
+- [ ] Create a `quickchr` SKILL.md for `~/.copilot/skills/` (and/or `skills/` in-repo) so agents using Copilot/Claude discover quickchr as the CHR-via-QEMU entrypoint. Describe trigger terms ("spin up CHR", "boot RouterOS locally", "CHR integration test") and link to MANUAL.md once written. Check with `~/.copilot/skills/routeros-qemu-chr/SKILL.md` — may be the right home rather than a new skill
+- [ ] JSDoc audit on the public barrel (`src/index.ts` + `src/lib/quickchr.ts`) — `QuickCHR.start()`, `ChrInstance.exec/rest/qga/snapshot/serial`, `StartOptions` fields. Today a type-only consumer knows the shape but not the semantics (e.g. "what does `installAllPackages` imply for boot time?"). Restraml integration already flagged readiness-contract ambiguity (P1 → "Clearer `start()` readiness contract"); JSDoc is how that promise shows up in IDE hovers without an `await ready` shim
+- [ ] Comment audit — search for stale `// TODO` / `// FIXME` / `// XXX`; either resolve or convert to BACKLOG items so they don't rot in code
+
+**Cross-platform smoke-test (the other user-flagged gap):**
+
+- [ ] Test from a Linux host on the same LAN — closer to CI than local macOS. Workflow: on macOS, `cd ~/GitHub/quickchr && git bundle create /tmp/quickchr.bundle --all`, then `scp /tmp/quickchr.bundle linuxbox:/tmp/`, then on the Linux box `git clone /tmp/quickchr.bundle quickchr && cd quickchr && bun install && bun run check && QUICKCHR_INTEGRATION=1 bun test test/integration/`. Alternative (no bundle): enable SSH on Mac and `git clone amm0@<mac-hostname>.local:GitHub/quickchr` from the Linux box — pull-only, keeps the Mac as origin until push.
+- [ ] Verify `quickchr completions --install` works end-to-end on bash and fish (currently only zsh tested — commit `f7ca662` flags this)
+- [ ] Verify `qemu-img` detection + `--boot-size` path on Linux (Intel Mac tested; arm64 Linux needs its own pass once KVM is detected)
+
+**Test coverage gaps that are still "lurking":**
+
+The aggregate numbers are great (92% funcs, 83% lines) but a few files are below 70% lines and worth a second look before push:
+
+- [ ] `credentials.ts` (55.81% lines) — `Bun.secrets` fallback to `~/.config/quickchr/` config files is the untested path; hard to exercise without a headless-Linux harness
+- [ ] `license.ts` (61.07% lines) — error-path coverage around retry/timeout; depends on license-renewal-readiness behavior (recent `f3bc3d0`/`12b7211` fixes)
+- [ ] `secrets.ts` (62.30% lines) — same story as `credentials.ts`; fallback branches untested
+- [ ] `completions.ts` (66.87% lines) — generator functions have good unit tests; the installer (`install` / `uninstall` / rc-file patching) is the untested chunk. Linux smoke-test above would pick this up for free
+- [ ] `images.ts` (57.89% lines) — the `downloadImage` happy-path is tested; fallback branches (partial download resume, zip cache miss) are not
+
+Coverage is informational here — don't add tests for the sake of the number. The question to answer before push is "am I comfortable someone else finding a bug in this file before I do?" and these five are the ones where the honest answer is "somewhat."
 
 ### Anchor Manual (MANUAL.md)
 
@@ -958,10 +1018,10 @@ quickchr start matrica-dev   --version development  --arch arm64 --port-base 923
 
 - [x] `examples/matrica/matrica.test.ts` (bun:test) — LITE mode (`MATRICA_LITE=1`): 2 channels, native arch, no extra packages. Full mode: all 4 channels with native arch + zerotier + container.
 - [x] `examples/matrica/matrica.test.ts` — exec() test: identity + `:serialize` JSON on all instances (exercises exec from a different consumer than integration tests)
-- [ ] `examples/matrica/Makefile`
-- [ ] `examples/matrica/matrica.py` (Python, subprocess CLI)
-- [ ] `examples/matrica/README.md`
-- [ ] `examples/matrica/rb5009-arm64.rsc` (sample config with zerotier/container references)
+- [x] `examples/matrica/Makefile`
+- [x] `examples/matrica/matrica.py` (Python, subprocess CLI)
+- [x] `examples/matrica/README.md`
+- [x] `examples/matrica/rb5009-arm64.rsc` (sample config with zerotier/container references)
 
 #### "trauks" - Testing an /app container (Latvian for "container")
 
