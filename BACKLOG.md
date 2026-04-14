@@ -463,13 +463,13 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 - [x] Extra disks — attach N additional blank qcow2 disks at specified sizes (`--add-disk 512M`), so RouterOS can format/use them. Implemented in CLI, wizard, library API, `quickchr disk`, and state persistence.
 - [x] Disk resize support (`--boot-size 512M` for the primary disk). Converts the boot disk to qcow2 before first boot and persists across `clean()`.
-- [ ] Integration test: `QuickCHR.add()` + first `start()` with `bootSize` / `extraDisks` should verify the disk artifacts exist and RouterOS sees the extra drives
+- [x] Integration test: `QuickCHR.add()` + first `start()` with `bootSize` / `extraDisks` verifies disk artifacts and RouterOS-visible extra drives (`test/integration/disk.test.ts`)
 - [ ] Windows smoke test: global `bun install -g` + PATH detection for `qemu-system-*` and `qemu-img` in CI or a documented manual checklist
 
 ### Snapshots
 
-- [ ] QEMU snapshot/restore via monitor `savevm`/`loadvm`
-- [ ] Start with an integration test to validate it actually works (resolve technical risk first). Consider saving RouterOS `:export` alongside the VM snapshot for a richer "checkpoint" concept.
+- [x] QEMU snapshot/restore via monitor `savevm`/`loadvm` validated via integration test (`test/integration/disk.test.ts`) by restoring RouterOS identity after mutation
+- [ ] Consider saving RouterOS `:export` alongside VM snapshot for a richer "checkpoint" concept (follow-up on top of validated `savevm`/`loadvm` mechanics)
 
 ### QGA (Guest Agent)
 
