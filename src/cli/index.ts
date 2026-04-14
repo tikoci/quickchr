@@ -874,7 +874,7 @@ async function cmdSetup() {
 	});
 	if (clack.isCancel(action)) { clack.cancel("Cancelled."); return; }
 
-	const { link, machineNotFoundMessage } = await import("./format.ts");
+	const { link, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 	const instance = QuickCHR.get(target.name);
 	if (!instance) { clack.log.error(machineNotFoundMessage(target.name)); return; }
 
@@ -883,7 +883,8 @@ async function cmdSetup() {
 		spinner.start(`Starting ${target.name}...`);
 		const started = await QuickCHR.start({ name: target.name, background: true });
 		spinner.stop(`${si("running")} ${bold(started.name)} started`);
-		clack.note(`REST: ${link(started.restUrl)}\nSSH:  ssh admin@127.0.0.1 -p ${started.sshPort}`, "Instance details");
+		const creds = await resolveDisplayCredentials(started.state);
+		clack.note(`REST: ${link(formatRestUrl(started.ports.http, creds.user, creds.password))}\nSSH:  ${formatSshCommand(creds.user, started.sshPort)}`, "Instance details");
 	} else if (action === "stop") {
 		await instance.stop();
 		clack.log.success(`${bold(target.name)} stopped`);
@@ -906,7 +907,7 @@ async function cmdStart(argv: string[]) {
 	// --all: start every stopped machine in background
 	if (flagBool(flags, "all")) {
 		const { QuickCHR } = await import("../lib/quickchr.ts");
-		const { statusIcon, link, bold } = await import("./format.ts");
+		const { statusIcon, link, bold, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 		const stopped = QuickCHR.list().filter((m) => m.status !== "running");
 		if (stopped.length === 0) {
 			console.log("No stopped instances.");
@@ -915,7 +916,8 @@ async function cmdStart(argv: string[]) {
 		for (const m of stopped) {
 			console.log(`Starting ${bold(m.name)}...`);
 			const instance = await QuickCHR.start({ name: m.name, background: true });
-			console.log(`${statusIcon("running")} ${bold(instance.name)}  REST: ${link(instance.restUrl)}  SSH: ssh admin@127.0.0.1 -p ${instance.sshPort}`);
+			const creds = await resolveDisplayCredentials(instance.state);
+			console.log(`${statusIcon("running")} ${bold(instance.name)}  REST: ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}  SSH: ${formatSshCommand(creds.user, instance.sshPort)}`);
 		}
 		return;
 	}
@@ -937,7 +939,7 @@ async function cmdStart(argv: string[]) {
 
 	// Build start options from flags
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, formatPorts, formatNetworks, link, bold, dim } = await import("./format.ts");
+	const { statusIcon, formatPorts, formatNetworks, link, bold, dim, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
@@ -1056,13 +1058,18 @@ async function cmdStart(argv: string[]) {
 		console.log(`  ${dim("Tip: resume session")}   quickchr start ${instance.name} --fg`);
 		console.log(`  ${dim("Tip: run background")}   quickchr start ${instance.name}`);
 	} else {
+		const creds = await resolveDisplayCredentials(instance.state);
 		console.log(`${statusIcon("running")} ${bold(instance.name)} started`);
 		console.log(`  Version: ${instance.state.version} (${instance.state.arch})`);
 		console.log(`  Network: ${formatNetworks(instance.state.networks ?? [])}`);
 		console.log(`  Ports:   ${formatPorts(instance.state.ports)}`);
-		console.log(`  REST:    ${link(instance.restUrl)}`);
-		console.log(`  SSH:     ssh admin@127.0.0.1 -p ${instance.sshPort}`);
+		console.log(`  REST:    ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`);
+		console.log(`  SSH:     ${formatSshCommand(creds.user, instance.sshPort)}`);
 		console.log(`  WinBox:  127.0.0.1:${instance.ports.winbox}`);
+		if (creds.user !== "admin") {
+			console.log(`  Login:   ${creds.user} / ${creds.password || "(no password)"}`);
+			console.log(`  Run:     quickchr exec ${instance.name} /system/resource/print`);
+		}
 	}
 }
 
@@ -1131,7 +1138,7 @@ async function cmdList() {
 
 async function cmdStatus(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, bold, dim, link, formatPorts, formatNetworks, machineNotFoundMessage } = await import("./format.ts");
+	const { statusIcon, bold, dim, link, formatPorts, formatNetworks, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 
 	const name = argv[0];
 
@@ -1160,10 +1167,14 @@ async function cmdStatus(argv: string[]) {
 	console.log(`  Logs:       ${dim(`${s.machineDir}/qemu.log`)}`);
 
 	if (s.status === "running") {
+		const creds = await resolveDisplayCredentials(s);
 		console.log();
-		console.log(`  REST:       ${link(`http://127.0.0.1:${instance.ports.http}`)}`);
+		console.log(`  REST:       ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`);
 		console.log(`  WinBox:     127.0.0.1:${instance.ports.winbox}`);
-		console.log(`  SSH:        ssh admin@127.0.0.1 -p ${instance.sshPort}`);
+		console.log(`  SSH:        ${formatSshCommand(creds.user, instance.sshPort)}`);
+		if (creds.user !== "admin") {
+			console.log(`  Login:      ${creds.user} / ${creds.password || "(no password)"}`);
+		}
 		console.log(`  Serial:     ${dim(`${s.machineDir}/serial.sock`)}`);
 		console.log();
 		console.log(`  ${dim("Tip:")} quickchr stop ${s.name}`);

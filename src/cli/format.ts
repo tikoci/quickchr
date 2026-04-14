@@ -128,3 +128,27 @@ export function link(url: string, label?: string): string {
 	return `${col.cyan}${label ?? url}${col.reset}`;
 }
 
+/** Resolve display credentials for a machine (from secret store or state). */
+export async function resolveDisplayCredentials(
+	state: { name: string; user?: { name: string; password: string } },
+): Promise<{ user: string; password: string }> {
+	const { getInstanceCredentials } = await import("../lib/credentials.ts");
+	const stored = await getInstanceCredentials(state.name);
+	if (stored) return { user: stored.user, password: stored.password };
+	if (state.user && state.user.password !== "(stored in secrets)") {
+		return { user: state.user.name, password: state.user.password };
+	}
+	return { user: state.user?.name ?? "admin", password: "" };
+}
+
+/** Format SSH connection string with correct user. */
+export function formatSshCommand(user: string, port: number): string {
+	return `ssh ${user}@127.0.0.1 -p ${port}`;
+}
+
+/** Format REST URL with credentials if available. */
+export function formatRestUrl(httpPort: number, user: string, password: string): string {
+	const auth = password ? `${user}:${password}@` : `${user}@`;
+	return `http://${auth}127.0.0.1:${httpPort}`;
+}
+
