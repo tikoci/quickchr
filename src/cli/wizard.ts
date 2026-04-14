@@ -69,24 +69,36 @@ export async function runWizard(): Promise<void> {
 	});
 	if (clack.isCancel(name)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	// 4. Resources
-	const cpu = await clack.text({
-		message: "CPU cores:",
-		defaultValue: "1",
-		validate: (v) => {
-			const n = Number(v);
-			if (!Number.isInteger(n) || n < 1 || n > 16) return "1-16";
-		},
+	// 4. Resources — detect host capabilities and offer sensible choices
+	const os = await import("node:os");
+	const hostCpus = os.cpus().length;
+	const hostMemMb = Math.round(os.totalmem() / 1024 / 1024);
+
+	const cpuOptions: Array<{ value: string; label: string; hint?: string }> = [];
+	cpuOptions.push({ value: "1", label: "1 CPU", hint: "recommended for most use" });
+	if (hostCpus >= 2) cpuOptions.push({ value: "2", label: "2 CPUs" });
+	if (hostCpus >= 4) cpuOptions.push({ value: "4", label: "4 CPUs" });
+	if (hostCpus >= 8) cpuOptions.push({ value: "8", label: "8 CPUs" });
+	if (hostCpus >= 16) cpuOptions.push({ value: "16", label: "16 CPUs" });
+
+	const cpu = await clack.select({
+		message: `CPU cores (host: ${hostCpus}):`,
+		options: cpuOptions,
+		initialValue: "1",
 	});
 	if (clack.isCancel(cpu)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	const mem = await clack.text({
-		message: "Memory (MB):",
-		defaultValue: "256",
-		validate: (v) => {
-			const n = Number(v);
-			if (!Number.isInteger(n) || n < 128) return "Minimum 128 MB";
-		},
+	const memOptions: Array<{ value: string; label: string; hint?: string }> = [];
+	memOptions.push({ value: "256", label: "256 MB", hint: "recommended minimum" });
+	if (hostMemMb >= 1024) memOptions.push({ value: "512", label: "512 MB" });
+	if (hostMemMb >= 2048) memOptions.push({ value: "1024", label: "1 GB" });
+	if (hostMemMb >= 4096) memOptions.push({ value: "2048", label: "2 GB" });
+	if (hostMemMb >= 8192) memOptions.push({ value: "4096", label: "4 GB" });
+
+	const mem = await clack.select({
+		message: `Memory (host: ${(hostMemMb / 1024).toFixed(0)} GB):`,
+		options: memOptions,
+		initialValue: "256",
 	});
 	if (clack.isCancel(mem)) { clack.cancel("Cancelled."); process.exit(0); }
 
@@ -551,6 +563,9 @@ export async function runWizard(): Promise<void> {
 	spinner.start(spinMsg);
 
 	try {
+		opts.onProgress = (msg: string) => {
+			spinner.message(msg);
+		};
 		const instance = await QuickCHR.start(opts);
 		spinner.stop(`${bold(instance.name)} started`);
 
@@ -560,16 +575,29 @@ export async function runWizard(): Promise<void> {
 		const details = [
 			`Version: ${instance.state.version} (${instance.state.arch})`,
 		];
+
+		// Credentials — show username/password so user can actually log in
+		const creds = instance.state.user;
+		const loginUser = creds?.name ?? "admin";
+		const loginPass = creds?.password && creds.password !== "(stored in secrets)" ? creds.password : "";
+
 		if (userMode) {
+			const authPrefix = loginPass ? `${loginUser}:${loginPass}@` : `${loginUser}@`;
 			details.push(
 				`Ports:   ${formatPorts(instance.state.ports)}`,
-				`REST:    ${instance.restUrl}`,
-				`SSH:     ssh admin@127.0.0.1 -p ${instance.sshPort}`,
+				`REST:    http://${authPrefix}127.0.0.1:${instance.ports.http}`,
+				`SSH:     ssh ${loginUser}@127.0.0.1 -p ${instance.sshPort}`,
 				`WinBox:  127.0.0.1:${instance.ports.winbox}`,
 			);
 		} else {
 			details.push("Network: shared/bridged — VM has a DHCP address (no localhost port forwarding)");
 			details.push("Tip:     Check IP via RouterOS console: /ip/dhcp-client/print");
+		}
+
+		if (creds?.name) {
+			details.push("");
+			details.push(`Login:   ${creds.name} / ${loginPass || "(no password)"}`);
+			details.push(`Run:     quickchr exec ${instance.name} /system/resource/print`);
 		}
 
 		clack.note(details.join("\n"), "Instance details");

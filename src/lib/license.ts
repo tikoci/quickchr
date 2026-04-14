@@ -12,6 +12,7 @@
 
 import type { LicenseLevel, LicenseOptions } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
+import { createLogger, type ProgressLogger } from "./log.ts";
 
 /** Default timeout for waiting for a license change to propagate (ms). */
 const LICENSE_VERIFY_TIMEOUT = 90_000;
@@ -58,7 +59,9 @@ export async function renewLicense(
 	opts: LicenseOptions,
 	chrUser = "admin",
 	chrPass = "",
+	logger?: ProgressLogger,
 ): Promise<void> {
+	const log = logger ?? createLogger();
 	const auth = `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
 	const body: Record<string, string> = {};
 	if (opts.account) body.account = opts.account;
@@ -101,12 +104,12 @@ export async function renewLicense(
 		}
 
 		const text = await response.text();
-		console.log(`[quickchr] License renew response body: ${text}`);
+		log.debug(`License renew response body: ${text}`);
 		const result = classifyRenewResponse(text);
 
 		if (result === "not-ready") {
 			if (attempt < MAX_RENEW_ATTEMPTS) {
-				console.warn(`[quickchr] License renew attempt ${attempt}: got system resource data instead of renew status — retrying`);
+				log.warn(`[quickchr] License renew attempt ${attempt}: got system resource data instead of renew status — retrying`);
 				await Bun.sleep(5000);
 				continue;
 			}
@@ -127,11 +130,11 @@ export async function renewLicense(
 			try {
 				const info = await getLicenseInfo(httpPort, chrUser, chrPass);
 				pollCount++;
-				console.log(`[quickchr] License poll #${pollCount}: level=${info.level}, want=${opts.level}`);
+				log.debug(`License poll #${pollCount}: level=${info.level}, want=${opts.level}`);
 				if (info.level === opts.level) return;
 			} catch (e) {
 				pollCount++;
-				console.warn(`[quickchr] License poll #${pollCount} error: ${e instanceof Error ? e.message : String(e)}`);
+				log.warn(`[quickchr] License poll #${pollCount} error: ${e instanceof Error ? e.message : String(e)}`);
 			}
 			await Bun.sleep(2000);
 		}

@@ -6,6 +6,7 @@ import { QuickCHRError } from "./types.ts";
 import { saveInstanceCredentials } from "./credentials.ts";
 import { generatePassword } from "./password.ts";
 import { waitForBoot } from "./qemu.ts";
+import { createLogger, type ProgressLogger } from "./log.ts";
 
 /** The default user name created by quickchr for managed CHR access. */
 export const QUICKCHR_USER = "quickchr";
@@ -255,6 +256,7 @@ export async function provision(
 	user?: { name: string; password: string },
 	shouldDisableAdmin?: boolean,
 	secureLogin?: boolean,
+	logger?: ProgressLogger,
 ): Promise<ProvisionResult> {
 	// Determine what user to create.
 	// Priority: explicit user > auto-create quickchr account (secureLogin defaults true)
@@ -279,7 +281,8 @@ export async function provision(
 
 	if (shouldDisableAdmin) {
 		if (!effectiveUser) {
-			console.warn("Warning: disabling admin without creating another user — you may lose access");
+			const log = logger ?? createLogger();
+			log.warn("Warning: disabling admin without creating another user — you may lose access");
 		}
 		// Pass the new user's auth for verification — after disabling admin,
 		// admin creds may stop working for REST queries.

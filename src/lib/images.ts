@@ -8,12 +8,14 @@ import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { chrDownloadUrl, chrImageBasename } from "./versions.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
+import { createLogger, type ProgressLogger } from "./log.ts";
 
 /** Download a CHR image ZIP if not already cached. Returns path to the ZIP. */
 export async function downloadImage(
 	version: string,
 	arch: Arch,
 	cacheDir?: string,
+	logger?: ProgressLogger,
 ): Promise<string> {
 	const cache = cacheDir ?? getCacheDir();
 	ensureDir(cache);
@@ -26,8 +28,9 @@ export async function downloadImage(
 		return zipPath;
 	}
 
-	console.log(`Downloading CHR ${version} (${arch})...`);
-	console.log(`  ${url}`);
+	const log = logger ?? createLogger();
+	log.status(`Downloading CHR ${version} (${arch})...`);
+	log.status(`  ${url}`);
 
 	const MAX_RETRIES = 3;
 	let lastError: Error | undefined;
@@ -50,7 +53,7 @@ export async function downloadImage(
 				// Stream to disk via arrayBuffer (Bun.write with Response can hang on large files)
 				const buf = await response.arrayBuffer();
 				await Bun.write(zipPath, buf);
-				console.log(`  Saved (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+				log.status(`  Saved (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
 				return zipPath;
 			}
 		} catch (e) {
@@ -58,7 +61,7 @@ export async function downloadImage(
 			lastError = e instanceof Error ? e : new Error(String(e));
 		}
 		if (attempt < MAX_RETRIES) {
-			console.log(`  Download failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${attempt * 2}s...`);
+			log.status(`  Download failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${attempt * 2}s...`);
 			await Bun.sleep(attempt * 2000);
 		}
 	}
@@ -73,6 +76,7 @@ export async function downloadImage(
 export async function extractImage(
 	zipPath: string,
 	cacheDir?: string,
+	logger?: ProgressLogger,
 ): Promise<string> {
 	const cache = cacheDir ?? getCacheDir();
 	ensureDir(cache);
@@ -84,7 +88,8 @@ export async function extractImage(
 		return imgPath;
 	}
 
-	console.log(`Extracting: ${basename(zipPath)}`);
+	const log = logger ?? createLogger();
+	log.status(`Extracting: ${basename(zipPath)}`);
 
 	const result = Bun.spawnSync(["unzip", "-o", zipPath, "-d", cache], {
 		stdout: "pipe",
@@ -130,15 +135,17 @@ export async function ensureCachedImage(
 	version: string,
 	arch: Arch,
 	cacheDir?: string,
+	logger?: ProgressLogger,
 ): Promise<string> {
 	const cache = cacheDir ?? getCacheDir();
 	const imgPath = join(cache, `${chrImageBasename(version, arch)}.img`);
 	if (existsSync(imgPath)) {
-		console.log(`  Using cached image: ${chrImageBasename(version, arch)}`);
+		const log = logger ?? createLogger();
+		log.status(`  Using cached image: ${chrImageBasename(version, arch)}`);
 		return imgPath;
 	}
-	const zipPath = await downloadImage(version, arch, cacheDir);
-	return extractImage(zipPath, cacheDir);
+	const zipPath = await downloadImage(version, arch, cacheDir, logger);
+	return extractImage(zipPath, cacheDir, logger);
 }
 
 /** Copy a cached image to a machine's working directory as disk.img. */

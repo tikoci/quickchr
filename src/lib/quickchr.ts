@@ -47,6 +47,7 @@ import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec } from "./console.ts";
 import { createNamedSocket, getNamedSocket, addSocketMember, removeSocketMember } from "./socket-registry.ts";
+import { createLogger, type ProgressLogger } from "./log.ts";
 import {
 	formatDeviceModeSelection,
 	readDeviceMode,
@@ -616,10 +617,12 @@ export class QuickCHR {
 			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
 		}
 
+		const logger = createLogger(opts.onProgress);
+
 		const requestedDeviceMode = opts.deviceMode;
 		const resolvedDeviceMode = resolveDeviceModeOptions(requestedDeviceMode);
 		for (const warning of resolvedDeviceMode.warnings) {
-			console.warn(`[quickchr] Device-mode: ${warning}`);
+			logger.warn(`[quickchr] Device-mode: ${warning}`);
 		}
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 
@@ -675,11 +678,11 @@ export class QuickCHR {
 					pendingOpts.license
 				);
 				if (hasPending) {
-					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts);
+					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger);
 				}
 			}
 			// Exists but stopped — restart it
-			return QuickCHR._launchExisting(existing, opts.background ?? true);
+			return QuickCHR._launchExisting(existing, opts.background ?? true, undefined, logger);
 		}
 
 		// Allocate port block
@@ -734,7 +737,7 @@ export class QuickCHR {
 		try {
 
 		// Download and prepare image
-		const cachedImg = await ensureCachedImage(version, arch);
+		const cachedImg = await ensureCachedImage(version, arch, undefined, logger);
 		copyImageToMachine(cachedImg, machineDir);
 
 		// Prepare disks (boot resize + extra disks)
@@ -848,7 +851,7 @@ export class QuickCHR {
 				disableAdmin: opts.disableAdmin,
 				license: opts.license ? await resolveLicenseInput(opts.license) ?? undefined : undefined,
 				secureLogin: opts.secureLogin,
-			}, launchConfig);
+			}, launchConfig, logger);
 		}
 
 		// Foreground + provisioning: all provisioning is done in background mode.
@@ -862,7 +865,7 @@ export class QuickCHR {
 			// Release lock before re-launching — _launchExisting acquires its own.
 			// The outer finally block will attempt a second unlink; that is harmless.
 			try { unlinkSync(lockPath); } catch { /* ignore */ }
-			return QuickCHR._launchExisting(state, false);
+			return QuickCHR._launchExisting(state, false, undefined, logger);
 		}
 
 			return instance;
@@ -893,10 +896,12 @@ export class QuickCHR {
 			secureLogin?: boolean;
 		},
 		launchConfig: QemuLaunchConfig,
+		logger?: ProgressLogger,
 	): Promise<void> {
+		const log = logger ?? createLogger();
 		const resolvedDeviceMode = resolveDeviceModeOptions(opts.deviceMode);
 		for (const warning of resolvedDeviceMode.warnings) {
-			console.warn(`[quickchr] Device-mode: ${warning}`);
+			log.warn(`[quickchr] Device-mode: ${warning}`);
 		}
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 		const bootTimeout = defaultBootTimeout(machineState.arch, opts.installAllPackages || (opts.packages?.length ?? 0) > 0);
@@ -906,28 +911,28 @@ export class QuickCHR {
 		await Bun.sleep(2000);
 
 		if (opts.installAllPackages) {
-			await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http);
+			await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
 			await instance.waitForBoot(bootTimeout);
 		} else if (opts.packages && opts.packages.length > 0) {
-			await installPackages(opts.packages, machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http);
+			await installPackages(opts.packages, machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
 			await instance.waitForBoot(bootTimeout);
 		}
 
 		if (hasDeviceModeProvisioning) {
 			const httpPort = chrPorts.http;
 			await waitForDeviceModeApi(httpPort, 30_000);
-			console.log(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
+			log.status(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
 
 			// Pre-check: if mode is already exactly what we want, skip update + power-cycle.
 			let alreadyActive = false;
 			try {
 				const beforeMode = await readDeviceMode(httpPort);
-				console.log(`[quickchr] Device-mode before update: ${JSON.stringify(beforeMode)}`);
+				log.debug(`Device-mode before update: ${JSON.stringify(beforeMode)}`);
 				alreadyActive = verifyDeviceMode(resolvedDeviceMode, beforeMode).ok;
 			} catch { /* CHR unexpectedly unreachable — proceed with update */ }
 
 			if (alreadyActive) {
-				console.log("  Device-mode already active; no power-cycle required.");
+				log.status("  Device-mode already active; no power-cycle required.");
 			} else {
 				const maxAttempts = 5;
 				let pendingUpdate: Promise<Response> | undefined;
@@ -951,11 +956,11 @@ export class QuickCHR {
 					if (outcome.state === "pending") {
 						pendingUpdate = request;
 						requiresPowerCycle = true;
-						console.log("[quickchr] Device-mode update entered pending confirmation state");
+						log.debug("Device-mode update entered pending confirmation state");
 						break;
 					}
 
-					console.log(`[quickchr] Device-mode update response: HTTP ${outcome.response.status}`);
+					log.debug(`Device-mode update response: HTTP ${outcome.response.status}`);
 
 					// Early HTTP 200 is not enough to trust. Give RouterOS a moment to either
 					// begin its internal reboot or reflect the requested mode in REST.
@@ -969,7 +974,7 @@ export class QuickCHR {
 					}
 
 					if (routerOsOffline) {
-						console.log("[quickchr] Device-mode accepted — waiting for RouterOS internal reboot");
+						log.debug("Device-mode accepted — waiting for RouterOS internal reboot");
 						const rebooted = await instance.waitForBoot(bootTimeout);
 						if (!rebooted) {
 							throw new QuickCHRError("BOOT_TIMEOUT", "RouterOS device-mode internal reboot timed out");
@@ -978,10 +983,10 @@ export class QuickCHR {
 					}
 
 					const actualNow = await readDeviceMode(httpPort);
-					console.log(`[quickchr] Device-mode after update attempt ${attempt}: ${JSON.stringify(actualNow)}`);
+					log.debug(`Device-mode after update attempt ${attempt}: ${JSON.stringify(actualNow)}`);
 					const immediateVerification = verifyDeviceMode(resolvedDeviceMode, actualNow);
 					if (immediateVerification.ok) {
-						console.log("  Device-mode already active; no power-cycle required.");
+						log.status("  Device-mode already active; no power-cycle required.");
 						break;
 					}
 
@@ -992,7 +997,7 @@ export class QuickCHR {
 						);
 					}
 
-					console.warn(`[quickchr] Device-mode update returned early without activation (attempt ${attempt}/${maxAttempts}); retrying...`);
+					log.warn(`[quickchr] Device-mode update returned early without activation (attempt ${attempt}/${maxAttempts}); retrying...`);
 					await Bun.sleep(2000);
 				}
 
@@ -1001,7 +1006,7 @@ export class QuickCHR {
 					// is the hardware power-cycle that confirms the staged device-mode change.
 					const rebootMethod = await hardRebootMachine(machineState, launchConfig);
 					pendingUpdate?.catch(() => {});
-					console.log(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
+					log.status(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
 
 					const rebooted = await instance.waitForBoot(bootTimeout);
 					if (!rebooted) {
@@ -1014,7 +1019,7 @@ export class QuickCHR {
 				}
 
 				const actual = await readDeviceMode(httpPort);
-				console.log(`[quickchr] Device-mode post-reboot: ${JSON.stringify(actual)}`);
+				log.debug(`Device-mode post-reboot: ${JSON.stringify(actual)}`);
 				const verification = verifyDeviceMode(resolvedDeviceMode, actual);
 				if (!verification.ok) {
 					throw new QuickCHRError(
@@ -1023,15 +1028,15 @@ export class QuickCHR {
 					);
 				}
 
-				console.log(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
+				log.status(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
 			}
 		}
 
 		if (opts.license) {
-			console.log("Applying CHR license...");
+			log.status("Applying CHR license...");
 			const resolvedLicense = await resolveLicenseInput(opts.license);
 			if (resolvedLicense) try {
-				await renewLicense(chrPorts.http, resolvedLicense);
+				await renewLicense(chrPorts.http, resolvedLicense, undefined, undefined, log);
 				const level = resolvedLicense.level ?? "p1";
 				const current = loadMachine(machineState.name);
 				if (current) {
@@ -1039,14 +1044,14 @@ export class QuickCHR {
 					saveMachine(current);
 				}
 				machineState.licenseLevel = level;
-				console.log(`  License applied: free → ${level}`);
+				log.status(`  License applied: free → ${level}`);
 			} catch (e) {
-				console.warn(`[quickchr] License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
+				log.warn(`[quickchr] License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		}
 
 		if (opts.user || opts.disableAdmin || opts.secureLogin !== false) {
-			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin);
+			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log);
 			if (result.user) {
 				// Persist user info in state (password placeholder — real password in secret store)
 				const current = loadMachine(machineState.name);
@@ -1057,8 +1062,8 @@ export class QuickCHR {
 				machineState.user = { name: result.user.name, password: result.user.password };
 				if (!opts.user) {
 					// Auto-created quickchr account — show the password once
-					console.log(`  quickchr account created — user: ${result.user.name}, password: ${result.user.password}`);
-					console.log(`  Password saved to ${credentialStorageLabel()}`);
+					log.status(`  quickchr account created — user: ${result.user.name}, password: ${result.user.password}`);
+					log.status(`  Password saved to ${credentialStorageLabel()}`);
 				}
 			}
 		}
@@ -1077,6 +1082,7 @@ export class QuickCHR {
 			license?: LicenseOptions;
 			secureLogin?: boolean;
 		},
+		logger?: ProgressLogger,
 	): Promise<ChrInstance> {
 		const lockPath = join(state.machineDir, ".start-lock");
 		acquireLock(lockPath);
@@ -1152,7 +1158,7 @@ export class QuickCHR {
 					`Machine "${state.name}" is running but unconfigured. Remove it with: quickchr rm ${state.name}`,
 				);
 			}
-			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig);
+			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig, logger);
 		}
 
 		return instance;

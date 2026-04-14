@@ -99,3 +99,7 @@ export type { MikrotikCredentials, InstanceCredentials } from "./lib/credentials
 
 // Package utilities
 export { downloadPackages, listAvailablePackages, downloadAndListPackages, installPackages, installAllPackages } from "./lib/packages.ts";
+
+// Logging
+export { createLogger } from "./lib/log.ts";
+export type { ProgressLogger } from "./lib/log.ts";

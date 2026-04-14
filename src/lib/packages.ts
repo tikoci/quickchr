@@ -9,12 +9,14 @@ import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { packagesDownloadUrl } from "./versions.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
+import { createLogger, type ProgressLogger } from "./log.ts";
 
 /** Download and extract the all-packages ZIP for a version/arch. Returns the extract dir. */
 export async function downloadPackages(
 	version: string,
 	arch: Arch,
 	cacheDir?: string,
+	logger?: ProgressLogger,
 ): Promise<string> {
 	const cache = cacheDir ?? getCacheDir();
 	ensureDir(cache);
@@ -25,13 +27,15 @@ export async function downloadPackages(
 	const extractDir = join(cache, `packages-${arch}-${version}`);
 
 	if (existsSync(extractDir)) {
-		console.log(`  Using cached packages: ${version} (${arch})`);
+		const log = logger ?? createLogger();
+		log.status(`  Using cached packages: ${version} (${arch})`);
 		return extractDir;
 	}
 
 	// Download if needed
 	if (!existsSync(zipPath)) {
-		console.log(`Downloading packages for ${version} (${arch})...`);
+		const log = logger ?? createLogger();
+		log.status(`Downloading packages for ${version} (${arch})...`);
 		const response = await fetch(url);
 		if (!response.ok) {
 			throw new QuickCHRError(
@@ -83,6 +87,7 @@ export async function uploadPackages(
 	sshPort: number,
 	user: string = "admin",
 	password: string = "",
+	logger?: ProgressLogger,
 ): Promise<void> {
 	// Use SSH_ASKPASS to supply the password without requiring sshpass.
 	// SSH_ASKPASS_REQUIRE=prefer (OpenSSH 8.4+) works even without a display.
@@ -98,9 +103,10 @@ export async function uploadPackages(
 	};
 
 	try {
+		const log = logger ?? createLogger();
 		for (const pkgPath of packagePaths) {
 			const filename = basename(pkgPath);
-			console.log(`Uploading: ${filename}`);
+			log.status(`Uploading: ${filename}`);
 
 			const scpArgs = [
 				"scp", "-P", String(sshPort),
@@ -135,16 +141,18 @@ export async function installPackages(
 	arch: Arch,
 	sshPort: number,
 	httpPort: number,
+	logger?: ProgressLogger,
 ): Promise<void> {
 	if (packages.length === 0) return;
 
-	const extractDir = await downloadPackages(version, arch);
+	const log = logger ?? createLogger();
+	const extractDir = await downloadPackages(version, arch, undefined, logger);
 
 	const packagePaths: string[] = [];
 	for (const pkg of packages) {
 		const pkgPath = findPackageFile(extractDir, pkg);
 		if (!pkgPath) {
-			console.warn(`Package "${pkg}" not found in all_packages for ${version} (${arch})`);
+			log.warn(`Package "${pkg}" not found in all_packages for ${version} (${arch})`);
 			continue;
 		}
 		packagePaths.push(pkgPath);
@@ -152,10 +160,10 @@ export async function installPackages(
 
 	if (packagePaths.length === 0) return;
 
-	await uploadPackages(packagePaths, sshPort);
+	await uploadPackages(packagePaths, sshPort, undefined, undefined, logger);
 
 	// Reboot to activate packages
-	console.log("Rebooting CHR to activate packages...");
+	log.status("Rebooting CHR to activate packages...");
 	try {
 		await fetch(`http://127.0.0.1:${httpPort}/rest/system/reboot`, {
 			method: "POST",
@@ -195,10 +203,12 @@ export async function installAllPackages(
 	arch: Arch,
 	sshPort: number,
 	httpPort: number,
+	logger?: ProgressLogger,
 ): Promise<void> {
-	const extractDir = await downloadPackages(version, arch);
+	const log = logger ?? createLogger();
+	const extractDir = await downloadPackages(version, arch, undefined, logger);
 	const allPkgs = listAvailablePackages(extractDir);
 	if (allPkgs.length === 0) return;
-	console.log(`Installing all ${allPkgs.length} packages: ${allPkgs.join(", ")}`);
-	await installPackages(allPkgs, version, arch, sshPort, httpPort);
+	log.status(`Installing all ${allPkgs.length} packages: ${allPkgs.join(", ")}`);
+	await installPackages(allPkgs, version, arch, sshPort, httpPort, logger);
 }

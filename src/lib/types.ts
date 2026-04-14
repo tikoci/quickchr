@@ -192,6 +192,10 @@ export interface StartOptions {
 	/** Extra blank disks to attach, specified as sizes (e.g. ["512M", "1G"]).
 	 *  Requires `qemu-img` on the host. Extra disks are always qcow2. */
 	extraDisks?: string[];
+	/** Progress callback for status messages during start.
+	 *  If not provided, messages go to console.log.
+	 *  Debug-level messages (prefixed [quickchr]) are only emitted when QUICKCHR_DEBUG=1. */
+	onProgress?: (message: string) => void;
 }
 
 // --- Instance (runtime handle) ---
