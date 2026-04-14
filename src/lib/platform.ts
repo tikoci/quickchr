@@ -380,8 +380,8 @@ export function detectPhysicalInterfaces(): HostInterface[] {
 
 		if (!portMatch || !deviceMatch) continue;
 
-		const name = portMatch[1].trim();
-		const device = deviceMatch[1].trim();
+		const name = (portMatch[1] ?? "").trim();
+		const device = (deviceMatch[1] ?? "").trim();
 		const mac = macMatch?.[1]?.trim();
 
 		const nameLower = name.toLowerCase();

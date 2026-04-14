@@ -56,8 +56,8 @@ export function loadMachine(name: string): MachineState | undefined {
 	const data = readFileSync(path, "utf-8");
 	const state = JSON.parse(data) as MachineState;
 	// Migrate legacy `network` field → `networks` array
-	if (!state.networks && (state as Record<string, unknown>).network) {
-		const legacy = (state as Record<string, unknown>).network as MachineState["networks"][0]["specifier"] | "user" | "vmnet-shared" | { type: "vmnet-bridge"; iface: string };
+	if (!state.networks && (state as unknown as Record<string, unknown>).network) {
+		const legacy = (state as unknown as Record<string, unknown>).network as MachineState["networks"][0]["specifier"] | "user" | "vmnet-shared" | { type: "vmnet-bridge"; iface: string };
 		state.networks = networkModeToConfigs(legacy as Parameters<typeof networkModeToConfigs>[0]);
 	} else if (!state.networks) {
 		state.networks = [{ specifier: "user", id: "net0" }];
