@@ -315,6 +315,13 @@ export function resolveStartNetworks(
 	return [{ specifier: "user", id: "net0" }];
 }
 
+/** Returns true when at least one network uses QEMU user-mode (hostfwd) networking.
+ *  Only user-mode networks forward localhost ports — shared/bridged/tap/socket networks
+ *  assign a DHCP address that is not reachable from host localhost. */
+export function hasUserModeNetwork(networks: NetworkConfig[]): boolean {
+	return networks.some((n) => n.specifier === "user");
+}
+
 // ── Platform-aware network resolution ───────────────────────────────
 
 export interface ResolutionContext {

@@ -19,7 +19,7 @@ import type {
 import { QuickCHRError, ARCHES } from "./types.ts";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg, qgaKvmWarning, detectSocketVmnet } from "./platform.ts";
 import { resolveVersion, isValidVersion, generateMachineName } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString, hasUserModeNetwork } from "./network.ts";
 import {
 	getUsedPortBases,
 	saveMachine,
@@ -758,6 +758,16 @@ export class QuickCHR {
 			hasDeviceModeProvisioning ||
 			opts.secureLogin !== false
 		);
+
+		const networkConfigs = resolveStartNetworks(opts.networks, opts.network);
+		if (hasProvisioning && !hasUserModeNetwork(networkConfigs)) {
+			throw new QuickCHRError(
+				"NETWORK_UNAVAILABLE",
+				"Provisioning (packages, login setup, device-mode, license) requires a user-mode network interface for localhost access. " +
+				"Add a user-mode network or remove provisioning options.",
+			);
+		}
+
 		const spawnInBackground = background || (!background && hasProvisioning);
 		const state: MachineState = {
 			name,
@@ -765,7 +775,7 @@ export class QuickCHR {
 			arch,
 			cpu: opts.cpu ?? 1,
 			mem: defaultMem(arch, opts.mem),
-			networks: resolveStartNetworks(opts.networks, opts.network),
+			networks: networkConfigs,
 			ports,
 			packages: opts.packages ?? [],
 			deviceMode: requestedDeviceMode,
@@ -824,8 +834,11 @@ export class QuickCHR {
 		if (hasProvisioning) {
 			const booted = await instance.waitForBoot(bootTimeout);
 			if (!booted) {
-				console.warn(`[quickchr] Warning: CHR did not respond within ${bootTimeout / 1000}s — skipping provisioning. Run 'quickchr status ${name}' to check once it's up.`);
-				return instance;
+				throw new QuickCHRError(
+					"BOOT_TIMEOUT",
+					`CHR did not respond within ${bootTimeout / 1000}s — provisioning skipped. ` +
+					`Machine "${name}" is running but unconfigured. Remove it with: quickchr rm ${name}`,
+				);
 			}
 			await QuickCHR._provisionInstance(instance, state, {
 				installAllPackages: opts.installAllPackages,
@@ -1133,8 +1146,11 @@ export class QuickCHR {
 			const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts.installAllPackages);
 			const booted = await instance.waitForBoot(bootTimeout);
 			if (!booted) {
-				console.warn(`[quickchr] Warning: CHR did not respond within ${bootTimeout / 1000}s — skipping provisioning. Run 'quickchr status ${state.name}' to check once it's up.`);
-				return instance;
+				throw new QuickCHRError(
+					"BOOT_TIMEOUT",
+					`CHR did not respond within ${bootTimeout / 1000}s — provisioning skipped. ` +
+					`Machine "${state.name}" is running but unconfigured. Remove it with: quickchr rm ${state.name}`,
+				);
 			}
 			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig);
 		}
@@ -1180,8 +1196,8 @@ export class QuickCHR {
 		for (const arch of ARCHES) {
 			const qemuName = arch === "arm64" ? "qemu-system-aarch64" : "qemu-system-x86_64";
 			try {
-				requireQemu(arch);
-				const ver = getQemuVersion(arch);
+				const qemuBin = requireQemu(arch);
+				const ver = getQemuVersion(qemuBin);
 				checks.push({
 					label: qemuName,
 					status: "ok",
@@ -1286,22 +1302,6 @@ export class QuickCHR {
 			});
 		}
 
-		// sshpass (needed for package upload to RouterOS — empty-password auth)
-		const sshpassResult = Bun.spawnSync(["which", "sshpass"], { stdout: "pipe", stderr: "pipe" });
-		if (sshpassResult.exitCode === 0) {
-			checks.push({
-				label: "sshpass",
-				status: "ok",
-				detail: new TextDecoder().decode(sshpassResult.stdout).trim(),
-			});
-		} else {
-			checks.push({
-				label: "sshpass",
-				status: "warn",
-				detail: "not found — required for extra package upload (brew install sshpass / apt install sshpass)",
-			});
-		}
-
 		// qemu-img (optional, for disk resize and extra disks)
 		const qemuImgPath = findQemuImg();
 		if (qemuImgPath) {
@@ -1353,10 +1353,11 @@ export class QuickCHR {
 				}
 			}
 			if (orphans.length > 0) {
+				const removeLines = orphans.map((o) => `  rm -rf ${join(machinesDir, o)}`).join("\n");
 				checks.push({
 					label: "Orphaned machine dirs",
 					status: "warn",
-					detail: `${orphans.length} dir(s) without machine.json: ${orphans.join(", ")}. Remove manually: rm -rf ${machinesDir}/<name>`,
+					detail: `${orphans.length} dir(s) without machine.json: ${orphans.join(", ")}\nRemove manually:\n${removeLines}`,
 				});
 			} else {
 				checks.push({

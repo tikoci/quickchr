@@ -300,7 +300,7 @@ export async function spawnQemu(
 
 	let spawnCmd: string[];
 	if (wrapper) {
-		console.log(`[quickchr] Using socket_vmnet wrapper: ${wrapper.command} ${wrapper.args.join(" ")}`);
+		process.stderr.write(`[quickchr] Using socket_vmnet wrapper: ${wrapper.command} ${wrapper.args.join(" ")}\n`);
 		spawnCmd = [wrapper.command, ...wrapper.args, bin, ...args];
 	} else {
 		spawnCmd = [bin, ...args];

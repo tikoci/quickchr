@@ -530,16 +530,25 @@ export async function runWizard(): Promise<void> {
 		const instance = await QuickCHR.start(opts);
 		spinner.stop(`${bold(instance.name)} started`);
 
-		clack.note(
-			[
-				`Version: ${instance.state.version} (${instance.state.arch})`,
+		const { hasUserModeNetwork } = await import("../lib/network.ts");
+		const userMode = hasUserModeNetwork(instance.state.networks);
+
+		const details = [
+			`Version: ${instance.state.version} (${instance.state.arch})`,
+		];
+		if (userMode) {
+			details.push(
 				`Ports:   ${formatPorts(instance.state.ports)}`,
 				`REST:    ${instance.restUrl}`,
 				`SSH:     ssh admin@127.0.0.1 -p ${instance.sshPort}`,
 				`WinBox:  127.0.0.1:${instance.ports.winbox}`,
-			].join("\n"),
-			"Instance details",
-		);
+			);
+		} else {
+			details.push("Network: shared/bridged — VM has a DHCP address (no localhost port forwarding)");
+			details.push("Tip:     Check IP via RouterOS console: /ip/dhcp-client/print");
+		}
+
+		clack.note(details.join("\n"), "Instance details");
 
 		clack.outro("Done!");
 	} catch (e: unknown) {
