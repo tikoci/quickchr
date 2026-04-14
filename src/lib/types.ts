@@ -107,6 +107,28 @@ export const DEFAULT_PORT_BASE = 9100;
 
 export type BootDiskFormat = "raw" | "qcow2";
 
+/** Information about a single QEMU snapshot stored in a qcow2 disk image.
+ *
+ *  Populated by parsing QEMU monitor `info snapshots` output or
+ *  `qemu-img info --output=json`.  The `vmStateSize` field gives a rough
+ *  indication of how much guest state has changed — larger values typically
+ *  mean more RAM pages were dirty at snapshot time. */
+export interface SnapshotInfo {
+	/** Numeric snapshot ID (assigned by QEMU, monotonically increasing). */
+	id: string;
+	/** Human-readable tag / name (the string passed to `savevm`). */
+	name: string;
+	/** Size of the saved VM state in bytes.  Gives a rough sense of how "heavy"
+	 *  the snapshot is — proportional to the amount of dirty guest RAM at save time. */
+	vmStateSize: number;
+	/** When the snapshot was created (ISO 8601 string). */
+	date: string;
+	/** Guest VM clock at snapshot time, formatted as `HH:MM:SS.mmm`. */
+	vmClock: string;
+	/** Instruction count at snapshot time, or `undefined` if QEMU reported `--`. */
+	icount?: number;
+}
+
 // --- Machine State ---
 
 export interface MachineConfig {
@@ -277,6 +299,40 @@ export interface ChrInstance {
 	/** Sample QEMU guest load from the monitor. Returns null when the monitor is
 	 *  unavailable (machine stopped or running in foreground mode). */
 	queryLoad(): Promise<ChrLoadSample | null>;
+
+	/** Snapshot operations on this instance's boot disk.
+	 *
+	 *  Requires a qcow2 boot disk (`bootDiskFormat: "qcow2"` in StartOptions).
+	 *  Raw disks do not support snapshots — methods throw `STATE_ERROR` if called
+	 *  on a raw-disk instance.
+	 *
+	 *  **For running machines**, `save`/`load`/`delete` use the QEMU monitor
+	 *  (`savevm`/`loadvm`/`delvm`).  `list` uses the monitor for live state.
+	 *
+	 *  **For stopped machines**, only `list` works (reads qcow2 metadata directly
+	 *  via `qemu-img info`).  Other operations require the machine to be running.
+	 *
+	 *  @example
+	 *  const snaps = await instance.snapshot.list();
+	 *  await instance.snapshot.save("before-upgrade");
+	 *  // ... do something risky ...
+	 *  await instance.snapshot.load("before-upgrade");
+	 */
+	snapshot: {
+		/** List all snapshots on this instance's boot disk.
+		 *  Works on both running and stopped machines. */
+		list(): Promise<SnapshotInfo[]>;
+		/** Save a snapshot of the current VM state.  Requires the machine to be running.
+		 *  @param name - Snapshot tag name (e.g. "before-upgrade"). Auto-generated if omitted. */
+		save(name?: string): Promise<SnapshotInfo>;
+		/** Load (restore) a previously saved snapshot.  Requires the machine to be running.
+		 *  The VM state is replaced; existing runtime state is lost.
+		 *  @param name - Snapshot tag name to restore. */
+		load(name: string): Promise<void>;
+		/** Delete a snapshot.  Requires the machine to be running.
+		 *  @param name - Snapshot tag name to delete. */
+		delete(name: string): Promise<void>;
+	};
 }
 
 // --- Platform ---

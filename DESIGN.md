@@ -26,7 +26,7 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
 3. **No shell scripts** — QEMU args built entirely in TypeScript. Enables Windows support and testability.
 
-4. **No qcow2** — Uses raw `.img` directly (MikroTik provides them). Simpler, no `qemu-img` dependency.
+4. **Optional qcow2** — Default boot disk uses raw `.img` (MikroTik provides them). Users can opt into `qcow2` format for boot resize and QEMU snapshot/restore support. Requires `qemu-img` when enabled.
 
 5. **ARM64 VirtIO rule** — Never use `if=virtio` on aarch64 `virt` machine. Always explicit `-device virtio-blk-pci,drive=drive0`.
 

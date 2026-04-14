@@ -1,14 +1,20 @@
 /**
- * Disk management — qemu-img wrapper for boot disk resizing and extra disk creation.
+ * Disk management — qemu-img wrapper for boot disk resizing, extra disk creation,
+ * and qcow2 snapshot operations.
  *
- * All extra disks are qcow2.  Boot disk stays raw unless resized, at which point
- * it is converted to qcow2.  This module deliberately uses qcow2 to anticipate
- * future snapshot/restore support without implementing it now.
+ * All extra disks are qcow2.  Boot disk stays raw unless the user selects qcow2
+ * format (or requests resize, which implies qcow2).  qcow2 enables QEMU
+ * snapshot/restore via `savevm`/`loadvm` monitor commands.
+ *
+ * Snapshot operations:
+ *  - {@link parseSnapshotList} — parse QEMU monitor `info snapshots` text into {@link SnapshotInfo}[]
+ *  - {@link listSnapshots} — get structured snapshot data from a qcow2 image via `qemu-img info`
+ *  - {@link formatSnapshotTable} — render snapshot list as a human-readable ANSI table
  */
 
 import { join } from "node:path";
 import { existsSync, unlinkSync } from "node:fs";
-import type { BootDiskFormat } from "./types.ts";
+import type { BootDiskFormat, SnapshotInfo } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { requireQemuImg } from "./platform.ts";
 
@@ -230,4 +236,165 @@ export function cleanDiskFiles(machineDir: string): void {
 		if (!existsSync(diskPath)) break;
 		try { unlinkSync(diskPath); } catch { /* ignore */ }
 	}
+}
+
+// --- Snapshot operations ---
+
+/**
+ * Parse QEMU monitor `info snapshots` text output into structured data.
+ *
+ * The monitor returns lines like:
+ * ```
+ * ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT
+ * --        test              113 MiB 2026-04-14 00:47:19  0000:01:17.163         --
+ * ```
+ *
+ * @param monitorOutput - Raw text from `instance.monitor("info snapshots")`
+ * @returns Parsed snapshot list (empty array if no snapshots exist)
+ */
+export function parseSnapshotList(monitorOutput: string): SnapshotInfo[] {
+	const lines = monitorOutput.split("\n");
+	const snapshots: SnapshotInfo[] = [];
+
+	for (const line of lines) {
+		// Match snapshot data lines: ID, TAG, VM SIZE, DATE (YYYY-MM-DD HH:MM:SS), VM CLOCK, ICOUNT
+		// Example: "--      test              113 MiB 2026-04-14 00:47:19  0000:01:17.163         --"
+		// Example: "1       snap1             113 MiB 2026-04-14 00:47:19  0000:01:17.163         --"
+		const match = line.match(
+			/^\s*(\S+)\s+(\S+)\s+(\d+(?:\.\d+)?\s*(?:[KMGT]i?B|bytes?))\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\d{4}:\d{2}:\d{2}\.\d+)\s+(\S+)/i,
+		);
+		if (!match) continue;
+
+		const [, id, name, vmSizeStr, dateStr, vmClock, icountStr] = match;
+		if (!id || !name || !vmSizeStr || !dateStr || !vmClock) continue;
+
+		snapshots.push({
+			id: id === "--" ? "0" : id,
+			name: name,
+			vmStateSize: parseVmSize(vmSizeStr),
+			date: dateStr.replace(" ", "T") + "Z",
+			vmClock: vmClock,
+			icount: icountStr === "--" ? undefined : Number(icountStr),
+		});
+	}
+
+	return snapshots;
+}
+
+/** Parse a human-readable VM size string ("113 MiB", "2.1 GiB") to bytes. */
+function parseVmSize(sizeStr: string): number {
+	const match = sizeStr.match(/^([\d.]+)\s*([KMGT]i?B|bytes?)?$/i);
+	if (!match) return 0;
+	const value = Number.parseFloat(match[1] ?? "0");
+	const unit = (match[2] ?? "").toLowerCase();
+	const multipliers: Record<string, number> = {
+		"": 1, "b": 1, "byte": 1, "bytes": 1,
+		"kib": 1024, "kb": 1000,
+		"mib": 1024 * 1024, "mb": 1000 * 1000,
+		"gib": 1024 ** 3, "gb": 1000 ** 3,
+		"tib": 1024 ** 4, "tb": 1000 ** 4,
+	};
+	return Math.round(value * (multipliers[unit] ?? 1));
+}
+
+/**
+ * List snapshots stored in a qcow2 disk image using `qemu-img info`.
+ *
+ * Works on both running and stopped machines (reads the qcow2 metadata directly).
+ * Returns an empty array for raw disks or images with no snapshots.
+ *
+ * @param diskPath - Path to the qcow2 disk image file
+ * @returns Structured snapshot list with size information
+ */
+export async function listSnapshots(diskPath: string): Promise<SnapshotInfo[]> {
+	const qemuImg = requireQemuImg();
+	const proc = Bun.spawn([qemuImg, "info", "--output=json", "-U", diskPath], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const exitCode = await proc.exited;
+	if (exitCode !== 0) {
+		return [];
+	}
+	const stdout = await new Response(proc.stdout).text();
+	try {
+		const info = JSON.parse(stdout) as {
+			snapshots?: Array<{
+				id: string;
+				name: string;
+				"vm-state-size": number;
+				"date-sec": number;
+				"date-nsec": number;
+				"vm-clock-sec": number;
+				"vm-clock-nsec": number;
+				"icount"?: number;
+			}>;
+		};
+		if (!info.snapshots || info.snapshots.length === 0) return [];
+
+		return info.snapshots.map((s) => {
+			const date = new Date(s["date-sec"] * 1000);
+			const clockSec = s["vm-clock-sec"];
+			const hours = Math.floor(clockSec / 3600);
+			const mins = Math.floor((clockSec % 3600) / 60);
+			const secs = clockSec % 60;
+			const ms = Math.floor(s["vm-clock-nsec"] / 1_000_000);
+
+			return {
+				id: s.id,
+				name: s.name,
+				vmStateSize: s["vm-state-size"],
+				date: date.toISOString(),
+				vmClock: `${String(hours).padStart(4, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}.${String(ms).padStart(3, "0")}`,
+				icount: s.icount,
+			};
+		});
+	} catch {
+		return [];
+	}
+}
+
+/** Format bytes as a compact human-readable size (e.g. "113 MiB", "2.1 GiB"). */
+export function formatDiskSize(bytes: number): string {
+	if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+	if (bytes >= 1024 ** 2) return `${(bytes / (1024 * 1024)).toFixed(0)} MiB`;
+	if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KiB`;
+	return `${bytes} B`;
+}
+
+/**
+ * Format a snapshot list as a human-readable table string.
+ *
+ * Produces a compact table suitable for terminal display:
+ * ```
+ *   #  NAME           SIZE      DATE                 VM CLOCK
+ *   1  baseline       113 MiB   2026-04-14 00:47     0001:17:00
+ *   2  after-config   118 MiB   2026-04-14 01:02     0001:32:15
+ * ```
+ *
+ * @param snapshots - Parsed snapshot list from {@link parseSnapshotList} or {@link listSnapshots}
+ * @returns Formatted table string (no trailing newline), or "No snapshots." if empty
+ */
+export function formatSnapshotTable(snapshots: SnapshotInfo[]): string {
+	if (snapshots.length === 0) return "No snapshots.";
+
+	const headers = ["#", "NAME", "SIZE", "DATE", "VM CLOCK"];
+	const rows = snapshots.map((s) => [
+		s.id,
+		s.name,
+		formatDiskSize(s.vmStateSize),
+		s.date.replace("T", " ").replace(/:\d{2}(?:\.\d+)?Z$/, "").replace("Z", ""),
+		s.vmClock,
+	]);
+
+	const widths = headers.map((h, i) =>
+		Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)),
+	);
+
+	const headerLine = headers.map((h, i) => h.padEnd(widths[i] ?? 0)).join("  ");
+	const dataLines = rows.map((row) =>
+		row.map((cell, i) => cell.padEnd(widths[i] ?? 0)).join("  "),
+	);
+
+	return [headerLine, ...dataLines].join("\n");
 }

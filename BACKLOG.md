@@ -470,8 +470,14 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 - [x] QEMU snapshot/restore via monitor `savevm`/`loadvm` validated via integration test (`test/integration/disk.test.ts`) by restoring RouterOS identity after mutation
 - [x] Setup wizard (`setup` → Manage) exposes snapshot operations (`savevm`/`loadvm`/`delvm`/list) and disk layout context for safer operator workflows
+- [x] Structured `SnapshotInfo` type and parsing — `parseSnapshotList()` (QEMU monitor text), `listSnapshots()` (`qemu-img info --output=json`), `formatSnapshotTable()` for aligned display. Exported from `@tikoci/quickchr`.
+- [x] `ChrInstance.snapshot` convenience API — `.list()`, `.save(name?)`, `.load(name)`, `.delete(name)` with proper error handling, qcow2 guard, and auto-generated ISO date names.
+- [x] `quickchr snapshot <name> [list|save|load|delete]` CLI command with `--json` output for automation/agents. Alias: `snap`.
+- [x] Wizard snapshot UX overhaul — `clack.select()` for load/delete (no more typing names), formatted table for list, save defaults to ISO date, size info in hints, 16-item cap with CLI fallback guidance.
+- [x] qcow2 guard in wizard — snapshot menu only appears for qcow2 boot disks. Raw-disk machines see `⚠ no snapshots (raw disk)` note. Stopped machines get list-only access with hint.
 - [ ] Keep config-script import out of current snapshot scope. For now, snapshots are infrastructure-level checkpoints; callers can apply config using existing mechanisms (`exec`, provisioning, external automation).
 - [ ] Consider saving RouterOS `:export` alongside VM snapshot for a richer "checkpoint" concept (follow-up only; not tied to loading/importing scripts)
+- [ ] Snapshot search in wizard — `@clack/prompts` search for machines/snapshots when lists grow large (>16 items). Not urgent for typical use, but would help heavy users.
 
 ### QGA (Guest Agent)
 

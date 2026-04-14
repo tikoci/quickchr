@@ -7,6 +7,9 @@ import {
 	prepareExtraDisks,
 	cleanDiskFiles,
 	getDiskInfo,
+	parseSnapshotList,
+	formatSnapshotTable,
+	formatDiskSize,
 } from "../../src/lib/disk.ts";
 import { findQemuImg } from "../../src/lib/platform.ts";
 
@@ -162,5 +165,67 @@ describe("getDiskInfo", () => {
 		expect(info.virtualSize).toBe(128 * 1024 * 1024);
 		expect(info.actualSize).toBeGreaterThan(0);
 		expect(info.filename).toContain("disk1.qcow2");
+	});
+});
+
+describe("parseSnapshotList", () => {
+	test("parses typical QEMU monitor output", () => {
+		const output = [
+			"ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT",
+			"--        test              113 MiB 2026-04-14 00:47:19  0000:01:17.163         --",
+			"1         before-upgrade    118 MiB 2026-04-14 01:02:33  0001:32:15.421         --",
+		].join("\n");
+		const snaps = parseSnapshotList(output);
+		expect(snaps).toHaveLength(2);
+		expect(snaps[0]?.name).toBe("test");
+		expect(snaps[0]?.id).toBe("0"); // "--" maps to "0"
+		expect(snaps[0]?.vmStateSize).toBe(113 * 1024 * 1024);
+		expect(snaps[0]?.date).toBe("2026-04-14T00:47:19Z");
+		expect(snaps[0]?.vmClock).toBe("0000:01:17.163");
+		expect(snaps[0]?.icount).toBeUndefined();
+		expect(snaps[1]?.name).toBe("before-upgrade");
+		expect(snaps[1]?.id).toBe("1");
+	});
+
+	test("returns empty for no snapshots", () => {
+		expect(parseSnapshotList("There is no snapshot available.")).toHaveLength(0);
+		expect(parseSnapshotList("")).toHaveLength(0);
+	});
+
+	test("handles GiB sizes", () => {
+		const output = "--        bigsnap           2.1 GiB 2026-04-14 02:00:00  0010:00:00.000         --";
+		const snaps = parseSnapshotList(output);
+		expect(snaps).toHaveLength(1);
+		expect(snaps[0]?.vmStateSize).toBeGreaterThan(2 * 1024 ** 3);
+	});
+});
+
+describe("formatDiskSize", () => {
+	test("formats bytes to human readable", () => {
+		expect(formatDiskSize(500)).toBe("500 B");
+		expect(formatDiskSize(1024)).toBe("1 KiB");
+		expect(formatDiskSize(113 * 1024 * 1024)).toBe("113 MiB");
+		expect(formatDiskSize(2.5 * 1024 ** 3)).toBe("2.5 GiB");
+	});
+});
+
+describe("formatSnapshotTable", () => {
+	test("formats snapshots as aligned table", () => {
+		const snaps = [
+			{ id: "1", name: "baseline", vmStateSize: 113 * 1024 * 1024, date: "2026-04-14T00:47:19.000Z", vmClock: "0001:17:00.000" },
+			{ id: "2", name: "after-config", vmStateSize: 118 * 1024 * 1024, date: "2026-04-14T01:02:33.000Z", vmClock: "0001:32:15.000" },
+		];
+		const table = formatSnapshotTable(snaps);
+		expect(table).toContain("#");
+		expect(table).toContain("NAME");
+		expect(table).toContain("baseline");
+		expect(table).toContain("after-config");
+		expect(table).toContain("113 MiB");
+		const lines = table.split("\n");
+		expect(lines).toHaveLength(3); // header + 2 data rows
+	});
+
+	test("returns message for empty list", () => {
+		expect(formatSnapshotTable([])).toBe("No snapshots.");
 	});
 });

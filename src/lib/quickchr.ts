@@ -14,6 +14,7 @@ import type {
 	LicenseInput,
 	MachineState,
 	QgaCommand,
+	SnapshotInfo,
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
@@ -36,7 +37,7 @@ import {
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
-import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions } from "./disk.ts";
+import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
@@ -431,6 +432,84 @@ function createInstance(state: MachineState): ChrInstance {
 			} catch {
 				return null;
 			}
+		},
+
+		snapshot: {
+			async list(): Promise<SnapshotInfo[]> {
+				const format = state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+				if (format !== "qcow2") return [];
+
+				// Try monitor first (works on running machines, gives live state)
+				if (state.status === "running") {
+					try {
+						const out = await monitorCommand(state.machineDir, "info snapshots");
+						return parseSnapshotList(out);
+					} catch { /* fall through to qemu-img */ }
+				}
+
+				// Fall back to qemu-img info (works on stopped machines too)
+				const bootPath = join(state.machineDir, "boot.qcow2");
+				if (existsSync(bootPath)) {
+					return listSnapshots(bootPath);
+				}
+				return [];
+			},
+
+			async save(name?: string): Promise<SnapshotInfo> {
+				const format = state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+				if (format !== "qcow2") {
+					throw new QuickCHRError("STATE_ERROR", "Snapshots require a qcow2 boot disk. Recreate with bootDiskFormat: \"qcow2\".");
+				}
+				if (state.status !== "running") {
+					throw new QuickCHRError("MACHINE_STOPPED", `Machine "${state.name}" must be running to save a snapshot.`);
+				}
+
+				const snapName = name ?? new Date().toISOString().replace(/:/g, "-").replace(/\..+$/, "Z");
+				const out = await monitorCommand(state.machineDir, `savevm ${snapName}`);
+				if (/^error[:\s]/i.test(out)) {
+					throw new QuickCHRError("PROCESS_FAILED", `savevm failed: ${out.trim()}`);
+				}
+
+				// Read back the snapshot list to return the new entry
+				const snaps = await this.list();
+				return snaps.find((s) => s.name === snapName) ?? {
+					id: "0",
+					name: snapName,
+					vmStateSize: 0,
+					date: new Date().toISOString(),
+					vmClock: "0000:00:00.000",
+				};
+			},
+
+			async load(name: string): Promise<void> {
+				const format = state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+				if (format !== "qcow2") {
+					throw new QuickCHRError("STATE_ERROR", "Snapshots require a qcow2 boot disk.");
+				}
+				if (state.status !== "running") {
+					throw new QuickCHRError("MACHINE_STOPPED", `Machine "${state.name}" must be running to load a snapshot.`);
+				}
+
+				const out = await monitorCommand(state.machineDir, `loadvm ${name}`);
+				if (/^error[:\s]/i.test(out)) {
+					throw new QuickCHRError("PROCESS_FAILED", `loadvm failed: ${out.trim()}`);
+				}
+			},
+
+			async delete(name: string): Promise<void> {
+				const format = state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+				if (format !== "qcow2") {
+					throw new QuickCHRError("STATE_ERROR", "Snapshots require a qcow2 boot disk.");
+				}
+				if (state.status !== "running") {
+					throw new QuickCHRError("MACHINE_STOPPED", `Machine "${state.name}" must be running to delete a snapshot.`);
+				}
+
+				const out = await monitorCommand(state.machineDir, `delvm ${name}`);
+				if (/^error[:\s]/i.test(out)) {
+					throw new QuickCHRError("PROCESS_FAILED", `delvm failed: ${out.trim()}`);
+				}
+			},
 		},
 	};
 }

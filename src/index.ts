@@ -41,6 +41,7 @@ export type {
 	QgaOsInfo,
 	QgaTimezone,
 	ServiceName,
+	SnapshotInfo,
 	StartOptions,
 } from "./lib/types.ts";
 
@@ -51,7 +52,7 @@ export type { ErrorCode, HostInterface } from "./lib/types.ts";
 export { detectPhysicalInterfaces, resolveInterfaceAlias } from "./lib/platform.ts";
 
 // Disk utilities
-export { getDiskInfo, createQcow2Disk } from "./lib/disk.ts";
+export { getDiskInfo, createQcow2Disk, listSnapshots, parseSnapshotList, formatSnapshotTable, formatDiskSize } from "./lib/disk.ts";
 export type { DiskInfo } from "./lib/disk.ts";
 
 // Auth utilities
