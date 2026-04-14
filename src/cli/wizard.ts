@@ -336,11 +336,25 @@ export async function runWizard(): Promise<void> {
 
 	// 9. Networks — build up NetworkSpecifier[] interactively
 	const networks: NetworkSpecifier[] = [];
-	const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
-	const { parseNetworkSpecifier } = await import("../lib/network.ts");
+	const { detectPlatform, detectPhysicalInterfaces, isSocketVmnetDaemonRunning } = await import("../lib/platform.ts");
+	const { parseNetworkSpecifier, hasUserModeNetwork } = await import("../lib/network.ts");
 	const platform = await detectPlatform();
 	const isMacOS = platform.os === "darwin";
 	const hasSocketVmnet = !!platform.socketVmnet;
+	const socketVmnetRunning = hasSocketVmnet && !!platform.socketVmnet?.sharedSocket
+		? isSocketVmnetDaemonRunning(platform.socketVmnet.sharedSocket)
+		: false;
+
+	// Determine if any provisioning steps were requested (requires user-mode network)
+	const hasProvisioningNeeds = !!(
+		installAllPackages ||
+		packages.length > 0 ||
+		deviceMode ||
+		secureLogin !== false ||
+		user ||
+		disableAdmin ||
+		license
+	);
 
 	const wantNetwork = await clack.confirm({
 		message: "Configure networking? (default is user-mode with port forwarding)",
@@ -355,7 +369,11 @@ export async function runWizard(): Promise<void> {
 				{ value: "user", label: "user", hint: "port forwarding (default)" },
 			];
 			if (isMacOS && hasSocketVmnet) {
-				netOptions.push({ value: "shared", label: "shared", hint: "rootless shared network via socket_vmnet" });
+				if (socketVmnetRunning) {
+					netOptions.push({ value: "shared", label: "shared", hint: "rootless shared network via socket_vmnet" });
+				} else {
+					netOptions.push({ value: "shared", label: "shared", hint: "socket_vmnet installed but daemon not running — sudo brew services start socket_vmnet" });
+				}
 			}
 			if (isMacOS) {
 				netOptions.push({ value: "bridged", label: "bridged", hint: "bridge to a physical interface" });
@@ -378,6 +396,12 @@ export async function runWizard(): Promise<void> {
 				if (networks.includes("shared")) {
 					clack.log.warn("Only one shared network is supported.");
 					continue;
+				}
+				if (!socketVmnetRunning) {
+					clack.log.warn("socket_vmnet daemon is not running. This network will fail at start. Start it first: sudo brew services start socket_vmnet");
+				}
+				if (hasProvisioningNeeds) {
+					clack.log.warn("Shared networking does not forward localhost ports — provisioning (packages, login, device-mode) requires a user-mode interface too. Add 'user' as well.");
 				}
 				networks.push("shared");
 			} else if (netType === "bridged") {
@@ -417,6 +441,29 @@ export async function runWizard(): Promise<void> {
 			});
 			if (clack.isCancel(another)) { clack.cancel("Cancelled."); process.exit(0); }
 			addMore = another;
+		}
+
+		// After network loop: if provisioning was requested but no user-mode interface is
+		// present, provisioning will fail at start-time. Offer to add one now so the user
+		// doesn't reach the hard error.
+		if (hasProvisioningNeeds && !hasUserModeNetwork(
+			networks.map((specifier, i) => ({ specifier, id: `net${i}` })),
+		)) {
+			clack.log.warn(
+				"Provisioning (packages, login setup, device-mode, license) requires a user-mode " +
+				"interface for localhost port access. The current network selection has none.",
+			);
+			const addUser = await clack.confirm({
+				message: "Add a user-mode interface (port forwarding) alongside the current networks?",
+				initialValue: true,
+			});
+			if (clack.isCancel(addUser)) { clack.cancel("Cancelled."); process.exit(0); }
+			if (addUser) {
+				networks.unshift("user");
+				clack.log.success("Added user-mode interface as net0.");
+			} else {
+				clack.log.warn("Provisioning options will be ignored — starting with current networks only.");
+			}
 		}
 	}
 
@@ -552,7 +599,7 @@ export async function runWizard(): Promise<void> {
 
 		clack.outro("Done!");
 	} catch (e: unknown) {
-		spinner.stop("Failed");
+		spinner.stop("Failed", 1);
 		if (e instanceof Error) {
 			clack.log.error(e.message);
 		}

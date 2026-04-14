@@ -17,7 +17,7 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg, qgaKvmWarning, detectSocketVmnet } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning } from "./platform.ts";
 import { resolveVersion, isValidVersion, generateMachineName } from "./versions.ts";
 import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString, hasUserModeNetwork } from "./network.ts";
 import {
@@ -1322,15 +1322,32 @@ export class QuickCHR {
 		if (process.platform === "darwin") {
 			const vmnet = detectSocketVmnet();
 			if (vmnet) {
+				const sharedRunning = vmnet.sharedSocket
+					? isSocketVmnetDaemonRunning(vmnet.sharedSocket)
+					: false;
 				const parts = [vmnet.client];
 				if (vmnet.sharedSocket) parts.push(`shared: ${vmnet.sharedSocket}`);
 				const bridgedIfaces = Object.keys(vmnet.bridgedSockets);
 				if (bridgedIfaces.length > 0) parts.push(`bridged: ${bridgedIfaces.join(", ")}`);
-				checks.push({
-					label: "socket_vmnet",
-					status: vmnet.sharedSocket ? "ok" : "warn",
-					detail: parts.join(" — "),
-				});
+				if (sharedRunning) {
+					checks.push({
+						label: "socket_vmnet",
+						status: "ok",
+						detail: parts.join(" — "),
+					});
+				} else if (vmnet.sharedSocket) {
+					checks.push({
+						label: "socket_vmnet",
+						status: "warn",
+						detail: `${vmnet.client} — installed but daemon not running. Start: sudo brew services start socket_vmnet`,
+					});
+				} else {
+					checks.push({
+						label: "socket_vmnet",
+						status: "warn",
+						detail: `${vmnet.client} — client found but no socket (daemon not started). Start: sudo brew services start socket_vmnet`,
+					});
+				}
 			} else {
 				checks.push({
 					label: "socket_vmnet",

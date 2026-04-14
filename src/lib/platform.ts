@@ -225,7 +225,10 @@ function isSocket(path: string): boolean {
 
 /** Check if a socket_vmnet daemon socket is accessible (file exists and is a socket). */
 export function isSocketVmnetDaemonRunning(socketPath: string): boolean {
-	return existsSync(socketPath) && isSocket(socketPath);
+	if (!existsSync(socketPath) || !isSocket(socketPath)) return false;
+	// Socket file persists on disk after the daemon stops. Verify the process is alive.
+	const result = Bun.spawnSync(["pgrep", "socket_vmnet"], { stdout: "pipe", stderr: "pipe" });
+	return result.exitCode === 0;
 }
 
 /** Detect socket_vmnet installation and running daemons (macOS only). */
