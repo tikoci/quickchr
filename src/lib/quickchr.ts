@@ -190,7 +190,12 @@ function createInstance(state: MachineState): ChrInstance {
 			cleanDiskFiles(state.machineDir);
 
 			// Re-prepare disks if the machine had disk customizations
-			await ensureConfiguredDisks(state.machineDir, state.bootSize, state.extraDisks);
+			await ensureConfiguredDisks(
+				state.machineDir,
+				state.bootSize,
+				state.extraDisks,
+				state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
+			);
 
 			// Remove EFI vars to force re-creation
 			const efiVars = join(state.machineDir, "efi-vars.fd");
@@ -551,7 +556,7 @@ export class QuickCHR {
 		const arch: Arch = opts.arch ?? hostArchToChr();
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
-		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks);
+		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -570,7 +575,12 @@ export class QuickCHR {
 		try {
 			const cachedImg = await ensureCachedImage(version, arch);
 			copyImageToMachine(cachedImg, machineDir);
-			const diskArtifacts = await ensureConfiguredDisks(machineDir, diskOpts.bootSize, diskOpts.extraDisks);
+			const diskArtifacts = await ensureConfiguredDisks(
+				machineDir,
+				diskOpts.bootSize,
+				diskOpts.extraDisks,
+				diskOpts.bootDiskFormat,
+			);
 
 			const state: MachineState = {
 				name,
@@ -640,7 +650,7 @@ export class QuickCHR {
 
 		// Resolve architecture
 		const arch: Arch = opts.arch ?? hostArchToChr();
-		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks);
+		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 
 		// Check prerequisites
 		requireQemu(arch);
@@ -721,7 +731,7 @@ export class QuickCHR {
 				extraPorts: opts.extraPorts ?? [],
 				bootSize: diskOpts.bootSize,
 				extraDisks: diskOpts.extraDisks,
-				bootDiskFormat: diskOpts.bootSize ? "qcow2" : "raw",
+				bootDiskFormat: diskOpts.bootDiskFormat,
 				createdAt: new Date().toISOString(),
 				status: "stopped",
 				machineDir,
@@ -741,7 +751,12 @@ export class QuickCHR {
 		copyImageToMachine(cachedImg, machineDir);
 
 		// Prepare disks (boot resize + extra disks)
-		const diskArtifacts = await ensureConfiguredDisks(machineDir, diskOpts.bootSize, diskOpts.extraDisks);
+		const diskArtifacts = await ensureConfiguredDisks(
+			machineDir,
+			diskOpts.bootSize,
+			diskOpts.extraDisks,
+			diskOpts.bootDiskFormat,
+		);
 		const bootDisk = diskArtifacts.bootDisk;
 		const extraDiskConfigs = diskArtifacts.extraDisks;
 
@@ -1093,7 +1108,12 @@ export class QuickCHR {
 			throw new QuickCHRError("MACHINE_NOT_FOUND", `Disk image not found for "${state.name}"`);
 		}
 
-		const diskArtifacts = await ensureConfiguredDisks(state.machineDir, state.bootSize, state.extraDisks);
+		const diskArtifacts = await ensureConfiguredDisks(
+			state.machineDir,
+			state.bootSize,
+			state.extraDisks,
+			state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
+		);
 		const bootDisk = diskArtifacts.bootDisk;
 		const extraDiskConfigs = diskArtifacts.extraDisks;
 

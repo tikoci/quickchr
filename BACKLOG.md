@@ -469,7 +469,9 @@ The refactoring is not all-or-nothing. Incremental steps:
 ### Snapshots
 
 - [x] QEMU snapshot/restore via monitor `savevm`/`loadvm` validated via integration test (`test/integration/disk.test.ts`) by restoring RouterOS identity after mutation
-- [ ] Consider saving RouterOS `:export` alongside VM snapshot for a richer "checkpoint" concept (follow-up on top of validated `savevm`/`loadvm` mechanics)
+- [x] Setup wizard (`setup` → Manage) exposes snapshot operations (`savevm`/`loadvm`/`delvm`/list) and disk layout context for safer operator workflows
+- [ ] Keep config-script import out of current snapshot scope. For now, snapshots are infrastructure-level checkpoints; callers can apply config using existing mechanisms (`exec`, provisioning, external automation).
+- [ ] Consider saving RouterOS `:export` alongside VM snapshot for a richer "checkpoint" concept (follow-up only; not tied to loading/importing scripts)
 
 ### QGA (Guest Agent)
 

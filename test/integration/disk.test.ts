@@ -45,6 +45,43 @@ function parseExecJsonArray(output: string): Array<Record<string, unknown>> {
 	return [];
 }
 
+async function waitForDiskList(
+	instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>>,
+	timeoutMs: number,
+): Promise<Array<Record<string, unknown>>> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const disksJson = await instance.exec(":put [:serialize to=json [/disk/print as-value]]");
+			const disks = parseExecJsonArray(disksJson.output);
+			if (disks.length > 0) return disks;
+		} catch {
+			// /rest/execute can lag briefly behind basic HTTP readiness.
+		}
+		await Bun.sleep(1000);
+	}
+	return [];
+}
+
+async function setIdentityWithRetry(
+	instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>>,
+	value: string,
+	timeoutMs: number,
+): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			await instance.exec(`/system identity set name=${value}`);
+			await waitForIdentity(instance, value, 8_000);
+			return;
+		} catch {
+			// Retry until /rest/execute is fully ready and the write sticks.
+		}
+		await Bun.sleep(1000);
+	}
+	throw new Error(`Timed out setting identity to "${value}"`);
+}
+
 describe.skipIf(SKIP)("disk support", () => {
 	beforeAll(async () => {
 		await cleanupMachine("integration-disk-add-start");
@@ -97,8 +134,7 @@ describe.skipIf(SKIP)("disk support", () => {
 			const booted = await instance.waitForBoot(120_000);
 			expect(booted).toBe(true);
 
-			const disksJson = await instance.exec(":put [:serialize to=json [/disk/print as-value]]");
-			const disks = parseExecJsonArray(disksJson.output);
+			const disks = await waitForDiskList(instance, 30_000);
 			expect(disks.length).toBeGreaterThanOrEqual(2);
 		} finally {
 			if (instance) {
@@ -129,13 +165,11 @@ describe.skipIf(SKIP)("disk support", () => {
 			const booted = await instance.waitForBoot(120_000);
 			expect(booted).toBe(true);
 
-			await instance.exec("/system identity set name=snapbefore");
-			await waitForIdentity(instance, "snapbefore", 30_000);
+			await setIdentityWithRetry(instance, "snapbefore", 30_000);
 
 			await instance.monitor(`savevm ${snapshotName}`);
 
-			await instance.exec("/system identity set name=snapafter");
-			await waitForIdentity(instance, "snapafter", 30_000);
+			await setIdentityWithRetry(instance, "snapafter", 30_000);
 
 			await instance.monitor(`loadvm ${snapshotName}`);
 			const rebootedAfterLoad = await instance.waitForBoot(120_000);

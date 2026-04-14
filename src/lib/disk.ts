@@ -42,11 +42,22 @@ function normalizeDiskSize(size: string, label: string): string {
 export function normalizeDiskOptions(
 	bootSize?: string,
 	extraDisks?: string[],
-): { bootSize?: string; extraDisks?: string[] } {
-	if (!bootSize && (!extraDisks || extraDisks.length === 0)) {
+ 	bootDiskFormat?: BootDiskFormat,
+): { bootSize?: string; extraDisks?: string[]; bootDiskFormat: BootDiskFormat } {
+ 	const format: BootDiskFormat = bootDiskFormat ?? (bootSize ? "qcow2" : "raw");
+
+	if (format === "raw" && bootSize) {
+		throw new QuickCHRError(
+			"INVALID_DISK_SIZE",
+			"Raw boot disks cannot be resized. Use bootDiskFormat=\"qcow2\" (or --boot-disk-format qcow2) to enable resizing.",
+		);
+	}
+
+	if (format === "raw" && !bootSize && (!extraDisks || extraDisks.length === 0)) {
 		return {
 			bootSize: bootSize?.trim() || undefined,
 			extraDisks,
+			bootDiskFormat: format,
 		};
 	}
 
@@ -57,6 +68,7 @@ export function normalizeDiskOptions(
 		extraDisks: extraDisks && extraDisks.length > 0
 			? extraDisks.map((size, index) => normalizeDiskSize(size, `extra disk ${index + 1} size`))
 			: undefined,
+		bootDiskFormat: format,
 	};
 }
 
@@ -132,16 +144,22 @@ export async function getDiskInfo(path: string): Promise<DiskInfo> {
 export async function prepareBootDisk(
 	machineDir: string,
 	bootSize?: string,
+	bootDiskFormat?: BootDiskFormat,
 ): Promise<{ path: string; format: BootDiskFormat }> {
+	const format: BootDiskFormat = bootDiskFormat ?? (bootSize ? "qcow2" : "raw");
 	const rawPath = join(machineDir, "disk.img");
 
-	if (!bootSize) {
+	if (format === "raw") {
 		return { path: rawPath, format: "raw" };
 	}
 
 	const qcow2Path = join(machineDir, "boot.qcow2");
-	await convertRawToQcow2(rawPath, qcow2Path);
-	await resizeQcow2(qcow2Path, bootSize);
+	if (!existsSync(qcow2Path)) {
+		await convertRawToQcow2(rawPath, qcow2Path);
+	}
+	if (bootSize) {
+		await resizeQcow2(qcow2Path, bootSize);
+	}
 	return { path: qcow2Path, format: "qcow2" };
 }
 
@@ -169,15 +187,17 @@ export async function ensureConfiguredDisks(
 	machineDir: string,
 	bootSize?: string,
 	extraDiskSizes?: string[],
+	bootDiskFormat?: BootDiskFormat,
 ): Promise<{
 	bootDisk: { path: string; format: BootDiskFormat };
 	extraDisks?: { path: string; format: "qcow2" }[];
 }> {
-	const bootDisk = bootSize
-		? (existsSync(join(machineDir, "boot.qcow2"))
+	const format: BootDiskFormat = bootDiskFormat ?? (bootSize ? "qcow2" : "raw");
+	const bootDisk = format === "raw"
+		? { path: join(machineDir, "disk.img"), format: "raw" as const }
+		: (existsSync(join(machineDir, "boot.qcow2"))
 			? { path: join(machineDir, "boot.qcow2"), format: "qcow2" as const }
-			: await prepareBootDisk(machineDir, bootSize))
-		: { path: join(machineDir, "disk.img"), format: "raw" as const };
+			: await prepareBootDisk(machineDir, bootSize, "qcow2"));
 
 	let extraDisks: { path: string; format: "qcow2" }[] | undefined;
 	if (extraDiskSizes && extraDiskSizes.length > 0) {

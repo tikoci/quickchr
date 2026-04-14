@@ -189,6 +189,9 @@ export interface StartOptions {
 	/** Boot disk size override (e.g. "512M", "2G"). Requires `qemu-img` on the host.
 	 *  Converts the boot disk to qcow2 before first boot. */
 	bootSize?: string;
+	/** Boot disk format. `qcow2` enables snapshots and resize; `raw` keeps the original raw image.
+	 *  Raw boot disks cannot be resized. */
+	bootDiskFormat?: BootDiskFormat;
 	/** Extra blank disks to attach, specified as sizes (e.g. ["512M", "1G"]).
 	 *  Requires `qemu-img` on the host. Extra disks are always qcow2. */
 	extraDisks?: string[];

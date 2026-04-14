@@ -104,6 +104,7 @@ export async function runWizard(): Promise<void> {
 
 	// 4b. Disk configuration — requires qemu-img; skip gracefully if absent
 	let bootSize: string | undefined;
+	let bootDiskFormat: "qcow2" | "raw" = "qcow2";
 	const extraDisks: string[] = [];
 
 	const { findQemuImg, getQemuInstallHint } = await import("../lib/platform.ts");
@@ -113,21 +114,36 @@ export async function runWizard(): Promise<void> {
 	if (!qemuImg) {
 		clack.log.warn(`Disk features (boot resize, extra disks) require qemu-img. Run 'quickchr doctor' to confirm setup. ${getQemuInstallHint()}`);
 	} else {
-		const wantBootResize = await clack.confirm({
-			message: "Resize the boot disk? (default is ~128 MB)",
-			initialValue: false,
+		const diskFormatChoice = await clack.select({
+			message: "Boot disk format:",
+			options: [
+				{ value: "qcow2", label: "qcow2 (recommended)", hint: "supports snapshots and resize" },
+				{ value: "raw", label: "raw", hint: "no resize support" },
+			],
+			initialValue: "qcow2",
 		});
-		if (clack.isCancel(wantBootResize)) { clack.cancel("Cancelled."); process.exit(0); }
+		if (clack.isCancel(diskFormatChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+		bootDiskFormat = diskFormatChoice as "qcow2" | "raw";
 
-		if (wantBootResize) {
-			const size = await clack.text({
-				message: "Boot disk size (e.g., 512M, 1G, 2G):",
-				validate: (v) => {
-					if (!isValidDiskSize(v)) return "Size like 512M, 1G, or 2048";
-				},
+		if (bootDiskFormat === "qcow2") {
+			const wantBootResize = await clack.confirm({
+				message: "Resize the boot disk? (default is ~128 MB)",
+				initialValue: false,
 			});
-			if (clack.isCancel(size)) { clack.cancel("Cancelled."); process.exit(0); }
-			bootSize = size.trim();
+			if (clack.isCancel(wantBootResize)) { clack.cancel("Cancelled."); process.exit(0); }
+
+			if (wantBootResize) {
+				const size = await clack.text({
+					message: "Boot disk size (e.g., 512M, 1G, 2G):",
+					validate: (v) => {
+						if (!isValidDiskSize(v)) return "Size like 512M, 1G, or 2048";
+					},
+				});
+				if (clack.isCancel(size)) { clack.cancel("Cancelled."); process.exit(0); }
+				bootSize = size.trim();
+			}
+		} else {
+			clack.log.info("Raw boot disk selected — boot resize is disabled.");
 		}
 
 		const wantExtraDisks = await clack.confirm({
@@ -477,6 +493,7 @@ export async function runWizard(): Promise<void> {
 		cpu: Number(cpu),
 		mem: Number(mem),
 		bootSize,
+		bootDiskFormat,
 		extraDisks: extraDisks.length > 0 ? extraDisks : undefined,
 		packages,
 		installAllPackages,
@@ -571,9 +588,12 @@ export async function runWizard(): Promise<void> {
 	spinner.start(spinMsg);
 
 	try {
+		let cachePrewarmed = false;
 		opts.onProgress = (msg: string) => {
+			if (cachePrewarmed && msg.startsWith("Using cached image:")) return;
 			spinner.message(msg);
 		};
+		cachePrewarmed = true;
 		const instance = await QuickCHR.start(opts);
 		spinner.stop(`${bold(instance.name)} started`);
 

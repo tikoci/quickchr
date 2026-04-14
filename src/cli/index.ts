@@ -457,6 +457,7 @@ async function cmdAdd(argv: string[]) {
 			...(flags["api-ssl"] === false ? ["api-ssl" as ServiceName] : []),
 		],
 		networks: buildNetworks(flags),
+		bootDiskFormat: (flag(flags, "boot-disk-format") as StartOptions["bootDiskFormat"] | undefined) ?? "qcow2",
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 	};
@@ -844,12 +845,18 @@ async function cmdSetup() {
 
 	// Manage flow
 	const { statusIcon, bold } = await import("./format.ts");
+	const diskSummary = (m: typeof machines[number]): string => {
+		const bootFormat = m.bootDiskFormat ?? (m.bootSize ? "qcow2" : "raw");
+		const boot = m.bootSize ? `${m.bootSize} (${bootFormat})` : `default (~128M, ${bootFormat})`;
+		const extraCount = m.extraDisks?.length ?? 0;
+		return extraCount > 0 ? `${boot} + ${extraCount} extra` : boot;
+	};
 	const selected = await clack.select({
 		message: "Select machine:",
 		options: machines.map((m) => ({
 			value: m.name,
 			label: m.name,
-			hint: `${statusIcon(m.status)} ${m.version} (${m.arch})`,
+			hint: `${statusIcon(m.status)} ${m.version} (${m.arch}) • disk: ${diskSummary(m)}`,
 		})),
 	});
 	if (clack.isCancel(selected)) { clack.cancel("Cancelled."); return; }
@@ -861,12 +868,19 @@ async function cmdSetup() {
 	const actions = target.status === "running"
 		? [
 			{ value: "stop", label: "Stop" },
+			{ value: "snapshots", label: "Snapshots  (save / load / delete / list)" },
 			{ value: "remove", label: "Remove  (stop first, then delete)" },
 		]
 		: [
 			{ value: "start", label: "Start" },
 			{ value: "remove", label: "Remove" },
 		];
+
+	clack.note(
+		`Boot disk: ${target.bootSize ? `${target.bootSize} (${target.bootDiskFormat ?? "qcow2"})` : `default (~128M, ${target.bootDiskFormat ?? "raw"})`}\n` +
+		`Extra disks: ${target.extraDisks && target.extraDisks.length > 0 ? target.extraDisks.join(", ") : "none"}`,
+		`${target.name} disk layout`,
+	);
 
 	const action = await clack.select({
 		message: `${bold(target.name)} — ${target.status}. Choose action:`,
@@ -878,6 +892,14 @@ async function cmdSetup() {
 	const instance = QuickCHR.get(target.name);
 	if (!instance) { clack.log.error(machineNotFoundMessage(target.name)); return; }
 
+	const runMonitorChecked = async (commandText: string): Promise<string> => {
+		const out = await instance.monitor(commandText);
+		if (/^error[:\s]/i.test(out)) {
+			throw new Error(out);
+		}
+		return out;
+	};
+
 	if (action === "start") {
 		const spinner = clack.spinner();
 		spinner.start(`Starting ${target.name}...`);
@@ -888,6 +910,80 @@ async function cmdSetup() {
 	} else if (action === "stop") {
 		await instance.stop();
 		clack.log.success(`${bold(target.name)} stopped`);
+	} else if (action === "snapshots") {
+		while (true) {
+			const snapshotAction = await clack.select({
+				message: `${bold(target.name)} snapshots:`,
+				options: [
+					{ value: "list", label: "List snapshots" },
+					{ value: "save", label: "Save snapshot" },
+					{ value: "load", label: "Load snapshot" },
+					{ value: "delete", label: "Delete snapshot" },
+					{ value: "back", label: "Back" },
+				],
+			});
+			if (clack.isCancel(snapshotAction) || snapshotAction === "back") break;
+
+			if (snapshotAction === "list") {
+				const out = await runMonitorChecked("info snapshots");
+				const cleaned = out
+					.split("\n")
+					.filter((line, idx) => !(idx === 0 && line.trim().toLowerCase() === "info snapshots"))
+					.join("\n")
+					.trim();
+				clack.note(cleaned || "No snapshots found.", `${target.name} snapshots`);
+				continue;
+			}
+
+			const defaultSnapshotName = new Date().toISOString().replace(/:/g, "-").replace(/\..+$/, "Z");
+
+			const snapName = await clack.text({
+				message: "Snapshot name:",
+				defaultValue: defaultSnapshotName,
+				validate: (v) => {
+					if (!v.trim()) return "Snapshot name is required";
+					if (/\s/.test(v)) return "Use a name without spaces";
+				},
+			});
+			if (clack.isCancel(snapName)) continue;
+
+			if (snapshotAction === "save") {
+				const spinner = clack.spinner();
+				spinner.start(`Saving snapshot ${snapName}...`);
+				await runMonitorChecked(`savevm ${snapName}`);
+				spinner.stop(`Saved snapshot ${bold(snapName)}`);
+				continue;
+			}
+
+			if (snapshotAction === "load") {
+				const confirmed = await clack.confirm({
+					message: `Load snapshot ${bold(snapName)}? Current runtime state will be replaced.`,
+					initialValue: false,
+				});
+				if (clack.isCancel(confirmed) || !confirmed) continue;
+
+				const spinner = clack.spinner();
+				spinner.start(`Loading snapshot ${snapName}...`);
+				await runMonitorChecked(`loadvm ${snapName}`);
+				const booted = await instance.waitForBoot(120_000);
+				if (booted) {
+					spinner.stop(`Loaded snapshot ${bold(snapName)}`);
+				} else {
+					spinner.stop(`Loaded snapshot ${bold(snapName)} (boot readiness check timed out)`);
+				}
+				continue;
+			}
+
+			if (snapshotAction === "delete") {
+				const confirmed = await clack.confirm({
+					message: `Delete snapshot ${bold(snapName)}?`,
+					initialValue: false,
+				});
+				if (clack.isCancel(confirmed) || !confirmed) continue;
+				await runMonitorChecked(`delvm ${snapName}`);
+				clack.log.success(`Deleted snapshot ${bold(snapName)}`);
+			}
+		}
 	} else if (action === "remove") {
 		const confirmed = await clack.confirm({ message: `Remove ${bold(target.name)} and its disk? This cannot be undone.`, initialValue: false });
 		if (!clack.isCancel(confirmed) && confirmed) {
@@ -956,6 +1052,7 @@ async function cmdStart(argv: string[]) {
 			...(flags["api-ssl"] === false ? ["api-ssl" as ServiceName] : []),
 		],
 		networks: buildNetworks(flags),
+		bootDiskFormat: (flag(flags, "boot-disk-format") as StartOptions["bootDiskFormat"] | undefined) ?? "qcow2",
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 		installDeps: flagBool(flags, "install-deps"),
@@ -1692,7 +1789,8 @@ Options:
   --arch <arch>         Architecture: arm64, x86 (default: host native)
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
-	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — requires qemu-img
+	--boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
+	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
 	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install on first boot (repeatable)
   --install-all-packages  Install all packages on first boot
@@ -1760,7 +1858,8 @@ Options:
   --name <name>         Instance name
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
-	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — requires qemu-img
+	--boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
+	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
 	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install (repeatable)
   --add-user <u:p>      Create user with name:password
