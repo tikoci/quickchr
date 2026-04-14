@@ -6,13 +6,16 @@ import type { Arch, Channel, DeviceModeOptions, LicenseLevel, LicenseOptions, Ne
 import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
 
 /** Run the interactive wizard using @clack/prompts. */
-export async function runWizard(): Promise<void> {
+export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<void> {
 	// Dynamic import — only loaded when wizard is actually used
 	const clack = await import("@clack/prompts");
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { formatPorts, bold } = await import("./format.ts");
 
 	clack.intro("quickchr — MikroTik CHR Manager");
+	if (wizardOpts?.firstRun) {
+		clack.log.info("No machines found — let's create your first CHR instance.");
+	}
 
 	// 1. Version source: channel or direct version
 	const versionSource = await clack.select({
@@ -532,8 +535,16 @@ export async function runWizard(): Promise<void> {
 	const resolvedVersion = opts.version ?? await resolveVersion(opts.channel ?? "stable");
 	opts.version = resolvedVersion; // pin so QuickCHR.start doesn't resolve again
 
+	// Route pre-warm messages through clack so they render inside the prompt flow
+	// (prevents "Using cached image:" from appearing as raw text outside the │ lines).
+	const prewarmLogger = {
+		status: (msg: string) => clack.log.step(msg.trim()),
+		debug: () => {},
+		warn: (msg: string) => clack.log.warn(msg),
+	};
+
 	try {
-		await ensureCachedImage(resolvedVersion, arch as Arch);
+		await ensureCachedImage(resolvedVersion, arch as Arch, undefined, prewarmLogger);
 	} catch (e: unknown) {
 		clack.log.error(e instanceof Error ? e.message : String(e));
 		process.exit(1);

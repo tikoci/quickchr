@@ -797,33 +797,34 @@ async function getRunningMachines() {
 
 async function cmdSetup() {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const machines = QuickCHR.list();
 	const { runWizard } = await import("./wizard.ts");
 
-	// Zero machines: jump straight into create flow
-	if (machines.length === 0) {
-		return runWizard();
+	// Zero machines: jump straight into create flow with first-run intro
+	if (QuickCHR.list().length === 0) {
+		return runWizard({ firstRun: true });
 	}
 
 	const clack = await import("@clack/prompts");
 	clack.intro("quickchr setup");
 
-	const choice = await clack.select({
-		message: "What would you like to do?",
-		options: [
-			{ value: "create", label: "Create a new machine" },
-			{ value: "manage", label: "Manage machines (start / stop / remove / disks / snapshots)" },
-			{ value: "networks", label: "Configure networks" },
-		],
-	});
-	if (clack.isCancel(choice)) { clack.cancel("Cancelled."); return; }
+	// Main menu loops until cancel or create — Back from machine select returns here
+	while (true) {
+		const choice = await clack.select({
+			message: "What would you like to do?",
+			options: [
+				{ value: "create", label: "Create a new machine" },
+				{ value: "manage", label: "Manage machines (start / stop / remove / disks / snapshots)" },
+				{ value: "networks", label: "Configure networks" },
+			],
+		});
+		if (clack.isCancel(choice)) { clack.cancel("Cancelled."); return; }
 
-	if (choice === "create") {
-		clack.outro("");
-		return runWizard();
-	}
+		if (choice === "create") {
+			clack.outro("");
+			return runWizard();
+		}
 
-	if (choice === "networks") {
+		if (choice === "networks") {
 		const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
 		const platform = await detectPlatform();
 		const isMacOS = platform.os === "darwin";
@@ -846,20 +847,19 @@ async function cmdSetup() {
 		clack.log.step("  socket::<name> — named L2 link between VMs");
 
 		clack.log.info("Use these with: quickchr add --add-network <spec>");
-		clack.outro("");
-		return;
-	}
+		continue; // back to main menu
+		}
 
 	// Manage flow
 	const { statusIcon, bold, link, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
-	const diskSummary = (m: typeof machines[number]): string => {
+	const diskSummary = (m: ReturnType<typeof QuickCHR.list>[number]): string => {
 		const bootFormat = m.bootDiskFormat ?? (m.bootSize ? "qcow2" : "raw");
 		const boot = m.bootSize ? `${m.bootSize} (${bootFormat})` : `default (~128M, ${bootFormat})`;
 		const extraCount = m.extraDisks?.length ?? 0;
 		return extraCount > 0 ? `${boot} + ${extraCount} extra` : boot;
 	};
 
-	let machineList = machines;
+	let machineList = QuickCHR.list();
 
 	// Machine selection loop — loops until user explicitly backs out
 	while (true) {
@@ -1086,8 +1086,8 @@ async function cmdSetup() {
 
 		machineList = QuickCHR.list();
 	}
-
-	clack.outro("Done!");
+	// machine select "← Back" → outer while continues → main menu re-shown
+	}
 }
 
 async function cmdStart(argv: string[]) {
@@ -1650,7 +1650,15 @@ async function cmdSnapshot(argv: string[]) {
 		}
 		case "load": {
 			if (!snapName) {
-				console.error("Usage: quickchr snapshot <name> load <snapshot-name>");
+				const snaps = await instance.snapshot.list();
+				if (snaps.length > 0 && snaps.length <= 5) {
+					console.error(`Usage: quickchr snapshot ${name} load <snapshot-name>`);
+					console.error(dim(`  Available: ${snaps.map((s) => s.name).join(", ")}`));
+				} else {
+					console.error(`Usage: quickchr snapshot ${name} load <snapshot-name>`);
+					if (snaps.length > 5) console.error(dim(`  Run 'quickchr snapshot ${name} list' to see all snapshots.`));
+					else console.error(dim(`  No snapshots yet. Run: quickchr snapshot ${name} save`));
+				}
 				process.exit(1);
 			}
 			await instance.snapshot.load(snapName);
@@ -1660,7 +1668,14 @@ async function cmdSnapshot(argv: string[]) {
 		case "delete":
 		case "rm": {
 			if (!snapName) {
-				console.error("Usage: quickchr snapshot <name> delete <snapshot-name>");
+				const snaps = await instance.snapshot.list();
+				if (snaps.length > 0 && snaps.length <= 5) {
+					console.error(`Usage: quickchr snapshot ${name} delete <snapshot-name>`);
+					console.error(dim(`  Available: ${snaps.map((s) => s.name).join(", ")}`));
+				} else {
+					console.error(`Usage: quickchr snapshot ${name} delete <snapshot-name>`);
+					if (snaps.length > 5) console.error(dim(`  Run 'quickchr snapshot ${name} list' to see all snapshots.`));
+				}
 				process.exit(1);
 			}
 			await instance.snapshot.delete(snapName);
