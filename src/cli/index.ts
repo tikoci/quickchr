@@ -504,6 +504,7 @@ async function cmdAdd(argv: string[]) {
 }
 
 async function cmdConsole(argv: string[]) {
+	const { machineNotFoundMessage } = await import("./format.ts");
 	const { positional } = parseFlags(argv);
 	const name = positional[0];
 
@@ -520,7 +521,7 @@ async function cmdConsole(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const machine = QuickCHR.get(name);
 	if (!machine) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 	if (machine.state.status !== "running") {
@@ -531,6 +532,7 @@ async function cmdConsole(argv: string[]) {
 }
 
 async function cmdExec(argv: string[]) {
+	const { machineNotFoundMessage } = await import("./format.ts");
 	const { flags, positional } = parseFlags(argv);
 	const name = positional[0];
 	const commandParts = positional.slice(1);
@@ -549,7 +551,7 @@ async function cmdExec(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const machine = QuickCHR.get(name);
 	if (!machine) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 	if (machine.state.status !== "running") {
@@ -574,6 +576,7 @@ async function cmdExec(argv: string[]) {
 }
 
 async function cmdQga(argv: string[]) {
+	const { machineNotFoundMessage } = await import("./format.ts");
 	const { flags, positional } = parseFlags(argv);
 	const name = positional[0];
 	const operation = positional[1];
@@ -613,7 +616,7 @@ Options:
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const machine = QuickCHR.get(name);
 	if (!machine) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 	if (machine.state.status !== "running") {
@@ -871,9 +874,9 @@ async function cmdSetup() {
 	});
 	if (clack.isCancel(action)) { clack.cancel("Cancelled."); return; }
 
-	const { link } = await import("./format.ts");
+	const { link, machineNotFoundMessage } = await import("./format.ts");
 	const instance = QuickCHR.get(target.name);
-	if (!instance) { clack.log.error("Machine not found."); return; }
+	if (!instance) { clack.log.error(machineNotFoundMessage(target.name)); return; }
 
 	if (action === "start") {
 		const spinner = clack.spinner();
@@ -1066,7 +1069,7 @@ async function cmdStart(argv: string[]) {
 async function cmdStop(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, bold } = await import("./format.ts");
+	const { statusIcon, bold, machineNotFoundMessage } = await import("./format.ts");
 
 	if (flagBool(flags, "all")) {
 		const machines = QuickCHR.list().filter((m) => m.status === "running");
@@ -1094,7 +1097,7 @@ async function cmdStop(argv: string[]) {
 
 	const instance = QuickCHR.get(name);
 	if (!instance) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 	await instance.stop();
@@ -1128,7 +1131,7 @@ async function cmdList() {
 
 async function cmdStatus(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, bold, dim, link, formatPorts, formatNetworks } = await import("./format.ts");
+	const { statusIcon, bold, dim, link, formatPorts, formatNetworks, machineNotFoundMessage } = await import("./format.ts");
 
 	const name = argv[0];
 
@@ -1139,7 +1142,7 @@ async function cmdStatus(argv: string[]) {
 
 	const instance = QuickCHR.get(name);
 	if (!instance) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 
@@ -1174,7 +1177,7 @@ async function cmdStatus(argv: string[]) {
 async function cmdRemove(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { bold, statusIcon } = await import("./format.ts");
+	const { bold, statusIcon, machineNotFoundMessage } = await import("./format.ts");
 
 	// --all: remove every machine (warn about running ones)
 	if (flagBool(flags, "all")) {
@@ -1203,7 +1206,7 @@ async function cmdRemove(argv: string[]) {
 
 	const instance = QuickCHR.get(name);
 	if (!instance) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 
@@ -1214,7 +1217,7 @@ async function cmdRemove(argv: string[]) {
 async function cmdClean(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { bold, statusIcon } = await import("./format.ts");
+	const { bold, statusIcon, machineNotFoundMessage } = await import("./format.ts");
 
 	// --all: clean every machine
 	if (flagBool(flags, "all")) {
@@ -1243,7 +1246,7 @@ async function cmdClean(argv: string[]) {
 
 	const instance = QuickCHR.get(name);
 	if (!instance) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 
@@ -1254,7 +1257,7 @@ async function cmdClean(argv: string[]) {
 async function cmdLicense(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { bold } = await import("./format.ts");
+	const { bold, machineNotFoundMessage } = await import("./format.ts");
 
 	const name = positional[0] ?? flag(flags, "name");
 
@@ -1265,7 +1268,7 @@ async function cmdLicense(argv: string[]) {
 
 	const instance = QuickCHR.get(name);
 	if (!instance) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 	if (instance.state.status !== "running") {
@@ -1329,7 +1332,7 @@ async function cmdDisk(argv: string[]) {
 	}
 
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { bold, dim } = await import("./format.ts");
+	const { bold, dim, machineNotFoundMessage } = await import("./format.ts");
 	const { getDiskInfo } = await import("../lib/disk.ts");
 	const { join } = await import("node:path");
 	const { existsSync } = await import("node:fs");
@@ -1337,7 +1340,7 @@ async function cmdDisk(argv: string[]) {
 
 	const machine = QuickCHR.get(name);
 	if (!machine) {
-		console.error(`Machine "${name}" not found.`);
+		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
 

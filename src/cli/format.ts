@@ -2,6 +2,22 @@
  * CLI output formatting — tables, colors, status indicators.
  */
 
+import { listMachineNames } from "../lib/state.ts";
+
+/** Format a "machine not found" error with helpful suggestions. */
+export function machineNotFoundMessage(name: string): string {
+	const names = listMachineNames();
+	let msg = `Machine "${name}" not found.`;
+	if (names.length === 0) {
+		msg += `\n  No machines exist. Create one: quickchr start`;
+	} else if (names.length <= 5) {
+		msg += `\n  Available: ${names.join(", ")}`;
+	} else {
+		msg += `\n  Run 'quickchr list' to see available machines.`;
+	}
+	return msg;
+}
+
 const COLORS = {
 	reset: "\x1b[0m",
 	bold: "\x1b[1m",

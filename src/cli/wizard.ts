@@ -82,7 +82,7 @@ export async function runWizard(): Promise<void> {
 
 	const mem = await clack.text({
 		message: "Memory (MB):",
-		defaultValue: "512",
+		defaultValue: "256",
 		validate: (v) => {
 			const n = Number(v);
 			if (!Number.isInteger(n) || n < 128) return "Minimum 128 MB";
@@ -369,8 +369,16 @@ export async function runWizard(): Promise<void> {
 			if (clack.isCancel(netType)) { clack.cancel("Cancelled."); process.exit(0); }
 
 			if (netType === "user") {
+				if (networks.includes("user")) {
+					clack.log.warn("Only one user-mode network is supported. Please choose a different type.");
+					continue;
+				}
 				networks.push("user");
 			} else if (netType === "shared") {
+				if (networks.includes("shared")) {
+					clack.log.warn("Only one shared network is supported.");
+					continue;
+				}
 				networks.push("shared");
 			} else if (netType === "bridged") {
 				const ifaces = detectPhysicalInterfaces();

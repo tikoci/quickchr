@@ -1,4 +1,13 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+
+import * as platformMod from "../../src/lib/platform.ts";
+
+const mockDaemonRunning = mock(() => true);
+mock.module("../../src/lib/platform.ts", () => ({
+	...platformMod,
+	isSocketVmnetDaemonRunning: mockDaemonRunning,
+}));
+
 import {
 	resolveNetworkConfig,
 	resolveAllNetworks,
@@ -114,6 +123,13 @@ describe("resolveNetworkConfig", () => {
 				QuickCHRError,
 			);
 		});
+
+		test("throws when socket_vmnet daemon is not running", () => {
+			mockDaemonRunning.mockReturnValueOnce(false);
+			expect(() => resolveNetworkConfig(cfg("shared"), macCtx(MOCK_SVN))).toThrow(
+				/socket_vmnet daemon is not running/,
+			);
+		});
 	});
 
 	// ── vmnet-shared ──────────────────────────────────────────────────
@@ -170,6 +186,16 @@ describe("resolveNetworkConfig", () => {
 					linuxCtx(),
 				),
 			).toThrow(QuickCHRError);
+		});
+
+		test("throws when socket_vmnet daemon is not running", () => {
+			mockDaemonRunning.mockReturnValueOnce(false);
+			expect(() =>
+				resolveNetworkConfig(
+					cfg({ type: "bridged", iface: "en0" }),
+					macCtx(MOCK_SVN),
+				),
+			).toThrow(/socket_vmnet bridged daemon is not running/);
 		});
 	});
 

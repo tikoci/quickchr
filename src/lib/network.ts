@@ -20,7 +20,7 @@ import {
 	QuickCHRError,
 } from "./types.ts";
 import { getNamedSocket } from "./socket-registry.ts";
-import { resolveInterfaceAlias } from "./platform.ts";
+import { resolveInterfaceAlias, isSocketVmnetDaemonRunning } from "./platform.ts";
 
 /** Allocate a port block for a new instance, avoiding conflicts with existing machines. */
 export function allocatePortBlock(
@@ -348,6 +348,13 @@ function resolveShared(
 	if (ctx.platform.os === "darwin") {
 		const svn = ctx.socketVmnet ?? ctx.platform.socketVmnet;
 		if (svn?.sharedSocket) {
+			if (!isSocketVmnetDaemonRunning(svn.sharedSocket)) {
+				throw new QuickCHRError(
+					"NETWORK_UNAVAILABLE",
+					`socket_vmnet daemon is not running (socket not found: ${svn.sharedSocket})`,
+					"Start it with: sudo brew services start socket_vmnet",
+				);
+			}
 			return {
 				qemuNetdevArgs: [
 					"-netdev", `socket,id=${config.id},fd=3`,
@@ -401,6 +408,13 @@ function resolveBridged(
 		const svn = ctx.socketVmnet ?? ctx.platform.socketVmnet;
 		const bridgeSocket = svn?.bridgedSockets[resolved];
 		if (svn && bridgeSocket) {
+			if (!isSocketVmnetDaemonRunning(bridgeSocket)) {
+				throw new QuickCHRError(
+					"NETWORK_UNAVAILABLE",
+					`socket_vmnet bridged daemon is not running (socket not found: ${bridgeSocket})`,
+					"Start it with: sudo brew services start socket_vmnet",
+				);
+			}
 			return {
 				qemuNetdevArgs: [
 					"-netdev", `socket,id=${config.id},fd=3`,

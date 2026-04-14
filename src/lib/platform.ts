@@ -223,6 +223,11 @@ function isSocket(path: string): boolean {
 	}
 }
 
+/** Check if a socket_vmnet daemon socket is accessible (file exists and is a socket). */
+export function isSocketVmnetDaemonRunning(socketPath: string): boolean {
+	return existsSync(socketPath) && isSocket(socketPath);
+}
+
 /** Detect socket_vmnet installation and running daemons (macOS only). */
 export function detectSocketVmnet(): SocketVmnetInfo | undefined {
 	if (process.platform !== "darwin") return undefined;
