@@ -143,6 +143,9 @@ async function main() {
 			case "qga":
 				await cmdQga(args.slice(1));
 				break;
+			case "get":
+				await cmdGet(args.slice(1));
+				break;
 			case "license":
 				await cmdLicense(args.slice(1));
 				break;
@@ -161,6 +164,9 @@ async function main() {
 				break;
 			case "doctor":
 				await cmdDoctor();
+				break;
+			case "logs":
+				await cmdLogs(args.slice(1));
 				break;
 			case "networks":
 			case "net":
@@ -1150,6 +1156,7 @@ async function cmdStart(argv: string[]) {
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 		installDeps: flagBool(flags, "install-deps"),
 		dryRun: flagBool(flags, "dry-run"),
+		timeoutExtra: parseInt(flag(flags, "timeout-extra") ?? flag(flags, "T") ?? "0", 10) * 1000 || undefined,
 	};
 
 	const deviceModeValue = flag(flags, "device-mode");
@@ -1372,6 +1379,123 @@ async function cmdStatus(argv: string[]) {
 		console.log();
 		console.log(`  ${dim("Tip:")} quickchr start ${s.name}  |  quickchr remove ${s.name}`);
 	}
+	console.log();
+}
+
+async function cmdGet(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { bold, dim, machineNotFoundMessage } = await import("./format.ts");
+
+	const name = positional[0];
+	const group = positional[1] as "license" | "device-mode" | "admin" | undefined;
+	const asJson = flagBool(flags, "json");
+
+	if (!name) {
+		console.error("Usage: quickchr get <name> [license|device-mode|admin] [--json]");
+		process.exit(1);
+	}
+
+	const validGroups = ["license", "device-mode", "admin"];
+	if (group && !validGroups.includes(group)) {
+		console.error(`Unknown property group: "${group}". Valid groups: ${validGroups.join(", ")}`);
+		process.exit(1);
+	}
+
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+
+	const s = instance.state;
+
+	if (s.status !== "running") {
+		// Offline — show what we know from persisted state
+		const offlineData = {
+			name: s.name,
+			status: s.status,
+			version: s.version,
+			arch: s.arch,
+			note: "machine is not running — live properties unavailable",
+		};
+		if (asJson) {
+			console.log(JSON.stringify(offlineData, null, 2));
+		} else {
+			console.log(`\n${bold(s.name)} (${s.status})`);
+			console.log(`  Version: ${s.version} (${s.arch})`);
+			console.log(`  ${dim("Start the machine to query live properties.")}`);
+			console.log();
+		}
+		return;
+	}
+
+	const { resolveAuth } = await import("../lib/auth.ts");
+	const auth = await resolveAuth(s);
+	const base = `http://127.0.0.1:${instance.ports.http}/rest`;
+	const headers: Record<string, string> = { Authorization: auth.header };
+	const to = AbortSignal.timeout(8_000);
+
+	async function fetchGroup(path: string): Promise<unknown> {
+		try {
+			const r = await fetch(`${base}${path}`, { headers, signal: to });
+			if (r.ok) return r.json();
+		} catch { /* offline or auth error */ }
+		return null;
+	}
+
+	const results: Record<string, unknown> = {};
+
+	if (!group || group === "license") {
+		const v = await fetchGroup("/system/license");
+		if (v) results.license = v;
+	}
+	if (!group || group === "device-mode") {
+		const v = await fetchGroup("/system/device-mode");
+		if (v) results["device-mode"] = v;
+	}
+	if (!group || group === "admin") {
+		// Show all users in group=full (admin-equivalent)
+		const users = await fetchGroup("/user") as Array<Record<string, unknown>> | null;
+		if (users) results.admin = users.filter((u) => u.group === "full");
+	}
+
+	if (asJson) {
+		console.log(JSON.stringify(results, null, 2));
+		return;
+	}
+
+	console.log(`\n${bold(s.name)} — live config`);
+
+	if (results.license) {
+		const lic = results.license as Record<string, unknown>;
+		console.log(`\n  ${bold("License")}`);
+		const level = lic.level ?? lic["upgradable-to"] ?? "free (1 Mbps)";
+		console.log(`    Level:       ${level}`);
+		if (lic["software-id"]) console.log(`    Software ID: ${lic["software-id"]}`);
+		if (lic.deadline) console.log(`    Deadline:    ${lic.deadline}`);
+	}
+
+	if (results["device-mode"]) {
+		const dm = results["device-mode"] as Record<string, unknown>;
+		const mode = dm.mode ?? "(not set)";
+		console.log(`\n  ${bold("Device Mode")}`);
+		console.log(`    Mode: ${mode}`);
+		const features = Object.entries(dm)
+			.filter(([k, v]) => k !== "mode" && v === true)
+			.map(([k]) => k);
+		if (features.length > 0) console.log(`    Enabled: ${features.join(", ")}`);
+	}
+
+	if (results.admin) {
+		const users = results.admin as Array<Record<string, unknown>>;
+		console.log(`\n  ${bold("Admin Users")} (group=full)`);
+		for (const u of users) {
+			const status = u.disabled === "true" || u.disabled === true ? dim(" (disabled)") : "";
+			console.log(`    ${u.name}${status}`);
+		}
+	}
+
 	console.log();
 }
 
@@ -1982,6 +2106,56 @@ async function cmdCompletions(argv: string[]) {
 	}
 }
 
+async function cmdLogs(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const name = positional[0];
+
+	if (!name) {
+		console.error("Usage: quickchr logs <name> [--follow] [-n <lines>]");
+		process.exit(1);
+	}
+
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { join } = await import("node:path");
+	const { existsSync } = await import("node:fs");
+	const { machineNotFoundMessage } = await import("./format.ts");
+
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+
+	const logPath = join(instance.state.machineDir, "qemu.log");
+
+	if (!existsSync(logPath)) {
+		console.log("No log file yet.");
+		return;
+	}
+
+	let follow = flagBool(flags, "follow");
+	let lines = flag(flags, "lines") ? Number(flag(flags, "lines")) : 50;
+
+	for (let i = 0; i < argv.length; i++) {
+		if (argv[i] === "-f") follow = true;
+		if (argv[i] === "-n" && argv[i + 1]) {
+			lines = Number(argv[i + 1]);
+			i++;
+		}
+	}
+
+	if (follow) {
+		const tail = Bun.spawn(["tail", "-f", "-n", String(lines), logPath], {
+			stdout: "inherit",
+			stderr: "inherit",
+		});
+		await tail.exited;
+	} else {
+		const tail = Bun.spawnSync(["tail", "-n", String(lines), logPath], { stdout: "pipe" });
+		process.stdout.write(tail.stdout);
+	}
+}
+
 async function cmdDoctor() {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { statusIcon, bold } = await import("./format.ts");
@@ -2043,11 +2217,13 @@ Commands:
   exec <name> <command>   Run a RouterOS CLI command on a running instance
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
+  get <name> [group]          Show machine config (license, device-mode, admin)
   license <name>          Apply/renew CHR trial license
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
   networks                Network discovery & socket management
   completions             Manage shell completions (Tab completion)
+  logs <name>             Tail the QEMU log for an instance
   doctor                  Check prerequisites
   version                 Show version info
   help [command]          Show help
@@ -2166,6 +2342,7 @@ Options:
   --device-mode-enable <f>  Set one or more device-mode flags to yes
   --device-mode-disable <f> Set one or more device-mode flags to no
   --no-device-mode      Skip device-mode provisioning entirely
+  --timeout-extra <s>, -T <s>  Add extra seconds to the auto-computed boot timeout
   --dry-run             Print what would run without starting`);
 			break;
 		case "stop":
@@ -2187,6 +2364,17 @@ Options:
 Check system prerequisites: QEMU binaries, firmware, acceleration,
 sshpass (for package upload), qemu-img (for disk operations), data directories,
 and cached images. Also reports the current shell and completion install status.`);
+			break;
+		case "logs":
+			console.log(`quickchr logs <name> [options]
+
+Tail the QEMU log for a CHR instance.
+
+  <name>              Instance name (required).
+
+Options:
+  --follow, -f        Follow log output (tail -f style).
+  --lines=<N>, -n <N> Number of lines to show (default: 50).`);
 			break;
 		case "completions":
 			console.log(`quickchr completions [options]
@@ -2232,6 +2420,22 @@ Options:
 
 Requires qcow2 boot disk (--boot-disk-format=qcow2 or --boot-size=<size>).
 Alias: quickchr snap`);
+			break;
+		case "get":
+			console.log(`quickchr get <name> [license|device-mode|admin] [--json]
+
+Query live machine configuration from a running CHR instance.
+
+  <name>           Name of a running CHR instance (required).
+  license          Show license level, software ID, and deadline.
+  device-mode      Show device-mode settings and enabled features.
+  admin            Show users in the full (admin) group.
+
+Options:
+  --json           Structured JSON output.
+
+When no group is given, all properties are shown.
+The machine must be running to query live properties.`);
 			break;
 		case "license":
 			console.log(`quickchr license <name> [options]
