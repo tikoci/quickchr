@@ -145,4 +145,41 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			await cleanupMachine("integration-dm-features");
 		}
 	}, 300_000);
+
+	test("setDeviceMode() changes mode on a running instance", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			// Boot without device-mode provisioning to get a plain running instance
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch,
+				background: true,
+				name: "integration-dm-setmode",
+				deviceMode: { mode: "skip" },
+				secureLogin: false,
+			});
+
+			expect(instance.state.status).toBe("running");
+
+			// Change device-mode on the running instance — triggers a hard power-cycle
+			await instance.setDeviceMode({ mode: "rose" });
+
+			// After setDeviceMode returns the CHR is rebooted and running with mode=rose
+			const actual = await readDeviceMode(instance.ports.http);
+			expect(actual.mode).toBe("rose");
+
+			// Persisted state must reflect the new mode
+			expect(instance.state.deviceMode).toMatchObject({ mode: "rose" });
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-dm-setmode");
+		}
+	}, 300_000);
 });

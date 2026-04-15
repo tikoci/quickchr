@@ -188,8 +188,13 @@ async function ensureLoggedIn(
 	password: string,
 	timeoutMs: number,
 ): Promise<boolean> {
-	// Send \r to solicit a response (prompt or login)
+	// Send \r to solicit a response (prompt or login).
+	// Re-poke every 2s — a fresh socket connection may not receive the login
+	// prompt until the terminal is nudged (e.g. after a cold boot or reconnect).
+	const POKE_INTERVAL_MS = 2_000;
 	write(session, "\r");
+	let lastPokeAt = Date.now();
+	let hasQuit = false;
 
 	const deadline = Date.now() + timeoutMs;
 
@@ -197,11 +202,19 @@ async function ensureLoggedIn(
 	while (Date.now() < deadline) {
 		const remaining = deadline - Date.now();
 
-		// Check for CLI prompt first (already logged in)
+		// If we see a CLI prompt, a previous session is still active on the serial console.
+		// Log out once so we can log back in as the requested user. This handles the case
+		// where consoleExec is called twice with different users — the terminal retains the
+		// previous session after the socket closes (serial has no HUP concept).
 		const promptIdx = session.buffer.indexOf(PROMPT_PATTERN, session.matchOffset);
 		if (promptIdx >= 0) {
 			session.matchOffset = promptIdx + PROMPT_PATTERN.length;
-			return true;
+			if (!hasQuit) {
+				hasQuit = true;
+				write(session, "/quit\r");
+				await Bun.sleep(500);
+			}
+			continue;
 		}
 
 		// Check for Login: prompt
@@ -225,6 +238,12 @@ async function ensureLoggedIn(
 			// - "new password>" → Ctrl-C to skip
 			// - CLI prompt → done
 			return await handlePostLogin(session, deadline - Date.now());
+		}
+
+		// Re-poke the terminal periodically — no response yet
+		if (Date.now() - lastPokeAt >= POKE_INTERVAL_MS) {
+			write(session, "\r");
+			lastPokeAt = Date.now();
 		}
 
 		await Bun.sleep(POLL_INTERVAL_MS);

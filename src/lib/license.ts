@@ -49,10 +49,12 @@ function classifyRenewResponse(text: string): "done" | "pending" | "not-ready" {
 }
 
 /** Apply or renew a CHR trial license via /system/license/renew.
- *  @param httpPort  REST API port (e.g. 9180)
- *  @param opts      MikroTik account credentials + desired level
- *  @param chrUser   RouterOS admin username (default "admin")
- *  @param chrPass   RouterOS admin password (default "" for fresh CHR)
+ *  @param httpPort   REST API port (e.g. 9180)
+ *  @param opts       MikroTik account credentials + desired level
+ *  @param chrUser    RouterOS admin username (default "admin")
+ *  @param chrPass    RouterOS admin password (default "" for fresh CHR)
+ *  @param logger     Optional progress logger
+ *  @param authHeader Pre-built Authorization header (overrides chrUser/chrPass when provided)
  */
 export async function renewLicense(
 	httpPort: number,
@@ -60,9 +62,10 @@ export async function renewLicense(
 	chrUser = "admin",
 	chrPass = "",
 	logger?: ProgressLogger,
+	authHeader?: string,
 ): Promise<void> {
 	const log = logger ?? createLogger();
-	const auth = `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
+	const auth = authHeader ?? `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
 	const body: Record<string, string> = {};
 	if (opts.account) body.account = opts.account;
 	if (opts.password) body.password = opts.password;
@@ -74,7 +77,7 @@ export async function renewLicense(
 
 	// Wait for the license subsystem to be ready — right after boot, RouterOS may
 	// return system resource data for all REST endpoints (see waitForBoot stage 4).
-	await waitForLicenseApi(httpPort, chrUser, chrPass);
+	await waitForLicenseApi(httpPort, chrUser, chrPass, 30_000, auth);
 
 	for (let attempt = 1; attempt <= MAX_RENEW_ATTEMPTS; attempt++) {
 		let response: Response;
@@ -128,7 +131,7 @@ export async function renewLicense(
 		let pollCount = 0;
 		while (Date.now() < deadline) {
 			try {
-				const info = await getLicenseInfo(httpPort, chrUser, chrPass);
+				const info = await getLicenseInfo(httpPort, chrUser, chrPass, auth);
 				pollCount++;
 				log.debug(`License poll #${pollCount}: level=${info.level}, want=${opts.level}`);
 				if (info.level === opts.level) return;
@@ -153,8 +156,9 @@ async function waitForLicenseApi(
 	chrUser: string,
 	chrPass: string,
 	timeoutMs = 30_000,
+	authHeader?: string,
 ): Promise<void> {
-	const auth = `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
+	const auth = authHeader ?? `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
 	const deadline = Date.now() + timeoutMs;
 
 	while (Date.now() < deadline) {
@@ -178,13 +182,15 @@ async function waitForLicenseApi(
  *  Uses GET /rest/system/license (standard REST read for a single-object menu).
  *  Normalises the response: RouterOS omits `level` for the implicit "free" tier,
  *  so we fill it in when absent.
+ *  @param authHeader Pre-built Authorization header (overrides chrUser/chrPass when provided)
  */
 export async function getLicenseInfo(
 	httpPort: number,
 	chrUser = "admin",
 	chrPass = "",
+	authHeader?: string,
 ): Promise<LicenseInfo> {
-	const auth = `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
+	const auth = authHeader ?? `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
 
 	let response: Response;
 	try {

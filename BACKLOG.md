@@ -87,7 +87,7 @@ Before the first `git push` to `tikoci/quickchr`, tidy the repo so first-time vi
 - [ ] Remove or populate stale `test.jpg` (0-byte file at repo root, committed Apr 6 — residue from an experiment)
 - [ ] Reconcile `/index.ts` vs `/src/index.ts` — root one is out-of-sync with the real barrel (`src/index.ts`). `package.json` points to `src/index.ts`. Delete the root file or make it a re-export alias.
 - [ ] `.gitignore`: confirm `.venv/`, `coverage/`, `*.jpg` (if experimental) are excluded; Python venv is currently untracked but should be explicit
-- [ ] Bump `package.json` version from `0.1.0` before first publish. Decide: pre-release (`0.1.0-rc.1`) or `0.2.0`?
+- [ ] Bump `package.json` version from `0.1.0` before first publish. **Even minors** are "release" and **odd minors** are "pre-release", each has own patch#, major stays at 0 until significant test/usage on **all** platform/arch combos.
 
 **Docs drift (README is stale):**
 
@@ -136,11 +136,11 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 ### Provisioning
 
 - [x] `/system/device-mode` support — `update container=yes scheduler=yes ...` with mode selection (`advanced`/`enterprise`/etc). Required for containers and other restricted features. Opt-in only (not configured unless explicitly requested). CHR ships with mode=advanced. Wizard defaults to rose when user opts in.
-- [ ] `instance.setDeviceMode(options)` — allow changing device-mode on a running instance via the library API. Requires the hard-reboot QEMU flow, unlike most config changes that are simple REST calls. Useful for test scenarios that need to toggle device-mode features between runs.
-- [ ] License apply should read back and verify via REST after write — RouterOS commands vary by version; early detection beats debugging later
-- [ ] `license.ts` auth: `renewLicense()` and `getLicenseInfo()` default to `admin:` credentials. If a machine has `disableAdmin: true` with a provisioned user, license operations will fail with 401. Should accept or resolve credentials via `resolveAuth()` like `exec()` does.
+- [x] `instance.setDeviceMode(options)` — allow changing device-mode on a running instance via the library API. Requires the hard-reboot QEMU flow, unlike most config changes that are simple REST calls. Useful for test scenarios that need to toggle device-mode features between runs.
+- [x] License apply should read back and verify via REST after write — `getLicenseInfo()` called after `renewLicense()` in `_provisionInstance`; only updates `actualLevel` if the read-back confirms a non-free level. Early detection beats debugging later.
+- [x] `license.ts` auth: `renewLicense()` and `getLicenseInfo()` default to `admin:` credentials. If a machine has `disableAdmin: true` with a provisioned user, license operations will fail with 401. Should accept or resolve credentials via `resolveAuth()` like `exec()` does.
 - [x] First-boot serial console provisioning engine (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. `src/lib/console.ts` handles: login sequence (Login:, Password:), license `[Y/n]:` prompt, password change skip (Ctrl-C), and command execution over serial. Version-proof prompt pattern (`] > ` suffix). Wired into `instance.exec()` as `--via=console`. Unit tests in `test/unit/console.test.ts`, integration tests in `test/integration/exec.test.ts`.
-- [ ] Console-based provisioning — use `console.ts` login/prompt engine for first-boot provisioning when REST API is unavailable. Refactor `provision.ts` to optionally use console transport.
+- [x] Console-based provisioning — `provision.ts` accepts optional `machineDir`; if REST times out (30s), falls back to `consoleProvision()` which uses `consoleExec()` for user creation and admin disable. `ensureLoggedIn()` now logs out any stale serial session before re-authenticating as the desired user (`/quit\r` + hasQuit guard). `exec --via=auto` also falls back to console on REST unreachable. Integration-tested.
 - [x] **Fix: `disableAdmin()` race condition** — `disableAdmin()` now accepts optional `verifyAuth` parameter for read-back verification using alternate credentials (e.g. the new user created before disabling admin). Verification poll loop catches transient errors (401 from disabled admin, network blips) instead of aborting. Deadline increased to 20s. `provision()` passes new user's auth for verification.
 
 ### Robustness

@@ -164,6 +164,79 @@ describe.skipIf(SKIP)("user provisioning", () => {
 	}, 180_000);
 });
 
+describe.skipIf(SKIP)("console provisioning", () => {
+	beforeAll(async () => {
+		await cleanupMachine("integration-prov-console");
+	});
+
+	test("exec --via=console can create a user and admin can be disabled", async () => {
+		// This verifies the consoleExec path that console provisioning uses:
+		// issue RouterOS CLI commands over the serial socket, then confirm via REST.
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			// Boot with no user provisioning so admin:"" is active.
+			// secureLogin:false → hasProvisioning=false → start() returns before boot;
+			// we must explicitly wait for REST before using the console.
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch: "x86",
+				background: true,
+				name: "integration-prov-console",
+				secureLogin: false,
+			});
+
+			// Wait for REST to be up (serial console is usable once CHR is fully booted)
+			const booted = await instance.waitForBoot(60_000);
+			expect(booted).toBe(true);
+
+			// Create a user via serial console — same command consoleProvision uses
+			await instance.exec(
+				'/user add name="consoletest" password="ConsolePass1" group=full',
+				{ via: "console", user: "admin", password: "" },
+			);
+
+			// Verify the user was created and can auth via REST
+			const resp = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{
+					headers: { Authorization: `Basic ${btoa("consoletest:ConsolePass1")}` },
+					signal: AbortSignal.timeout(10_000),
+				},
+			);
+			expect(resp.status).toBe(200);
+
+			// Disable admin via serial console using the newly-created user.
+			// RouterOS silently ignores disabling your own account in the same session,
+			// so we must authenticate as a different user — mirroring what consoleProvision does.
+			await instance.exec("/user set [find name=admin] disabled=yes", {
+				via: "console",
+				user: "consoletest",
+				password: "ConsolePass1",
+			});
+
+			// Admin should now be disabled — REST with admin creds returns 401 or 500
+			// (RouterOS may return 500 instead of 401 for disabled-user auth attempts).
+			// Wait briefly for RouterOS to stabilize after the user change.
+			await Bun.sleep(2_000);
+			const adminResp = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{
+					headers: { Authorization: `Basic ${btoa("admin:")}` },
+					signal: AbortSignal.timeout(10_000),
+				},
+			);
+			expect(adminResp.status).not.toBe(200);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-console");
+		}
+	}, 180_000);
+});
+
 describe.skipIf(SKIP)("provisioning corner cases", () => {
 	beforeAll(async () => {
 		await cleanupMachine("integration-prov-corner");

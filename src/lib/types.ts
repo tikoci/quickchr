@@ -2,6 +2,8 @@
  * Shared types for quickchr — CHR QEMU Manager.
  */
 
+import type { ProgressLogger } from "./log.ts";
+
 // --- Version & Architecture ---
 
 export type Channel = "stable" | "long-term" | "testing" | "development";
@@ -278,6 +280,13 @@ export interface ChrInstance {
 	exec(command: string, opts?: ExecOptions): Promise<ExecResult>;
 	/** Apply or renew a CHR trial license. */
 	license(opts: LicenseOptions): Promise<void>;
+	/** Change device-mode on a running instance (e.g. enable container, rose, etc.).
+	 *  This requires a hard QEMU power-cycle to confirm the change — the instance
+	 *  will briefly stop and restart. Wait for the returned promise before using the
+	 *  instance again.
+	 *  @param options  Desired device-mode flags (same as StartOptions.deviceMode).
+	 *  @param logger   Optional progress logger for status/debug output. */
+	setDeviceMode(options: DeviceModeOptions, logger?: ProgressLogger): Promise<void>;
 
 	/** List extra packages available for this instance's version and arch.
 	 *  Downloads and caches the all_packages ZIP on the first call. */

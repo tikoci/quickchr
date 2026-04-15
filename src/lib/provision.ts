@@ -1,11 +1,13 @@
 /**
- * Post-boot provisioning — user creation, admin disable via REST API.
+ * Post-boot provisioning — user creation, admin disable via REST API,
+ * with a console transport fallback when REST is unavailable.
  */
 
 import { QuickCHRError } from "./types.ts";
 import { saveInstanceCredentials } from "./credentials.ts";
 import { generatePassword } from "./password.ts";
 import { waitForBoot } from "./qemu.ts";
+import { consoleExec } from "./console.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 
 /** The default user name created by quickchr for managed CHR access. */
@@ -241,11 +243,53 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 	);
 }
 
+/** Provision a CHR via the serial console — fallback when REST is unavailable.
+ *  Creates a user and optionally disables admin by sending RouterOS CLI commands
+ *  over the serial socket. All commands run as admin with an empty password (fresh CHR). */
+async function consoleProvision(
+	machineDir: string,
+	machineName: string,
+	effectiveUser: { name: string; password: string } | null,
+	shouldDisableAdmin: boolean,
+	logger?: ProgressLogger,
+): Promise<ProvisionResult> {
+	const log = logger ?? createLogger();
+
+	if (effectiveUser) {
+		log.status(`  Creating user "${effectiveUser.name}" via serial console...`);
+		// RouterOS CLI syntax: /user add name=... password=... group=full
+		await consoleExec(
+			machineDir,
+			`/user add name="${effectiveUser.name}" password="${effectiveUser.password}" group=full`,
+			"admin",
+			"",
+			30_000,
+		);
+		await saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
+		log.debug(`User "${effectiveUser.name}" created via console`);
+	}
+
+	if (shouldDisableAdmin) {
+		log.status("  Disabling admin via serial console...");
+		// Use newly-created user to disable admin — RouterOS silently ignores
+		// disabling your own account while the current session is authenticated as that user.
+		const disableUser = effectiveUser?.name ?? "admin";
+		const disablePass = effectiveUser?.password ?? "";
+		await consoleExec(machineDir, "/user set [find name=admin] disabled=yes", disableUser, disablePass, 30_000);
+		log.debug("Admin disabled via console");
+	}
+
+	return { user: effectiveUser };
+}
+
 /** Run all provisioning steps based on the config.
  *
  * When `user` is provided, creates that exact user. When `user` is omitted
  * but `secureLogin` is true (or unset — it defaults to true), a `quickchr`
  * managed account is created automatically with a generated password.
+ *
+ * When `machineDir` is provided and the REST API does not become available within
+ * 30 seconds, provisioning falls back to the serial console transport.
  *
  * Returns the user that was created (if any) so callers can display the
  * password and store it.
@@ -257,7 +301,10 @@ export async function provision(
 	shouldDisableAdmin?: boolean,
 	secureLogin?: boolean,
 	logger?: ProgressLogger,
+	machineDir?: string,
 ): Promise<ProvisionResult> {
+	const log = logger ?? createLogger();
+
 	// Determine what user to create.
 	// Priority: explicit user > auto-create quickchr account (secureLogin defaults true)
 	let effectiveUser = user ?? null;
@@ -271,7 +318,18 @@ export async function provision(
 		return { user: null };
 	}
 
-	await waitForRest(httpPort);
+	// Try REST provisioning. When machineDir is provided, use a shorter timeout
+	// so the console fallback can engage sooner if REST isn't available.
+	const restTimeout = machineDir ? 30_000 : 60_000;
+	try {
+		await waitForRest(httpPort, restTimeout);
+	} catch (e) {
+		if (machineDir) {
+			log.warn("REST API unavailable — falling back to serial console provisioning");
+			return consoleProvision(machineDir, machineName, effectiveUser, !!shouldDisableAdmin, logger);
+		}
+		throw e;
+	}
 
 	if (effectiveUser) {
 		await createUser(httpPort, effectiveUser.name, effectiveUser.password);
@@ -281,7 +339,6 @@ export async function provision(
 
 	if (shouldDisableAdmin) {
 		if (!effectiveUser) {
-			const log = logger ?? createLogger();
 			log.warn("Warning: disabling admin without creating another user — you may lose access");
 		}
 		// Pass the new user's auth for verification — after disabling admin,

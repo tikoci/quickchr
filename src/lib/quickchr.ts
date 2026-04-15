@@ -12,6 +12,7 @@ import type {
 	ExecOptions,
 	ExecResult,
 	LicenseInput,
+	LicenseLevel,
 	MachineState,
 	QgaCommand,
 	SnapshotInfo,
@@ -41,7 +42,7 @@ import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnaps
 import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
-import { renewLicense } from "./license.ts";
+import { renewLicense, getLicenseInfo } from "./license.ts";
 import { resolveAuth } from "./auth.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials } from "./credentials.ts";
 import { restExecute } from "./exec.ts";
@@ -311,18 +312,34 @@ function createInstance(state: MachineState): ChrInstance {
 				);
 			}
 			const auth = await resolveAuth(state, opts?.user, opts?.password);
-			return restExecute(restUrl, auth, command, opts);
+			if (via === "rest") {
+				return restExecute(restUrl, auth, command, opts);
+			}
+			// via === "auto": try REST, fall back to console on network/timeout errors.
+			// QuickCHRError from REST (HTTP errors like 401/400) are not retried — they
+			// represent a real command or auth failure, not an unreachable endpoint.
+			try {
+				return await restExecute(restUrl, auth, command, {
+					...opts,
+					timeout: opts?.timeout ?? 10_000,
+				});
+			} catch (e) {
+				if (e instanceof QuickCHRError) throw e;
+				// Network error (ECONNREFUSED, timeout) — fall back to console
+				const consoleResult = await consoleExec(
+					state.machineDir,
+					command,
+					auth.user,
+					opts?.password ?? state.user?.password ?? "",
+					opts?.timeout ?? 30_000,
+				);
+				return { output: consoleResult.output, via: "console" };
+			}
 		},
 
 		async license(opts: LicenseOptions): Promise<void> {
 			const auth = await resolveAuth(state);
-			const rawCreds = auth.header.startsWith("Basic ")
-				? Buffer.from(auth.header.slice(6), "base64").toString()
-				: `${auth.user}:`;
-			const [chrUser, chrPass] = rawCreds.includes(":")
-				? [rawCreds.slice(0, rawCreds.indexOf(":")), rawCreds.slice(rawCreds.indexOf(":") + 1)]
-				: [rawCreds, ""];
-			await renewLicense(ports.http, opts, chrUser, chrPass);
+			await renewLicense(ports.http, opts, undefined, undefined, undefined, auth.header);
 			// Persist the applied level in state
 			if (opts.level) {
 				const current = loadMachine(state.name);
@@ -332,6 +349,21 @@ function createInstance(state: MachineState): ChrInstance {
 				}
 				state.licenseLevel = opts.level;
 			}
+		},
+
+		async setDeviceMode(options: DeviceModeOptions, logger?: ProgressLogger): Promise<void> {
+			const log = logger ?? createLogger();
+			const resolved = resolveDeviceModeOptions(options);
+			for (const w of resolved.warnings) log.warn(`Device-mode: ${w}`);
+			const launchConfig = await buildLaunchConfigFromState(state);
+			await applyDeviceMode(this as ChrInstance, state, resolved, launchConfig, log);
+			// Persist updated device-mode in state
+			const current = loadMachine(state.name);
+			if (current) {
+				current.deviceMode = options;
+				saveMachine(current);
+			}
+			state.deviceMode = options;
 		},
 
 		async availablePackages(): Promise<string[]> {
@@ -608,6 +640,149 @@ async function hardRebootMachine(
 	saveMachine(state);
 
 	return method;
+}
+
+/** Reconstruct the QEMU launch config from persisted machine state.
+ *  Mirrors the logic in _launchExisting so setDeviceMode() can power-cycle
+ *  a running instance without re-running the full start flow. */
+async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaunchConfig> {
+	const diskArtifacts = await ensureConfiguredDisks(
+		state.machineDir,
+		state.bootSize,
+		state.extraDisks,
+		state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
+	);
+	const platform = await detectPlatform();
+	const hostfwd = buildHostfwdString(state.ports);
+	const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+	return {
+		arch: state.arch,
+		machineDir: state.machineDir,
+		bootDisk: diskArtifacts.bootDisk,
+		extraDisks: diskArtifacts.extraDisks,
+		mem: state.mem,
+		cpu: state.cpu,
+		ports: state.ports,
+		networks: resolvedNetworks,
+		background: true,
+	};
+}
+
+/** Apply a device-mode change to a running CHR instance (may require hard power-cycle).
+ *  Extracted from _provisionInstance so setDeviceMode() can reuse the same logic. */
+async function applyDeviceMode(
+	instance: ChrInstance,
+	machineState: MachineState,
+	resolvedDeviceMode: ReturnType<typeof resolveDeviceModeOptions>,
+	launchConfig: QemuLaunchConfig,
+	log: ProgressLogger,
+): Promise<void> {
+	const httpPort = toChrPorts(machineState.ports).http;
+	const bootTimeout = defaultBootTimeout(machineState.arch);
+	await waitForDeviceModeApi(httpPort, 30_000);
+	log.status(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
+
+	let alreadyActive = false;
+	try {
+		const beforeMode = await readDeviceMode(httpPort);
+		log.debug(`Device-mode before update: ${JSON.stringify(beforeMode)}`);
+		alreadyActive = verifyDeviceMode(resolvedDeviceMode, beforeMode).ok;
+	} catch { /* CHR unexpectedly unreachable — proceed with update */ }
+
+	if (alreadyActive) {
+		log.status("  Device-mode already active; no power-cycle required.");
+		return;
+	}
+
+	const maxAttempts = 5;
+	let pendingUpdate: Promise<Response> | undefined;
+	let requiresPowerCycle = false;
+
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
+		const outcome = await Promise.race([
+			request
+				.then((response) => ({ state: "resolved" as const, response }))
+				.catch((error: unknown) => ({ state: "rejected" as const, error })),
+			Bun.sleep(2000).then(() => ({ state: "pending" as const })),
+		]);
+
+		if (outcome.state === "rejected") {
+			throw (outcome.error instanceof Error)
+				? outcome.error
+				: new QuickCHRError("PROCESS_FAILED", `Device-mode update request failed: ${String(outcome.error)}`);
+		}
+
+		if (outcome.state === "pending") {
+			pendingUpdate = request;
+			requiresPowerCycle = true;
+			log.debug("Device-mode update entered pending confirmation state");
+			break;
+		}
+
+		log.debug(`Device-mode update response: HTTP ${outcome.response.status}`);
+		await Bun.sleep(5000);
+
+		let routerOsOffline = false;
+		try {
+			await fetch(`http://127.0.0.1:${httpPort}/`, { signal: AbortSignal.timeout(2000) });
+		} catch {
+			routerOsOffline = true;
+		}
+
+		if (routerOsOffline) {
+			log.debug("Device-mode accepted — waiting for RouterOS internal reboot");
+			const rebooted = await instance.waitForBoot(bootTimeout);
+			if (!rebooted) {
+				throw new QuickCHRError("BOOT_TIMEOUT", "RouterOS device-mode internal reboot timed out");
+			}
+			await waitForDeviceModeApi(httpPort, bootTimeout);
+		}
+
+		const actualNow = await readDeviceMode(httpPort);
+		log.debug(`Device-mode after update attempt ${attempt}: ${JSON.stringify(actualNow)}`);
+		const immediateVerification = verifyDeviceMode(resolvedDeviceMode, actualNow);
+		if (immediateVerification.ok) {
+			log.status("  Device-mode already active; no power-cycle required.");
+			return;
+		}
+
+		if (attempt === maxAttempts) {
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				`Device-mode update did not activate or enter pending state after ${maxAttempts} attempts; last mismatch: ${immediateVerification.mismatches.join("; ")}`,
+			);
+		}
+
+		log.warn(`Device-mode update returned early without activation (attempt ${attempt}/${maxAttempts}); retrying...`);
+		await Bun.sleep(2000);
+	}
+
+	if (requiresPowerCycle) {
+		const rebootMethod = await hardRebootMachine(machineState, launchConfig);
+		pendingUpdate?.catch(() => {});
+		log.status(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
+
+		const rebooted = await instance.waitForBoot(bootTimeout);
+		if (!rebooted) {
+			throw new QuickCHRError(
+				"BOOT_TIMEOUT",
+				`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s`,
+			);
+		}
+		await waitForDeviceModeApi(httpPort, bootTimeout);
+	}
+
+	const actual = await readDeviceMode(httpPort);
+	log.debug(`Device-mode post-reboot: ${JSON.stringify(actual)}`);
+	const verification = verifyDeviceMode(resolvedDeviceMode, actual);
+	if (!verification.ok) {
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`Device-mode verification failed after hard reboot: ${verification.mismatches.join("; ")}`,
+		);
+	}
+	log.status(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
 }
 
 // biome-ignore lint/complexity/noStaticOnlyClass: QuickCHR is the public API — class provides a clear namespace for consumers
@@ -1013,117 +1188,7 @@ export class QuickCHR {
 		}
 
 		if (hasDeviceModeProvisioning) {
-			const httpPort = chrPorts.http;
-			await waitForDeviceModeApi(httpPort, 30_000);
-			log.status(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
-
-			// Pre-check: if mode is already exactly what we want, skip update + power-cycle.
-			let alreadyActive = false;
-			try {
-				const beforeMode = await readDeviceMode(httpPort);
-				log.debug(`Device-mode before update: ${JSON.stringify(beforeMode)}`);
-				alreadyActive = verifyDeviceMode(resolvedDeviceMode, beforeMode).ok;
-			} catch { /* CHR unexpectedly unreachable — proceed with update */ }
-
-			if (alreadyActive) {
-				log.status("  Device-mode already active; no power-cycle required.");
-			} else {
-				const maxAttempts = 5;
-				let pendingUpdate: Promise<Response> | undefined;
-				let requiresPowerCycle = false;
-
-				for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-					const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
-					const outcome = await Promise.race([
-						request
-							.then((response) => ({ state: "resolved" as const, response }))
-							.catch((error: unknown) => ({ state: "rejected" as const, error })),
-						Bun.sleep(2000).then(() => ({ state: "pending" as const })),
-					]);
-
-					if (outcome.state === "rejected") {
-						throw (outcome.error instanceof Error)
-							? outcome.error
-							: new QuickCHRError("PROCESS_FAILED", `Device-mode update request failed: ${String(outcome.error)}`);
-					}
-
-					if (outcome.state === "pending") {
-						pendingUpdate = request;
-						requiresPowerCycle = true;
-						log.debug("Device-mode update entered pending confirmation state");
-						break;
-					}
-
-					log.debug(`Device-mode update response: HTTP ${outcome.response.status}`);
-
-					// Early HTTP 200 is not enough to trust. Give RouterOS a moment to either
-					// begin its internal reboot or reflect the requested mode in REST.
-					await Bun.sleep(5000);
-
-					let routerOsOffline = false;
-					try {
-						await fetch(`http://127.0.0.1:${httpPort}/`, { signal: AbortSignal.timeout(2000) });
-					} catch {
-						routerOsOffline = true;
-					}
-
-					if (routerOsOffline) {
-						log.debug("Device-mode accepted — waiting for RouterOS internal reboot");
-						const rebooted = await instance.waitForBoot(bootTimeout);
-						if (!rebooted) {
-							throw new QuickCHRError("BOOT_TIMEOUT", "RouterOS device-mode internal reboot timed out");
-						}
-						await waitForDeviceModeApi(httpPort, bootTimeout);
-					}
-
-					const actualNow = await readDeviceMode(httpPort);
-					log.debug(`Device-mode after update attempt ${attempt}: ${JSON.stringify(actualNow)}`);
-					const immediateVerification = verifyDeviceMode(resolvedDeviceMode, actualNow);
-					if (immediateVerification.ok) {
-						log.status("  Device-mode already active; no power-cycle required.");
-						break;
-					}
-
-					if (attempt === maxAttempts) {
-						throw new QuickCHRError(
-							"PROCESS_FAILED",
-							`Device-mode update did not activate or enter pending confirmation state after ${maxAttempts} attempts; last mismatch: ${immediateVerification.mismatches.join("; ")}`,
-						);
-					}
-
-					log.warn(`Device-mode update returned early without activation (attempt ${attempt}/${maxAttempts}); retrying...`);
-					await Bun.sleep(2000);
-				}
-
-				if (requiresPowerCycle) {
-					// Cold QEMU power-cycle: kill + restart. From RouterOS's perspective this
-					// is the hardware power-cycle that confirms the staged device-mode change.
-					const rebootMethod = await hardRebootMachine(machineState, launchConfig);
-					pendingUpdate?.catch(() => {});
-					log.status(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
-
-					const rebooted = await instance.waitForBoot(bootTimeout);
-					if (!rebooted) {
-						throw new QuickCHRError(
-							"BOOT_TIMEOUT",
-							`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s. Ensure QEMU was fully power-cycled and try again.`,
-						);
-					}
-					await waitForDeviceModeApi(httpPort, bootTimeout);
-				}
-
-				const actual = await readDeviceMode(httpPort);
-				log.debug(`Device-mode post-reboot: ${JSON.stringify(actual)}`);
-				const verification = verifyDeviceMode(resolvedDeviceMode, actual);
-				if (!verification.ok) {
-					throw new QuickCHRError(
-						"PROCESS_FAILED",
-						`Device-mode verification failed after hard reboot: ${verification.mismatches.join("; ")}. Re-run start with explicit --device-mode flags or stop/start to force another power-cycle.`,
-					);
-				}
-
-				log.status(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
-			}
+			await applyDeviceMode(instance, machineState, resolvedDeviceMode, launchConfig, log);
 		}
 
 		if (opts.license) {
@@ -1131,21 +1196,29 @@ export class QuickCHR {
 			const resolvedLicense = await resolveLicenseInput(opts.license);
 			if (resolvedLicense) try {
 				await renewLicense(chrPorts.http, resolvedLicense, undefined, undefined, log);
-				const level = resolvedLicense.level ?? "p1";
+				// Read back the actual applied level — RouterOS is the source of truth.
+				let actualLevel: string = resolvedLicense.level ?? "p1";
+				try {
+					const info = await getLicenseInfo(chrPorts.http);
+					if (info.level && info.level !== "free") actualLevel = info.level;
+					log.debug(`License read-back: actual level=${actualLevel}`);
+				} catch (e) {
+					log.warn(`License read-back failed (using requested level): ${e instanceof Error ? e.message : String(e)}`);
+				}
 				const current = loadMachine(machineState.name);
 				if (current) {
-					current.licenseLevel = level;
+					current.licenseLevel = actualLevel as LicenseLevel;
 					saveMachine(current);
 				}
-				machineState.licenseLevel = level;
-				log.status(`  License applied: free → ${level}`);
+				machineState.licenseLevel = actualLevel as LicenseLevel;
+				log.status(`  License applied: free → ${actualLevel}`);
 			} catch (e) {
 				log.warn(`License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		}
 
 		if (opts.user || opts.disableAdmin || opts.secureLogin !== false) {
-			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log);
+			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log, machineState.machineDir);
 			if (result.user) {
 				// Persist user info in state (password placeholder — real password in secret store)
 				const current = loadMachine(machineState.name);
