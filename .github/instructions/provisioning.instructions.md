@@ -1,5 +1,5 @@
 ---
-applyTo: "src/lib/provision.ts,src/lib/exec.ts,src/lib/qemu.ts,src/lib/license.ts,test/integration/**"
+applyTo: "src/lib/provision.ts,src/lib/exec.ts,src/lib/qemu.ts,src/lib/license.ts,src/lib/device-mode.ts,test/integration/**"
 ---
 
 # Provisioning & RouterOS Debugging Instructions
@@ -27,13 +27,15 @@ after boot, even after `waitForBoot` returns true.
 Each caller must handle this independently. The established pattern:
 
 ```typescript
+// Use node:http + agent:false (NOT fetch) — see "Bun Connection Pool" section below
+import { request as nodeRequest } from "node:http";
+
 // Retry until the response has the expected keys (up to N seconds)
 const deadline = Date.now() + 20_000;
 let lastBody = "";
 while (Date.now() < deadline) {
-    const resp = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
-    if (resp.ok) {
-        const body = await resp.text();
+    const { status, body } = await nodeGet(url, headers, 5_000); // nodeGet uses node:http
+    if (status >= 200 && status < 300) {
         lastBody = body;
         const data = JSON.parse(body);
         if (data && typeof data === "object" && !Array.isArray(data) && "expected-key" in data) {
@@ -47,6 +49,53 @@ throw new Error(`Endpoint did not return valid data within 20s (last: ${lastBody
 
 Callers that already implement this: `getLicenseInfo` (15s), `readDeviceMode` (30s
 AbortSignal), `fetchUntilHasKeys` in anchor test (20s).
+
+## Bun Connection Pool — Use `node:http` + `agent: false`
+
+**Bun's `fetch()` pools TCP connections by `host:port` and ignores `Connection: close`.**
+This causes silent stale-response bugs in integration tests and library code.
+
+Symptoms:
+- A test passes in isolation but fails in the full suite
+- A POST returns immediately (<2ms) with data that looks like a cached GET response
+- Different test runs produce inconsistent results on the same machine
+
+Root cause: when one machine is stopped and a new machine is started on the same port
+(possible when ports are recycled), Bun's pool may return responses from the prior
+machine's connections. Even `Bun.sleep(500)` between calls does not drain the pool.
+
+**The fix: use `node:http` with `agent: false` for any REST call to a CHR.**
+
+```typescript
+import { request as nodeRequest } from "node:http";
+
+function nodeGet(url: string, headers: Record<string, string>, timeoutMs: number): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+        const parsed = new URL(url);
+        const req = nodeRequest(
+            { hostname: parsed.hostname, port: parsed.port, path: parsed.pathname + parsed.search,
+              method: "GET", headers, agent: false },
+            (res) => {
+                let body = "";
+                res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+                res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+                res.on("error", reject);
+            },
+        );
+        req.setTimeout(timeoutMs, () => { req.destroy(new Error("timeout")); });
+        req.on("error", reject);
+        req.end();
+    });
+}
+```
+
+Existing fixes using this pattern:
+- `exec.ts`: `restExecute` (commit `0c0f1b1`) — GET polling precedes the POST
+- `device-mode.ts`: `startDeviceModeUpdate` (commit `980ef4b`) — `waitForDeviceModeApi` GET loop pollutes the pool before the blocking POST
+- `test/integration/anchor.test.ts`: `nodeGet` helper (commit `980ef4b`) — test ports may be recycled from prior tests
+
+**Rule:** any integration test or library function that calls a CHR REST endpoint should
+use `node:http` + `agent: false`. Do NOT use `fetch()` for CHR REST calls.
 
 ## Collecting RouterOS Logs for Debugging
 
