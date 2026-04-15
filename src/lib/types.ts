@@ -219,6 +219,9 @@ export interface StartOptions {
 	/** Extra blank disks to attach, specified as sizes (e.g. ["512M", "1G"]).
 	 *  Requires `qemu-img` on the host. Extra disks are always qcow2. */
 	extraDisks?: string[];
+	/** Extra milliseconds added to the computed boot timeout.
+	 *  Useful on slow hosts where `defaultBootTimeout` underestimates actual boot time. */
+	timeoutExtra?: number;
 	/** Progress callback for status messages during start.
 	 *  If not provided, messages go to console.log.
 	 *  Debug-level messages (prefixed [debug]) are only emitted when QUICKCHR_DEBUG=1. */

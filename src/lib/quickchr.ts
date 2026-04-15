@@ -19,7 +19,7 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning } from "./platform.ts";
 import { resolveVersion, isValidVersion, generateMachineName } from "./versions.ts";
 import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString, hasUserModeNetwork } from "./network.ts";
 import {
@@ -71,9 +71,12 @@ function defaultMem(arch: Arch, override?: number): number {
 	return override ?? (isCrossArchEmulation(arch) ? 1024 : 512);
 }
 
-/** Default boot timeout — cross-arch TCG is much slower than native acceleration. */
-function defaultBootTimeout(arch: Arch, withPackages?: boolean): number {
-	const base = isCrossArchEmulation(arch) ? 300_000 : 120_000;
+/** Default boot timeout — accel mode and cross-arch emulation affect how slow the VM boots. */
+function defaultBootTimeout(arch: Arch, withPackages?: boolean, accel?: string): number {
+	const cross = isCrossArchEmulation(arch);
+	const factor = accelTimeoutFactor(accel ?? "tcg", cross);
+	// Base: 120s for native, scaled by factor (TCG cross-arch = 15× = 1800s max)
+	const base = Math.ceil(120_000 * factor);
 	// Package reinstall adds a full reboot cycle — extend by the same factor.
 	return withPackages ? base * 2 : base;
 }
@@ -409,7 +412,8 @@ function createInstance(state: MachineState): ChrInstance {
 			// Pass resolved credentials so waitForBoot can validate the response body
 			// (not just check for a connection), preventing ECONNRESET on the first
 			// real REST call after the reboot completes.
-			const timeout = defaultBootTimeout(state.arch, true);
+			const accel = await detectAccel(state.arch);
+			const timeout = defaultBootTimeout(state.arch, true, accel);
 			await waitForBoot(ports.http, timeout, rebootAuth);
 
 			return installed;
@@ -678,7 +682,8 @@ async function applyDeviceMode(
 	log: ProgressLogger,
 ): Promise<void> {
 	const httpPort = toChrPorts(machineState.ports).http;
-	const bootTimeout = defaultBootTimeout(machineState.arch);
+	const accel = await detectAccel(machineState.arch);
+	const bootTimeout = defaultBootTimeout(machineState.arch, undefined, accel);
 	await waitForDeviceModeApi(httpPort, 30_000);
 	log.status(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
 
@@ -1102,7 +1107,8 @@ export class QuickCHR {
 
 		const instance = createInstance(state);
 
-		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages);
+		const accel = await detectAccel(arch);
+		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages, accel) + (opts.timeoutExtra ?? 0);
 		if (hasProvisioning) {
 			const booted = await instance.waitForBoot(bootTimeout);
 			if (!booted) {
@@ -1173,7 +1179,8 @@ export class QuickCHR {
 			log.warn(`Device-mode: ${warning}`);
 		}
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
-		const bootTimeout = defaultBootTimeout(machineState.arch, opts.installAllPackages || (opts.packages?.length ?? 0) > 0);
+		const accel = await detectAccel(machineState.arch);
+		const bootTimeout = defaultBootTimeout(machineState.arch, opts.installAllPackages || (opts.packages?.length ?? 0) > 0, accel);
 		const chrPorts = toChrPorts(machineState.ports);
 
 		// Give SSH a moment to start after HTTP comes up
@@ -1321,7 +1328,8 @@ export class QuickCHR {
 		const instance = createInstance(state);
 
 		if (hasProvisioning && provisioningOpts) {
-			const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts.installAllPackages);
+			const accel = await detectAccel(state.arch);
+			const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts.installAllPackages, accel);
 			const booted = await instance.waitForBoot(bootTimeout);
 			if (!booted) {
 				throw new QuickCHRError(

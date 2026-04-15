@@ -117,6 +117,21 @@ export function isCrossArchEmulation(guestArch: "x86" | "arm64"): boolean {
 	return guestArch === "arm64" && process.arch !== "arm64";
 }
 
+/**
+ * Timeout scaling factor for QEMU acceleration mode.
+ *
+ * KVM and HVF are near-native; TCG is software emulation and may be 4–15×
+ * slower depending on whether the emulated guest architecture matches the host.
+ *
+ * @param accel  Output of detectAccel() for the guest arch.
+ * @param crossArch  True when host and guest architectures differ.
+ */
+export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
+	if (accel === "kvm" || accel === "hvf") return 1.0;
+	// TCG: cross-arch is 15× slower (x86-on-arm64 especially), same-arch is 4×.
+	return crossArch ? 15.0 : 4.0;
+}
+
 /** Detect available QEMU acceleration for a guest architecture. */
 export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 	const hostOs = process.platform;
