@@ -21,27 +21,55 @@ export interface ShellInfo {
 	supported: boolean;
 }
 
-/** Detect the current shell from $SHELL and report its version. */
+/**
+ * Detect the current interactive shell.
+ *
+ * $SHELL reflects the *login* shell, not the currently running one — e.g. it stays
+ * "/bin/zsh" even inside a fish session. Shell-specific env vars exported by the
+ * running shell are more reliable: fish exports FISH_VERSION, zsh exports ZSH_VERSION,
+ * bash exports BASH_VERSION. We check those first, then fall back to $SHELL.
+ */
 export function detectCurrentShell(): ShellInfo {
-	const shellEnv = process.env.SHELL ?? "";
-	const shell = shellEnv || "unknown";
-
+	// Shell-specific env vars take priority over $SHELL (login shell).
+	// These are exported by the *currently running* interactive shell.
+	let detectedBinary: string | undefined;
 	let version: string | undefined;
-	if (shellEnv) {
-		try {
-			const result = Bun.spawnSync([shellEnv, "--version"], {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			if (result.exitCode === 0) {
-				const out = new TextDecoder().decode(result.stdout).trim();
-				const firstLine = out.split("\n")[0] ?? "";
-				// Extract version number from first line
-				const match = firstLine.match(/(\d+\.\d+[\w.]*)/);
-				version = (match?.[1] ?? firstLine.slice(0, 60)) || undefined;
+
+	if (process.env.FISH_VERSION) {
+		detectedBinary = "fish";
+		version = process.env.FISH_VERSION;
+	} else if (process.env.ZSH_VERSION) {
+		detectedBinary = "zsh";
+		version = process.env.ZSH_VERSION;
+	} else if (process.env.BASH_VERSION) {
+		detectedBinary = "bash";
+		const m = process.env.BASH_VERSION.match(/(\d+\.\d+[\w.]*)/);
+		version = m?.[1] ?? process.env.BASH_VERSION.slice(0, 60);
+	}
+
+	// Resolve full path for the detected binary (or fall back to $SHELL).
+	let shell: string;
+	if (detectedBinary) {
+		const which = Bun.spawnSync(["which", detectedBinary], { stdout: "pipe", stderr: "pipe" });
+		shell = which.exitCode === 0
+			? new TextDecoder().decode(which.stdout).trim()
+			: detectedBinary;
+	} else {
+		const shellEnv = process.env.SHELL ?? "";
+		shell = shellEnv || "unknown";
+		// Get version from the login shell binary.
+		if (shellEnv) {
+			try {
+				const result = Bun.spawnSync([shellEnv, "--version"], { stdout: "pipe", stderr: "pipe" });
+				if (result.exitCode === 0) {
+					const out = new TextDecoder().decode(result.stdout).trim();
+					const firstLine = out.split("\n")[0] ?? "";
+					const match = firstLine.match(/(\d+\.\d+[\w.]*)/);
+					version = (match?.[1] ?? firstLine.slice(0, 60)) || undefined;
+				}
+			} catch {
+				// version unavailable
 			}
-		} catch {
-			// version unavailable
 		}
 	}
 
