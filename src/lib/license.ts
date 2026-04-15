@@ -189,15 +189,17 @@ export async function getLicenseInfo(
 	chrUser = "admin",
 	chrPass = "",
 	authHeader?: string,
+	retryMs = 15_000,
 ): Promise<LicenseInfo> {
 	const auth = authHeader ?? `Basic ${btoa(`${chrUser}:${chrPass}`)}`;
 
 	// RouterOS briefly serves /system/resource data from /system/license immediately
-	// after boot (REST routing startup race). Retry for up to 15s to let it settle.
-	const deadline = Date.now() + 15_000;
+	// after boot (REST routing startup race). Retry for up to retryMs to let it settle.
+	// do-while ensures at least one attempt even when retryMs=0 (useful in tests).
+	const deadline = Date.now() + retryMs;
 	let lastError: unknown;
 
-	while (Date.now() < deadline) {
+	do {
 		let response: Response;
 		try {
 			response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license`, {
@@ -207,7 +209,8 @@ export async function getLicenseInfo(
 			});
 		} catch (e) {
 			lastError = e;
-			await Bun.sleep(1000);
+			// Skip the sleep when past the deadline (e.g. retryMs=0 in tests).
+			await Bun.sleep(Math.max(0, Math.min(1000, deadline - Date.now())));
 			continue;
 		}
 
@@ -223,7 +226,7 @@ export async function getLicenseInfo(
 		// Post-boot REST quirk: /system/license may return /system/resource data briefly.
 		// Retry until the endpoint stabilises rather than failing to the caller.
 		if ("board-name" in info || "architecture-name" in info) {
-			await Bun.sleep(1000);
+			await Bun.sleep(Math.max(0, Math.min(1000, deadline - Date.now())));
 			continue;
 		}
 		// RouterOS REST omits default / empty fields. A CHR with no registered license
@@ -231,7 +234,7 @@ export async function getLicenseInfo(
 		// read info.level without special-casing undefined.
 		if (!info.level) info.level = "free";
 		return info;
-	}
+	} while (Date.now() < deadline);
 
 	const msg = lastError instanceof Error ? lastError.message : String(lastError ?? "timed out");
 	throw new QuickCHRError(

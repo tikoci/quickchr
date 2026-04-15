@@ -132,7 +132,8 @@ describe("renewLicense — error paths", () => {
 describe("getLicenseInfo — error paths", () => {
 	test("throws PROCESS_FAILED on network error", async () => {
 		globalThis.fetch = (() => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
-		const err = await getLicenseInfo(9100).catch((e) => e);
+		// retryMs=0 so it doesn't spin for 15s before throwing
+		const err = await getLicenseInfo(9100, "admin", "", undefined, 0).catch((e) => e);
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/ECONNREFUSED/);
 	});
@@ -140,7 +141,7 @@ describe("getLicenseInfo — error paths", () => {
 	test("throws PROCESS_FAILED on HTTP error response", async () => {
 		globalThis.fetch = (() =>
 			Promise.resolve(new Response("Forbidden", { status: 403 }))) as unknown as typeof fetch;
-		const err = await getLicenseInfo(9100).catch((e) => e);
+		const err = await getLicenseInfo(9100, "admin", "", undefined, 0).catch((e) => e);
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/403/);
 	});
