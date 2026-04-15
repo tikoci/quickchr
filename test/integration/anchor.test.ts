@@ -1,5 +1,38 @@
 import { describe, test, expect } from "bun:test";
+import { request as nodeRequest } from "node:http";
 import { accelTimeoutFactor, detectAccel, isCrossArchEmulation } from "../../src/lib/platform.ts";
+
+/**
+ * Fresh-connection GET using node:http with agent:false.
+ * Bun's fetch() pools TCP connections by host:port. When a prior test's
+ * machine is stopped and its port is recycled to a new machine, pooled
+ * connections return stale responses. agent:false forces a new TCP
+ * connection for every request, bypassing the pool entirely.
+ */
+function nodeGet(url: string, headers: Record<string, string>, timeoutMs: number): Promise<{ status: number; body: string }> {
+	return new Promise((resolve, reject) => {
+		const parsed = new URL(url);
+		const req = nodeRequest(
+			{
+				hostname: parsed.hostname,
+				port: parsed.port,
+				path: parsed.pathname + parsed.search,
+				method: "GET",
+				headers,
+				agent: false,
+			},
+			(res) => {
+				let body = "";
+				res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+				res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+				res.on("error", reject);
+			},
+		);
+		req.setTimeout(timeoutMs, () => { req.destroy(new Error("request timeout")); });
+		req.on("error", reject);
+		req.end();
+	});
+}
 
 /**
  * Anchor test — RouterOS REST API schema stability.
@@ -62,12 +95,8 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 				let lastBody = "";
 				while (Date.now() < deadline) {
 					try {
-						const resp = await fetch(`${base}/${path}`, {
-							headers,
-							signal: AbortSignal.timeout(5_000),
-						});
-						if (resp.ok) {
-							const body = await resp.text();
+						const { status, body } = await nodeGet(`${base}/${path}`, headers, 5_000);
+						if (status >= 200 && status < 300) {
 							lastBody = body;
 							const data = JSON.parse(body) as unknown;
 							if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -96,9 +125,9 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			expect(license).toHaveProperty("system-id");
 
 			// --- /user ---
-			const userResp = await fetch(`${base}/user`, { headers, signal: AbortSignal.timeout(10_000) });
-			expect(userResp.status).toBe(200);
-			const users = await userResp.json() as Array<Record<string, unknown>>;
+			const { status: userStatus, body: userBody } = await nodeGet(`${base}/user`, headers, 10_000);
+			expect(userStatus).toBe(200);
+			const users = JSON.parse(userBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(users)).toBe(true);
 			// Each user must have name + group
 			for (const u of users) {
@@ -114,9 +143,9 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			expect(dm).toHaveProperty("mode");
 
 			// --- /ip/address ---
-			const ipResp = await fetch(`${base}/ip/address`, { headers, signal: AbortSignal.timeout(10_000) });
-			expect(ipResp.status).toBe(200);
-			const ips = await ipResp.json() as Array<Record<string, unknown>>;
+			const { status: ipStatus, body: ipBody } = await nodeGet(`${base}/ip/address`, headers, 10_000);
+			expect(ipStatus).toBe(200);
+			const ips = JSON.parse(ipBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(ips)).toBe(true);
 			if (ips.length > 0) {
 				expect(ips[0]).toHaveProperty("address");
@@ -124,9 +153,9 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			}
 
 			// --- /interface ---
-			const ifResp = await fetch(`${base}/interface`, { headers, signal: AbortSignal.timeout(10_000) });
-			expect(ifResp.status).toBe(200);
-			const ifaces = await ifResp.json() as Array<Record<string, unknown>>;
+			const { status: ifStatus, body: ifBody } = await nodeGet(`${base}/interface`, headers, 10_000);
+			expect(ifStatus).toBe(200);
+			const ifaces = JSON.parse(ifBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(ifaces)).toBe(true);
 			expect(ifaces.length).toBeGreaterThan(0);
 			for (const iface of ifaces) {

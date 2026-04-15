@@ -705,6 +705,10 @@ async function applyDeviceMode(
 
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 		const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
+		// RouterOS blocks this connection while waiting for hard power-cycle confirmation.
+		// We race against 2s: if still pending at 2s, RouterOS has entered blocking state
+		// and we can confirm by killing QEMU. If it resolves in <2s ("returned early"),
+		// RouterOS hasn't committed the pending change yet — check state and retry.
 		const outcome = await Promise.race([
 			request
 				.then((response) => ({ state: "resolved" as const, response }))
@@ -755,7 +759,7 @@ async function applyDeviceMode(
 		if (attempt === maxAttempts) {
 			throw new QuickCHRError(
 				"PROCESS_FAILED",
-				`Device-mode update did not activate or enter pending state after ${maxAttempts} attempts; last mismatch: ${immediateVerification.mismatches.join("; ")}`,
+				`Device-mode update did not activate after ${maxAttempts} attempts; last mismatch: ${immediateVerification.mismatches.join("; ")}`,
 			);
 		}
 

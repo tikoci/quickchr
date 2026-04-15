@@ -2,6 +2,7 @@
  * RouterOS device-mode provisioning helpers.
  */
 
+import { request as nodeRequest } from "node:http";
 import type { DeviceModeOptions } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 
@@ -183,6 +184,11 @@ export async function waitForDeviceModeApi(httpPort: number, timeoutMs: number =
  * RouterOS blocks the HTTP connection waiting for power-cycle confirmation (up to 5 minutes).
  * The caller MUST kill the QEMU process while this request is pending to confirm the change.
  * The connection error (ECONNRESET) that results when QEMU exits is expected — suppress it.
+ *
+ * Uses node:http with agent:false to bypass Bun's connection pool. Bun pools connections
+ * by host:port; a pooled connection from the waitForDeviceModeApi GET poll loop would return
+ * a stale cached response immediately, making the POST appear to resolve in <2s before
+ * RouterOS has entered the blocking "waiting for power-cycle" state.
  */
 export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceModeOptions): Promise<Response> {
 	if (!shouldApplyDeviceMode(options)) {
@@ -195,26 +201,41 @@ export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceM
 		payload[name] = value;
 	}
 
-	// No AbortSignal — RouterOS holds this connection open (default ~5m) while waiting
-	// for hard power-cycle confirmation. The caller fires-and-forgets, then kills QEMU.
-	// The pending request will reject with ECONNRESET when QEMU exits — that's expected.
-	return fetch(`http://127.0.0.1:${httpPort}/rest/system/device-mode/update`, {
-		method: "POST",
-		headers: {
-			Authorization: `Basic ${btoa("admin:")}`,
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(payload),
-	}).then(async (response) => {
-		if (response.ok) {
-			return response;
-		}
+	const bodyStr = JSON.stringify(payload);
+	const bodyBuf = Buffer.from(bodyStr, "utf-8");
 
-		const body = await response.text();
-		throw new QuickCHRError(
-			"PROCESS_FAILED",
-			`Device-mode update failed: HTTP ${response.status} - ${body}`,
-		);
+	return new Promise<Response>((resolve, reject) => {
+		const req = nodeRequest({
+			hostname: "127.0.0.1",
+			port: httpPort,
+			path: "/rest/system/device-mode/update",
+			method: "POST",
+			headers: {
+				Authorization: `Basic ${btoa("admin:")}`,
+				"Content-Type": "application/json",
+				"Content-Length": bodyBuf.length,
+			},
+			agent: false,
+		}, (res) => {
+			const chunks: Buffer[] = [];
+			res.on("data", (c: Buffer) => chunks.push(c));
+			res.on("end", () => {
+				const status = res.statusCode ?? 0;
+				if (status >= 200 && status < 300) {
+					resolve(new Response(Buffer.concat(chunks), { status }));
+				} else {
+					const body = Buffer.concat(chunks).toString("utf-8");
+					reject(new QuickCHRError(
+						"PROCESS_FAILED",
+						`Device-mode update failed: HTTP ${status} - ${body}`,
+					));
+				}
+			});
+			res.on("error", reject);
+		});
+		req.on("error", reject);
+		req.write(bodyBuf);
+		req.end();
 	});
 }
 
