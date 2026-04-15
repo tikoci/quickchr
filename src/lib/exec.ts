@@ -56,7 +56,13 @@ export async function restExecute(
 	const { status, ct, data } = await new Promise<{ status: number; ct: string; data: string }>((resolve, reject) => {
 		const parsed = new URL(url);
 		const bodyBuf = Buffer.from(bodyStr, "utf-8");
-		const timer = setTimeout(() => req.destroy(new Error(`exec timed out after ${timeout}ms`)), timeout);
+		let done = false;
+		// Call reject() directly in addition to req.destroy(): Bun's node:http
+		// req.destroy() does not reliably fire the "error" event, which would
+		// leave the Promise pending forever if the CHR stops responding mid-request.
+		const timer = setTimeout(() => {
+			if (!done) { done = true; req.destroy(); reject(new QuickCHRError("EXEC_FAILED", `exec timed out after ${timeout}ms`)); }
+		}, timeout);
 
 		const req = nodeRequest({
 			hostname: parsed.hostname,
@@ -70,7 +76,7 @@ export async function restExecute(
 			},
 			agent: false,
 		}, (res) => {
-			clearTimeout(timer);
+			if (!done) { done = true; clearTimeout(timer); }
 			const chunks: Buffer[] = [];
 			res.on("data", (c: Buffer) => chunks.push(c));
 			res.on("end", () => resolve({
@@ -80,7 +86,7 @@ export async function restExecute(
 			}));
 			res.on("error", reject);
 		});
-		req.on("error", (e) => { clearTimeout(timer); reject(e); });
+		req.on("error", (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
 		req.write(bodyBuf);
 		req.end();
 	});

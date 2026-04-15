@@ -149,7 +149,7 @@ function createInstance(state: MachineState): ChrInstance {
 		async waitForBoot(timeoutMs?: number): Promise<boolean> {
 			// Use resolved credentials so waitForBoot can validate the response body
 			// on authenticated machines (post-provisioning, post-install reboots).
-			const auth = await resolveAuth(state);
+			const auth = resolveAuth(state);
 			return waitForBoot(ports.http, timeoutMs, auth.header);
 		},
 
@@ -175,7 +175,7 @@ function createInstance(state: MachineState): ChrInstance {
 			}
 			unregisterSocketMembers(state);
 			// Clean up stored instance credentials
-			await deleteInstanceCredentials(state.name);
+			deleteInstanceCredentials(state.name);
 			removeState(state.name);
 		},
 
@@ -207,7 +207,7 @@ function createInstance(state: MachineState): ChrInstance {
 			if (existsSync(efiVars)) rmSync(efiVars);
 
 			// Clean up stored instance credentials (re-provisioned on next start)
-			await deleteInstanceCredentials(state.name);
+			deleteInstanceCredentials(state.name);
 
 			// Update state
 			const current = loadMachine(state.name);
@@ -245,7 +245,7 @@ function createInstance(state: MachineState): ChrInstance {
 
 				const headers = new Headers(opts?.headers);
 				if (!headers.has("Authorization")) {
-					const auth = await resolveAuth(state);
+					const auth = resolveAuth(state);
 					headers.set("Authorization", auth.header);
 				}
 				if (!headers.has("Content-Type") && opts?.body) {
@@ -297,7 +297,7 @@ function createInstance(state: MachineState): ChrInstance {
 			}
 
 			if (via === "console") {
-				const auth = await resolveAuth(state, opts?.user, opts?.password);
+				const auth = resolveAuth(state, opts?.user, opts?.password);
 				const result = await consoleExec(
 					state.machineDir,
 					command,
@@ -314,7 +314,7 @@ function createInstance(state: MachineState): ChrInstance {
 					`exec transport "${via}" is not yet implemented`,
 				);
 			}
-			const auth = await resolveAuth(state, opts?.user, opts?.password);
+			const auth = resolveAuth(state, opts?.user, opts?.password);
 			if (via === "rest") {
 				return restExecute(restUrl, auth, command, opts);
 			}
@@ -341,7 +341,7 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async license(opts: LicenseOptions): Promise<void> {
-			const auth = await resolveAuth(state);
+			const auth = resolveAuth(state);
 			await renewLicense(ports.http, opts, undefined, undefined, undefined, auth.header);
 			// Persist the applied level in state
 			if (opts.level) {
@@ -396,7 +396,7 @@ function createInstance(state: MachineState): ChrInstance {
 			// Reboot to activate packages
 			let rebootAuth: string;
 			try {
-				const auth = await resolveAuth(state);
+				const auth = resolveAuth(state);
 				rebootAuth = auth.header;
 				await fetch(`http://127.0.0.1:${ports.http}/rest/system/reboot`, {
 					method: "POST",
@@ -425,7 +425,7 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async subprocessEnv(): Promise<Record<string, string>> {
-			const auth = await resolveAuth(state);
+			const auth = resolveAuth(state);
 			// auth.header is "Basic <base64>" — extract the raw user:pass.
 			const rawCreds = auth.header.startsWith("Basic ")
 				? Buffer.from(auth.header.slice(6), "base64").toString()

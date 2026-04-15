@@ -1431,7 +1431,7 @@ async function cmdGet(argv: string[]) {
 	}
 
 	const { resolveAuth } = await import("../lib/auth.ts");
-	const auth = await resolveAuth(s);
+	const auth = resolveAuth(s);
 	const base = `http://127.0.0.1:${instance.ports.http}/rest`;
 	const headers: Record<string, string> = { Authorization: auth.header };
 	const to = AbortSignal.timeout(8_000);

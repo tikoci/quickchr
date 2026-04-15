@@ -22,8 +22,8 @@ export interface ResolvedAuth {
  *
  * Priority:
  *   1. Explicit overrides (`user` + `password` args) — caller knows best.
- *   2. Per-instance credentials stored in secret store (Bun.secrets / config file).
- *   3. Provisioned user stored in machine.json (`state.user`).
+ *   2. Provisioned user stored in machine.json (`state.user`).
+ *   3. Per-instance credentials stored in config file (written during provisioning).
  *   4. CHR default: `admin` with empty password.
  *
  * When `state.disableAdmin` is true and no provisioned user exists the
@@ -31,11 +31,11 @@ export interface ResolvedAuth {
  * (the caller will get a 401) rather than throwing — the caller may have
  * re-enabled admin or created a user out-of-band.
  */
-export async function resolveAuth(
+export function resolveAuth(
 	state: Pick<MachineState, "name" | "user" | "disableAdmin">,
 	user?: string,
 	password?: string,
-): Promise<ResolvedAuth> {
+): ResolvedAuth {
 	if (user !== undefined) {
 		return {
 			header: `Basic ${btoa(`${user}:${password ?? ""}`)}`,
@@ -43,19 +43,21 @@ export async function resolveAuth(
 		};
 	}
 
-	// Check per-instance secrets (Bun.secrets / config file fallback)
-	const stored = await getInstanceCredentials(state.name);
-	if (stored) {
-		return {
-			header: `Basic ${btoa(`${stored.user}:${stored.password}`)}`,
-			user: stored.user,
-		};
-	}
-
+	// state.user is the canonical provisioned user written to machine.json.
+	// Check this first — no I/O, no keychain, no blocking.
 	if (state.user) {
 		return {
 			header: `Basic ${btoa(`${state.user.name}:${state.user.password}`)}`,
 			user: state.user.name,
+		};
+	}
+
+	// Check per-instance credentials stored in config file (sync, no keychain).
+	const stored = getInstanceCredentials(state.name);
+	if (stored) {
+		return {
+			header: `Basic ${btoa(`${stored.user}:${stored.password}`)}`,
+			user: stored.user,
 		};
 	}
 

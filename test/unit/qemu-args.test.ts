@@ -627,7 +627,7 @@ async function withBootServer(
 ) {
 	const server = Bun.serve({ port: 0, fetch: handler });
 	try {
-		await fn(server.port);
+		await fn(server.port ?? 0);
 	} finally {
 		server.stop(true);
 	}

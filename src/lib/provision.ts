@@ -244,7 +244,7 @@ async function consoleProvision(
 			"",
 			30_000,
 		);
-		await saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
+		saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
 		log.debug(`User "${effectiveUser.name}" created via console`);
 	}
 
@@ -355,7 +355,7 @@ export async function provision(
 
 	if (!effectiveUser && !shouldDisableAdmin) {
 		// No user, no disable — save admin:"" as instance creds for symmetry
-		await saveInstanceCredentials(machineName, "admin", "");
+		saveInstanceCredentials(machineName, "admin", "");
 		return { user: null };
 	}
 
@@ -389,7 +389,7 @@ export async function provision(
 		if (effectiveUser) {
 			await createUser(httpPort, effectiveUser.name, effectiveUser.password);
 			// Persist to secret store so resolveAuth() picks it up
-			await saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
+			saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
 		}
 
 		if (secureLogin && !user && effectiveUser && machineDir) {

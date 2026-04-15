@@ -55,6 +55,28 @@ function writeConfigStore(service: string, store: Record<string, string>): void 
 
 // --- Public API ---
 
+/** Retrieve a secret from the config file only (no OS keychain).
+ *  Use for credentials that don't need OS-level security (e.g., per-instance CHR passwords). */
+export function secretGetSync(service: string, name: string): string | null {
+	return readConfigStore(service)[name] ?? null;
+}
+
+/** Store a secret in the config file only (no OS keychain). */
+export function secretSetSync(service: string, name: string, value: string): void {
+	const store = readConfigStore(service);
+	store[name] = value;
+	writeConfigStore(service, store);
+}
+
+/** Delete a secret from the config file only (no OS keychain).  Returns true if deleted. */
+export function secretDeleteSync(service: string, name: string): boolean {
+	const store = readConfigStore(service);
+	if (!(name in store)) return false;
+	delete store[name];
+	writeConfigStore(service, store);
+	return true;
+}
+
 /** Retrieve a secret.  Returns null when not found. */
 export async function secretGet(service: string, name: string): Promise<string | null> {
 	if (hasBunSecrets()) {

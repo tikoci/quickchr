@@ -441,6 +441,15 @@ function nodeGet(
 ): Promise<{ status: number; body: string }> {
 	return new Promise((resolve, reject) => {
 		const parsed = new URL(url);
+		let done = false;
+
+		// Use plain setTimeout + direct reject rather than req.setTimeout + req.destroy:
+		// Bun's node:http req.destroy() does not reliably fire the req "error" event,
+		// which would leave the Promise pending forever in a non-responding CHR scenario.
+		const timer = setTimeout(() => {
+			if (!done) { done = true; req.destroy(); reject(new Error("timeout")); }
+		}, timeoutMs);
+
 		const req = nodeRequest(
 			{
 				hostname: parsed.hostname,
@@ -456,12 +465,11 @@ function nodeGet(
 			(res) => {
 				let body = "";
 				res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-				res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
-				res.on("error", reject);
+				res.on("end", () => { if (!done) { done = true; clearTimeout(timer); resolve({ status: res.statusCode ?? 0, body }); } });
+				res.on("error", (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
 			},
 		);
-		req.setTimeout(timeoutMs, () => { req.destroy(new Error("timeout")); });
-		req.on("error", reject);
+		req.on("error", (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
 		req.end();
 	});
 }

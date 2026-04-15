@@ -133,7 +133,7 @@ export async function resolveDisplayCredentials(
 	state: { name: string; user?: { name: string; password: string } },
 ): Promise<{ user: string; password: string }> {
 	const { getInstanceCredentials } = await import("../lib/credentials.ts");
-	const stored = await getInstanceCredentials(state.name);
+	const stored = getInstanceCredentials(state.name);
 	if (stored) return { user: stored.user, password: stored.password };
 	if (state.user && state.user.password !== "(stored in secrets)") {
 		return { user: state.user.name, password: state.user.password };

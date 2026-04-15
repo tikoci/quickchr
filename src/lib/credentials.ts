@@ -14,7 +14,7 @@
  * Both scopes use the secrets.ts wrapper (Bun.secrets → config file fallback).
  */
 
-import { secretGet, secretSet, secretDelete, secretStorageLabel } from "./secrets.ts";
+import { secretGet, secretSet, secretDelete, secretStorageLabel, secretGetSync, secretSetSync, secretDeleteSync } from "./secrets.ts";
 
 export interface MikrotikCredentials {
 	account: string;
@@ -68,9 +68,12 @@ export function credentialStorageLabel(): string {
 
 // --- Per-Instance Credentials (CHR login) ---
 
-/** Read stored credentials for a CHR instance.  Returns null if none saved. */
-export async function getInstanceCredentials(machineName: string): Promise<InstanceCredentials | null> {
-	const raw = await secretGet(INSTANCE_SERVICE, machineName);
+/** Read stored credentials for a CHR instance.  Returns null if none saved.
+ *  Uses config file storage (not OS keychain) — instance credentials are ephemeral
+ *  and don't require keychain-level security.  Avoids blocking macOS auth dialogs
+ *  in non-interactive contexts (tests, background processes). */
+export function getInstanceCredentials(machineName: string): InstanceCredentials | null {
+	const raw = secretGetSync(INSTANCE_SERVICE, machineName);
 	if (!raw) return null;
 	try {
 		const parsed = JSON.parse(raw) as { user?: string; password?: string };
@@ -81,16 +84,16 @@ export async function getInstanceCredentials(machineName: string): Promise<Insta
 	return null;
 }
 
-/** Save credentials for a CHR instance. */
-export async function saveInstanceCredentials(
+/** Save credentials for a CHR instance (config file, not keychain). */
+export function saveInstanceCredentials(
 	machineName: string,
 	user: string,
 	password: string,
-): Promise<void> {
-	await secretSet(INSTANCE_SERVICE, machineName, JSON.stringify({ user, password }));
+): void {
+	secretSetSync(INSTANCE_SERVICE, machineName, JSON.stringify({ user, password }));
 }
 
-/** Delete stored credentials for a CHR instance. */
-export async function deleteInstanceCredentials(machineName: string): Promise<void> {
-	await secretDelete(INSTANCE_SERVICE, machineName);
+/** Delete stored credentials for a CHR instance (config file, not keychain). */
+export function deleteInstanceCredentials(machineName: string): void {
+	secretDeleteSync(INSTANCE_SERVICE, machineName);
 }
