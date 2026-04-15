@@ -114,6 +114,7 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/io.github.lima-vm.socket_
 ```
 
 Sockets created:
+
 - Shared: `$(brew --prefix)/var/run/socket_vmnet`
 - Bridged: `$(brew --prefix)/var/run/socket_vmnet.bridged.en0`
 
@@ -163,7 +164,7 @@ Both VMs get separate IPs from the macOS DHCP server and can reach each other (a
 
 `socket_vmnet` supports static DHCP via `/etc/bootptab`:
 
-```
+```text
 %%
 # hostname   hwtype  hwaddr              ipaddr
 chr-router   1       52:54:00:ab:cd:01   192.168.105.10
@@ -176,7 +177,7 @@ Combined with a known MAC in the QEMU `-device` flag, this gives CHRs predictabl
 
 Instead of a launchd service, you can allow specific users to run `socket_vmnet` via sudo with restricted args:
 
-```
+```text
 # /etc/sudoers.d/socket_vmnet
 %admin ALL=(root) NOPASSWD: /opt/socket_vmnet/bin/socket_vmnet
 ```
@@ -211,6 +212,7 @@ The `script=no,downscript=no` suppresses QEMU's default `qemu-ifup`/`qemu-ifdown
 User-owned TAPs are NOT persistent across reboots by default. Options:
 
 **systemd-networkd** (`.netdev` file):
+
 ```ini
 # /etc/systemd/network/50-chr-tap0.netdev
 [NetDev]
@@ -223,12 +225,14 @@ Group=amm0
 ```
 
 **udev rule** (recreates on module load):
-```
+
+```text
 # /etc/udev/rules.d/90-quickchr-tap.rules
 ACTION=="add", SUBSYSTEM=="net", KERNEL=="tun", RUN+="/sbin/ip tuntap add dev tap-chr0 mode tap user amm0"
 ```
 
 **systemd service** (explicit, easy to manage):
+
 ```ini
 [Unit]
 Description=quickchr network: tap-chr0
@@ -332,7 +336,8 @@ qemu-system-x86_64 \
 ```
 
 On RouterOS inside the VM:
-```
+
+```routeros
 /ip address add address=10.100.0.2/24 interface=ether1
 /ip route add gateway=10.100.0.1
 /ip dns set servers=8.8.8.8
@@ -384,6 +389,7 @@ QEMU can bridge to a Hyper-V switch if the TAP-Windows driver is also present an
 ### HAXM / WHPx Acceleration Note
 
 QEMU acceleration on Windows:
+
 - Intel HAXM: deprecated, no longer updated.
 - WHPx (Windows Hypervisor Platform): Available on Windows 10+, requires Hyper-V feature enabled. Used via `-accel whpx`. Does NOT require Hyper-V VMs to be running, just the platform API.
 - AEHD: AMD equivalent.
@@ -538,7 +544,7 @@ For `socket_vmnet` and bridge modes, QEMU VMs sharing the same L2 segment must h
 2. **Store** the MAC in `machine.json` under the network config (so it's stable across restarts).
 3. **Never reuse** MACs across machines on the same named network.
 
-```
+```text
 52:54:00:<hash-byte1>:<hash-byte2>:<hash-byte3>
 ```
 
@@ -581,7 +587,7 @@ Lima-style: `quickchr network install-sudoers` could generate a sudoers file tha
 | bridge-utils / iproute2 | — | `which ip` + `which bridge` | — |
 | `/dev/net/tun` accessible | — | `ls -la /dev/net/tun` | — |
 | qemu-bridge-helper present + setuid | — | `ls -la $(which qemu-bridge-helper)` | — |
-| TAP-Windows driver | — | — | `Get-NetAdapter | Where Virtual` |
+| TAP-Windows driver | — | — | `Get-NetAdapter \| Where Virtual` |
 | Named networks registered | `~/.local/share/quickchr/networks/*.json` | same | same |
 
 ---

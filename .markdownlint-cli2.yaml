@@ -17,3 +17,7 @@ ignores:
   - "node_modules/**"
   - "**/node_modules/**"
   - ".github/prompts/**"
+  # skills/ are LLM instruction files — different audience, not rendered docs
+  - "skills/**"
+  # .venv/ is a Python virtualenv — never lint vendored dependencies
+  - ".venv/**"

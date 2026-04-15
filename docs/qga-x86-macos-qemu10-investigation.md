@@ -68,7 +68,7 @@ The QGA daemon never tried to open `/dev/virtio-ports/org.qemu.guest_agent.0`.
 
 The original QEMU virtio trace shows (with corrected event identification):
 
-```
+```text
 virtio_serial_send_control_event port 1, event 1, value 1   ← PORT_ADD
 virtio_serial_handle_control_message event 0, value 1       ← DEVICE_READY (guest → host)
 virtio_serial_send_control_event port 1, event 1, value 1   ← PORT_ADD
@@ -83,6 +83,7 @@ Event 6 = `VIRTIO_CONSOLE_PORT_OPEN` (not "RESIZE" as the original report claime
 The host correctly sends PORT_OPEN. The guest receives it but never opens the port.
 
 Reference: `include/standard-headers/linux/virtio_console.h` (QEMU v10.2.0):
+
 ```c
 #define VIRTIO_CONSOLE_DEVICE_READY     0
 #define VIRTIO_CONSOLE_PORT_ADD         1
@@ -114,6 +115,7 @@ If the code is identical, the behavior is identical. There is no regression.
 **4. CPUID KVM detection is identical in both QEMU versions**
 
 `target/i386/cpu.c` in both v9.2.0 and v10.2.0:
+
 ```c
 case 0x40000000:
     // Under TCG: returns "TCGTCGTCGTCG"
@@ -122,6 +124,7 @@ case 0x40000000:
 ```
 
 And later:
+
 ```c
 if (!kvm_enabled() || !cpu->expose_kvm) {
     env->features[FEAT_KVM] = 0;   // Zero ALL KVM feature bits under HVF/TCG
@@ -129,6 +132,7 @@ if (!kvm_enabled() || !cpu->expose_kvm) {
 ```
 
 This code is **identical in both versions**. Under HVF:
+
 - CPUID leaf 0x40000000: no vendor string (zeros)
 - CPUID leaf 0x40000001 (FEAT_KVM): all zeros (no KVM features)
 
@@ -286,6 +290,6 @@ the KVM requirement explicitly in the CHR manual.
 
 - QEMU `include/standard-headers/linux/virtio_console.h` — event number definitions
 - QEMU `target/i386/cpu.c` — CPUID 0x40000000 handling (identical v9.2.0 / v10.2.0)
-- MikroTik CHR manual: https://help.mikrotik.com/docs/spaces/ROS/pages/18350234/
-- virtio-serial spec: https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html
+- MikroTik CHR manual: <https://help.mikrotik.com/docs/spaces/ROS/pages/18350234/>
+- virtio-serial spec: <https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html>
 - quickchr issue tracking: BACKLOG.md in this repo
