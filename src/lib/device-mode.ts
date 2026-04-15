@@ -2,9 +2,9 @@
  * RouterOS device-mode provisioning helpers.
  */
 
-import { request as nodeRequest } from "node:http";
 import type { DeviceModeOptions } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
+import { restGet, restPost } from "./rest.ts";
 
 export const KNOWN_DEVICE_MODES = ["home", "advanced", "basic", "rose"] as const;
 
@@ -150,21 +150,22 @@ export function formatDeviceModeSelection(options: ResolvedDeviceModeOptions): s
 
 /** Wait until the device-mode REST endpoint is reachable with default admin auth. */
 export async function waitForDeviceModeApi(httpPort: number, timeoutMs: number = 60_000): Promise<void> {
+	const auth = `Basic ${btoa("admin:")}`;
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		try {
-			const response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/device-mode`, {
-				headers: { Authorization: `Basic ${btoa("admin:")}` },
-				signal: AbortSignal.timeout(3000),
-			});
+			const { status } = await restGet(
+				`http://127.0.0.1:${httpPort}/rest/system/device-mode`,
+				auth,
+				3000,
+			);
 
-			if (response.ok) {
+			if (status >= 200 && status < 300) {
 				return;
 			}
 
-			if (response.status === 401) {
-				const body = await response.text();
-				throw new QuickCHRError("PROCESS_FAILED", `Device-mode API auth failed: HTTP 401 - ${body}`);
+			if (status === 401) {
+				throw new QuickCHRError("PROCESS_FAILED", `Device-mode API auth failed: HTTP 401`);
 			}
 		} catch (error) {
 			if (error instanceof QuickCHRError) {
@@ -185,14 +186,12 @@ export async function waitForDeviceModeApi(httpPort: number, timeoutMs: number =
  * The caller MUST kill the QEMU process while this request is pending to confirm the change.
  * The connection error (ECONNRESET) that results when QEMU exits is expected — suppress it.
  *
- * Uses node:http with agent:false to bypass Bun's connection pool. Bun pools connections
- * by host:port; a pooled connection from the waitForDeviceModeApi GET poll loop would return
- * a stale cached response immediately, making the POST appear to resolve in <2s before
- * RouterOS has entered the blocking "waiting for power-cycle" state.
+ * Uses restPost (node:http + agent:false) to bypass Bun's connection pool.
+ * The 300s timeout is a safety limit — the caller is expected to kill QEMU well before then.
  */
-export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceModeOptions): Promise<Response> {
+export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceModeOptions): Promise<{ status: number; body: string }> {
 	if (!shouldApplyDeviceMode(options)) {
-		return Promise.resolve(new Response(null, { status: 200 }));
+		return Promise.resolve({ status: 200, body: "" });
 	}
 
 	const payload: Record<string, string> = {};
@@ -201,59 +200,35 @@ export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceM
 		payload[name] = value;
 	}
 
-	const bodyStr = JSON.stringify(payload);
-	const bodyBuf = Buffer.from(bodyStr, "utf-8");
-
-	return new Promise<Response>((resolve, reject) => {
-		const req = nodeRequest({
-			hostname: "127.0.0.1",
-			port: httpPort,
-			path: "/rest/system/device-mode/update",
-			method: "POST",
-			headers: {
-				Authorization: `Basic ${btoa("admin:")}`,
-				"Content-Type": "application/json",
-				"Content-Length": bodyBuf.length,
-			},
-			agent: false,
-		}, (res) => {
-			const chunks: Buffer[] = [];
-			res.on("data", (c: Buffer) => chunks.push(c));
-			res.on("end", () => {
-				const status = res.statusCode ?? 0;
-				if (status >= 200 && status < 300) {
-					resolve(new Response(Buffer.concat(chunks), { status }));
-				} else {
-					const body = Buffer.concat(chunks).toString("utf-8");
-					reject(new QuickCHRError(
-						"PROCESS_FAILED",
-						`Device-mode update failed: HTTP ${status} - ${body}`,
-					));
-				}
-			});
-			res.on("error", reject);
-		});
-		req.on("error", reject);
-		req.write(bodyBuf);
-		req.end();
-	});
+	const auth = `Basic ${btoa("admin:")}`;
+	return restPost(
+		`http://127.0.0.1:${httpPort}/rest/system/device-mode/update`,
+		auth,
+		payload,
+		300_000, // Safety timeout — QEMU kill should resolve this first
+	);
 }
 
 export async function readDeviceMode(httpPort: number): Promise<Record<string, string>> {
-	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/device-mode`, {
-		headers: { Authorization: `Basic ${btoa("admin:")}` },
-		signal: AbortSignal.timeout(30_000),
-	});
+	const auth = `Basic ${btoa("admin:")}`;
+	const { status, body } = await restGet(
+		`http://127.0.0.1:${httpPort}/rest/system/device-mode`,
+		auth,
+		30_000,
+	);
 
-	if (!response.ok) {
-		const body = await response.text();
+	if (status < 200 || status >= 300) {
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`Failed to read device-mode: HTTP ${response.status} - ${body}`,
+			`Failed to read device-mode: HTTP ${status} - ${body}`,
 		);
 	}
 
-	const data = await response.json() as unknown;
+	let data: unknown;
+	try { data = JSON.parse(body); } catch {
+		throw new QuickCHRError("PROCESS_FAILED", "Invalid /system/device-mode REST response (not JSON)");
+	}
+
 	const record = Array.isArray(data) ? data[0] : data;
 	if (!record || typeof record !== "object") {
 		throw new QuickCHRError("PROCESS_FAILED", "Invalid /system/device-mode REST response");

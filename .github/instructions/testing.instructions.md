@@ -96,3 +96,40 @@ If a CI integration run fails, check (in order):
 3. **Annotations** — `::error::` lines appear inline on the commit
 
 See `.github/instructions/ci.instructions.md` for the full artifact map and failure diagnosis guide.
+
+## Debugging Test Failures — Diagnosis Flowchart
+
+**Never increase a timeout as a first fix.** It masks the root cause. Follow this flowchart:
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Passes alone, fails in suite | Stale CHR machine on same port (beforeAll cleanup incomplete) | Add machine name to `beforeAll` cleanup list |
+| Hangs forever | Promise never resolves — missing timeout or Bun.secrets Keychain dialog | Check timeout patterns, check `MIKROTIK_WEB_*` env vars |
+| Wrong/stale response data | Post-boot REST race (field not yet populated) | Add field-presence polling loop with deadline |
+| Times out at full timeout | CHR not booting (QEMU issue, firmware issue) | Check `qemu.log` and `machine.json` in machine dir |
+| HTTP 401 on unit test | Unit test mocks `globalThis.fetch` but code uses `rest.ts` (node:http) | Use `createServer` mock pattern (see `license.test.ts`) |
+| ECONNRESET noise in output | Expected on fire-and-forget calls (device-mode power-cycle) | Ensure `.catch(() => {})` attached immediately to pending promise |
+
+### Prove Before Refactoring
+
+When a test fails, **understand the actual behavior before changing code**:
+1. Add `console.log` to see actual values at the failure point
+2. Use `curl -v http://127.0.0.1:{port}/rest/...` against the running CHR
+3. Enable RouterOS logging: `/system/logging/add topics=debug,!packet,!raw action=memory`
+4. Check `qemu.log` in the machine directory for QEMU-level issues
+5. Only after understanding the root cause should you modify the code
+
+### Unit Test Mock Pattern
+
+- **CHR REST code** (uses `rest.ts` → `node:http`): Mock with `createServer` from `node:http`.
+  Listen on port 0 (auto-assign), pass port to function under test, clean up in `afterEach`.
+- **External URL code** (uses `fetch()` directly): Mock with `globalThis.fetch = ...`.
+  Only valid for `versions.ts`, `images.ts`, `packages.ts`.
+
+## Lab Tests (test/lab/)
+
+For longer single-test explorations that don't belong in CI:
+- Semi-durable scripts to collect data, validate assumptions, make decisions
+- May be re-run to recheck assumptions after code changes
+- NOT part of CI — `bun test` doesn't run them unless explicitly pointed at `test/lab/`
+- Use for RouterOS behavioral investigation (async commands, timing, REST semantics)

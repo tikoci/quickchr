@@ -48,6 +48,7 @@ import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec } from "./console.ts";
+import { restRequest, restGet, restPost } from "./rest.ts";
 import { createNamedSocket, getNamedSocket, addSocketMember, removeSocketMember } from "./socket-registry.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import {
@@ -243,27 +244,33 @@ function createInstance(state: MachineState): ChrInstance {
 			for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
 				if (attempt > 0) await Bun.sleep(2000);
 
-				const headers = new Headers(opts?.headers);
-				if (!headers.has("Authorization")) {
-					const auth = resolveAuth(state);
-					headers.set("Authorization", auth.header);
+				// Resolve auth and method
+				const authResolved = resolveAuth(state);
+				let authHeader = authResolved.header;
+				// Allow caller to override Authorization via opts.headers
+				if (opts?.headers) {
+					const h = new Headers(opts.headers);
+					if (h.has("Authorization")) authHeader = h.get("Authorization")!;
 				}
-				if (!headers.has("Content-Type") && opts?.body) {
-					headers.set("Content-Type", "application/json");
-				}
+				const method = (opts?.method ?? "GET").toUpperCase();
+				const bodyStr = opts?.body != null ? String(opts.body) : null;
 
 				try {
-					const response = await fetch(url, { ...opts, headers });
-					if (!response.ok) {
-						const body = await response.text();
-						throw new Error(`REST ${response.status}: ${body}`);
+					const { status, body } = await restRequest(
+						url,
+						method,
+						authHeader,
+						bodyStr,
+						10_000,
+					);
+					if (status < 200 || status >= 300) {
+						throw new Error(`REST ${status}: ${body}`);
 					}
 
-					const text = await response.text();
 					try {
-						return JSON.parse(text) as unknown;
+						return JSON.parse(body) as unknown;
 					} catch {
-						return text;
+						return body;
 					}
 				} catch (e) {
 					if (attempt < MAX_RETRIES && (e as { code?: string }).code === "ECONNRESET") {
@@ -398,11 +405,12 @@ function createInstance(state: MachineState): ChrInstance {
 			try {
 				const auth = resolveAuth(state);
 				rebootAuth = auth.header;
-				await fetch(`http://127.0.0.1:${ports.http}/rest/system/reboot`, {
-					method: "POST",
-					headers: { Authorization: rebootAuth },
-					signal: AbortSignal.timeout(5000),
-				});
+				await restPost(
+					`http://127.0.0.1:${ports.http}/rest/system/reboot`,
+					rebootAuth,
+					{},
+					5000,
+				);
 			} catch {
 				// Expected — connection drops during reboot
 				rebootAuth ??= `Basic ${btoa("admin:")}`;
@@ -700,7 +708,7 @@ async function applyDeviceMode(
 	}
 
 	const maxAttempts = 5;
-	let pendingUpdate: Promise<Response> | undefined;
+	let pendingUpdate: Promise<{ status: number; body: string }> | undefined;
 	let requiresPowerCycle = false;
 
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -724,6 +732,10 @@ async function applyDeviceMode(
 
 		if (outcome.state === "pending") {
 			pendingUpdate = request;
+			// Attach .catch immediately — ECONNRESET is expected when QEMU is killed
+			// during the blocking power-cycle confirmation. Without this, the rejection
+			// fires as "unhandled" while hardRebootMachine() is awaited.
+			pendingUpdate.catch(() => {});
 			requiresPowerCycle = true;
 			log.debug("Device-mode update entered pending confirmation state");
 			break;
@@ -734,7 +746,8 @@ async function applyDeviceMode(
 
 		let routerOsOffline = false;
 		try {
-			await fetch(`http://127.0.0.1:${httpPort}/`, { signal: AbortSignal.timeout(2000) });
+			// Unauthenticated probe — just check if HTTP is up (webfig login page).
+			await restGet(`http://127.0.0.1:${httpPort}/`, "", 2000);
 		} catch {
 			routerOsOffline = true;
 		}
@@ -769,7 +782,6 @@ async function applyDeviceMode(
 
 	if (requiresPowerCycle) {
 		const rebootMethod = await hardRebootMachine(machineState, launchConfig);
-		pendingUpdate?.catch(() => {});
 		log.status(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
 
 		const rebooted = await instance.waitForBoot(bootTimeout);
@@ -1113,19 +1125,21 @@ export class QuickCHR {
 
 		const accel = await detectAccel(arch);
 		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages, accel) + (opts.timeoutExtra ?? 0);
+
+		// Always wait for boot in background mode — the JSDoc promises "REST-ready".
+		const booted = await instance.waitForBoot(bootTimeout);
+		if (!booted) {
+			try { await instance.stop(); } catch { /* ignore */ }
+			try { await instance.remove(); } catch { /* ignore */ }
+			throw new QuickCHRError(
+				"BOOT_TIMEOUT",
+				`CHR did not respond within ${bootTimeout / 1000}s` +
+				(hasProvisioning ? " — provisioning could not run." : ".") +
+				` Machine "${name}" has been cleaned up automatically.`,
+			);
+		}
+
 		if (hasProvisioning) {
-			const booted = await instance.waitForBoot(bootTimeout);
-			if (!booted) {
-				// Stop QEMU and remove state — don't leave the user with a partially
-				// configured or unconfigured machine they didn't ask for.
-				try { await instance.stop(); } catch { /* ignore */ }
-				try { await instance.remove(); } catch { /* ignore */ }
-				throw new QuickCHRError(
-					"BOOT_TIMEOUT",
-					`CHR did not respond within ${bootTimeout / 1000}s — provisioning could not run. ` +
-					`Machine "${name}" has been cleaned up automatically.`,
-				);
-			}
 			await QuickCHR._provisionInstance(instance, state, {
 				installAllPackages: opts.installAllPackages,
 				packages: opts.packages,
@@ -1335,19 +1349,22 @@ export class QuickCHR {
 
 		const instance = createInstance(state);
 
+		// Always wait for boot in background mode — start() promises "REST-ready".
+		const accel = await detectAccel(state.arch);
+		const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts?.installAllPackages, accel);
+		const booted = await instance.waitForBoot(bootTimeout);
+		if (!booted) {
+			try { await instance.stop(); } catch { /* ignore */ }
+			try { await instance.remove(); } catch { /* ignore */ }
+			throw new QuickCHRError(
+				"BOOT_TIMEOUT",
+				`CHR did not respond within ${bootTimeout / 1000}s` +
+				(hasProvisioning ? " — provisioning could not run." : ".") +
+				` Machine "${state.name}" has been cleaned up automatically.`,
+			);
+		}
+
 		if (hasProvisioning && provisioningOpts) {
-			const accel = await detectAccel(state.arch);
-			const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts.installAllPackages, accel);
-			const booted = await instance.waitForBoot(bootTimeout);
-			if (!booted) {
-				try { await instance.stop(); } catch { /* ignore */ }
-				try { await instance.remove(); } catch { /* ignore */ }
-				throw new QuickCHRError(
-					"BOOT_TIMEOUT",
-					`CHR did not respond within ${bootTimeout / 1000}s — provisioning could not run. ` +
-					`Machine "${state.name}" has been cleaned up automatically.`,
-				);
-			}
 			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig, logger);
 		}
 

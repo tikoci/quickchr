@@ -18,11 +18,10 @@
  * install leaves state on the connection the verification loop used).
  */
 
-import { request as nodeRequest } from "node:http";
-
 import type { ExecOptions, ExecResult, ExecTransport } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import type { ResolvedAuth } from "./auth.ts";
+import { restPost } from "./rest.ts";
 
 /** Default client-side timeout for exec requests (ms). */
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -48,48 +47,19 @@ export async function restExecute(
 ): Promise<ExecResult> {
 	const timeout = opts?.timeout ?? DEFAULT_TIMEOUT_MS;
 	const url = `${restUrl}/rest/execute`;
-	const bodyStr = JSON.stringify({ script: command, "as-string": true });
 
-	// node:http with agent:false — creates a fresh TCP connection per call,
-	// bypassing Bun's global connection pool to avoid RouterOS returning
-	// stale session data from a reused provisioning connection.
-	const { status, ct, data } = await new Promise<{ status: number; ct: string; data: string }>((resolve, reject) => {
-		const parsed = new URL(url);
-		const bodyBuf = Buffer.from(bodyStr, "utf-8");
-		let done = false;
-		// Call reject() directly in addition to req.destroy(): Bun's node:http
-		// req.destroy() does not reliably fire the "error" event, which would
-		// leave the Promise pending forever if the CHR stops responding mid-request.
-		const timer = setTimeout(() => {
-			if (!done) { done = true; req.destroy(); reject(new QuickCHRError("EXEC_FAILED", `exec timed out after ${timeout}ms`)); }
-		}, timeout);
-
-		const req = nodeRequest({
-			hostname: parsed.hostname,
-			port: Number(parsed.port) || 80,
-			path: parsed.pathname,
-			method: "POST",
-			headers: {
-				Authorization: auth.header,
-				"Content-Type": "application/json",
-				"Content-Length": bodyBuf.length,
-			},
-			agent: false,
-		}, (res) => {
-			if (!done) { done = true; clearTimeout(timer); }
-			const chunks: Buffer[] = [];
-			res.on("data", (c: Buffer) => chunks.push(c));
-			res.on("end", () => resolve({
-				status: res.statusCode ?? 0,
-				ct: (res.headers["content-type"] as string) ?? "",
-				data: Buffer.concat(chunks).toString("utf-8"),
-			}));
-			res.on("error", reject);
-		});
-		req.on("error", (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
-		req.write(bodyBuf);
-		req.end();
-	});
+	let status: number;
+	let data: string;
+	try {
+		const resp = await restPost(url, auth.header, { script: command, "as-string": true }, timeout);
+		status = resp.status;
+		data = resp.body;
+	} catch (e) {
+		throw new QuickCHRError(
+			"EXEC_FAILED",
+			`exec timed out or failed: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
 
 	if (status < 200 || status >= 300) {
 		throw new QuickCHRError(
@@ -99,11 +69,11 @@ export async function restExecute(
 	}
 
 	let output: string;
-
-	if (ct.includes("application/json")) {
+	try {
 		const json = JSON.parse(data);
 		output = extractRetValue(json);
-	} else {
+	} catch {
+		// Non-JSON response — return raw text
 		output = data;
 	}
 

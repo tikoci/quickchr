@@ -1433,13 +1433,13 @@ async function cmdGet(argv: string[]) {
 	const { resolveAuth } = await import("../lib/auth.ts");
 	const auth = resolveAuth(s);
 	const base = `http://127.0.0.1:${instance.ports.http}/rest`;
-	const headers: Record<string, string> = { Authorization: auth.header };
-	const to = AbortSignal.timeout(8_000);
+	const authHeader = auth.header;
 
 	async function fetchGroup(path: string): Promise<unknown> {
 		try {
-			const r = await fetch(`${base}${path}`, { headers, signal: to });
-			if (r.ok) return r.json();
+			const { restGet: rGet } = await import("../lib/rest.ts");
+			const { status, body } = await rGet(`${base}${path}`, authHeader, 8_000);
+			if (status >= 200 && status < 300) return JSON.parse(body);
 		} catch { /* offline or auth error */ }
 		return null;
 	}

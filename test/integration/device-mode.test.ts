@@ -22,7 +22,7 @@ async function cleanupMachine(name: string): Promise<void> {
 
 describe.skipIf(SKIP)("device-mode provisioning", () => {
 	beforeAll(async () => {
-		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features"]) {
+		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features", "integration-dm-setmode"]) {
 			await cleanupMachine(name);
 		}
 	});

@@ -11,6 +11,7 @@ import { generatePassword } from "./password.ts";
 import { waitForBoot } from "./qemu.ts";
 import { consoleExec } from "./console.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
+import { restGet, restPost, restPatch } from "./rest.ts";
 
 /** The default user name created by quickchr for managed CHR access. */
 export const QUICKCHR_USER = "quickchr";
@@ -24,20 +25,23 @@ async function readUser(httpPort: number, auth: string, name: string): Promise<R
 	// Fetch the full user list and filter client-side.  RouterOS REST filter
 	// query syntax differs across versions and is unreliable for name-based
 	// lookups; fetching all users is safe given the small number of entries.
-	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/user`, {
-		headers: { Authorization: auth },
-		signal: AbortSignal.timeout(5000),
-	});
+	const { status, body } = await restGet(
+		`http://127.0.0.1:${httpPort}/rest/user`,
+		auth,
+		5000,
+	);
 
-	if (!response.ok) {
-		const body = await response.text();
+	if (status < 200 || status >= 300) {
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`Failed to read user list: HTTP ${response.status} — ${body}`,
+			`Failed to read user list: HTTP ${status} — ${body}`,
 		);
 	}
 
-	const users = await response.json() as Record<string, unknown>[];
+	let users: Record<string, unknown>[];
+	try { users = JSON.parse(body) as Record<string, unknown>[]; } catch {
+		return undefined;
+	}
 	if (!Array.isArray(users)) return undefined;
 	return users.find((u) => u.name === name);
 }
@@ -68,21 +72,17 @@ export async function createUser(
 	await waitForRest(httpPort);
 
 	const auth = `Basic ${btoa("admin:")}`;
-	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/user/add`, {
-		method: "POST",
-		headers: {
-			Authorization: auth,
-			"Content-Type": "application/json",
-		},
-		signal: AbortSignal.timeout(10_000),
-		body: JSON.stringify({ name, password, group }),
-	});
+	const { status, body: respBody } = await restPost(
+		`http://127.0.0.1:${httpPort}/rest/user/add`,
+		auth,
+		{ name, password, group },
+		10_000,
+	);
 
-	if (!response.ok) {
-		const body = await response.text();
+	if (status < 200 || status >= 300) {
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`Failed to create user "${name}": HTTP ${response.status} — ${body}`,
+			`Failed to create user "${name}": HTTP ${status} — ${respBody}`,
 		);
 	}
 
@@ -159,21 +159,17 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 		throw new QuickCHRError("PROCESS_FAILED", "Cannot disable admin: user record has no .id");
 	}
 
-	const disableResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/${adminId}`, {
-		method: "PATCH",
-		headers: {
-			Authorization: actionAuth,
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({ disabled: "yes" }),
-		signal: AbortSignal.timeout(10_000),
-	});
+	const { status: patchStatus, body: patchRawBody } = await restPatch(
+		`http://127.0.0.1:${httpPort}/rest/user/${adminId}`,
+		actionAuth,
+		{ disabled: "yes" },
+		10_000,
+	);
 
-	if (!disableResp.ok) {
-		const body = await disableResp.text();
+	if (patchStatus < 200 || patchStatus >= 300) {
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`Failed to disable admin: HTTP ${disableResp.status} — ${body}`,
+			`Failed to disable admin: HTTP ${patchStatus} — ${patchRawBody}`,
 		);
 	}
 
@@ -182,7 +178,7 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 	// If the response body is unexpected (boot race), fall through to verification loop.
 	let patchConfirmed = false;
 	try {
-		const patchBody = await disableResp.json() as Record<string, unknown>;
+		const patchBody = JSON.parse(patchRawBody) as Record<string, unknown>;
 		const patchDisabled = String(patchBody?.disabled ?? "");
 		patchConfirmed = patchDisabled === "true" || patchDisabled === "yes";
 	} catch { /* non-JSON body — fall through to verification loop */ }
@@ -206,11 +202,12 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 
 		// Secondary: if admin credentials get 401, admin auth is rejected = disabled.
 		try {
-			const probe = await fetch(`http://127.0.0.1:${httpPort}/rest/system/resource`, {
-				headers: { Authorization: adminAuth },
-				signal: AbortSignal.timeout(3000),
-			});
-			if (probe.status === 401) return;
+			const { status: probeStatus } = await restGet(
+				`http://127.0.0.1:${httpPort}/rest/system/resource`,
+				adminAuth,
+				3000,
+			);
+			if (probeStatus === 401) return;
 		} catch { /* ignore */ }
 
 		await Bun.sleep(500);
@@ -303,17 +300,17 @@ export async function installSshKey(
 	let lastListBody = "";
 	while (Date.now() < deadline) {
 		try {
-			const listResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/ssh-keys`, {
-				headers: { Authorization: auth },
-				signal: AbortSignal.timeout(5_000),
-			});
-			if (listResp.ok) {
-				const body = await listResp.text();
-				lastListBody = body;
-				const keys = JSON.parse(body) as Array<{ user?: string }>;
+			const { status, body: listBody } = await restGet(
+				`http://127.0.0.1:${httpPort}/rest/user/ssh-keys`,
+				auth,
+				5_000,
+			);
+			if (status >= 200 && status < 300) {
+				lastListBody = listBody;
+				const keys = JSON.parse(listBody) as Array<{ user?: string }>;
 				if (Array.isArray(keys) && keys.some((k) => k.user === username)) return;
 			} else {
-				lastListBody = `HTTP ${listResp.status}`;
+				lastListBody = `HTTP ${status}`;
 			}
 		} catch (e) {
 			lastListBody = String(e);

@@ -13,6 +13,7 @@
 import type { LicenseLevel, LicenseOptions } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
+import { restGet, restPost } from "./rest.ts";
 
 /** Default timeout for waiting for a license change to propagate (ms). */
 const LICENSE_VERIFY_TIMEOUT = 90_000;
@@ -80,17 +81,17 @@ export async function renewLicense(
 	await waitForLicenseApi(httpPort, chrUser, chrPass, 30_000, auth);
 
 	for (let attempt = 1; attempt <= MAX_RENEW_ATTEMPTS; attempt++) {
-		let response: Response;
+		let status: number;
+		let text: string;
 		try {
-			response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license/renew`, {
-				method: "POST",
-				headers: {
-					Authorization: auth,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify(body),
-				signal: AbortSignal.timeout(30_000), // 10s for RouterOS wait + 20s net overhead
-			});
+			const resp = await restPost(
+				`http://127.0.0.1:${httpPort}/rest/system/license/renew`,
+				auth,
+				body,
+				30_000, // 10s for RouterOS wait + 20s net overhead
+			);
+			status = resp.status;
+			text = resp.body;
 		} catch (e) {
 			throw new QuickCHRError(
 				"PROCESS_FAILED",
@@ -98,15 +99,13 @@ export async function renewLicense(
 			);
 		}
 
-		if (!response.ok) {
-			const text = await response.text();
+		if (status < 200 || status >= 300) {
 			throw new QuickCHRError(
 				"PROCESS_FAILED",
-				`License renewal failed: HTTP ${response.status} — ${text}`,
+				`License renewal failed: HTTP ${status} — ${text}`,
 			);
 		}
 
-		const text = await response.text();
 		log.debug(`License renew response body: ${text}`);
 		const result = classifyRenewResponse(text);
 
@@ -163,12 +162,13 @@ async function waitForLicenseApi(
 
 	while (Date.now() < deadline) {
 		try {
-			const r = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license`, {
-				headers: { Authorization: auth },
-				signal: AbortSignal.timeout(5000),
-			});
-			if (r.ok) {
-				const data = await r.json() as Record<string, unknown>;
+			const { status, body } = await restGet(
+				`http://127.0.0.1:${httpPort}/rest/system/license`,
+				auth,
+				5000,
+			);
+			if (status >= 200 && status < 300) {
+				const data = JSON.parse(body) as Record<string, unknown>;
 				if ("system-id" in data && !("board-name" in data)) return;
 			}
 		} catch { /* not ready */ }
@@ -200,13 +200,16 @@ export async function getLicenseInfo(
 	let lastError: unknown;
 
 	do {
-		let response: Response;
+		let status: number;
+		let body: string;
 		try {
-			response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/license`, {
-				method: "GET",
-				headers: { Authorization: auth },
-				signal: AbortSignal.timeout(10_000),
-			});
+			const resp = await restGet(
+				`http://127.0.0.1:${httpPort}/rest/system/license`,
+				auth,
+				10_000,
+			);
+			status = resp.status;
+			body = resp.body;
 		} catch (e) {
 			lastError = e;
 			// Skip the sleep when past the deadline (e.g. retryMs=0 in tests).
@@ -214,15 +217,19 @@ export async function getLicenseInfo(
 			continue;
 		}
 
-		if (!response.ok) {
-			const text = await response.text();
+		if (status < 200 || status >= 300) {
 			throw new QuickCHRError(
 				"PROCESS_FAILED",
-				`Failed to get license info: HTTP ${response.status} — ${text}`,
+				`Failed to get license info: HTTP ${status} — ${body}`,
 			);
 		}
 
-		const info = await response.json() as LicenseInfo;
+		let info: LicenseInfo;
+		try { info = JSON.parse(body) as LicenseInfo; } catch {
+			lastError = new Error(`Invalid JSON from /system/license: ${body}`);
+			await Bun.sleep(Math.max(0, Math.min(1000, deadline - Date.now())));
+			continue;
+		}
 		// Post-boot REST quirk: /system/license may return /system/resource data briefly.
 		// Retry until the endpoint stabilises rather than failing to the caller.
 		if ("board-name" in info || "architecture-name" in info) {

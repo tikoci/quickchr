@@ -10,6 +10,7 @@ import { QuickCHRError } from "./types.ts";
 import { packagesDownloadUrl } from "./versions.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
+import { restPost } from "./rest.ts";
 
 /** Download and extract the all-packages ZIP for a version/arch. Returns the extract dir. */
 export async function downloadPackages(
@@ -165,11 +166,12 @@ export async function installPackages(
 	// Reboot to activate packages
 	log.status("Rebooting CHR to activate packages...");
 	try {
-		await fetch(`http://127.0.0.1:${httpPort}/rest/system/reboot`, {
-			method: "POST",
-			headers: { Authorization: `Basic ${btoa("admin:")}` },
-			signal: AbortSignal.timeout(5000),
-		});
+		await restPost(
+			`http://127.0.0.1:${httpPort}/rest/system/reboot`,
+			`Basic ${btoa("admin:")}`,
+			{},
+			5000,
+		);
 	} catch {
 		// Expected — connection drops during reboot
 	}

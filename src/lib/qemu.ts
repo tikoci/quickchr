@@ -7,12 +7,12 @@
 
 import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { request as nodeRequest } from "node:http";
 import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware } from "./platform.ts";
 import { buildHostfwdString } from "./network.ts";
 import { ensureDir } from "./state.ts";
+import { restGet } from "./rest.ts";
 
 export interface QemuLaunchConfig {
 	arch: Arch;
@@ -434,46 +434,6 @@ export async function stopMachineByName(_name: string, state: MachineState): Pro
  *                  CHR images; pass instance credentials for post-reboot probes
  *                  on provisioned machines so body validation can be performed.
  */
-function nodeGet(
-	url: string,
-	auth: string,
-	timeoutMs: number,
-): Promise<{ status: number; body: string }> {
-	return new Promise((resolve, reject) => {
-		const parsed = new URL(url);
-		let done = false;
-
-		// Use plain setTimeout + direct reject rather than req.setTimeout + req.destroy:
-		// Bun's node:http req.destroy() does not reliably fire the req "error" event,
-		// which would leave the Promise pending forever in a non-responding CHR scenario.
-		const timer = setTimeout(() => {
-			if (!done) { done = true; req.destroy(); reject(new Error("timeout")); }
-		}, timeoutMs);
-
-		const req = nodeRequest(
-			{
-				hostname: parsed.hostname,
-				port: parsed.port,
-				path: parsed.pathname + parsed.search,
-				method: "GET",
-				headers: { Authorization: auth },
-				// agent:false — new TCP connection per call, bypasses Bun's connection
-				// pool which caches connections by host:port and returns stale responses
-				// when the same port is reused by a new CHR instance.
-				agent: false,
-			},
-			(res) => {
-				let body = "";
-				res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-				res.on("end", () => { if (!done) { done = true; clearTimeout(timer); resolve({ status: res.statusCode ?? 0, body }); } });
-				res.on("error", (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
-			},
-		);
-		req.on("error", (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
-		req.end();
-	});
-}
-
 export async function waitForBoot(
 	httpPort: number,
 	timeoutMs: number = 120_000,
@@ -485,7 +445,7 @@ export async function waitForBoot(
 
 	while (Date.now() < deadline) {
 		try {
-			const { status, body } = await nodeGet(url, auth, 3000);
+			const { status, body } = await restGet(url, auth, 3000);
 
 			if (status === 401 || status === 403) {
 				// Auth rejected — the REST layer is up and responded, even though
