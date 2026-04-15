@@ -83,10 +83,10 @@ Before the first `git push` to `tikoci/quickchr`, tidy the repo so first-time vi
 
 **Repo hygiene:**
 
-- [ ] Add `LICENSE` file at repo root — `package.json` declares MIT but no root `LICENSE` exists; GitHub's license detector needs the file
-- [ ] Remove or populate stale `test.jpg` (0-byte file at repo root, committed Apr 6 — residue from an experiment)
-- [ ] Reconcile `/index.ts` vs `/src/index.ts` — root one is out-of-sync with the real barrel (`src/index.ts`). `package.json` points to `src/index.ts`. Delete the root file or make it a re-export alias.
-- [ ] `.gitignore`: confirm `.venv/`, `coverage/`, `*.jpg` (if experimental) are excluded; Python venv is currently untracked but should be explicit
+- [x] Add `LICENSE` file at repo root — MIT license added (`a8c8cad`)
+- [x] Remove or populate stale `test.jpg` (0-byte file at repo root) — removed (`a8c8cad`)
+- [x] Reconcile `/index.ts` vs `/src/index.ts` — root `index.ts` deleted (`a8c8cad`)
+- [x] `.gitignore`: `.venv/`, `coverage/`, `*.jpg` added (`a8c8cad`)
 - [ ] Bump `package.json` version from `0.1.0` before first publish. **Even minors** are "release" and **odd minors** are "pre-release", each has own patch#, major stays at 0 until significant test/usage on **all** platform/arch combos.
 
 **Docs drift (README is stale):**
@@ -142,7 +142,8 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 - [x] First-boot serial console provisioning engine (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. `src/lib/console.ts` handles: login sequence (Login:, Password:), license `[Y/n]:` prompt, password change skip (Ctrl-C), and command execution over serial. Version-proof prompt pattern (`] > ` suffix). Wired into `instance.exec()` as `--via=console`. Unit tests in `test/unit/console.test.ts`, integration tests in `test/integration/exec.test.ts`.
 - [x] Console-based provisioning — `provision.ts` accepts optional `machineDir`; if REST times out (30s), falls back to `consoleProvision()` which uses `consoleExec()` for user creation and admin disable. `ensureLoggedIn()` now logs out any stale serial session before re-authenticating as the desired user (`/quit\r` + hasQuit guard). `exec --via=auto` also falls back to console on REST unreachable. Integration-tested.
 - [x] **Fix: `disableAdmin()` race condition** — `disableAdmin()` now accepts optional `verifyAuth` parameter for read-back verification using alternate credentials (e.g. the new user created before disabling admin). Verification poll loop catches transient errors (401 from disabled admin, network blips) instead of aborting. Deadline increased to 20s. `provision()` passes new user's auth for verification.
-- [ ] **Timeout scaling rules** — all timeouts that wait for RouterOS (boot, provisioning, exec, REST readiness) should follow acceleration-aware scaling: x86-on-x86-KVM = 1×, arm64-KVM = 1×, arm64-on-x86-TCG = 2-4×, x86-on-arm64-TCG = 10-20×. Base timeouts should scale automatically via `detectAccel()` result. Add `--timeout-extra=<seconds>` CLI option that **adds** time (not replaces) for tricky environments. Document scaling factors in error messages when timeouts fire. See `.github/instructions/provisioning.instructions.md` for the full table.
+- [ ] **Timeout scaling rules** — ~~all timeouts that wait for RouterOS (boot, provisioning, exec, REST readiness) should follow acceleration-aware scaling~~ **Done** (`b512137`): `accelTimeoutFactor(accel, crossArch)` in `platform.ts` returns 1× (KVM/HVF), 4× (TCG same-arch), 15× (TCG cross-arch). `defaultBootTimeout()` in `quickchr.ts` uses `detectAccel()` at all 5 call sites. `--timeout-extra <s>` / `-T <s>` flag on `start` adds extra time. Unit tests in `test/unit/timeout-scaling.test.ts` (8 tests). Scaling factors documented in `.github/instructions/provisioning.instructions.md`.
+- [x] **Timeout scaling rules** — implemented `accelTimeoutFactor()`, updated `defaultBootTimeout()` with real accel detection, added `--timeout-extra` flag, 8 unit tests (`b512137`)
 
 ### Robustness
 
@@ -230,13 +231,14 @@ Integration tests and internal provisioning code check `board-name` and similar 
 - [x] Audit every REST assertion in integration tests — classify as "liveness check" or "write-verify". Done: board-name checks in start-stop and device-mode tests labeled as liveness; version check labeled as write-verify.
 - [x] Where provisioning claims to verify but the assertion is loose — reviewed; `toContain("CHR")` for liveness is intentional (CHR board-name format), `toContain(state.version)` for version is correct (RouterOS appends channel suffix). No tightening needed.
 - [x] Startup race (wrong array body from /system/resource): identified as boot timing race, NOT the expired-admin flag. Comments in `waitForBoot` (qemu.ts), `waitForRest`/`disableAdmin` (provision.ts), and device-mode.ts all updated to say "startup race" not "expired admin quirk".
-- [ ] Consider an anchor test concept for provisioning: a reference CHR started under controlled conditions whose full REST state is snapshotted and diffed on each run. Differences surface RouterOS schema changes before they break production workflows.
+- [x] Consider an anchor test concept for provisioning: a reference CHR started under controlled conditions whose full REST state is snapshotted and diffed on each run. Differences surface RouterOS schema changes before they break production workflows. **Done** (`3580d53`): `test/integration/anchor.test.ts` boots x86 CHR and verifies field presence on 6 REST endpoints (resource, identity, license, user, device-mode, ip/address, interface). 34 assertions. Note: corrected field is `system-id` (not `software-id`) for the license endpoint — also fixed in `cmdGet`. Post-boot 3s settle required before querying non-resource endpoints (RouterOS REST race). Value testing deferred (fields, not values — avoids version churn).
 
 ### RouterOS "expired admin" is not a REST blocker
 
 Multiple agents (and past code paths) have treated the admin account's `expired: true` flag as a REST API blocker and added workarounds accordingly. **It is not.** The `expired` flag only prompts a password-change screen at CLI/Winbox/SSH login (and even then can be bypassed with Ctrl-C). RouterOS REST API and API sockets are unaffected — authenticated requests with `admin:""` succeed on a fresh CHR image regardless of the expired flag. Workarounds built on this incorrect assumption (`clearAdminExpiry`, polling until `board-name` appears in shape-checks) add complexity without fixing a real problem.
 
 - [x] Audit `provision.ts` and any code with comments referencing "expired" or "quirk" — Done: all "expired admin quirk" comments corrected to "startup race". `clearAdminExpiry` kept (best-effort, catch-all) but docstring corrected: the expired flag does NOT affect REST, it only affects CLI/Winbox/SSH login. Candidate for removal after integration test confirms no regression.
+- [x] **`clearAdminExpiry` removed** (`3580d53`) — integration test (provisioning-integ) confirmed `clearAdminExpiry` is a no-op for REST provisioning. Function and call site deleted from `provision.ts`. No regression in provisioning tests.
 - [x] Update `.github/instructions/` to document that `expired: true` does not affect REST API — Done: `provisioning.instructions.md` and `general.instructions.md` already updated in prior commit.
 - [x] If a genuine startup race (not the expired flag) causes early REST responses to return wrong data — confirmed: it IS a startup race. `waitForBoot` already handles it correctly (two-consecutive-OK requirement). Comments updated accordingly.
 
@@ -372,8 +374,8 @@ quickchr get my-chr device-mode
 quickchr get my-chr admin                        # RouterOS users in group=full
 ```
 
-- [ ] Implement `set` command — license, device-mode, admin account
-- [ ] Implement `get` command — query settable properties via REST API. `--json`/`--yaml` output.
+- [ ] Implement `set` command — license, device-mode, admin account. **Deferred:** requires live CHR, credential resolution, and mutation logic for each settable property. Design is clear (see section above) but scope is large — prioritize after `list`/`status` merge. Actionable next step: start with `--license` flag only, which can reuse existing `license.ts` logic.
+- [x] Implement `get` command — `cmdGet` in `src/cli/index.ts` (`a8c8cad`). Queries live CHR REST endpoints (license, device-mode, admin users). Pretty-print or `--json`. Graceful offline handling. Fixed license field: `system-id` not `software-id`.
 - [ ] `get` without a property group: show all settable config (license level, device-mode, admin users)
 - [ ] Deprecate standalone `license` command → alias to `set <name> --license`
 
@@ -483,7 +485,7 @@ $ quickchr setup
 
 #### `logs` — QEMU Log
 
-- [ ] `quickchr logs <name>` — tail `qemu.log`. `--follow` for live tail. `--json` for structured log entries if we add structured logging later. **Include RouterOS logs if running:** `quickchr logs <name> --ros` or `quickchr logs <name> --source=qemu|ros|all` — pull from `/log/print` via REST for RouterOS-side logs. Useful for debugging provisioning and exec issues alongside QEMU output.
+- [x] `quickchr logs <name>` — tail `qemu.log`. `--follow` / `-f` for live tail. `-n N` for last N lines (`a8c8cad`). `--source=qemu|ros|all` and `--json` deferred (RouterOS `/log/print` integration).
 
 ### Shell Completions
 
@@ -562,11 +564,11 @@ The refactoring is not all-or-nothing. Incremental steps:
 - [x] **quickchr managed account** — new default: auto-creates a `quickchr` user with a generated password on each CHR instance. Password saved to secret store. Replaces reliance on `admin:""`. Opt out with `--no-secure-login`. Wizard offers 3 choices: managed (default), custom user, or keep admin.
 - [x] **`resolveAuth()` async + secrets lookup** — auth resolution now checks instance secrets (priority 2 after explicit args, before machine.json state). `remove()` and `clean()` clean up instance credentials.
 - [ ] Credential profiles — save/restore username+password per machine or as a shared default. `rest()` and CLI commands auto-use stored credentials.
-- [ ] SSH key-based auth — generate/store SSH keys for CHR instances as alternative to password auth. **This is a prerequisite for `exec --via=ssh`:** the provisioning path should generate an SSH key pair, install the public key into the CHR user's authorized keys, and store the private key in the machine directory. This ensures SSH works even if the password is later changed, and is more secure than `sshpass`. `sshpass` remains the fallback for admin/custom users who haven't provisioned keys.
+- [x] SSH key-based auth — generate/store SSH keys for CHR instances as alternative to password auth. **Done** (`3580d53`): `installSshKey()` in `provision.ts` generates ed25519 key pair, stores private key in `<machineDir>/ssh/id_ed25519`, POSTs public key to `/rest/user/ssh-keys/add`. Runs non-fatally at end of provisioning when `effectiveUser && machineDir`. Integration test in `provisioning.test.ts`. Prerequisite for `exec --via=ssh` (private key path now known). `sshpass` remains fallback for admin/custom users.
 
 ### Version Checks
 
-- [ ] **Doctor version reporting** — `doctor` should report version staleness for both quickchr itself and RouterOS/QEMU. Pre-release versions have odd minor numbers, release versions have even minor numbers. Show color-coded status: green = running latest release/pre-release, yellow = behind, red = very old. Display days since latest release. Example: `Running version 0.x.y (3 days behind latest release 0.x.z)`. This should be in `doctor` (discoverable, obvious) — not an auto-upgrader.
+- [ ] **Doctor version reporting** — `doctor` now shows installed QEMU binary version (`a8c8cad`). Remaining: report version staleness for quickchr itself and the active RouterOS image. Pre-release versions have odd minor numbers, release versions have even minor numbers. Show color-coded status: green = running latest release/pre-release, yellow = behind, red = very old. Display days since latest release. Example: `Running version 0.x.y (3 days behind latest release 0.x.z)`. This should be in `doctor` (discoverable, obvious) — not an auto-upgrader.
 
 ---
 

@@ -221,7 +221,7 @@ export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceM
 export async function readDeviceMode(httpPort: number): Promise<Record<string, string>> {
 	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/system/device-mode`, {
 		headers: { Authorization: `Basic ${btoa("admin:")}` },
-		signal: AbortSignal.timeout(10_000),
+		signal: AbortSignal.timeout(30_000),
 	});
 
 	if (!response.ok) {

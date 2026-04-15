@@ -684,7 +684,7 @@ async function applyDeviceMode(
 	const httpPort = toChrPorts(machineState.ports).http;
 	const accel = await detectAccel(machineState.arch);
 	const bootTimeout = defaultBootTimeout(machineState.arch, undefined, accel);
-	await waitForDeviceModeApi(httpPort, 30_000);
+	await waitForDeviceModeApi(httpPort, 60_000);
 	log.status(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
 
 	let alreadyActive = false;

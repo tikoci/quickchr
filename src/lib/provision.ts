@@ -89,7 +89,7 @@ export async function createUser(
 	// RouterOS can acknowledge /user/add before the user record becomes visible.
 	// Verify visibility (and group) so callers get deterministic behavior.
 	const expectedGroup = group.trim().toLowerCase();
-	const deadline = Date.now() + 15_000;
+	const deadline = Date.now() + 30_000;
 	while (Date.now() < deadline) {
 		try {
 			const user = await readUser(httpPort, auth, name);
@@ -297,6 +297,32 @@ export async function installSshKey(
 		const body = await response.text().catch(() => "");
 		throw new Error(`Failed to install SSH key for ${username}: HTTP ${response.status} ${body}`);
 	}
+	// Drain response body, then poll until the key appears in the listing.
+	// RouterOS may accept the POST before the key store is queryable,
+	// especially under load when internal async commits are delayed.
+	await response.text().catch(() => "");
+	const deadline = Date.now() + 60_000;
+	let lastListBody = "";
+	while (Date.now() < deadline) {
+		try {
+			const listResp = await fetch(`http://127.0.0.1:${httpPort}/rest/user/ssh-keys`, {
+				headers: { Authorization: auth },
+				signal: AbortSignal.timeout(5_000),
+			});
+			if (listResp.ok) {
+				const body = await listResp.text();
+				lastListBody = body;
+				const keys = JSON.parse(body) as Array<{ user?: string }>;
+				if (Array.isArray(keys) && keys.some((k) => k.user === username)) return;
+			} else {
+				lastListBody = `HTTP ${listResp.status}`;
+			}
+		} catch (e) {
+			lastListBody = String(e);
+		}
+		await Bun.sleep(500);
+	}
+	throw new Error(`SSH key for ${username} was accepted by RouterOS but did not appear in the listing within 60s (last listing: ${lastListBody})`);
 }
 
 /** Run all provisioning steps based on the config.
@@ -338,40 +364,58 @@ export async function provision(
 	// Try REST provisioning. When machineDir is provided, use a shorter timeout
 	// so the console fallback can engage sooner if REST isn't available.
 	const restTimeout = machineDir ? 30_000 : 60_000;
+	let usedConsolePath = false;
 	try {
 		await waitForRest(httpPort, restTimeout);
 	} catch (e) {
 		if (machineDir) {
 			log.warn("REST API unavailable — falling back to serial console provisioning");
-			return consoleProvision(machineDir, machineName, effectiveUser, !!shouldDisableAdmin, logger);
+			const result = await consoleProvision(machineDir, machineName, effectiveUser, !!shouldDisableAdmin, logger);
+			usedConsolePath = true;
+			// After console provisioning the machine is booted; REST comes up shortly.
+			// Attempt SSH key install for the managed quickchr user — non-fatal if REST is still unavailable.
+			if (secureLogin && !user && effectiveUser) {
+				try {
+					await waitForRest(httpPort, 30_000);
+					await installSshKey(httpPort, effectiveUser.name, machineName, machineDir);
+				} catch (keyErr) {
+					log.warn(`SSH key install failed after console provisioning (SSH transport will fall back to password): ${keyErr}`);
+				}
+			}
+			return result;
 		}
 		throw e;
 	}
 
-	if (effectiveUser) {
-		await createUser(httpPort, effectiveUser.name, effectiveUser.password);
-		// Persist to secret store so resolveAuth() picks it up
-		await saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
-	}
-
-	if (effectiveUser && machineDir) {
-		try {
-			await installSshKey(httpPort, effectiveUser.name, machineName, machineDir);
-		} catch (e) {
-			log.warn(`SSH key install failed (SSH transport will fall back to password): ${e}`);
+	if (!usedConsolePath) {
+		if (effectiveUser) {
+			await createUser(httpPort, effectiveUser.name, effectiveUser.password);
+			// Persist to secret store so resolveAuth() picks it up
+			await saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
 		}
-	}
 
-	if (shouldDisableAdmin) {
-		if (!effectiveUser) {
-			log.warn("Warning: disabling admin without creating another user — you may lose access");
+		if (secureLogin && !user && effectiveUser && machineDir) {
+			// Brief pause so RouterOS propagates the new user to all subsystems
+			// (including the SSH key store) before we attempt key installation.
+			await Bun.sleep(1000);
+			try {
+				await installSshKey(httpPort, effectiveUser.name, machineName, machineDir);
+			} catch (e) {
+				log.warn(`SSH key install failed (SSH transport will fall back to password): ${e}`);
+			}
 		}
-		// Pass the new user's auth for verification — after disabling admin,
-		// admin creds may stop working for REST queries.
-		const verifyAuth = effectiveUser
-			? `Basic ${btoa(`${effectiveUser.name}:${effectiveUser.password}`)}`
-			: undefined;
-		await disableAdmin(httpPort, verifyAuth);
+
+		if (shouldDisableAdmin) {
+			if (!effectiveUser) {
+				log.warn("Warning: disabling admin without creating another user — you may lose access");
+			}
+			// Pass the new user's auth for verification — after disabling admin,
+			// admin creds may stop working for REST queries.
+			const verifyAuth = effectiveUser
+				? `Basic ${btoa(`${effectiveUser.name}:${effectiveUser.password}`)}`
+				: undefined;
+			await disableAdmin(httpPort, verifyAuth);
+		}
 	}
 
 	return { user: effectiveUser };
