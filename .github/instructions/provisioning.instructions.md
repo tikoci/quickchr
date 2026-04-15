@@ -16,6 +16,38 @@ return unexpected data, the root cause is a **startup timing race** — not the 
 flag. Identify the actual condition (timing, RouterOS version, specific endpoint) and
 fix that specifically.
 
+## RouterOS Post-Boot REST Race
+
+`waitForBoot` polls `/rest/system/resource` with a two-consecutive-OK guard and detects
+the startup race (brief period where RouterOS returns wrong/array body) for that
+endpoint. However, **the race affects ALL non-resource endpoints** — `/system/identity`,
+`/system/license`, `/system/device-mode`, and others can also return wrong data briefly
+after boot, even after `waitForBoot` returns true.
+
+Each caller must handle this independently. The established pattern:
+
+```typescript
+// Retry until the response has the expected keys (up to N seconds)
+const deadline = Date.now() + 20_000;
+let lastBody = "";
+while (Date.now() < deadline) {
+    const resp = await fetch(url, { headers, signal: AbortSignal.timeout(5_000) });
+    if (resp.ok) {
+        const body = await resp.text();
+        lastBody = body;
+        const data = JSON.parse(body);
+        if (data && typeof data === "object" && !Array.isArray(data) && "expected-key" in data) {
+            return data; // Valid — stop polling
+        }
+    }
+    await Bun.sleep(1_000);
+}
+throw new Error(`Endpoint did not return valid data within 20s (last: ${lastBody})`);
+```
+
+Callers that already implement this: `getLicenseInfo` (15s), `readDeviceMode` (30s
+AbortSignal), `fetchUntilHasKeys` in anchor test (20s).
+
 ## Collecting RouterOS Logs for Debugging
 
 When debugging provisioning or exec behavior, enable verbose logging on the CHR:
