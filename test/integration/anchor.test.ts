@@ -49,39 +49,54 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			const booted = await instance.waitForBoot(bootTimeout);
 			expect(booted).toBe(true);
 
-			// RouterOS REST endpoints may briefly return stale/empty data for
-			// non-resource endpoints even after resource is stable. Brief pause
-			// ensures all endpoints have settled.
-			await Bun.sleep(3_000);
-
 			const base = `http://127.0.0.1:${instance.ports.http}/rest`;
 			const auth = `Basic ${btoa("admin:")}`;
 			const headers = { Authorization: auth };
-			const t = () => AbortSignal.timeout(10_000);
+
+			// RouterOS non-resource endpoints (identity, license, device-mode) may briefly
+			// return wrong data after boot even after waitForBoot declares the REST layer
+			// stable — waitForBoot only guards /system/resource. Poll until each endpoint
+			// returns valid fields (up to 20s per endpoint).
+			async function fetchUntilHasKeys(path: string, keys: string[]): Promise<Record<string, unknown>> {
+				const deadline = Date.now() + 20_000;
+				let lastBody = "";
+				while (Date.now() < deadline) {
+					try {
+						const resp = await fetch(`${base}/${path}`, {
+							headers,
+							signal: AbortSignal.timeout(5_000),
+						});
+						if (resp.ok) {
+							const body = await resp.text();
+							lastBody = body;
+							const data = JSON.parse(body) as unknown;
+							if (data && typeof data === "object" && !Array.isArray(data)) {
+								const obj = data as Record<string, unknown>;
+								if (keys.every((k) => k in obj)) return obj;
+							}
+						}
+					} catch { /* retry */ }
+					await Bun.sleep(1_000);
+				}
+				throw new Error(`/rest/${path} did not return expected keys [${keys.join(", ")}] within 20s (last: ${lastBody})`);
+			}
 
 			// --- /system/resource ---
-			const resResp = await fetch(`${base}/system/resource`, { headers, signal: t() });
-			expect(resResp.status).toBe(200);
-			const resource = await resResp.json() as Record<string, unknown>;
-			// Fields quickchr reads directly
+			const resource = await fetchUntilHasKeys("system/resource", ["board-name", "version", "cpu-load", "uptime", "free-memory", "total-memory", "architecture-name"]);
 			for (const field of ["board-name", "version", "cpu-load", "uptime", "free-memory", "total-memory", "architecture-name"]) {
 				expect(resource).toHaveProperty(field, expect.anything());
 			}
 
 			// --- /system/identity ---
-			const idResp = await fetch(`${base}/system/identity`, { headers, signal: t() });
-			expect(idResp.status).toBe(200);
-			const identity = await idResp.json() as Record<string, unknown>;
+			const identity = await fetchUntilHasKeys("system/identity", ["name"]);
 			expect(identity).toHaveProperty("name");
 
 			// --- /system/license ---
-			const licResp = await fetch(`${base}/system/license`, { headers, signal: t() });
-			expect(licResp.status).toBe(200);
-			const license = await licResp.json() as Record<string, unknown>;
+			const license = await fetchUntilHasKeys("system/license", ["system-id"]);
 			expect(license).toHaveProperty("system-id");
 
 			// --- /user ---
-			const userResp = await fetch(`${base}/user`, { headers, signal: t() });
+			const userResp = await fetch(`${base}/user`, { headers, signal: AbortSignal.timeout(10_000) });
 			expect(userResp.status).toBe(200);
 			const users = await userResp.json() as Array<Record<string, unknown>>;
 			expect(Array.isArray(users)).toBe(true);
@@ -95,14 +110,11 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			expect(users.some((u) => u.name === "admin")).toBe(true);
 
 			// --- /system/device-mode ---
-			const dmResp = await fetch(`${base}/system/device-mode`, { headers, signal: t() });
-			expect(dmResp.status).toBe(200);
-			const dm = await dmResp.json() as Record<string, unknown>;
-			// mode is the primary field we read
+			const dm = await fetchUntilHasKeys("system/device-mode", ["mode"]);
 			expect(dm).toHaveProperty("mode");
 
 			// --- /ip/address ---
-			const ipResp = await fetch(`${base}/ip/address`, { headers, signal: t() });
+			const ipResp = await fetch(`${base}/ip/address`, { headers, signal: AbortSignal.timeout(10_000) });
 			expect(ipResp.status).toBe(200);
 			const ips = await ipResp.json() as Array<Record<string, unknown>>;
 			expect(Array.isArray(ips)).toBe(true);
@@ -112,7 +124,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			}
 
 			// --- /interface ---
-			const ifResp = await fetch(`${base}/interface`, { headers, signal: t() });
+			const ifResp = await fetch(`${base}/interface`, { headers, signal: AbortSignal.timeout(10_000) });
 			expect(ifResp.status).toBe(200);
 			const ifaces = await ifResp.json() as Array<Record<string, unknown>>;
 			expect(Array.isArray(ifaces)).toBe(true);

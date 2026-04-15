@@ -286,22 +286,20 @@ export async function installSshKey(
 	}
 
 	const pubKey = (await Bun.file(`${privateKeyPath}.pub`).text()).trim();
+
+	// Install via serial console — commits synchronously unlike the REST endpoint
+	// which may return 200 OK before the key is durable in RouterOS storage.
+	await consoleExec(
+		machineDir,
+		`/user/ssh-keys/add user="${username}" key="${pubKey}"`,
+		"admin",
+		"",
+		30_000,
+	);
+
+	// Verify the key appears in the REST listing.
 	const auth = `Basic ${btoa("admin:")}`;
-	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/user/ssh-keys/add`, {
-		method: "POST",
-		headers: { Authorization: auth, "Content-Type": "application/json" },
-		body: JSON.stringify({ user: username, key: pubKey }),
-		signal: AbortSignal.timeout(10_000),
-	});
-	if (!response.ok) {
-		const body = await response.text().catch(() => "");
-		throw new Error(`Failed to install SSH key for ${username}: HTTP ${response.status} ${body}`);
-	}
-	// Drain response body, then poll until the key appears in the listing.
-	// RouterOS may accept the POST before the key store is queryable,
-	// especially under load when internal async commits are delayed.
-	await response.text().catch(() => "");
-	const deadline = Date.now() + 60_000;
+	const deadline = Date.now() + 10_000;
 	let lastListBody = "";
 	while (Date.now() < deadline) {
 		try {
@@ -322,7 +320,7 @@ export async function installSshKey(
 		}
 		await Bun.sleep(500);
 	}
-	throw new Error(`SSH key for ${username} was accepted by RouterOS but did not appear in the listing within 60s (last listing: ${lastListBody})`);
+	throw new Error(`SSH key for ${username} installed via console but did not appear in REST listing within 10s (last: ${lastListBody})`);
 }
 
 /** Run all provisioning steps based on the config.
