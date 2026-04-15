@@ -1472,7 +1472,7 @@ async function cmdGet(argv: string[]) {
 		console.log(`\n  ${bold("License")}`);
 		const level = lic.level ?? lic["upgradable-to"] ?? "free (1 Mbps)";
 		console.log(`    Level:       ${level}`);
-		if (lic["software-id"]) console.log(`    Software ID: ${lic["software-id"]}`);
+		if (lic["system-id"]) console.log(`    Software ID: ${lic["system-id"]}`);
 		if (lic.deadline) console.log(`    Deadline:    ${lic.deadline}`);
 	}
 

@@ -3,6 +3,8 @@
  * with a console transport fallback when REST is unavailable.
  */
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { saveInstanceCredentials } from "./credentials.ts";
 import { generatePassword } from "./password.ts";
@@ -56,28 +58,6 @@ async function waitForRest(
 	}
 }
 
-/** Re-set admin's password to its current value (empty string on fresh CHR).
- *
- * A fresh CHR image ships with admin marked `expired: true`, which prompts
- * a password-change screen at CLI/Winbox/SSH login. The expired flag does NOT
- * affect REST API access. This call is a best-effort attempt to clear the
- * expiry so SSH and CLI paths work cleanly; REST provisioning succeeds whether
- * or not it runs. Candidate for removal if testing confirms no observable effect.
- *
- * NOTE: The REST startup race (wrong body from /system/resource) is unrelated
- * to the expired flag — it is a timing issue handled by waitForBoot. */
-async function clearAdminExpiry(httpPort: number): Promise<void> {
-	const auth = `Basic ${btoa("admin:")}`;
-	try {
-		await fetch(`http://127.0.0.1:${httpPort}/rest/execute`, {
-			method: "POST",
-			headers: { Authorization: auth, "Content-Type": "application/json" },
-			body: JSON.stringify({ script: "/user/set admin password=\"\"", "as-string": "" }),
-			signal: AbortSignal.timeout(10_000),
-		});
-	} catch { /* best-effort — provisioning still works without this */ }
-}
-
 /** Create a user via the REST API. */
 export async function createUser(
 	httpPort: number,
@@ -86,7 +66,6 @@ export async function createUser(
 	group: string = "full",
 ): Promise<void> {
 	await waitForRest(httpPort);
-	await clearAdminExpiry(httpPort);
 
 	const auth = `Basic ${btoa("admin:")}`;
 	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/user/add`, {
@@ -282,6 +261,44 @@ async function consoleProvision(
 	return { user: effectiveUser };
 }
 
+/**
+ * Generate an ed25519 SSH keypair and install the public key on the CHR for `username`.
+ * Keys are stored in `<machineDir>/ssh/id_ed25519` (private) and `.pub` (public).
+ * This enables SSH transport without passwords for the quickchr managed user.
+ */
+export async function installSshKey(
+	httpPort: number,
+	username: string,
+	machineName: string,
+	machineDir: string,
+): Promise<void> {
+	const sshDir = join(machineDir, "ssh");
+	mkdirSync(sshDir, { recursive: true });
+
+	const privateKeyPath = join(sshDir, "id_ed25519");
+
+	const keygen = Bun.spawnSync(
+		["ssh-keygen", "-t", "ed25519", "-f", privateKeyPath, "-N", "", "-C", `quickchr@${machineName}`],
+		{ stdout: "pipe", stderr: "pipe" },
+	);
+	if (keygen.exitCode !== 0) {
+		throw new Error(`ssh-keygen failed: ${new TextDecoder().decode(keygen.stderr)}`);
+	}
+
+	const pubKey = (await Bun.file(`${privateKeyPath}.pub`).text()).trim();
+	const auth = `Basic ${btoa("admin:")}`;
+	const response = await fetch(`http://127.0.0.1:${httpPort}/rest/user/ssh-keys/add`, {
+		method: "POST",
+		headers: { Authorization: auth, "Content-Type": "application/json" },
+		body: JSON.stringify({ user: username, key: pubKey }),
+		signal: AbortSignal.timeout(10_000),
+	});
+	if (!response.ok) {
+		const body = await response.text().catch(() => "");
+		throw new Error(`Failed to install SSH key for ${username}: HTTP ${response.status} ${body}`);
+	}
+}
+
 /** Run all provisioning steps based on the config.
  *
  * When `user` is provided, creates that exact user. When `user` is omitted
@@ -335,6 +352,14 @@ export async function provision(
 		await createUser(httpPort, effectiveUser.name, effectiveUser.password);
 		// Persist to secret store so resolveAuth() picks it up
 		await saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
+	}
+
+	if (effectiveUser && machineDir) {
+		try {
+			await installSshKey(httpPort, effectiveUser.name, machineName, machineDir);
+		} catch (e) {
+			log.warn(`SSH key install failed (SSH transport will fall back to password): ${e}`);
+		}
 	}
 
 	if (shouldDisableAdmin) {

@@ -1,4 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * Integration tests — user provisioning and admin management.
@@ -260,7 +262,6 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 	beforeAll(async () => {
 		await cleanupMachine("integration-prov-corner");
 	});
-
 	test("createUser with an invalid group throws PROCESS_FAILED", async () => {
 		// RouterOS rejects /rest/user/add when the group name doesn't exist.
 		// This verifies the library surfaces that RouterOS error as PROCESS_FAILED
@@ -334,4 +335,51 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			await cleanupMachine("integration-prov-corner");
 		}
 	}, 300_000);
+});
+
+describe.skipIf(SKIP)("SSH key provisioning", () => {
+	beforeAll(async () => {
+		await cleanupMachine("integration-ssh-key");
+	});
+
+	test("SSH key installed for quickchr managed user", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				channel: "stable",
+				arch: "x86",
+				background: true,
+				name: "integration-ssh-key",
+				secureLogin: true,
+			});
+
+			// Verify SSH key files were written to machineDir/ssh/
+			const sshDir = join(instance.state.machineDir, "ssh");
+			expect(existsSync(join(sshDir, "id_ed25519"))).toBe(true);
+			expect(existsSync(join(sshDir, "id_ed25519.pub"))).toBe(true);
+
+			// Verify key was installed on CHR via REST
+			const { getInstanceCredentials } = await import("../../src/lib/credentials.ts");
+			const creds = await getInstanceCredentials("integration-ssh-key");
+			const auth = creds
+				? `Basic ${btoa(`${creds.user}:${creds.password}`)}`
+				: `Basic ${btoa("admin:")}`;
+
+			const resp = await fetch(`http://127.0.0.1:${instance.ports.http}/rest/user/ssh-keys`, {
+				headers: { Authorization: auth },
+				signal: AbortSignal.timeout(10_000),
+			});
+			expect(resp.status).toBe(200);
+			const keys = await resp.json() as Array<{ user: string; key: string }>;
+			const userKey = keys.find((k: { user: string }) => k.user === "quickchr");
+			expect(userKey).toBeDefined();
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-ssh-key");
+		}
+	}, 180_000);
 });
