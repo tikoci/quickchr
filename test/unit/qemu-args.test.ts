@@ -620,48 +620,62 @@ describe("stopMachineByName", () => {
 
 // --- waitForBoot ---
 
-describe("waitForBoot", () => {
-	const originalFetch = globalThis.fetch;
-
-	afterEach(() => {
-		globalThis.fetch = originalFetch;
-	});
-
-	function mockBoot(fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) {
-		globalThis.fetch = Object.assign(fn, { preconnect: (_url: string | URL) => {} }) as typeof fetch;
+// globalThis.fetch mocking does not intercept node:http — use a real server instead.
+async function withBootServer(
+	handler: (req: Request) => Response | Promise<Response>,
+	fn: (port: number) => Promise<void>,
+) {
+	const server = Bun.serve({ port: 0, fetch: handler });
+	try {
+		await fn(server.port);
+	} finally {
+		server.stop(true);
 	}
+}
 
+describe("waitForBoot", () => {
 	test("returns true when HTTP server responds with 401 (auth required = booted)", async () => {
-		mockBoot(() => Promise.resolve(new Response("Unauthorized", { status: 401 })));
-		const result = await waitForBoot(9199, 5000);
-		expect(result).toBe(true);
-	});
+		await withBootServer(
+			() => new Response("Unauthorized", { status: 401 }),
+			async (port) => {
+				const result = await waitForBoot(port, 8000);
+				expect(result).toBe(true);
+			},
+		);
+	}, 15_000);
 
 	test("returns true when HTTP server responds with 200 and valid board-name body", async () => {
-		mockBoot(() => Promise.resolve(new Response(
-			JSON.stringify({ "board-name": "CHR", "architecture-name": "x86_64" }),
-			{ status: 200 },
-		)));
-		const result = await waitForBoot(9199, 5000);
-		expect(result).toBe(true);
-	});
+		await withBootServer(
+			() => new Response(
+				JSON.stringify({ "board-name": "CHR", "architecture-name": "x86_64" }),
+				{ status: 200 },
+			),
+			async (port) => {
+				const result = await waitForBoot(port, 8000);
+				expect(result).toBe(true);
+			},
+		);
+	}, 15_000);
 
-	test("returns false when 200 response has user-list body (fresh CHR startup quirk)", async () => {
-		// Fresh CHR with expired admin returns the /user list for all GET requests
-		// until the REST layer finishes initializing.
-		mockBoot(() => Promise.resolve(new Response(
-			JSON.stringify([{ name: "admin", group: "full" }]),
-			{ status: 200 },
-		)));
-		// Short timeout — should expire without ever reaching board-name body
-		const result = await waitForBoot(9199, 50);
-		expect(result).toBe(false);
+	test("returns false when 200 response has user-list body (startup race — REST not fully initialized)", async () => {
+		// RouterOS sometimes returns the /user list for all GET requests briefly
+		// after boot during a startup race — not related to the expired admin flag.
+		// waitForBoot should reject array bodies and keep polling until timeout.
+		await withBootServer(
+			() => new Response(
+				JSON.stringify([{ name: "admin", group: "full" }]),
+				{ status: 200 },
+			),
+			async (port) => {
+				const result = await waitForBoot(port, 50);
+				expect(result).toBe(false);
+			},
+		);
 	}, 10_000);
 
 	test("returns false when all polls fail within timeout", async () => {
-		mockBoot(() => Promise.reject(new Error("connection refused")));
-		// Very short timeout — should expire after first failed poll
-		const result = await waitForBoot(9199, 50);
+		// Use a port with no server — every poll gets ECONNREFUSED
+		const result = await waitForBoot(9198, 50);
 		expect(result).toBe(false);
 	}, 10_000);
 });

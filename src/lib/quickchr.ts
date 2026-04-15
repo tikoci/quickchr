@@ -1116,10 +1116,14 @@ export class QuickCHR {
 		if (hasProvisioning) {
 			const booted = await instance.waitForBoot(bootTimeout);
 			if (!booted) {
+				// Stop QEMU and remove state — don't leave the user with a partially
+				// configured or unconfigured machine they didn't ask for.
+				try { await instance.stop(); } catch { /* ignore */ }
+				try { await instance.remove(); } catch { /* ignore */ }
 				throw new QuickCHRError(
 					"BOOT_TIMEOUT",
-					`CHR did not respond within ${bootTimeout / 1000}s — provisioning skipped. ` +
-					`Machine "${name}" is running but unconfigured. Remove it with: quickchr rm ${name}`,
+					`CHR did not respond within ${bootTimeout / 1000}s — provisioning could not run. ` +
+					`Machine "${name}" has been cleaned up automatically.`,
 				);
 			}
 			await QuickCHR._provisionInstance(instance, state, {
@@ -1336,10 +1340,12 @@ export class QuickCHR {
 			const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts.installAllPackages, accel);
 			const booted = await instance.waitForBoot(bootTimeout);
 			if (!booted) {
+				try { await instance.stop(); } catch { /* ignore */ }
+				try { await instance.remove(); } catch { /* ignore */ }
 				throw new QuickCHRError(
 					"BOOT_TIMEOUT",
-					`CHR did not respond within ${bootTimeout / 1000}s — provisioning skipped. ` +
-					`Machine "${state.name}" is running but unconfigured. Remove it with: quickchr rm ${state.name}`,
+					`CHR did not respond within ${bootTimeout / 1000}s — provisioning could not run. ` +
+					`Machine "${state.name}" has been cleaned up automatically.`,
 				);
 			}
 			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig, logger);

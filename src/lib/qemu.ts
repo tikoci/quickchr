@@ -7,6 +7,7 @@
 
 import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { request as nodeRequest } from "node:http";
 import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware } from "./platform.ts";
@@ -433,6 +434,38 @@ export async function stopMachineByName(_name: string, state: MachineState): Pro
  *                  CHR images; pass instance credentials for post-reboot probes
  *                  on provisioned machines so body validation can be performed.
  */
+function nodeGet(
+	url: string,
+	auth: string,
+	timeoutMs: number,
+): Promise<{ status: number; body: string }> {
+	return new Promise((resolve, reject) => {
+		const parsed = new URL(url);
+		const req = nodeRequest(
+			{
+				hostname: parsed.hostname,
+				port: parsed.port,
+				path: parsed.pathname + parsed.search,
+				method: "GET",
+				headers: { Authorization: auth },
+				// agent:false — new TCP connection per call, bypasses Bun's connection
+				// pool which caches connections by host:port and returns stale responses
+				// when the same port is reused by a new CHR instance.
+				agent: false,
+			},
+			(res) => {
+				let body = "";
+				res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+				res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+				res.on("error", reject);
+			},
+		);
+		req.setTimeout(timeoutMs, () => { req.destroy(new Error("timeout")); });
+		req.on("error", reject);
+		req.end();
+	});
+}
+
 export async function waitForBoot(
 	httpPort: number,
 	timeoutMs: number = 120_000,
@@ -444,21 +477,18 @@ export async function waitForBoot(
 
 	while (Date.now() < deadline) {
 		try {
-			const r = await fetch(url, {
-				headers: { Authorization: auth },
-				signal: AbortSignal.timeout(3000),
-			});
+			const { status, body } = await nodeGet(url, auth, 3000);
 
-			if (r.status === 401 || r.status === 403) {
+			if (status === 401 || status === 403) {
 				// Auth rejected — the REST layer is up and responded, even though
 				// we cannot validate the body. Count as ready.
 				consecutiveReady++;
-			} else if (r.ok) {
+			} else if (status >= 200 && status < 300) {
 				// RouterOS REST may return wrong data (array body) briefly after boot —
-				// a startup race, not related to the admin expired flag. Only accept
-				// the response once the body is the expected singleton object.
-				const body = await r.json().catch(() => null) as unknown;
-				if (body && typeof body === "object" && !Array.isArray(body) && "board-name" in (body as object)) {
+				// a startup race. Only accept once the body is the expected singleton object.
+				let parsed: unknown = null;
+				try { parsed = JSON.parse(body); } catch { /* ignore */ }
+				if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "board-name" in (parsed as object)) {
 					consecutiveReady++;
 				} else {
 					consecutiveReady = 0; // wrong body — REST not fully initialized yet
@@ -469,7 +499,7 @@ export async function waitForBoot(
 
 			if (consecutiveReady >= 2) return true;
 		} catch {
-			// ECONNRESET, connection refused, parse error — not ready yet
+			// ECONNRESET, connection refused, timeout — not ready yet
 			consecutiveReady = 0;
 		}
 		await Bun.sleep(2000);

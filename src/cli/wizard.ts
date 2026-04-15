@@ -597,6 +597,12 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	const spinner = clack.spinner();
 	const spinMsg = installAllPackages ? "Booting CHR and installing all packages..." : "Booting CHR...";
 	spinner.start(spinMsg);
+	const bootStartTime = Date.now();
+	// Show elapsed seconds so the user can see progress during the boot wait.
+	const elapsedTimer = setInterval(() => {
+		const elapsed = Math.floor((Date.now() - bootStartTime) / 1000);
+		spinner.message(`${spinMsg} (${elapsed}s)`);
+	}, 3000);
 
 	try {
 		let cachePrewarmed = false;
@@ -606,6 +612,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 		};
 		cachePrewarmed = true;
 		const instance = await QuickCHR.start(opts);
+		clearInterval(elapsedTimer);
 		spinner.stop(`${bold(instance.name)} started`);
 
 		const { hasUserModeNetwork } = await import("../lib/network.ts");
@@ -665,6 +672,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 
 		clack.outro("Done!");
 	} catch (e: unknown) {
+		clearInterval(elapsedTimer);
 		spinner.stop("Failed", 1);
 		if (e instanceof Error) {
 			clack.log.error(e.message);
