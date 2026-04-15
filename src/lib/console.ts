@@ -202,13 +202,27 @@ async function ensureLoggedIn(
 	while (Date.now() < deadline) {
 		const remaining = deadline - Date.now();
 
-		// If we see a CLI prompt, a previous session is still active on the serial console.
-		// Log out once so we can log back in as the requested user. This handles the case
-		// where consoleExec is called twice with different users — the terminal retains the
-		// previous session after the socket closes (serial has no HUP concept).
+		// If we see a CLI prompt, check whether we're already logged in as the right user.
+		// The prompt format is "[username@identity] > " — extract the username portion.
+		// If it matches the requested user, proceed directly without re-logging in.
+		// If it differs (previous session left open from a prior consoleExec call), log out
+		// once and re-authenticate as the correct user.  Serial has no HUP concept, so the
+		// previous session persists across socket reconnects.
 		const promptIdx = session.buffer.indexOf(PROMPT_PATTERN, session.matchOffset);
 		if (promptIdx >= 0) {
+			const beforePrompt = session.buffer.slice(0, promptIdx);
+			const bracketIdx = beforePrompt.lastIndexOf("[");
+			const atIdx = bracketIdx >= 0 ? beforePrompt.indexOf("@", bracketIdx) : -1;
+			const currentUser =
+				bracketIdx >= 0 && atIdx > bracketIdx ? beforePrompt.slice(bracketIdx + 1, atIdx) : null;
+
 			session.matchOffset = promptIdx + PROMPT_PATTERN.length;
+
+			if (currentUser === user) {
+				// Already logged in as the correct user — proceed directly to command execution.
+				return true;
+			}
+
 			if (!hasQuit) {
 				hasQuit = true;
 				write(session, "/quit\r");

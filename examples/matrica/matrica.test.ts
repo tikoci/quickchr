@@ -42,7 +42,8 @@ const PORT_BASES: Record<Channel, number> = {
 
 // Always match native arch for HVF acceleration — cross-arch TCG is too slow for CI.
 const CHR_ARCH = process.arch === "arm64" ? "arm64" as const : "x86" as const;
-const EXTRA_PACKAGES = LITE ? [] : ["zerotier", "container"];
+// zerotier is ARM64-only; container is available on both arches.
+const EXTRA_PACKAGES = LITE ? [] : CHR_ARCH === "arm64" ? ["zerotier", "container"] : ["container"];
 
 /** SSH options to skip host key checking for ephemeral test instances. */
 const SSH_OPTS = [
@@ -205,7 +206,11 @@ describe.skipIf(SKIP)("matrica — parallel version matrix", () => {
 	);
 
 	test(
-		LITE ? "packages baseline on all instances (lite)" : "zerotier + container packages active on all instances",
+		LITE
+			? "packages baseline on all instances (lite)"
+			: CHR_ARCH === "arm64"
+				? "zerotier + container packages active on all instances"
+				: "container package active on all instances",
 		async () => {
 			const checks = CHANNELS.map(async (channel) => {
 				const inst = instances.get(channel)!;
@@ -217,7 +222,9 @@ describe.skipIf(SKIP)("matrica — parallel version matrix", () => {
 					.filter((n): n is string => typeof n === "string");
 
 				if (!LITE) {
-					expect(activeNames).toContain("zerotier");
+					if (CHR_ARCH === "arm64") {
+						expect(activeNames).toContain("zerotier");
+					}
 					expect(activeNames).toContain("container");
 				}
 				// All builds have routeros

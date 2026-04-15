@@ -216,18 +216,23 @@ describe.skipIf(SKIP)("console provisioning", () => {
 				password: "ConsolePass1",
 			});
 
-			// Admin should now be disabled — REST with admin creds returns 401 or 500
-			// (RouterOS may return 500 instead of 401 for disabled-user auth attempts).
-			// Wait briefly for RouterOS to stabilize after the user change.
-			await Bun.sleep(2_000);
-			const adminResp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+			// Verify admin is disabled by reading the user list via the consoletest account.
+			// The user record reflects the change immediately — this is more reliable than
+			// polling admin HTTP auth, which may be cached by RouterOS's HTTP auth layer for
+			// several seconds after a console-based user change.
+			// Use /rest/user (no query filter) — RouterOS REST may 500 on ?name= filters.
+			const userListResp = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/user`,
 				{
-					headers: { Authorization: `Basic ${btoa("admin:")}` },
+					headers: { Authorization: `Basic ${btoa("consoletest:ConsolePass1")}` },
 					signal: AbortSignal.timeout(10_000),
 				},
 			);
-			expect(adminResp.status).not.toBe(200);
+			expect(userListResp.status).toBe(200);
+			const users = await userListResp.json() as Record<string, string>[];
+			const adminRecord = users.find((u) => u.name === "admin");
+			expect(adminRecord).toBeDefined();
+			expect(adminRecord?.disabled).toBe("true");
 		} finally {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }
