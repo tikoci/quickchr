@@ -217,21 +217,34 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			});
 
 			// Verify admin is disabled by reading the user list via the consoletest account.
-			// The user record reflects the change immediately — this is more reliable than
-			// polling admin HTTP auth, which may be cached by RouterOS's HTTP auth layer for
-			// several seconds after a console-based user change.
-			// Use /rest/user (no query filter) — RouterOS REST may 500 on ?name= filters.
-			const userListResp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/user`,
-				{
-					headers: { Authorization: `Basic ${btoa("consoletest:ConsolePass1")}` },
-					signal: AbortSignal.timeout(10_000),
-				},
-			);
-			expect(userListResp.status).toBe(200);
-			const users = await userListResp.json() as Record<string, string>[];
-			const adminRecord = users.find((u) => u.name === "admin");
-			expect(adminRecord).toBeDefined();
+			// RouterOS REST may briefly return 500 immediately after a console-based user
+			// change (internal state flush), so we retry with up to 30s timeout.
+			// The user record reflects the change immediately once the REST service stabilizes —
+			// more reliable than polling admin HTTP auth (cached for several seconds).
+			let adminRecord: Record<string, string> | undefined;
+			const verifyDeadline = Date.now() + 30_000;
+			while (Date.now() < verifyDeadline) {
+				try {
+					const userListResp = await fetch(
+						`http://127.0.0.1:${instance.ports.http}/rest/user`,
+						{
+							headers: { Authorization: `Basic ${btoa("consoletest:ConsolePass1")}` },
+							signal: AbortSignal.timeout(5_000),
+						},
+					);
+					if (userListResp.status === 200) {
+						const users = await userListResp.json() as Record<string, string>[];
+						const found = users.find((u) => u.name === "admin");
+						if (found?.disabled === "true") {
+							adminRecord = found;
+							break;
+						}
+					}
+				} catch {
+					// transient network/REST error — retry
+				}
+				await Bun.sleep(2_000);
+			}
 			expect(adminRecord?.disabled).toBe("true");
 		} finally {
 			if (instance) {

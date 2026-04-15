@@ -28,6 +28,13 @@ applyTo: "src/**"
 - `ChrInstance` has: `.stop()`, `.remove()`, `.rest()`, `.monitor()`, `.serial()`, `.qga()`, `.ports`, `.state`.
 - Port blocks: 10 ports per instance, base 9100. Offsets: +0=HTTP, +1=HTTPS, +2=SSH, +3=API, +4=API-SSL, +5=WinBox.
 
+## RouterOS "expired admin" Caveat
+
+The `expired: true` flag on the default admin account does NOT block REST API access.
+It only affects CLI/Winbox/SSH login (shows a password-change prompt, bypassable with Ctrl-C).
+Do not add workarounds targeting `expired` for REST paths — if REST fails early,
+the root cause is a startup timing race, not the expired flag.
+
 ## Style
 
 - Biome 2.x lint only (no formatting). Run: `bun run lint:biome`.

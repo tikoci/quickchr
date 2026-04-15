@@ -142,6 +142,7 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 - [x] First-boot serial console provisioning engine (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. `src/lib/console.ts` handles: login sequence (Login:, Password:), license `[Y/n]:` prompt, password change skip (Ctrl-C), and command execution over serial. Version-proof prompt pattern (`] > ` suffix). Wired into `instance.exec()` as `--via=console`. Unit tests in `test/unit/console.test.ts`, integration tests in `test/integration/exec.test.ts`.
 - [x] Console-based provisioning — `provision.ts` accepts optional `machineDir`; if REST times out (30s), falls back to `consoleProvision()` which uses `consoleExec()` for user creation and admin disable. `ensureLoggedIn()` now logs out any stale serial session before re-authenticating as the desired user (`/quit\r` + hasQuit guard). `exec --via=auto` also falls back to console on REST unreachable. Integration-tested.
 - [x] **Fix: `disableAdmin()` race condition** — `disableAdmin()` now accepts optional `verifyAuth` parameter for read-back verification using alternate credentials (e.g. the new user created before disabling admin). Verification poll loop catches transient errors (401 from disabled admin, network blips) instead of aborting. Deadline increased to 20s. `provision()` passes new user's auth for verification.
+- [ ] **Timeout scaling rules** — all timeouts that wait for RouterOS (boot, provisioning, exec, REST readiness) should follow acceleration-aware scaling: x86-on-x86-KVM = 1×, arm64-KVM = 1×, arm64-on-x86-TCG = 2-4×, x86-on-arm64-TCG = 10-20×. Base timeouts should scale automatically via `detectAccel()` result. Add `--timeout-extra=<seconds>` CLI option that **adds** time (not replaces) for tricky environments. Document scaling factors in error messages when timeouts fire. See `.github/instructions/provisioning.instructions.md` for the full table.
 
 ### Robustness
 
@@ -150,10 +151,10 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 - [x] Better error messages for common QEMU failures (EFI size mismatch, permission denied)
 - [x] Retry download on transient network errors
 - [x] Machine name validation — reject names starting with `-` to prevent flag confusion (e.g. `quickchr start -fg` creating a machine named `-fg`)
-- [ ] API error hints: include head/tail of `qemu.log` in spawn-failure errors so LLM agents get actionable context without needing to read files. Consider structured error payloads with `{ code, message, hint, diagnostics? }` shape.
-- [ ] `/system/shutdown` exec returns HTTP 400 — handle gracefully in `exec()`. RouterOS closes the connection during shutdown; treat as expected behavior, not error.
-- [ ] ether1 DHCP ordering: when `user + shared`, ether1 = SLiRP (10.x.x.x), ether2 = vmnet shared (DHCP from macOS). RouterOS only auto-creates DHCP client on ether1 — shared network may not get an IP without manual config. Investigate: does SLiRP work for provisioning without an IP assigned? If yes, document. If no, add DHCP client provisioning for ether2+ in provisioning code.
-- [ ] Wizard: show post-start credential access info when managed login is used — explain `quickchr exec <cmd>`, `quickchr get <machine> creds`, or API method to retrieve credentials. Important for bridged VMs where localhost port forwarding isn't the only access path.
+- [ ] LLM-actionable error diagnostics: review all error paths and progress states for what additional context would help an LLM agent resolve the issue without extra tool calls. Not just `qemu.log` — consider what 50 chars of related detail might save an agent from guessing which file to read next. Structured error payloads with `{ code, message, hint, diagnostics? }` shape. Similar to how the wizard provides contextual help, the API/errors should carry enough info to act on. May also apply to progress events. Start with an audit of current error paths to identify what *would* help and what *would* hurt (noise), then decide scope. This is a design question first, implementation second.
+- [ ] `/system/shutdown` exec returns HTTP 400 — handle gracefully in `exec()`. RouterOS closes the connection during shutdown; treat as expected behavior, not error. **Needs local testing first:** enable RouterOS debug logging (`/system/logging/add topics=debug,!packet,!raw`) and use `/log/print where message~"shutdown"` to understand the exact sequence. Consider using `/tool/sniffer` or host-side `tcpdump`/`tshark` to capture the HTTP exchange. Also test via QEMU monitor and serial to see the shutdown sequence from multiple angles. Don't code-and-pray — get data first.
+- [ ] ether1 DHCP ordering: when `user + shared`, ether1 = SLiRP (10.x.x.x), ether2 = vmnet shared (DHCP from macOS). RouterOS only auto-creates DHCP client on ether1 — shared network may not get an IP without manual config. **Experiment needed:** Does `localhost:91xx` work on "user"/SLiRP ether1 without an assigned IP? If yes, SLiRP-first is fine for provisioning (no login required to add a network), and shared on ether2 works without extra DHCP config from us. If no, we'd need `/ip/dhcp-client/add interface=ether2 use-peer-dns=yes add-default-route=yes default-route-distance=2` — but adding a second DHCP client has side effects (ECMP dual gateways, random DNS server selection from two DHCP servers). **Ideally** shared/bridged would be ether1 (gets auto DHCP, discoverable via MNDP broadcast on UDP 5678), but this requires swapping NIC order. The "user" SLiRP on ether2 with no extra config from localhost is the attractive positioning: flexible, no provisioning needed. Test locally, then decide.
+- [ ] Wizard: show post-start credential access info when managed login is used — explain `quickchr exec <cmd>`, `quickchr get <machine> creds`, or API method to retrieve credentials. Important for bridged VMs where localhost port forwarding isn't the only access path. **Credential philosophy:** quickchr is a test harness; easy access matters more than hardening. Show credentials in UI. Core rule: a user process can access our passwords (same privilege boundary), but credentials should not persist in logs or be usable for remote access. Threat model: prevent off-box access via bridge→CHR→local network (could bypass OS firewall), not prevent same-user access to stored passwords.
 
 ### Docs & Project
 
@@ -206,7 +207,7 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 
 **Device-mode feature flags (integration):**
 - [x] `device-mode.ts`: integration test for `mode=basic` with `enable: [bandwidth-test, ipsec]` + `disable: [zerotier]` — verifies non-rose mode + non-empty enable/disable arrays are fully applied and confirmed via `verifyDeviceMode`; covers the CLI `--device-mode-enable`/`--device-mode-disable` code path end-to-end — added to `test/integration/device-mode.test.ts`
-- [ ] `quickchr.ts`: `hardRebootMachine` signal fallback — monitor socket unavailable → SIGTERM cascade. Device-mode integration test covers the monitor-quit path only; signal path is untested
+- [ ] `quickchr.ts`: `hardRebootMachine` signal fallback — monitor socket unavailable → SIGTERM cascade. Device-mode integration test covers the monitor-quit path only; signal path is untested. **Needs systematic failure-mode testing first.** All provisioning steps need clear documentation of their failure modes — happy path works great, but removing deps or using different versions/distros could each have their own failure modes. Test locally to understand what the reboot path actually needs 100%, then code the fix. Don't try to fix uncovered failure paths based on guesses — data from running tests should guide the changes. Goal: provisioning should be "transactional" — you get the machine you wanted, or you don't (not "working BUT with warnings").
 
 **Exec (unit + integration):**
 - [x] `auth.ts`: unit tests for `resolveAuth()` — explicit override, provisioned user, admin fallback, disableAdmin edge case — `test/unit/exec.test.ts` (5 tests)
@@ -246,7 +247,7 @@ Multiple agents (and past code paths) have treated the admin account's `expired:
 - [ ] Change `secureLogin` default to `false` in `provision()` and `_provisionInstance()` — provisioning should be explicit opt-in, not opt-out.
 - [ ] Review all `QuickCHR.start()` call sites (tests, examples, CLI) — add explicit `secureLogin: true` where the managed account is actually needed, remove `secureLogin: false` guards added as workarounds.
 - [ ] Consider renaming to `createManagedUser` or splitting into a separate `provision.user` option group for clarity (tracked here; don't rename without also updating wizard, CLI flags, and docs).
-- [ ] Provisioning as a whole: the current model bundles package install, device-mode, license, and user creation into a single `_provisionInstance` call. Consider making each step an explicit opt-in with no implicit activation. Goal: `start()` is fast and predictable by default; callers who need provisioning compose it explicitly.
+- [ ] Provisioning as a whole: the current model bundles package install, device-mode, license, and user creation into a single `_provisionInstance` call. Consider making each step an explicit opt-in with no implicit activation. Goal: `start()` is fast and predictable by default; callers who need provisioning compose it explicitly. The wizard can still bundle common combinations (and default `secureLogin: true` for interactive paths). This is the "composition over configuration" philosophy: each provisioning step is a building block, `_provisionInstance` is one opinionated composition, callers can build their own.
 
 ---
 
@@ -337,13 +338,15 @@ $ quickchr start my-chr
 ● my-chr started (http://127.0.0.1:9100)
 ```
 
-- [ ] Refactor `start` to remove wizard/creation logic — pure start only
+- [ ] Refactor `start` to remove wizard/creation logic — pure start only. May already be largely done (wizard moved to `setup`, selectors removed). Check current state — if the wizard/creation paths are gone, mark done. Git has history; don't keep dead code "for reference." Remaining cleanup only, not legacy user migration (sole user to date).
 - [x] `start` without name: list startable machines, print tip, exit 0
 - [x] `stop` without name: list stoppable machines, print tip, exit 0
 - [x] Remove all clack selectors from `start` and `stop`
 - [x] `--all` flag on both
 
 #### `set` / `get` — Machine Configuration
+
+> **Architecture note (biggest current gap):** The set/get scheme needs a rational design for two scopes: **machine settings** (license, device-mode, admin accounts — things that mutate a running or stopped CHR) and **user preferences** (UI defaults, preferred transport, default credentials, always-use-this-password, don't-show-provisioning-progress — things that control quickchr behavior across all machines). Machine settings win over user preferences when both are set. User preferences are few (maybe a dozen at most) and none are critical today, but the *capability* is needed — without it, adding/fixing stuff is harder because there's no place to stash an option. Consider a path-based hierarchy so there's room to grow (similar to network specifiers where we leave parsing flexible). Machine settings have their own complexity: is the machine running? do we have credentials? should we start it to apply this? These are NOT like shell `set`/`echo $VAR`. The "concept" needs to manifest so it becomes a prompt to add a setting when needed — NOT "let's make everything a setting."
 
 Unified interface for machine properties that were previously separate commands or only in the wizard.
 
@@ -462,15 +465,15 @@ $ quickchr setup
 #### `exec` — Run RouterOS Commands
 
 - [x] `quickchr exec <name> <command>` — REST `/execute` transport with `as-string` for synchronous execution. Commands passed through as-is (no auto-wrapping). `--via=auto|rest` (auto defaults to REST). `--user`, `--password`, `--timeout` overrides. Smart auth via `resolveAuth()` uses provisioned credentials from machine.json.
-- [ ] `quickchr exec --json` — re-add `--json` flag that auto-wraps commands in `[:serialize to=json [...]]`. Removed in simplification pass; callers currently wrap manually. Add back as opt-in convenience once common patterns emerge from matrica/solis usage.
+- [ ] `quickchr exec --json` — re-add `--json` flag that auto-wraps commands in `[:serialize to=json [...]]`. Removed in simplification pass; callers currently wrap manually. Add back as opt-in convenience. Sync with Output & Display: use `--serialize=json|yaml|dsv|tsv|csv` following RouterOS's own `[:serialize]` naming, keep `--json` as alias for discoverability.
 - [x] `resolveAuth()` in `src/lib/auth.ts` — centralised credential resolution (explicit → provisioned → admin default). Used by both `exec()` and `rest()`.
 - [x] **Fix: exec JSON mode `ret` extraction** — when RouterOS wraps `:put`/`:return` output as `{ "ret": "<json-string>" }`, the JSON mode code now extracts the inner value instead of double-stringifying the wrapper object. Unit tested.
 - [x] **Fix: exec integration test** — restructured to share single CHR instance (3× faster). Defensive assertions accommodate `/rest/execute` response format variations across RouterOS versions. Text mode tests success completion; JSON mode validates `board-name` via `:serialize`.
-- [ ] SSH transport (`--via=ssh`) — spawn `ssh -p <port>` subprocess. Required for commands that don't work well over REST (long-running, interactive).
-- [ ] `--via=auto` tries SSH first, falls back to REST `/execute` (current auto = REST only until SSH implemented).
-- [ ] `--output=csv|tsv|yaml` additional output formats. `--yaml` is LLM/terminal-friendly (human-readable, parseable). JSON and YAML carry the same semantic meaning; JSON for programmatic callers (Python/matrica), YAML for interactive/agent use.
-- [ ] `--lint` pre-validates commands via `/console/inspect request=completion` before execution — check result array for `"error"` or `"obj-invalid"` entries. Enabled by default (safe pre-flight check). `--skip-lint` to bypass. The core logic is ~50 lines wrapping `/console/inspect request=completion` (see `~/GitHub/lsp-routeros-ts` — most of that LSP just wraps this for VS Code; the inspect call itself is the source of truth for command validity since it's what RouterOS's own CLI uses for error colorization). Especially valuable for LLM-generated commands where a bad command should fail fast with a clear error before execution.
-- [ ] User preference overrides in `.local` config — `prefer-transport: ssh`, `default-timeout: 60`, etc. Low priority until CLI stabilises, but the scheme should not preclude this.
+- [ ] SSH transport (`--via=ssh`) — spawn `ssh -p <port>` subprocess. Required for commands that don't work well over REST (long-running, interactive). **Depends on SSH key provisioning:** the `quickchr` managed user path should generate and install an SSH key pair during provisioning, stored in the machine directory. This ensures SSH works even if the password is changed, and is more secure than password-based SSH. `sshpass` remains the fallback for admin/custom users.
+- [ ] `--via=auto` tries SSH first, falls back to REST `/execute` (current auto = REST only until SSH implemented). With SSH keys provisioned, SSH becomes the preferred transport (full CLI, no 60s timeout, interactive support).
+- [ ] `--output=csv|tsv|yaml` additional output formats for `exec` and other commands. `--yaml` is LLM/terminal-friendly (human-readable, equally parseable). JSON for programmatic callers (Python/matrica), YAML for interactive/agent use. Follow RouterOS `[:serialize]` option naming where practical.
+- [ ] `--lint` pre-validates commands via `/console/inspect request=completion` before execution — check result array for `"error"` or `"obj-invalid"` entries. Enabled by default (safe pre-flight check). `--skip-lint` to bypass. The core logic is ~50 lines wrapping `/console/inspect request=completion` (see `~/GitHub/lsp-routeros-ts` — most of that LSP just wraps this for VS Code; the inspect call itself is the source of truth for command validity). **Cross-project dependency:** may need small work in `~/GitHub/lsp-routeros-ts` to extract the inspect wrapper as a reusable module or dep. Side benefit: the same completion data enables terminal command completion for RouterOS commands — a major "wow factor" feature (imagine a colored fish-style console filling RouterOS commands). We do NOT want to wrap RouterOS setup in helper functions — we handle "setup", users handle RouterOS config. But `exec` is the star-of-the-show: one path to run any command using any interface, with sophisticated validation.
+- [ ] User preference overrides in `.local` config — `prefer-transport: ssh`, `default-timeout: 60`, etc. Links to `set`/`get` architecture: user preferences need a home. Some options may not be discoverable from CLI alone (user has hidden settings that affect behavior), which is half anti-pattern — but the capability is needed. Start stashing settings one at a time as needs arise, with a rational scheme. Settings should be surfacable in wizard and via `get`. Priority rising — limiting because there's no place to stash an option to control esoteric things that might be useful.
 
 > **Design note — "MCP-like API feel":** `exec` should feel like calling an MCP tool — caller provides a RouterOS command and gets back output. No need to know ports, protocols, or auth details. But every automatic choice is overridable (`--via`, `--user`, `--port`, etc.) for callers who need precise control. This mirrors MCP's pattern of sensible defaults with full override capability.
 
@@ -480,11 +483,13 @@ $ quickchr setup
 
 #### `logs` — QEMU Log
 
-- [ ] `quickchr logs <name>` — tail `qemu.log`. `--follow` for live tail. `--json` for structured log entries if we add structured logging later.
+- [ ] `quickchr logs <name>` — tail `qemu.log`. `--follow` for live tail. `--json` for structured log entries if we add structured logging later. **Include RouterOS logs if running:** `quickchr logs <name> --ros` or `quickchr logs <name> --source=qemu|ros|all` — pull from `/log/print` via REST for RouterOS-side logs. Useful for debugging provisioning and exec issues alongside QEMU output.
 
 ### Shell Completions
 
 Shell completions replace interactive selectors as the "discovery" mechanism for machine names and flags. Higher priority now that commands are non-interactive.
+
+> **Testing status:** Only `zsh` verified end-to-end. `fish` has a `bun` link error (quickchr not in PATH when installed via dev setup, not Homebrew). `bash` untested on real shells. Human testing needed across shells/OS — this is an open item. See cross-platform smoke-test section.
 
 - [x] Completions for bash, zsh, fish — subcommands, machine names (from state dir), `--flag` options. `quickchr completions --install` (auto-detects shell), `--uninstall`, `--status`, `--dry-run`. No new deps — pure string generation. Idempotent rc-file patching. Works without Homebrew (falls back to XDG/user dirs).
 - [x] Explore generating completions without requiring Homebrew/package install (standalone shell script that reads `~/.local/share/quickchr/machines/` for names) — done via hidden `quickchr completions --machines` / `--running` flags called by the scripts.
@@ -493,14 +498,12 @@ Shell completions replace interactive selectors as the "discovery" mechanism for
 ### Output & Display
 
 - [ ] ANSI table cleanup — replace heavy box-drawing borders with minimal ANSI style; improve color and terminal-width-aware column layout. No new borders on any new output.
-- [ ] `--json` / `--yaml` output on: `list`, `get`, `networks`, `doctor`, `exec`. Consistent structure across commands.
-- [ ] `--no-ansi` option (low priority) — strip colors/formatting for log capture. ANSI may actually help LLMs as visual signal, so unclear if needed. Track but don't rush.
-- [ ] `doctor` as `bun test` — the checks are essentially assertions about the environment. Consider expressing doctor checks as a test file (`test/environment/doctor.test.ts`) that `bun test` can run, with `quickchr doctor` as a CLI wrapper. Keeps the "prescription" hints and rich output.
-- [ ] `doctor` enhancements — OS-level diagnostics: `ps`/port scan correlated with PID files, stale machine detection, named socket port conflict detection. System-wide health.
+- [ ] `--json` / `--yaml` / `--serialize` output on: `list`, `get`, `networks`, `doctor`, `exec`. Follow RouterOS `[:serialize]` scheme: `--serialize=json|yaml|dsv|tsv|csv` with `--serialize-delimiter` and `--serialize-options` for fine control. Keep `--json`/`--yaml` as convenience aliases for discoverability (common CLI convention). TSV output should be carefully structured so `head`/`tail`/`cut` work without stripping "tip"/"help" chrome. Consistent structure across all commands.
+- [ ] `doctor` enhancements — OS-level diagnostics: `ps`/port scan correlated with PID files, stale machine detection, named socket port conflict detection. System-wide health. Goal: produce a "lab results" report that could be submitted to GitHub issues (with PII redacted) to shorten the break-fix cycle. Consider `doctor --export` for a structured diagnostic dump. What would help troubleshooting on non-Mac platforms or Macs without deps if you were given DoctorResults from a bug report?
 
-### TUI Mode (future)
+### TUI Mode (deferred — see Deferred section)
 
-- [ ] `quickchr tui` or `quickchr manage` — full terminal UI with live machine list, start/stop/status actions, log viewer. Separate from `setup` wizard (which is guided creation). Lower priority but a natural evolution. Reserve the command name now.
+Moved to Deferred. Design direction when ready: **content first, prettification later**. Goal: maximize useful info about quickchr state in 80×24 chars. Consider three density formats: 1 CHR (show everything), 2 CHRs (A/B test view), 20+ CHRs (compact table). A middle ground before full TUI: structured output suitable for `watch quickchr list --serialize=tsv` that fills 80×24 with the right details. Investigate if `@clack/prompts` progress controls could provide a lightweight `watch`-like refresh, or consider `blessed-contrib` for the full version.
 
 ### Migration Path (current → target)
 
@@ -535,9 +538,7 @@ The refactoring is not all-or-nothing. Incremental steps:
 - [x] `quickchr snapshot <name> [list|save|load|delete]` CLI command with `--json` output for automation/agents. Alias: `snap`.
 - [x] Wizard snapshot UX overhaul — `clack.select()` for load/delete (no more typing names), formatted table for list, save defaults to ISO date, size info in hints, 16-item cap with CLI fallback guidance.
 - [x] qcow2 guard in wizard — snapshot menu only appears for qcow2 boot disks. Raw-disk machines see `⚠ no snapshots (raw disk)` note. Stopped machines get list-only access with hint.
-- [ ] Keep config-script import out of current snapshot scope. For now, snapshots are infrastructure-level checkpoints; callers can apply config using existing mechanisms (`exec`, provisioning, external automation).
-- [ ] Consider saving RouterOS `:export` alongside VM snapshot for a richer "checkpoint" concept (follow-up only; not tied to loading/importing scripts)
-- [ ] Snapshot search in wizard — `@clack/prompts` search for machines/snapshots when lists grow large (>16 items). Not urgent for typical use, but would help heavy users.
+- [ ] RouterOS `:export` alongside VM snapshot — save a config dump when snapshotting for a richer "checkpoint" concept. Also useful as a standalone `exec` convenience (not tied to snapshots). Should be automatic unless disabled via user preference or if we don't have credentials. Warn if export fails (requires auth, while VM snapshot does not — this difference always matters when linking "transactions"). `:export` is a "script generator" that creates code to recreate the current config on a clean router — it is NOT a "config file." `:import` is roughly equivalent to `:execute` / `/rest/console/execute` which we already support. No loss on import capability; export is the valuable addition.
 
 ### QGA (Guest Agent)
 
@@ -552,9 +553,7 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 ### Machine Config
 
-- [ ] `machine.json` → `machine.yaml` migration — YAML is friendlier for humans and LLMs. Accept `.json` as fallback; prefer `.yaml` when both exist.
-- [ ] Config schema rationalization — separate "desired config" (cpu, mem, packages, network) from "runtime state" (pid, status, lastStartedAt). Users should be able to edit the config section and have changes apply on next start. Safe edits: cpu, mem, name. Complex edits: packages (drift detection between file and RouterOS). Document the schema and what is/isn't user-editable.
-- [ ] Config `.rsc` / `.backup` import — load a RouterOS export script or backup as part of machine creation, for reproducible test environments.
+- [ ] Config schema rationalization — separate "desired config" (cpu, mem, packages, network) from "runtime state" (pid, status, lastStartedAt). Users should be able to edit the config section and have changes apply on next start. Safe edits: cpu, mem, name. Complex edits: packages (drift detection between file and RouterOS). Document the schema and what is/isn't user-editable. Links to `set`/`get` architecture — `set` mutates the config section, `get` reads it.
 
 ### Credentials
 
@@ -563,16 +562,11 @@ The refactoring is not all-or-nothing. Incremental steps:
 - [x] **quickchr managed account** — new default: auto-creates a `quickchr` user with a generated password on each CHR instance. Password saved to secret store. Replaces reliance on `admin:""`. Opt out with `--no-secure-login`. Wizard offers 3 choices: managed (default), custom user, or keep admin.
 - [x] **`resolveAuth()` async + secrets lookup** — auth resolution now checks instance secrets (priority 2 after explicit args, before machine.json state). `remove()` and `clean()` clean up instance credentials.
 - [ ] Credential profiles — save/restore username+password per machine or as a shared default. `rest()` and CLI commands auto-use stored credentials.
-- [ ] SSH key-based auth — generate/store SSH keys for CHR instances as alternative to password auth.
-
-### Templates & Upgrade
-
-- [ ] Machine templates (save/apply config presets) — lower priority; agents can already compose options. Revisit after config schema is solid.
-- [ ] `quickchr upgrade <name>` — in-place RouterOS version upgrade. Tension: test workflows prefer fresh instances over in-place mutation. May be better as a declarative `ensure.version` in machine config than an imperative command. Defer until config schema design settles.
+- [ ] SSH key-based auth — generate/store SSH keys for CHR instances as alternative to password auth. **This is a prerequisite for `exec --via=ssh`:** the provisioning path should generate an SSH key pair, install the public key into the CHR user's authorized keys, and store the private key in the machine directory. This ensures SSH works even if the password is later changed, and is more secure than `sshpass`. `sshpass` remains the fallback for admin/custom users who haven't provisioned keys.
 
 ### Version Checks
 
-- [ ] Auto-update check — notify when a newer QEMU or RouterOS version is available. Ties into tikoci's existing routeros-channel-check workflows.
+- [ ] **Doctor version reporting** — `doctor` should report version staleness for both quickchr itself and RouterOS/QEMU. Pre-release versions have odd minor numbers, release versions have even minor numbers. Show color-coded status: green = running latest release/pre-release, yellow = behind, red = very old. Display days since latest release. Example: `Running version 0.x.y (3 days behind latest release 0.x.z)`. This should be in `doctor` (discoverable, obvious) — not an auto-upgrader.
 
 ---
 
@@ -1220,3 +1214,39 @@ thing.
   `instance.installPackage(name | names[])` which uploads, reboots, and waits
   for boot — the full cycle as a single call. This is the primitive restraml
   needs for iterative install-crawl-diff per-package provenance (BACKLOG Phase 5).
+
+---
+
+## Deferred
+
+Items moved here are not rejected — they're deferred until prerequisites are met or a need becomes clear.
+
+### TUI Mode
+
+> Deferred until: content layer is complete (doctor, logs, list, exec all produce structured output).
+> Prerequisite: `--serialize` output for all commands, settings architecture for preferences.
+
+- [ ] TUI (blessed-contrib / ink / bubbletea) — a dashboard showing live machine status, resource usage, logs, and command output. **Content first:** maximize useful information in 80×24 before building a dashboard shell. The dashboard is a rendering layer over structured data — build the data layer first. When ready, consider: multi-machine status grid, log tail with filtering, network topology view (from NIC config), resource sparklines (if QGA provides CPU/mem data).
+
+### Templates & Upgrade
+
+- [ ] Machine templates (save/apply config presets) — lower priority; agents can already compose options. Revisit after config schema is solid.
+- [ ] `quickchr upgrade <name>` — in-place RouterOS version upgrade. Tension: test workflows prefer fresh instances over in-place mutation. May be better as a declarative `ensure.version` in machine config than an imperative command. Defer until config schema design settles.
+
+### Config Import/Export
+
+- [ ] Config `.rsc` / `.backup` import — load a RouterOS export script or backup as part of machine creation, for reproducible test environments.
+- [ ] `machine.json` → `machine.yaml` migration — YAML is friendlier for humans and LLMs. Accept `.json` as fallback; prefer `.yaml` when both exist.
+
+### Output Polish
+
+- [ ] `--no-ansi` flag for plain text output — complex with `@clack/prompts` (ANSI deeply embedded). ANSI may actually help LLM parsing (structural cues). Low priority unless a concrete consumer needs it.
+- [ ] Snapshot search in wizard — `@clack/prompts` search for machines/snapshots when lists grow large (>16 items). Not urgent for typical use.
+
+### Auto-Update
+
+- [ ] Auto-upgrade check — notify when a newer quickchr version is available. Should be a passive notice, not a blocker. Defer until version reporting in `doctor` is solid.
+
+### Credential Profiles
+
+- [ ] Credential profiles — save/restore username+password per machine or as a shared default. `rest()` and CLI commands auto-use stored credentials. Low priority until settings architecture is in place.
