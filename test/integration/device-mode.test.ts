@@ -83,6 +83,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			// CHR default mode before any device-mode update is "advanced" on fresh images.
 			// We do NOT assert the mode value here — the point is that start() succeeded
 			// without triggering a device-mode power-cycle.
+			// Liveness check: REST API is responding with CHR identity.
 			const resource = await instance.rest("/system/resource") as Record<string, unknown>;
 			expect(String(resource["board-name"])).toContain("CHR");
 		} finally {

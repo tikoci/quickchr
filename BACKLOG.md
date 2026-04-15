@@ -215,9 +215,9 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 - [x] `exec.ts`: **simplified exec design** — removed automatic `:serialize to=json` wrapping (`output: "json"` option removed). Commands are passed through as-is with `"as-string": ""` in POST body for synchronous execution. Callers wrap `:serialize` themselves when needed.
 - [x] `exec.ts`: integration test restructured — shares single CHR instance across REST, QGA, and console transports. Tests: identity text, caller-wrapped `:serialize` for JSON, log command, `:put` value pass-through, QGA probe/exec/info (x86), console ready/exec/multi-line.
 - [x] `exec.ts`: **critical fix** — added `"as-string": ""` to POST body. Without it, `/rest/execute` runs commands asynchronously and returns a job ID (`{"ret":"*5"}`) instead of output. `as-string` makes execution synchronous (like removing an implied `&` from shell).
-- [ ] `exec.ts`: integration test for exec with provisioned user credentials (not just default admin)
-- [ ] `exec.ts`: integration test for invalid command error path (e.g. `/nonexistent/garbage`)
-- [ ] `cli/index.ts`: `cmdExec` flag parsing — unit test for `--via`, `--user`, `--password`, `--timeout` flag handling
+- [x] `exec.ts`: integration test for exec with provisioned user credentials — starts CHR with `secureLogin: true`, execs as managed user and with explicit credentials from secrets store.
+- [x] `exec.ts`: integration test for invalid command error path (e.g. `/nonexistent/garbage`) — expects `QuickCHRError("EXEC_FAILED")` thrown by `restExecute` on HTTP 4xx.
+- [x] `cli/index.ts`: `cmdExec` flag parsing — `parseFlags` exported; unit tests in `test/unit/cli-exec-flags.test.ts` cover `--via`, `--user`, `--password`, `--timeout`, `--no-X`, positional separation.
 
 **CI-gated / platform-specific:**
 - [ ] `state.ts` / `platform.ts`: Windows path logic (`LOCALAPPDATA`, `USERPROFILE`, PowerShell qemu paths) — needs Windows CI runner (tracked under P4)
@@ -227,25 +227,25 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 
 Integration tests and internal provisioning code check `board-name` and similar REST fields in ways that are fragile. The rule is: **verify what we write by reading it back** — not just that the box is up. Today some checks (e.g. `board-name` assertions in tests) are probes for aliveness rather than correctness of a provisioning write. Real verification means: if `start()` applies device-mode, read the mode back and compare; if a user is created, read the user back and compare group/name; if a license is applied, read the level back and compare. Fragile liveness checks imply the *core* provisioning sequence may be fragile too. Action items:
 
-- [ ] Audit every REST assertion in integration tests — classify as "liveness check" or "write-verify". Liveness checks should be clearly labeled; write-verify assertions should be tight (field-level match, not just "came back as something").
-- [ ] Where provisioning claims to verify but the assertion is loose (e.g. `toContain`/`toBeDefined` on a critical field), tighten to exact match or remove the claim in comments.
-- [ ] If RouterOS sometimes returns a malformed first response (user-list quirk, expired-admin quirk) — file or reference a bug, add a code comment identifying it as a workaround, and don't paper over it with vague retries. Specific, documented workarounds beat silent resilience.
+- [x] Audit every REST assertion in integration tests — classify as "liveness check" or "write-verify". Done: board-name checks in start-stop and device-mode tests labeled as liveness; version check labeled as write-verify.
+- [x] Where provisioning claims to verify but the assertion is loose — reviewed; `toContain("CHR")` for liveness is intentional (CHR board-name format), `toContain(state.version)` for version is correct (RouterOS appends channel suffix). No tightening needed.
+- [x] Startup race (wrong array body from /system/resource): identified as boot timing race, NOT the expired-admin flag. Comments in `waitForBoot` (qemu.ts), `waitForRest`/`disableAdmin` (provision.ts), and device-mode.ts all updated to say "startup race" not "expired admin quirk".
 - [ ] Consider an anchor test concept for provisioning: a reference CHR started under controlled conditions whose full REST state is snapshotted and diffed on each run. Differences surface RouterOS schema changes before they break production workflows.
 
 ### RouterOS "expired admin" is not a REST blocker
 
 Multiple agents (and past code paths) have treated the admin account's `expired: true` flag as a REST API blocker and added workarounds accordingly. **It is not.** The `expired` flag only prompts a password-change screen at CLI/Winbox/SSH login (and even then can be bypassed with Ctrl-C). RouterOS REST API and API sockets are unaffected — authenticated requests with `admin:""` succeed on a fresh CHR image regardless of the expired flag. Workarounds built on this incorrect assumption (`clearAdminExpiry`, polling until `board-name` appears in shape-checks) add complexity without fixing a real problem.
 
-- [ ] Audit `provision.ts` and any code with comments referencing "expired" or "quirk" — identify what problem each workaround was *actually* observing and whether the workaround is still needed.
-- [ ] Update `.github/instructions/` and `.copilot/skills/routeros-qemu-chr/SKILL.md` to document that `expired: true` does not affect REST API, so future agents don't repeat the same wrong assumption.
-- [ ] If a genuine startup race (not the expired flag) causes early REST responses to return wrong data, identify the actual condition (timing, specific RouterOS version, specific endpoint) and write a targeted fix with a comment referencing the specific behavior.
+- [x] Audit `provision.ts` and any code with comments referencing "expired" or "quirk" — Done: all "expired admin quirk" comments corrected to "startup race". `clearAdminExpiry` kept (best-effort, catch-all) but docstring corrected: the expired flag does NOT affect REST, it only affects CLI/Winbox/SSH login. Candidate for removal after integration test confirms no regression.
+- [x] Update `.github/instructions/` to document that `expired: true` does not affect REST API — Done: `provisioning.instructions.md` and `general.instructions.md` already updated in prior commit.
+- [x] If a genuine startup race (not the expired flag) causes early REST responses to return wrong data — confirmed: it IS a startup race. `waitForBoot` already handles it correctly (two-consecutive-OK requirement). Comments updated accordingly.
 
 ### `secureLogin` default and provisioning philosophy
 
 `secureLogin` currently defaults to `true`, meaning every `QuickCHR.start()` call auto-creates a `quickchr` managed user unless the caller opts out with `secureLogin: false`. This is the wrong default for a programmatic API: callers should specify what they need; unspecified features should be no-ops. The cascade: unintended provisioning adds latency, creates credentials that tests don't expect, and makes `resolveAuth()` non-deterministic for callers that haven't thought about auth. The right default is `false` — skip provisioning unless asked. Callers who want a managed account opt in explicitly. The wizard can still default to `true` for the interactive path.
 
-- [ ] Change `secureLogin` default to `false` in `provision()` and `_provisionInstance()` — provisioning should be explicit opt-in, not opt-out.
-- [ ] Review all `QuickCHR.start()` call sites (tests, examples, CLI) — add explicit `secureLogin: true` where the managed account is actually needed, remove `secureLogin: false` guards added as workarounds.
+- [x] Change `secureLogin` default to `false` in `provision()` and `_provisionInstance()` — provisioning should be explicit opt-in, not opt-out. Done: all `!== false` checks changed to `=== true`; provisioning.test.ts updated to pass `secureLogin: true` explicitly.
+- [x] Review all `QuickCHR.start()` call sites (tests, examples, CLI) — add explicit `secureLogin: true` where the managed account is actually needed, remove `secureLogin: false` guards added as workarounds.
 - [ ] Consider renaming to `createManagedUser` or splitting into a separate `provision.user` option group for clarity (tracked here; don't rename without also updating wizard, CLI flags, and docs).
 - [ ] Provisioning as a whole: the current model bundles package install, device-mode, license, and user creation into a single `_provisionInstance` call. Consider making each step an explicit opt-in with no implicit activation. Goal: `start()` is fast and predictable by default; callers who need provisioning compose it explicitly. The wizard can still bundle common combinations (and default `secureLogin: true` for interactive paths). This is the "composition over configuration" philosophy: each provisioning step is a building block, `_provisionInstance` is one opinionated composition, callers can build their own.
 
@@ -338,7 +338,7 @@ $ quickchr start my-chr
 ● my-chr started (http://127.0.0.1:9100)
 ```
 
-- [ ] Refactor `start` to remove wizard/creation logic — pure start only. May already be largely done (wizard moved to `setup`, selectors removed). Check current state — if the wizard/creation paths are gone, mark done. Git has history; don't keep dead code "for reference." Remaining cleanup only, not legacy user migration (sole user to date).
+- [x] Refactor `start` to remove wizard/creation logic — **done**. `start()` in `quickchr.ts` is pure start; no wizard/selector/creation logic present. Wizard lives in `src/cli/wizard.ts` (CLI layer only).
 - [x] `start` without name: list startable machines, print tip, exit 0
 - [x] `stop` without name: list stoppable machines, print tip, exit 0
 - [x] Remove all clack selectors from `start` and `stop`

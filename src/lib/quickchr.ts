@@ -1028,7 +1028,7 @@ export class QuickCHR {
 			opts.disableAdmin ||
 			opts.license ||
 			hasDeviceModeProvisioning ||
-			opts.secureLogin !== false
+			opts.secureLogin === true
 		);
 
 		const networkConfigs = resolveStartNetworks(opts.networks, opts.network);
@@ -1217,7 +1217,7 @@ export class QuickCHR {
 			}
 		}
 
-		if (opts.user || opts.disableAdmin || opts.secureLogin !== false) {
+		if (opts.user || opts.disableAdmin || opts.secureLogin === true) {
 			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log, machineState.machineDir);
 			if (result.user) {
 				// Persist user info in state (password placeholder — real password in secret store)
@@ -1277,7 +1277,7 @@ export class QuickCHR {
 				provisioningOpts.user ||
 				provisioningOpts.disableAdmin ||
 				provisioningOpts.license ||
-				provisioningOpts.secureLogin !== false
+				provisioningOpts.secureLogin === true
 			)
 		);
 		// Always boot in background when provisioning is needed

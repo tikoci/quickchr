@@ -48,11 +48,11 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 			const booted = await instance.waitForBoot(60_000);
 			expect(booted).toBe(true);
 
-			// Test REST API
+			// Liveness check: REST API is responding with CHR identity.
 			const resource = await instance.rest("/system/resource") as Record<string, unknown>;
 			expect(String(resource["board-name"])).toContain("CHR");
 
-			// Test version matches
+			// Write-verify: RouterOS version matches what we requested to download.
 			expect(resource.version).toContain(instance.state.version);
 		} finally {
 			if (instance) {

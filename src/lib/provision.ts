@@ -42,9 +42,9 @@ async function readUser(httpPort: number, auth: string, name: string): Promise<R
 
 /** Wait for the REST API to be fully ready on a fresh (unprovisioned) CHR.
  *
- * Delegates to the shared waitForBoot which handles the "expired admin" quirk
- * (fresh CHR returns /user list for all GETs) and requires two consecutive
- * stable responses before declaring boot complete. */
+ * Delegates to the shared waitForBoot which guards against the startup race
+ * (wrong body briefly after boot) and requires two consecutive stable
+ * responses before declaring boot complete. */
 async function waitForRest(
 	httpPort: number,
 	timeoutMs: number = 60_000,
@@ -56,15 +56,16 @@ async function waitForRest(
 	}
 }
 
-/** Clear admin's expired-password flag by re-setting its password as admin itself.
+/** Re-set admin's password to its current value (empty string on fresh CHR).
  *
- * A fresh CHR image ships with admin marked `expired: true` (forced
- * password change on first login). While expired, RouterOS REST will
- * sometimes return the `/user` list as the body of unrelated GETs (notably
- * `/system/resource`) — a startup quirk that breaks clients that trust the
- * response shape. Running `/user/set admin password=""` via `/rest/execute`
- * clears the expired flag without changing the effective password, ending
- * the quirky period. */
+ * A fresh CHR image ships with admin marked `expired: true`, which prompts
+ * a password-change screen at CLI/Winbox/SSH login. The expired flag does NOT
+ * affect REST API access. This call is a best-effort attempt to clear the
+ * expiry so SSH and CLI paths work cleanly; REST provisioning succeeds whether
+ * or not it runs. Candidate for removal if testing confirms no observable effect.
+ *
+ * NOTE: The REST startup race (wrong body from /system/resource) is unrelated
+ * to the expired flag — it is a timing issue handled by waitForBoot. */
 async function clearAdminExpiry(httpPort: number): Promise<void> {
 	const auth = `Basic ${btoa("admin:")}`;
 	try {
@@ -158,9 +159,8 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 	// in the ID is a sub-delimiter (RFC 3986 path segments) and is NOT
 	// percent-encoded by the WHATWG URL constructor or Bun's fetch.
 	//
-	// Retry the lookup: the /rest/user endpoint can return wrong data (non-array)
-	// during the REST startup quirk period, even after /rest/system/resource is
-	// stable. Poll until we get a valid admin record.
+	// Retry the lookup: the /rest/user endpoint can return wrong data or HTTP 500
+	// briefly after boot (startup race). Poll until we get a valid admin record.
 	let adminUser: Record<string, unknown> | undefined;
 	const lookupDeadline = Date.now() + 15_000;
 	while (Date.now() < lookupDeadline) {
@@ -200,7 +200,7 @@ export async function disableAdmin(httpPort: number, verifyAuth?: string): Promi
 
 	// Validate the PATCH response body — RouterOS returns the updated user object.
 	// If the response confirms disabled=true, we know the change was applied.
-	// If the response is unexpected (startup quirk returning wrong data), retry.
+	// If the response body is unexpected (boot race), fall through to verification loop.
 	let patchConfirmed = false;
 	try {
 		const patchBody = await disableResp.json() as Record<string, unknown>;
@@ -306,9 +306,9 @@ export async function provision(
 	const log = logger ?? createLogger();
 
 	// Determine what user to create.
-	// Priority: explicit user > auto-create quickchr account (secureLogin defaults true)
+	// Priority: explicit user > auto-create quickchr account (secureLogin must be explicit true)
 	let effectiveUser = user ?? null;
-	if (!effectiveUser && secureLogin !== false) {
+	if (!effectiveUser && secureLogin === true) {
 		effectiveUser = { name: QUICKCHR_USER, password: generatePassword() };
 	}
 

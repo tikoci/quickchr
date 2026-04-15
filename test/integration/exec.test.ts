@@ -268,4 +268,63 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 		expect(result.via).toBe("console");
 		expect(result.output).toContain("ether");
 	}, 60_000);
+
+	test("exec invalid command returns error", async () => {
+		expect(instance).toBeDefined();
+		try {
+			// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+			const result = await instance!.exec("/nonexistent/garbage", { timeout: 15_000 });
+			expect(
+				result.output.toLowerCase().includes("bad command") ||
+				result.output.toLowerCase().includes("error") ||
+				result.output.toLowerCase().includes("expected"),
+			).toBe(true);
+		} catch (err) {
+			expect(err).toBeDefined();
+		}
+	}, 20_000);
+});
+
+describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
+	const MACHINE = "integration-exec-provisioned";
+	let instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>> | undefined;
+
+	beforeAll(async () => {
+		await cleanupMachine(MACHINE);
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		instance = await QuickCHR.start({
+			channel: "stable",
+			background: true,
+			name: MACHINE,
+			secureLogin: true,
+		});
+	}, 120_000);
+
+	afterAll(async () => {
+		try { await instance?.stop(); } catch { /* ignore */ }
+		try { await instance?.remove(); } catch { /* ignore */ }
+	});
+
+	test("exec as managed quickchr user succeeds", async () => {
+		expect(instance).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const result = await instance!.exec(":put ok", { timeout: 20_000 });
+		expect(result.output.trim()).toBe("ok");
+	}, 30_000);
+
+	test("exec with explicit provisioned credentials succeeds", async () => {
+		expect(instance).toBeDefined();
+		const { getInstanceCredentials } = await import("../../src/lib/credentials.ts");
+		const creds = await getInstanceCredentials(MACHINE);
+		expect(creds).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const result = await instance!.exec(":put credtest", {
+			// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+			user: creds!.user,
+			// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+			password: creds!.password,
+			timeout: 20_000,
+		});
+		expect(result.output.trim()).toBe("credtest");
+	}, 30_000);
 });

@@ -238,7 +238,7 @@ export async function readDeviceMode(httpPort: number): Promise<Record<string, s
 		throw new QuickCHRError("PROCESS_FAILED", "Invalid /system/device-mode REST response");
 	}
 
-	// Guard: system resource data instead of device-mode (post-boot REST quirk).
+	// Guard: /system/resource data instead of device-mode — REST startup race.
 	if ("board-name" in (record as Record<string, unknown>) || "architecture-name" in (record as Record<string, unknown>)) {
 		throw new QuickCHRError(
 			"PROCESS_FAILED",

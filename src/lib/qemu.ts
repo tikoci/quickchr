@@ -414,7 +414,7 @@ export async function stopMachineByName(_name: string, state: MachineState): Pro
  *   1. Connection refused — QEMU still booting
  *   2. ECONNRESET — HTTP server started but REST subsystem not yet accepting
  *   3. 401 from /rest — auth middleware is up; REST handler may still be initializing
- *   4. 200 but wrong body — "expired admin" quirk: fresh CHR returns /user list for all GETs
+ *   4. 200 but wrong body — startup race: REST initializes before routing tables settle; /system/resource may return an array (e.g. /user list) for a brief window
  *   5. 200 with correct body — REST is fully operational
  *
  * With proper credentials this function reaches stage 5 before returning. With
@@ -454,14 +454,14 @@ export async function waitForBoot(
 				// we cannot validate the body. Count as ready.
 				consecutiveReady++;
 			} else if (r.ok) {
-				// On a fresh CHR with an expired admin account, all GET requests
-				// return the /user list instead of the real resource. Only accept
+				// RouterOS REST may return wrong data (array body) briefly after boot —
+				// a startup race, not related to the admin expired flag. Only accept
 				// the response once the body is the expected singleton object.
 				const body = await r.json().catch(() => null) as unknown;
 				if (body && typeof body === "object" && !Array.isArray(body) && "board-name" in (body as object)) {
 					consecutiveReady++;
 				} else {
-					consecutiveReady = 0; // wrong body — still in startup quirk phase
+					consecutiveReady = 0; // wrong body — REST not fully initialized yet
 				}
 			} else {
 				consecutiveReady = 0;

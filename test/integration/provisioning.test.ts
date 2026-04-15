@@ -139,6 +139,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 				arch: "x86",
 				background: true,
 				name: "integration-prov-managed",
+				secureLogin: true,
 			});
 
 			// Instance credentials must have been saved to the secret store

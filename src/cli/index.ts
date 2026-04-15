@@ -10,7 +10,7 @@ const args = process.argv.slice(2);
 const command = args[0];
 
 /** Parse --flag=value and --flag value pairs from args. */
-function parseFlags(argv: string[]): { flags: Record<string, string | boolean | string[]>; positional: string[] } {
+export function parseFlags(argv: string[]): { flags: Record<string, string | boolean | string[]>; positional: string[] } {
 	const flags: Record<string, string | boolean | string[]> = {};
 	const positional: string[] = [];
 
