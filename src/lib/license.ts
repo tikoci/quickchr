@@ -23,25 +23,38 @@ const MAX_RENEW_ATTEMPTS = 3;
 
 /** Classify the response body from POST /rest/system/license/renew.
  *
- *  RouterOS returns different shapes depending on timing:
- *  - Array of {".section", status} objects: the duration= streaming output.
- *    Last entry with status="done" means the license server responded.
- *  - Object with "board-name"/"architecture-name": system resource data —
- *    a post-boot REST quirk where the endpoint isn't fully initialized yet.
- *    The renewal was NOT actually initiated; the POST must be retried.
+ *  Observed RouterOS responses (confirmed via curl experiments):
+ *
+ *  SUCCESS:
+ *    [{".section":"0","status":"connecting"},{".section":"1","status":"done"}]
+ *    → Last entry status="done" — license server accepted the request.
+ *
+ *  ERROR (various):
+ *    [{".section":"0","status":"connecting"},{".section":"1","status":"ERROR: Licensing Error: too many trial licences"}]
+ *    [{".section":"0","status":"connecting"},{".section":"1","status":"ERROR: Unauthorized"}]
+ *    → Last entry status starts with "ERROR:" — server rejected. Do NOT retry, do NOT poll.
+ *
+ *  NOT-READY (post-boot REST quirk):
+ *    {"board-name":"CHR","architecture-name":"x86_64",...}
+ *    → System resource data leaked through. The endpoint isn't initialized. Retry the POST.
+ *
+ *  HTTP 400: {"detail":"missing =account=","error":400,"message":"Bad Request"}
+ *    → Caught before this function (HTTP status check).
  */
-function classifyRenewResponse(text: string): "done" | "pending" | "not-ready" {
+function classifyRenewResponse(text: string): "done" | "error" | "pending" | "not-ready" {
 	try {
 		const data = JSON.parse(text);
 
 		if (Array.isArray(data)) {
 			const last = data[data.length - 1];
-			if (last && typeof last === "object" && last.status === "done") return "done";
+			if (last && typeof last === "object" && typeof last.status === "string") {
+				if (last.status === "done") return "done";
+				if (last.status.startsWith("ERROR:")) return "error";
+			}
 			return "pending";
 		}
 
 		if (data && typeof data === "object") {
-			// System resource data has board-name — not a license response.
 			if ("board-name" in data || "architecture-name" in data) return "not-ready";
 		}
 	} catch { /* unparseable — treat as pending */ }
@@ -108,6 +121,22 @@ export async function renewLicense(
 
 		log.debug(`License renew response body: ${text}`);
 		const result = classifyRenewResponse(text);
+
+		if (result === "error") {
+			// Extract the actual error message from the RouterOS response
+			let errorDetail = text;
+			try {
+				const data = JSON.parse(text);
+				if (Array.isArray(data)) {
+					const last = data[data.length - 1];
+					if (last?.status) errorDetail = last.status;
+				}
+			} catch { /* use raw text */ }
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				`License renewal rejected by MikroTik: ${errorDetail}`,
+			);
+		}
 
 		if (result === "not-ready") {
 			if (attempt < MAX_RENEW_ATTEMPTS) {

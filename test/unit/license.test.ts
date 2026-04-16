@@ -161,6 +161,57 @@ describe("renewLicense — error paths", () => {
 		expect(err.code).toBe("PROCESS_FAILED");
 		expect(err.message).toMatch(/401/);
 	});
+
+	test("throws immediately on license server error (e.g. too many trials)", async () => {
+		// Confirmed via curl: RouterOS returns HTTP 200 with error in status field.
+		// [{".section":"0","status":"connecting"},{".section":"1","status":"ERROR: Licensing Error: too many trial licences"}]
+		// This must NOT poll for 90s — it must throw immediately with the actual error.
+		const { port, server: s } = await startMockServer((req, res) => {
+			if (req.url?.includes("/rest/system/license") && !req.url?.includes("/renew")) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ "system-id": "TEST" }));
+			} else {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify([
+					{ ".section": "0", status: "connecting" },
+					{ ".section": "1", status: "ERROR: Licensing Error: too many trial licences" },
+				]));
+			}
+		});
+		server = s;
+
+		const start = Date.now();
+		const err = await renewLicense(port, { account: "a@example.com", password: "pass", level: "p1" }).catch((e) => e);
+		const elapsed = Date.now() - start;
+		expect(err.code).toBe("PROCESS_FAILED");
+		expect(err.message).toContain("too many trial licences");
+		// Must fail fast (< 5s), NOT poll for 90s
+		expect(elapsed).toBeLessThan(5000);
+	});
+
+	test("throws immediately on unauthorized license error", async () => {
+		// Confirmed via curl: bad MikroTik.com credentials return ERROR: Unauthorized
+		const { port, server: s } = await startMockServer((req, res) => {
+			if (req.url?.includes("/rest/system/license") && !req.url?.includes("/renew")) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ "system-id": "TEST" }));
+			} else {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify([
+					{ ".section": "0", status: "connecting" },
+					{ ".section": "1", status: "ERROR: Unauthorized" },
+				]));
+			}
+		});
+		server = s;
+
+		const start = Date.now();
+		const err = await renewLicense(port, { account: "bad@example.com", password: "wrong", level: "p1" }).catch((e) => e);
+		const elapsed = Date.now() - start;
+		expect(err.code).toBe("PROCESS_FAILED");
+		expect(err.message).toContain("Unauthorized");
+		expect(elapsed).toBeLessThan(5000);
+	});
 });
 
 describe("getLicenseInfo — error paths", () => {

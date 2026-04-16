@@ -82,10 +82,23 @@ Our code handles this by:
 4. Suppress the ECONNRESET that results from killing the connection
 5. Restart QEMU, wait for boot, verify mode
 
-## license/renew — Another Blocking Endpoint
+## license/renew — Blocking Endpoint with Error Classification
 
-`/system/license/renew` with valid credentials blocks for several seconds while contacting
-MikroTik's license servers. Use a generous timeout (60s+) and don't retry on transient failures.
+`/system/license/renew` blocks while contacting MikroTik's license servers. Use `duration="10s"`
+to let RouterOS wait up to 10s for the server before responding.
+
+**Confirmed response shapes** (via curl experiments on running CHR):
+
+| Response | Meaning | Action |
+|----------|---------|--------|
+| `[{status:"connecting"},{status:"done"}]` | License accepted | Poll `GET /system/license` to verify level changed |
+| `[{status:"connecting"},{status:"ERROR: Licensing Error: too many trial licences"}]` | Account trial limit reached | Throw immediately — do NOT poll |
+| `[{status:"connecting"},{status:"ERROR: Unauthorized"}]` | Bad MikroTik.com credentials | Throw immediately — do NOT poll |
+| `{"detail":"missing =account=","error":400}` | Missing required field | HTTP 400 — caught by status check |
+| `{"board-name":...}` (system resource data) | Post-boot REST race | Retry the POST (endpoint not initialized) |
+
+**Critical**: The `status` field can contain `"ERROR: ..."` with HTTP 200. Our code MUST check
+for error strings and throw immediately — not misclassify as "pending" and poll for 90 seconds.
 
 ## Type Safety Around RouterOS Shapes
 

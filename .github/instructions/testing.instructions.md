@@ -109,15 +109,47 @@ See `.github/instructions/ci.instructions.md` for the full artifact map and fail
 | Times out at full timeout | CHR not booting (QEMU issue, firmware issue) | Check `qemu.log` and `machine.json` in machine dir |
 | HTTP 401 on unit test | Unit test mocks `globalThis.fetch` but code uses `rest.ts` (node:http) | Use `createServer` mock pattern (see `license.test.ts`) |
 | ECONNRESET noise in output | Expected on fire-and-forget calls (device-mode power-cycle) | Ensure `.catch(() => {})` attached immediately to pending promise |
+| Polls for 90s then fails | Error in response body misclassified as "pending" | Check classification function — RouterOS returns errors inside HTTP 200 |
 
-### Prove Before Refactoring
+### Experiment First, Code Second
 
-When a test fails, **understand the actual behavior before changing code**:
-1. Add `console.log` to see actual values at the failure point
-2. Use `curl -v http://127.0.0.1:{port}/rest/...` against the running CHR
-3. Enable RouterOS logging: `/system/logging/add topics=debug,!packet,!raw action=memory`
-4. Check `qemu.log` in the machine directory for QEMU-level issues
-5. Only after understanding the root cause should you modify the code
+**MANDATORY for any REST/provisioning change**: Before writing or refactoring code, run a
+live experiment against a real CHR to understand the actual behavior:
+
+```bash
+# Step 1: Use curl to see what the endpoint ACTUALLY returns
+curl -v -u admin: http://127.0.0.1:9100/rest/system/license/renew \
+  -X POST -H "Content-Type: application/json" \
+  -d '{"account":"...","password":"...","level":"p1","duration":"10s"}'
+
+# Step 2: Check RouterOS logs for the operation
+curl -s -u admin: http://127.0.0.1:9100/rest/log?=detail
+
+# Step 3: Use our own tool to probe the state
+bun run dev -- exec <machine> ":put [/system/license/get level]"
+```
+
+**Evidence that must exist before any code change:**
+- Actual curl output showing the exact response shape
+- The specific field/value that is wrong or missing
+- A concrete hypothesis ("field X is Y, should be Z, because...")
+
+**Red flags that indicate guessing (do NOT proceed):**
+- "RouterOS is flaky" — it's not; our logic is wrong
+- "Increase the timeout" — something is failing silently
+- "Switch HTTP library" — prove the library bug first with a minimal repro
+- "Add retry logic" — retrying a broken command doesn't fix it
+
+### Historical lesson (sessions 008-017)
+
+The same Bun connection pool bug was discovered and fixed file-by-file 7 times because:
+1. No instruction file documented the bug and fix pattern
+2. Each session guessed independently instead of reading prior work
+3. Timeouts were increased first (masking), then node:http applied (correct but narrow)
+
+The fix was proven (checkpoint 011, 013, 017) via observable symptoms: POST returns in <2ms
+with GET data, stale SSH key listings in exec response. But it took 10 sessions because
+nobody ran `curl` first to see what RouterOS actually returned.
 
 ### Unit Test Mock Pattern
 
