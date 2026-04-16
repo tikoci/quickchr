@@ -283,23 +283,27 @@ Lab tests reorganized into `test/lab/<topic>/` subdirectories with `REPORT.md` l
 ### Missing SKILL References (to create)
 
 - [ ] **`quickchr-automation.md`** — How to use quickchr itself as a tool (trigger terms: "spin up CHR", "boot RouterOS", "CHR integration test"). Document `QuickCHR.start()` options, `ChrInstance` methods, port block layout, dry-run mode. May belong in `~/.copilot/skills/routeros-qemu-chr/` rather than a new skill. (See also P6 item on quickchr SKILL.md)
-- [ ] **`routeros-scripting.md`** (reference) — RouterOS scripting language syntax: variables, loops, arrays, error handling, function definitions, `:execute` vs `:do`. The SKILL.md mentions it but the referenced `scripting.md` may be incomplete or missing
-- [ ] **`routeros-firewall-rest.md`** (reference) — Firewall filter/NAT/mangle via REST. Key gotcha: rule ordering matters and REST `PUT` (add) appends by default — need `place-before` for insertion. `.id` references for PATCH/DELETE
-- [ ] **`routeros-users-rest.md`** (reference) — User management via REST: add/remove users, SSH key provisioning (`/user/ssh-keys/import`), group permissions. Needed for quickchr's credential provisioning flow
-- [ ] **`routeros-networking-rest.md`** (reference) — IP address, DHCP client/server, DNS, routes via REST. Most common operations for agents configuring test environments
-- [ ] **`bun-runtime-gotchas.md`** — Consolidated Bun-specific issues: connection pool (disproved but documented), `req.destroy()` silence, `Bun.secrets` Keychain dialog, test runner event loop sharing. Currently spread across `bun-http.instructions.md` and lab reports
+- [x] **`routeros-scripting.md`** (reference) — Updated with: `:execute` vs `:do`, `:parse`, array operations, `:serialize`/`:deserialize` (JSON), `/system/script` repository, script permissions/policies, variable scope gotchas. Verified against rosetta page 47579229. (Session: 2025-07-17)
+- [x] **`routeros-firewall-rest.md`** (reference) — Created. Covers `/ip/firewall/filter`, `/nat`, `/mangle` CRUD; `place-before` ordering gotcha (15 mentions); `.id` references; filtering/proplist; 5 common patterns. Source: rosetta MCP. (Session: 2025-07-17)
+- [x] **`routeros-users-rest.md`** (reference) — Created. Covers `/user` CRUD, `/user/group`, `/user/ssh-keys` (add + import), admin expired flag (REST unaffected), password change. Source: rosetta pages 8978504, 47579162, 132350014 + quickchr provisioning code. (Session: 2025-07-17)
+- [x] **`routeros-networking-rest.md`** (reference) — Created. Covers `/ip/address`, `/ip/route`, `/ip/dhcp-client`, `/ip/dhcp-server`, `/ip/dns`, `/interface`. Source: rosetta MCP (9 pages). (Session: 2025-07-17)
+- [x] **`bun-runtime-gotchas.md`** — Created. Consolidated 4 bugs: req.destroy() silence (confirmed), connection pool (disproved), Bun.secrets keychain (confirmed), test runner event loop sharing (confirmed). HTTP client decision matrix. Source: bun-pool lab + bun-http.instructions.md. (Session: 2025-07-17)
+- [ ] **`routeros-logging-rest.md`** (reference) — `/log/print` via REST, topic hierarchy, filtering with `where`. Useful for debugging provisioning and RouterOS troubleshooting. (Identified 2025-07-17)
+- [ ] **`qemu-monitor-protocol.md`** (reference) — QEMU monitor socket commands (`system_reset`, `quit`, `info status`, `info chardev`). Critical for quickchr automation but undocumented as a SKILL reference. (Identified 2025-07-17)
+- [ ] **`routeros-identity-rest.md`** (reference) — `/system/identity` GET/set, `/system/resource` full field list. Used by every boot detection and health check path. (Identified 2025-07-17)
 
 ### Open Lab Tests (to run)
 
 - [ ] **SCP package upload** — Exercise the full SCP → apply-changes path with a third-party `.npk`. Current package lab only covers built-in packages
 - [ ] **QGA file delivery** — Can `guest-file-write` deliver `.npk` files on x86 CHR? Would eliminate SCP dependency for package provisioning
-- [ ] **SSH key provisioning** — Document `/user/ssh-keys/import` via REST and via exec. Currently untested; quickchr generates keys but the install path needs lab validation
-- [ ] **Multi-package enable** — Can `{"numbers":"container,iot"}` enable multiple packages in one POST? Or must they be separate calls?
+- [x] **SSH key provisioning** — Lab complete (2025-07-17). Two methods: `add` (inline key, RSA only on 7.10) and `import` (upload file first). ed25519/ECDSA unsupported on 7.10 — need version testing on 7.18+. DELETE returns 204. SSH login verified working immediately after key install. See `test/lab/ssh-keys/REPORT.md`
+- [x] **Multi-package enable** — Tested on 7.10 (2025-07-17). `enable`/`disable` + `reboot` works. **Key finding: `/system/package/apply-changes` was added in RouterOS 7.18** — versions <7.18 MUST use `/system/reboot`. Updated container SKILL.md with version note.
 - [ ] **Serial console device-mode** — Observe the countdown timer on serial during device-mode/update. Not tested via quickchr's serial channel
 - [ ] **Large duration async** — What happens with `duration="60s"` on monitor-traffic? Is the response streamed or buffered? Memory implications
 - [ ] **License success shape** — Run `/system/license/renew` with valid credentials to confirm the `"done"` success path (currently skipped, needs `MIKROTIK_WEB_USER`/`MIKROTIK_WEB_PASS`)
-- [ ] **apply-changes consistency** — More testing across CHR versions to confirm `/system/reboot` truly never applies package changes (the test header notes possible inconsistency)
+- [ ] **apply-changes consistency** — Partially addressed: confirmed `apply-changes` first appeared in 7.18 via rosetta command version check. More version-specific testing still useful
 - [ ] **once="false" on other commands** — Verify the `once="false"` exception on commands beyond monitor-traffic (check-for-updates, ethernet/monitor)
+- [ ] **ed25519 SSH key version** — When exactly was ed25519 key support added? Test on 7.16+ or 7.18+ CHR. (Identified during SSH key lab, 2025-07-17)
 
 ### Bun HTTP Client — Open Question
 
