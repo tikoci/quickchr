@@ -115,7 +115,7 @@ Before the first `git push` to `tikoci/quickchr`, tidy the repo so first-time vi
 The aggregate numbers are great (92% funcs, 83% lines) but a few files are below 70% lines and worth a second look before push:
 
 - [ ] `credentials.ts` (55.81% lines) — `Bun.secrets` fallback to `~/.config/quickchr/` config files is the untested path; hard to exercise without a headless-Linux harness
-- [ ] `license.ts` (61.07% lines) — error-path coverage around retry/timeout; depends on license-renewal-readiness behavior (recent `f3bc3d0`/`12b7211` fixes)
+- [x] `license.ts` — **license error classification fix** (`8c1a193`): `classifyRenewResponse()` now detects `"ERROR: ..."` in RouterOS status field (HTTP 200 body). Previously misclassified as "pending" → 90s poll timeout. Root cause proven via `curl` against running CHR. Two new unit tests grounded in observed response shapes (too many trials, unauthorized). Response patterns documented in `routeros-rest.instructions.md`.
 - [ ] `secrets.ts` (62.30% lines) — same story as `credentials.ts`; fallback branches untested
 - [ ] `completions.ts` (66.87% lines) — generator functions have good unit tests; the installer (`install` / `uninstall` / rc-file patching) is the untested chunk. Linux smoke-test above would pick this up for free
 - [ ] `images.ts` (57.89% lines) — the `downloadImage` happy-path is tested; fallback branches (partial download resume, zip cache miss) are not
@@ -239,6 +239,10 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 ### Provisioning correctness — verify what you write
 
 Integration tests and internal provisioning code check `board-name` and similar REST fields in ways that are fragile. The rule is: **verify what we write by reading it back** — not just that the box is up. Today some checks (e.g. `board-name` assertions in tests) are probes for aliveness rather than correctness of a provisioning write. Real verification means: if `start()` applies device-mode, read the mode back and compare; if a user is created, read the user back and compare group/name; if a license is applied, read the level back and compare. Fragile liveness checks imply the *core* provisioning sequence may be fragile too. Action items:
+
+**Known bugs:**
+- [ ] `machine.json` `packages` field records `[]` even when all packages were requested and installed. The packages ARE active on the CHR (verified via `/rest/system/package`) but state is not persisted. Likely the state is written before package install completes, or the installed package list isn't fed back to `saveMachineState()`.
+- [x] License renewal error classification — `classifyRenewResponse()` misclassified `"ERROR: ..."` status as "pending", causing 90s poll. Fixed (`8c1a193`): now throws immediately with actual error text.
 
 - [x] Audit every REST assertion in integration tests — classify as "liveness check" or "write-verify". Done: board-name checks in start-stop and device-mode tests labeled as liveness; version check labeled as write-verify.
 - [x] Where provisioning claims to verify but the assertion is loose — reviewed; `toContain("CHR")` for liveness is intentional (CHR board-name format), `toContain(state.version)` for version is correct (RouterOS appends channel suffix). No tightening needed.
