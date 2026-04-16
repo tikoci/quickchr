@@ -63,6 +63,12 @@ or in-flight, and attributes can change shape between calls as results arrive.
   pre-flight attributes, or assume some default behavior
 
 `duration=` accepts RouterOS duration strings: `"10s"`, `"1m"`, `"1d2h3m2s"` — not ms integers.
+Returns array with `.section` indices (one per sample period, typically 1/s).
+
+`once=""` returns a single-element array (no `.section` field), immediate return.
+`once` is presence-based — any value enables it — **EXCEPT `once="false"` which does NOT
+activate once mode** (it blocks like no parameter). This differs from `as-string` which is
+purely presence-based (even `"false"` enables it).
 
 ## device-mode/update — The Oddball
 
@@ -91,9 +97,9 @@ to let RouterOS wait up to 10s for the server before responding.
 
 | Response | Meaning | Action |
 |----------|---------|--------|
-| `[{status:"connecting"},{status:"done"}]` | License accepted | Poll `GET /system/license` to verify level changed |
-| `[{status:"connecting"},{status:"ERROR: Licensing Error: too many trial licences"}]` | Account trial limit reached | Throw immediately — do NOT poll |
-| `[{status:"connecting"},{status:"ERROR: Unauthorized"}]` | Bad MikroTik.com credentials | Throw immediately — do NOT poll |
+| `[{".section":"0",status:"connecting"},{".section":"1",status:"done"}]` | License accepted | Poll `GET /system/license` to verify level changed |
+| `[{".section":"0",status:"connecting"},{".section":"1",status:"renewing"},{".section":"2",status:"ERROR: Licensing Error: too many trial licences"}]` | Account trial limit reached | Throw immediately — do NOT poll |
+| `[{".section":"0",status:"connecting"},{".section":"1",status:"renewing"},{".section":"2",status:"ERROR: Unauthorized"}]` | Bad MikroTik.com credentials | Throw immediately — do NOT poll |
 | `{"detail":"missing =account=","error":400}` | Missing required field | HTTP 400 — caught by status check |
 | `{"board-name":...}` (system resource data) | Post-boot REST race | Retry the POST (endpoint not initialized) |
 

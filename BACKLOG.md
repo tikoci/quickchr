@@ -267,6 +267,59 @@ Multiple agents (and past code paths) have treated the admin account's `expired:
 - [ ] Consider renaming to `createManagedUser` or splitting into a separate `provision.user` option group for clarity (tracked here; don't rename without also updating wizard, CLI flags, and docs).
 - [ ] Provisioning as a whole: the current model bundles package install, device-mode, license, and user creation into a single `_provisionInstance` call. Consider making each step an explicit opt-in with no implicit activation. Goal: `start()` is fast and predictable by default; callers who need provisioning compose it explicitly. The wizard can still bundle common combinations (and default `secureLogin: true` for interactive paths). This is the "composition over configuration" philosophy: each provisioning step is a building block, `_provisionInstance` is one opinionated composition, callers can build their own.
 
+### Lab-Verified RouterOS REST Behavior (May 2026)
+
+Comprehensive lab experiments run against CHR 7.22.1 (x86_64) documented exact REST API behavior for four critical subsystems. Lab test files in `test/lab/`, skill references in `~/.copilot/skills/routeros-fundamentals/references/`:
+
+- **device-mode-rest.md** — POST update ALWAYS blocks HTTP (even no-op); activation-timeout range 10s–1d; attempt-count tested to 12 with no REST limit (docs say "max 3" — appears CLI-only); flagged is independent of attempt-count
+- **packages-rest.md** — **CRITICAL: `/system/reboot` does NOT apply package changes; must use `/system/package/apply-changes`**. Built-in packages (12 on CHR) need enable + apply-changes only — no SCP upload needed. `scheduled` values: `""`, `"scheduled for enable"`, `"scheduled for disable"` (not "scheduled for install")
+- **async-commands-rest.md** — `duration="Xs"` → `.section` arrays; `once=""` → single-element array; no param → blocks forever. `once="false"` does NOT activate once mode (unlike `as-string` which is purely presence-based)
+- **licensing-rest.md** — Free CHR: `{level:"free",system-id:"..."}` (only 2 fields). Error strings appear inside HTTP 200 responses — must check for "ERROR:" prefix. `duration` parameter controls server wait time
+
+Existing references updated: `device-mode.md` (attempt-count limit corrected), `extra-packages.md` (apply-changes vs reboot fix). Instructions updated: `routeros-rest.instructions.md` (license response shapes with .section keys, once="false" caveat).
+
+Lab tests reorganized into `test/lab/<topic>/` subdirectories with `REPORT.md` lab reports bridging SKILL references ↔ test code. See `test/lab/README.md` for structure and running instructions.
+
+### Missing SKILL References (to create)
+
+- [ ] **`quickchr-automation.md`** — How to use quickchr itself as a tool (trigger terms: "spin up CHR", "boot RouterOS", "CHR integration test"). Document `QuickCHR.start()` options, `ChrInstance` methods, port block layout, dry-run mode. May belong in `~/.copilot/skills/routeros-qemu-chr/` rather than a new skill. (See also P6 item on quickchr SKILL.md)
+- [ ] **`routeros-scripting.md`** (reference) — RouterOS scripting language syntax: variables, loops, arrays, error handling, function definitions, `:execute` vs `:do`. The SKILL.md mentions it but the referenced `scripting.md` may be incomplete or missing
+- [ ] **`routeros-firewall-rest.md`** (reference) — Firewall filter/NAT/mangle via REST. Key gotcha: rule ordering matters and REST `PUT` (add) appends by default — need `place-before` for insertion. `.id` references for PATCH/DELETE
+- [ ] **`routeros-users-rest.md`** (reference) — User management via REST: add/remove users, SSH key provisioning (`/user/ssh-keys/import`), group permissions. Needed for quickchr's credential provisioning flow
+- [ ] **`routeros-networking-rest.md`** (reference) — IP address, DHCP client/server, DNS, routes via REST. Most common operations for agents configuring test environments
+- [ ] **`bun-runtime-gotchas.md`** — Consolidated Bun-specific issues: connection pool (disproved but documented), `req.destroy()` silence, `Bun.secrets` Keychain dialog, test runner event loop sharing. Currently spread across `bun-http.instructions.md` and lab reports
+
+### Open Lab Tests (to run)
+
+- [ ] **SCP package upload** — Exercise the full SCP → apply-changes path with a third-party `.npk`. Current package lab only covers built-in packages
+- [ ] **QGA file delivery** — Can `guest-file-write` deliver `.npk` files on x86 CHR? Would eliminate SCP dependency for package provisioning
+- [ ] **SSH key provisioning** — Document `/user/ssh-keys/import` via REST and via exec. Currently untested; quickchr generates keys but the install path needs lab validation
+- [ ] **Multi-package enable** — Can `{"numbers":"container,iot"}` enable multiple packages in one POST? Or must they be separate calls?
+- [ ] **Serial console device-mode** — Observe the countdown timer on serial during device-mode/update. Not tested via quickchr's serial channel
+- [ ] **Large duration async** — What happens with `duration="60s"` on monitor-traffic? Is the response streamed or buffered? Memory implications
+- [ ] **License success shape** — Run `/system/license/renew` with valid credentials to confirm the `"done"` success path (currently skipped, needs `MIKROTIK_WEB_USER`/`MIKROTIK_WEB_PASS`)
+- [ ] **apply-changes consistency** — More testing across CHR versions to confirm `/system/reboot` truly never applies package changes (the test header notes possible inconsistency)
+- [ ] **once="false" on other commands** — Verify the `once="false"` exception on commands beyond monitor-traffic (check-for-updates, ethernet/monitor)
+
+### Bun HTTP Client — Open Question
+
+The codebase uses two HTTP clients with no crisp rule for when to use which:
+
+| Where | Client | Why |
+|-------|--------|-----|
+| `rest.ts` (CHR REST) | `node:http` + `agent:false` | Originally: pool bug. Actually: `req.destroy()` bug |
+| `versions.ts`, `images.ts`, `packages.ts` | `fetch()` | External URLs — no timeout/destroy concerns |
+| Integration tests | `node:http` helpers | Copied from rest.ts pattern |
+
+**The pool bug was NOT reproduced** (see `test/lab/bun-pool/REPORT.md`). The real reason rest.ts needs node:http is **Bug 2** from `bun-http.instructions.md`: Bun's `req.destroy()` doesn't emit the `error` event, causing promise hangs on timeout. This IS reproducible and IS a real problem for long-polling/blocking endpoints like device-mode.
+
+**What we need** (in priority order):
+
+1. **Crisp rule**: "Use `fetch()` everywhere except when you need `req.destroy()` with guaranteed error propagation (long-polling/blocking REST endpoints)." Update `bun-http.instructions.md` to lead with this rule instead of the pool bug narrative
+2. **Bun bug report**: File issue for `req.destroy()` not emitting error. If fixed, rest.ts could migrate back to fetch()
+3. **Periodic re-test**: When Bun ships a major version, re-run `test/lab/bun-pool/` to track pool behavior
+4. **Eventual unification**: If Bun fixes destroy + pool, migrate rest.ts back to fetch() and remove the node:http dependency. Until then, the mixed pattern is correct but the documentation should explain WHY (destroy bug, not pool bug)
+
 ---
 
 ## P2 — CLI & UX
