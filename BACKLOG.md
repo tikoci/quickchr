@@ -87,14 +87,14 @@ Before the first `git push` to `tikoci/quickchr`, tidy the repo so first-time vi
 - [x] Remove or populate stale `test.jpg` (0-byte file at repo root) — removed (`a8c8cad`)
 - [x] Reconcile `/index.ts` vs `/src/index.ts` — root `index.ts` deleted (`a8c8cad`)
 - [x] `.gitignore`: `.venv/`, `coverage/`, `*.jpg` added (`a8c8cad`)
-- [ ] Bump `package.json` version from `0.1.0` before first publish. **Even minors** are "release" and **odd minors** are "pre-release", each has own patch#, major stays at 0 until significant test/usage on **all** platform/arch combos.
+- [x] Bump `package.json` version from `0.1.0` before first publish. Bumped to `0.2.0` (`36ad135`). **Even minors** are "release" and **odd minors** are "pre-release", each has own patch#, major stays at 0 until significant test/usage on **all** platform/arch combos.
 
 **Docs drift (README is stale):**
 
-- [ ] Update `README.md` CLI examples — add `setup`, `snapshot`/`snap`, `exec`, `console`, `qga`, `networks`, `completions`. The current README still centers on `start` wizard-style and omits most commands added since
-- [ ] Update `README.md` flag table — add `--add-network` (the big recent addition), remove/rename `--fg`/`--foreground` to match current CLI, document `--emulate-device` placeholder
-- [ ] Fix port-layout offsets note — README table shows +0..+5 but storage layout docs elsewhere imply +0..+9; pick one and match reality
-- [ ] Split `README.md` → `CONTRIBUTING.md` (dev setup, `bun run check`, integration test policy) — already tracked under "Docs & Project" but grouped here so it gets done together
+- [x] Update `README.md` CLI examples — full rewrite (`36ad135`): added `setup`, `snapshot`/`snap`, `exec`, `console`, `qga`, `networks`, `completions`, `disk`, `set`, `get`, and all others.
+- [x] Update `README.md` flag table — added `--add-network`, corrected `--fg`/`--bg` aliases, full flag table with all current options (`36ad135`).
+- [x] Fix port-layout offsets note — README table now shows +0..+9 matching actual implementation (`36ad135`).
+- [x] Split `README.md` → `CONTRIBUTING.md` — dev setup, `bun run check`, architecture rules, integration test policy moved to `CONTRIBUTING.md` (`36ad135`).
 - [ ] Add `CHANGELOG.md` (or decide against it explicitly) — a short "Unreleased" section now seeds the discipline for future releases
 - [ ] Consider `SECURITY.md` — minimal pointer ("report via GitHub security advisories") is enough
 
@@ -102,7 +102,7 @@ Before the first `git push` to `tikoci/quickchr`, tidy the repo so first-time vi
 
 - [ ] Create a `quickchr` SKILL.md for `~/.copilot/skills/` (and/or `skills/` in-repo) so agents using Copilot/Claude discover quickchr as the CHR-via-QEMU entrypoint. Describe trigger terms ("spin up CHR", "boot RouterOS locally", "CHR integration test") and link to MANUAL.md once written. Check with `~/.copilot/skills/routeros-qemu-chr/SKILL.md` — may be the right home rather than a new skill
 - [ ] JSDoc audit on the public barrel (`src/index.ts` + `src/lib/quickchr.ts`) — `QuickCHR.start()`, `ChrInstance.exec/rest/qga/snapshot/serial`, `StartOptions` fields. Today a type-only consumer knows the shape but not the semantics (e.g. "what does `installAllPackages` imply for boot time?"). Restraml integration already flagged readiness-contract ambiguity (P1 → "Clearer `start()` readiness contract"); JSDoc is how that promise shows up in IDE hovers without an `await ready` shim
-- [ ] Comment audit — search for stale `// TODO` / `// FIXME` / `// XXX`; either resolve or convert to BACKLOG items so they don't rot in code
+- [x] Comment audit — searched for stale `// TODO` / `// FIXME` / `// XXX` in `src/`; none found (`36ad135`).
 
 **Cross-platform smoke-test (the other user-flagged gap):**
 
@@ -255,7 +255,7 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 Integration tests and internal provisioning code check `board-name` and similar REST fields in ways that are fragile. The rule is: **verify what we write by reading it back** — not just that the box is up. Today some checks (e.g. `board-name` assertions in tests) are probes for aliveness rather than correctness of a provisioning write. Real verification means: if `start()` applies device-mode, read the mode back and compare; if a user is created, read the user back and compare group/name; if a license is applied, read the level back and compare. Fragile liveness checks imply the *core* provisioning sequence may be fragile too. Action items:
 
 **Known bugs:**
-- [ ] `machine.json` `packages` field records `[]` even when all packages were requested and installed. The packages ARE active on the CHR (verified via `/rest/system/package`) but state is not persisted. Likely the state is written before package install completes, or the installed package list isn't fed back to `saveMachineState()`.
+- [x] `machine.json` `packages` field records `[]` even when all packages were requested and installed. Fixed (`36ad135`): `installPackages()`/`installAllPackages()` now return `Promise<string[]>`; `_provisionInstance` captures the list and calls `saveMachine()` to persist. Integration-tested in `start-stop.test.ts`.
 - [x] License renewal error classification — `classifyRenewResponse()` misclassified `"ERROR: ..."` status as "pending", causing 90s poll. Fixed (`8c1a193`): now throws immediately with actual error text.
 
 - [x] Audit every REST assertion in integration tests — classify as "liveness check" or "write-verify". Done: board-name checks in start-stop and device-mode tests labeled as liveness; version check labeled as write-verify.
@@ -461,10 +461,10 @@ quickchr get my-chr device-mode
 quickchr get my-chr admin                        # RouterOS users in group=full
 ```
 
-- [ ] Implement `set` command — license, device-mode, admin account. **Deferred:** requires live CHR, credential resolution, and mutation logic for each settable property. Design is clear (see section above) but scope is large — prioritize after `list`/`status` merge. Actionable next step: start with `--license` flag only, which can reuse existing `license.ts` logic.
+- [x] Implement `set` command — started with `--license` flag (`36ad135`): `quickchr set <name> --license` applies license using existing `license.ts` logic. Device-mode and admin account remain deferred.
 - [x] Implement `get` command — `cmdGet` in `src/cli/index.ts` (`a8c8cad`). Queries live CHR REST endpoints (license, device-mode, admin users). Pretty-print or `--json`. Graceful offline handling. Fixed license field: `system-id` not `software-id`.
 - [x] `get` without a property group: shows all settable config (license level, device-mode, admin users) — already implemented via `if (!group || group === "license")` / `group === "device-mode"` / `group === "admin"` pattern in `cmdGet`.
-- [ ] Deprecate standalone `license` command → alias to `set <name> --license`
+- [x] Deprecate standalone `license` command → alias to `set <name> --license`. Dispatcher now prints deprecation warning and routes to `applyLicense()` (`36ad135`).
 
 #### `remove` / `clean` — Non-Interactive
 
@@ -509,9 +509,9 @@ $ quickchr list --json
 [{"name":"my-chr","status":"running",...}]
 ```
 
-- [ ] Merge `list` and `status` — `list` for table, `list <name>` for detail
-- [ ] Keep `status` as alias for `list`
-- [ ] `--json` / `--yaml` output on `list`
+- [x] Merge `list` and `status` — `list [<name>] [--json]` for both table and detail; `cmdStatus` eliminated (`36ad135`)
+- [x] Keep `status` as alias for `list` — dispatcher routes `status` → `cmdList()` (`36ad135`)
+- [x] `--json` / `--yaml` output on `list` — `--json` implemented; YAML deferred
 - [ ] Enrichment: pull live QEMU stats (CPU, memory) via monitor channel for `list <name>` detail view
 - [ ] Show network info (names, any downgrades) in both table and detail views
 
@@ -1132,8 +1132,8 @@ quickchr start vienk --version stable
 
 **CI-testable:** Yes — fast (~15s with KVM/HVF), no extra packages, no cross-arch. Ideal for both x86 and ARM64 runners.
 
-- [ ] `examples/vienk/vienk.test.ts`
-- [ ] `examples/vienk/README.md`
+- [x] `examples/vienk/vienk.test.ts` — created (`36ad135`): 3 tests (boot, identity, interface list), native arch, stable version
+- [x] `examples/vienk/README.md` — created (`36ad135`): quickstart guide with timing table
 
 Simple example where an /app is test by bring it up in CHR, and the /app services offered.
 
