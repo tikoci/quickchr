@@ -34,8 +34,8 @@ the tests' `process.arch` check handle this automatically:
 | macos-15 (M-series) | arm64 | arm64 | qemu-system-aarch64 | HVF (if available) |
 | macos-13 (Intel) | x64 | x86 | qemu-system-x86_64 | HVF (if available) |
 
-**x86 cross-arch on aarch64 is NOT tested** — TCG I/O port emulation bottleneck
-makes boot times impractical (>5 min).  aarch64 on x86_64 TCG works fine (~20s).
+**x86 cross-arch on aarch64 is NOT tested** — TCG I/O port emulation makes it impractical.
+aarch64 on x86_64 TCG is significantly slower than native but works.
 
 ## Artifacts — Where to Look After a Failure
 
@@ -58,12 +58,12 @@ makes boot times impractical (>5 min).  aarch64 on x86_64 TCG works fine (~20s).
 1. Open `qemu.log` from the artifact — look for `Panic`, `Error`, `EFI` failures
 2. Check `machine.json` — verify `status`, `arch`, `ports`, `version` fields
 3. Check `integration-output.txt` — find the specific test that timed out or errored
-4. Look for `::notice::KVM not available` in logs — TCG boots are 2-4× slower
+4. Look for `::notice::KVM not available` in logs — TCG is significantly slower than KVM/HVF and per-probe HTTP timeouts may need to be larger
 
 ### Common failure signatures
 | Symptom | Likely cause | Where to look |
 |---------|-------------|---------------|
-| `waitForBoot` timeout | TCG too slow, boot stall | `qemu.log` first 100 lines |
+| `waitForBoot` timeout | TCG slowness or boot stall — check serial log to distinguish | `qemu.log` first 100 lines |
 | `MISSING_FIRMWARE` on arm64 | UEFI pkg not installed | `apt-get` step logs |
 | Port conflict | stale machine from prior run | `machine.json` port fields |
 | `sshpass` not found | missing dep | `apt-get`/`brew install` step |

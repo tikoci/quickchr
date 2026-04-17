@@ -116,25 +116,19 @@ server-side before returning results.
 For packet-level debugging: `/tool/sniffer` with TZSP streaming, or `tcpdump`/`tshark`
 on the host side of the QEMU network.
 
-## Timeout Scaling Rules
+## Timeout Rules
 
-Different acceleration modes have dramatically different boot/response times.
-When setting timeouts, apply these scaling factors:
+Boot and response times vary significantly by acceleration mode and host hardware.
+**Do not rely on specific timing estimates** — they become stale and cause cascading failures when reused uncritically.
 
-| Accel Mode          | Factor | Typical Boot | Notes                            |
-|---------------------|--------|-------------|----------------------------------|
-| x86 on x86 (KVM)   | 1×     | 5-10s       | Baseline                         |
-| arm64 on arm64 (KVM)| 1×    | 5-10s       | Same as x86 KVM                  |
-| arm64 on arm64 (HVF)| 1×    | 5-15s       | Apple Silicon                    |
-| x86 on x86 (HVF)   | 1×     | 5-15s       | Intel Mac                        |
-| arm64 on x86 (TCG)  | 2-4×   | 20-60s      | Manageable                       |
-| x86 on arm64 (TCG)  | 10-20× | 60-300s     | Very slow, avoid in CI           |
+Key principles when implementing timeouts:
+- **Per-probe HTTP timeout is the critical factor.** Under cross-arch TCG, a single HTTP round-trip through the emulated TCP stack can take many seconds. A 3-second curl timeout (`curl -m 3`) will time out on every probe even when CHR is fully booted.
+- Native KVM/HVF (same-arch) is much faster than cross-arch TCG — but do not assume specific numbers.
+- Cross-arch TCG (guest arch ≠ host arch) is the slowest scenario; plan for it but measure rather than guess.
+- Provide a `--timeout-extra=<seconds>` CLI option that **adds** time (not replaces).
+- Consider `detectAccel()` result to adjust retry behavior.
+- Document the accel mode in timeout error messages so users know why it was slow.
 
-When implementing timeouts:
-- Use a base timeout (e.g., 30s for boot) and multiply by the scaling factor
-- Provide a `--timeout-extra=<seconds>` CLI option that **adds** time (not replaces)
-- Consider `detectAccel()` result to auto-scale timeouts
-- Document the scaling in error messages when timeouts fire
 
 ## Provisioning Failure Modes
 
