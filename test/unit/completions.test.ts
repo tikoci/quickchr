@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, beforeEach } from "bun:test";
-import { existsSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	detectCurrentShell,
@@ -20,6 +20,10 @@ const tmpHome = join(import.meta.dir, "tmp-completions-home");
 const SHELLS: SupportedShell[] = ["bash", "zsh", "fish"];
 
 const originalHome = process.env.HOME;
+const originalShell = process.env.SHELL;
+const originalFishVersion = process.env.FISH_VERSION;
+const originalZshVersion = process.env.ZSH_VERSION;
+const originalBashVersion = process.env.BASH_VERSION;
 
 // Collect any system-path (non-HOME) completion files written during a test
 // so afterEach can clean them up and prevent filesystem leaks between tests.
@@ -31,6 +35,13 @@ beforeEach(() => {
 
 afterEach(() => {
 	process.env.HOME = originalHome;
+	process.env.SHELL = originalShell;
+	if (originalFishVersion === undefined) delete process.env.FISH_VERSION;
+	else process.env.FISH_VERSION = originalFishVersion;
+	if (originalZshVersion === undefined) delete process.env.ZSH_VERSION;
+	else process.env.ZSH_VERSION = originalZshVersion;
+	if (originalBashVersion === undefined) delete process.env.BASH_VERSION;
+	else process.env.BASH_VERSION = originalBashVersion;
 	if (existsSync(tmpHome)) {
 		rmSync(tmpHome, { recursive: true, force: true });
 	}
@@ -76,6 +87,27 @@ describe("detectCurrentShell", () => {
 		const info = detectCurrentShell();
 		expect(info.supported).toBe(false);
 		process.env.SHELL = savedShell;
+	});
+
+	test("prefers shell-specific env vars over $SHELL", () => {
+		process.env.SHELL = "/bin/zsh";
+
+		process.env.FISH_VERSION = "4.0.1";
+		delete process.env.ZSH_VERSION;
+		delete process.env.BASH_VERSION;
+		expect(shellBinary(detectCurrentShell())).toBe("fish");
+		expect(detectCurrentShell().version).toBe("4.0.1");
+
+		delete process.env.FISH_VERSION;
+		process.env.ZSH_VERSION = "5.9";
+		expect(shellBinary(detectCurrentShell())).toBe("zsh");
+		expect(detectCurrentShell().version).toBe("5.9");
+
+		delete process.env.ZSH_VERSION;
+		process.env.BASH_VERSION = "5.2.37(1)-release";
+		const bashInfo = detectCurrentShell();
+		expect(shellBinary(bashInfo)).toBe("bash");
+		expect(bashInfo.version).toBe("5.2.37");
 	});
 });
 
@@ -173,6 +205,18 @@ describe("completionInstallPath", () => {
 			expect(typeof zshLoc.rcFile).toBe("string");
 		}
 	});
+
+	test("bash uses XDG completions dir when available", () => {
+		process.env.HOME = tmpHome;
+		mkdirSync(join(tmpHome, ".local", "share", "bash-completion", "completions"), { recursive: true });
+
+		const bashLoc = completionInstallPath("bash");
+		if (bashLoc.file.startsWith(tmpHome)) {
+			expect(bashLoc.file).toBe(join(tmpHome, ".local", "share", "bash-completion", "completions", "quickchr"));
+			expect(bashLoc.rcLine).toBeUndefined();
+			expect(bashLoc.rcFile).toBeUndefined();
+		}
+	});
 });
 
 describe("completionStatusFor", () => {
@@ -188,6 +232,17 @@ describe("completionStatusFor", () => {
 			expect(status.installed).toBe(false);
 			expect(typeof status.path).toBe("string");
 		}
+	});
+
+	test("returns installed:true after installation (fish — always under HOME)", () => {
+		// Fish completions always go to ~/.config/fish/completions/quickchr.fish,
+		// so this test runs unconditionally regardless of Homebrew or system paths.
+		process.env.HOME = tmpHome;
+		installCompletions("fish");
+		const status = completionStatusFor("fish");
+		expect(status.shell).toBe("fish");
+		expect(status.installed).toBe(true);
+		expect(status.path).toContain("quickchr.fish");
 	});
 });
 
@@ -247,12 +302,11 @@ describe("installCompletions / uninstallCompletions", () => {
 		process.env.HOME = tmpHome;
 		const result = installCompletions("zsh");
 		if (result.rcLine && result.rcFile) {
-			const { readFileSync } = require("node:fs");
-			const content = readFileSync(result.rcFile, "utf8") as string;
+			const content = readFileSync(result.rcFile, "utf8");
 			expect(content).toContain(result.rcLine);
 
 			uninstallCompletions("zsh");
-			const after = readFileSync(result.rcFile, "utf8") as string;
+			const after = readFileSync(result.rcFile, "utf8");
 			expect(after).not.toContain(result.rcLine);
 		}
 	});
@@ -264,15 +318,31 @@ describe("installCompletions / uninstallCompletions", () => {
 		const result = completionStatusFor("bash");
 		if (result.installed) {
 			// Check rc file has exactly one occurrence of the source line
-			const { completionInstallPath } = require("../../src/lib/completions.ts");
 			const loc = completionInstallPath("bash");
 			if (loc.rcLine && loc.rcFile && existsSync(loc.rcFile)) {
-				const { readFileSync } = require("node:fs");
-				const content = readFileSync(loc.rcFile, "utf8") as string;
+				const content = readFileSync(loc.rcFile, "utf8");
 				const count = content.split(loc.rcLine).length - 1;
 				expect(count).toBe(1);
 			}
 		}
+	});
+
+	test("install appends rc lines after files without a trailing newline", () => {
+		// Tests appendRcLine's separator logic: if the existing rc file doesn't end
+		// with a newline, the appended line should be separated by one.
+		// Uses bash because its fallback path (no Homebrew bash_completion.d, no XDG dir)
+		// is more common than zsh's fallback (macOS always has /usr/local/share/zsh/site-functions).
+		process.env.HOME = tmpHome;
+		mkdirSync(tmpHome, { recursive: true });
+		const rcFile = join(tmpHome, process.platform === "darwin" ? ".bash_profile" : ".bashrc");
+		writeFileSync(rcFile, "export PATH=/usr/local/bin");
+
+		const result = installCompletions("bash");
+		if (result.rcLine && result.rcFile === rcFile) {
+			expect(readFileSync(rcFile, "utf8")).toBe(`export PATH=/usr/local/bin\n${result.rcLine}\n`);
+		}
+		// Note: on macOS with Homebrew bash-completion@2 installed, completionInstallPath("bash")
+		// resolves to the Homebrew dir and no rc file is written — the assertion above is skipped.
 	});
 
 	test("uninstall returns removed:false when not installed", () => {
@@ -283,15 +353,29 @@ describe("installCompletions / uninstallCompletions", () => {
 });
 
 describe("listMachineNamesForCompletion", () => {
-	test("returns an array (may be empty)", () => {
-		const names = listMachineNamesForCompletion();
-		expect(Array.isArray(names)).toBe(true);
+	test("lists machine directories from quickchr state", () => {
+		process.env.HOME = tmpHome;
+		const machinesDir = join(tmpHome, ".local", "share", "quickchr", "machines");
+		for (const name of ["alpha", "beta"]) {
+			mkdirSync(join(machinesDir, name), { recursive: true });
+			writeFileSync(join(machinesDir, name, "machine.json"), JSON.stringify({ name, status: "stopped" }));
+		}
+
+		expect(listMachineNamesForCompletion().sort()).toEqual(["alpha", "beta"]);
 	});
 });
 
 describe("listRunningMachineNamesForCompletion", () => {
-	test("returns an array (may be empty)", () => {
-		const names = listRunningMachineNamesForCompletion();
-		expect(Array.isArray(names)).toBe(true);
+	test("returns only running machines and skips unreadable state files", () => {
+		process.env.HOME = tmpHome;
+		const machinesDir = join(tmpHome, ".local", "share", "quickchr", "machines");
+		mkdirSync(join(machinesDir, "alpha"), { recursive: true });
+		writeFileSync(join(machinesDir, "alpha", "machine.json"), JSON.stringify({ status: "running" }));
+		mkdirSync(join(machinesDir, "beta"), { recursive: true });
+		writeFileSync(join(machinesDir, "beta", "machine.json"), JSON.stringify({ status: "stopped" }));
+		mkdirSync(join(machinesDir, "gamma"), { recursive: true });
+		writeFileSync(join(machinesDir, "gamma", "machine.json"), "{not-json");
+
+		expect(listRunningMachineNamesForCompletion()).toEqual(["alpha"]);
 	});
 });
