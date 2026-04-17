@@ -44,6 +44,22 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 **Resolution order for `--add-network shared`:** socket_vmnet daemon → vmnet-shared (root) → error
 **Resolution order for `--add-network bridged:<iface>`:** socket_vmnet bridged → vmnet-bridged (root) → error
 
+### SLiRP hostfwd Requires a Guest IP
+
+SLiRP `hostfwd` forwards connections to a specific guest IP (default `10.0.2.15`).
+**Without that IP on the guest interface, hostfwd creates half-open connections:**
+the host-side TCP connect succeeds (SLiRP accepts immediately) but the guest never
+receives data. HTTP requests hang until the per-probe timeout — not ECONNREFUSED.
+
+This means SLiRP **must** be on ether1 (RouterOS auto-creates DHCP client only on ether1;
+SLiRP's built-in DHCP assigns 10.0.2.15). Multi-NIC configs: `user` first, then
+shared/bridged/socket. Shared/bridged on ether2+ needs a manual DHCP client added via
+REST after boot.
+
+**TCG hazard:** Half-open connections burn the full per-probe HTTP timeout on every
+`waitForBoot` probe. Under TCG where TCP round-trips are slow, this compounds badly.
+Lab evidence: `test/lab/slirp-hostfwd/`.
+
 ## Channels (background mode)
 
 - Monitor: Unix socket, readline protocol. Wait for `(qemu)` prompt before sending commands.

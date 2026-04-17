@@ -14,6 +14,9 @@ Each subdirectory is a self-contained lab covering one subsystem:
 | `packages/` | `/system/package` lifecycle, apply-changes | 6 | `packages-rest.md` |
 | `async-commands/` | `duration=`, `once=`, `.section` arrays | 5 | `async-commands-rest.md` |
 | `licensing/` | `/system/license` tiers, renew response shapes | 5 | `licensing-rest.md` |
+| `slirp-hostfwd/` | SLiRP hostfwd: does it work without a guest IP? | 4 | `qemu.instructions.md` |
+| `ssh-keys/` | SSH key provisioning and `exec --via=ssh` | — | `provisioning.instructions.md` |
+| `scripting-patterns/` | RouterOS scripting via REST `/execute` | — | — |
 
 Each directory contains:
 

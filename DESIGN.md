@@ -123,6 +123,22 @@ quickchr manages individual CHR instances. Multi-router topologies, test matrice
 
 For advanced networking (TAP interfaces, bridges), quickchr **discovers and presents options** but does not manage OS-level network configuration. On macOS, vmnet is straightforward (root + a QEMU flag). On Linux, TAP requires editing system files that vary by distro and network manager — that's the user's domain. quickchr will enumerate available interfaces, generate the correct QEMU flags, and link to tikoci docs for setup guides.
 
+#### SLiRP hostfwd — Why User-Mode Must Be ether1
+
+QEMU SLiRP (`-netdev user`) hostfwd **requires** the guest to have an IP address (default `10.0.2.15`) on the SLiRP-connected interface. Without it, `hostfwd` accepts TCP connections on the host side (creating a half-open state) but the guest never receives data — HTTP requests hang until timeout.
+
+RouterOS auto-creates a DHCP client only on ether1. SLiRP includes a DHCP server that assigns `10.0.2.15`. Therefore **SLiRP must be ether1** for zero-config provisioning. This is why `user` is always the first network in multi-NIC configurations.
+
+When adding shared/bridged as ether2+, a manual DHCP client is needed:
+```
+POST /rest/ip/dhcp-client/add
+{"interface":"ether2","use-peer-dns":"yes","add-default-route":"yes","default-route-distance":"2"}
+```
+
+The `default-route-distance=2` ensures the shared route is backup — SLiRP ether1 remains the primary gateway, avoiding ECMP dual-gateway side effects.
+
+**TCG hazard:** SLiRP half-open connections (TCP connect succeeds, data never flows) burn the full per-probe HTTP timeout in `waitForBoot`. Under cross-arch TCG where TCP round-trips are slow, this compounds badly. Lab: `test/lab/slirp-hostfwd/`.
+
 ### Platform Priority
 
 macOS → Linux → Windows. Mac and Linux share most code paths with minor `#ifdef`-style branches. Windows is tracked but lower priority — larger RouterOS admin audience there, but fewer recipes and harder to test. Windows CI runner planned after the existing macOS/Linux matrix is stable.
