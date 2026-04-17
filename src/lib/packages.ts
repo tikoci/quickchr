@@ -135,7 +135,8 @@ export async function uploadPackages(
 	}
 }
 
-/** Install extra packages: download, extract, upload, reboot. */
+/** Install extra packages: download, extract, upload, reboot.
+ *  Returns the names of packages that were actually found and uploaded. */
 export async function installPackages(
 	packages: string[],
 	version: string,
@@ -143,13 +144,15 @@ export async function installPackages(
 	sshPort: number,
 	httpPort: number,
 	logger?: ProgressLogger,
-): Promise<void> {
-	if (packages.length === 0) return;
+): Promise<string[]> {
+	if (packages.length === 0) return [];
+
 
 	const log = logger ?? createLogger();
 	const extractDir = await downloadPackages(version, arch, undefined, logger);
 
 	const packagePaths: string[] = [];
+	const installed: string[] = [];
 	for (const pkg of packages) {
 		const pkgPath = findPackageFile(extractDir, pkg);
 		if (!pkgPath) {
@@ -157,9 +160,10 @@ export async function installPackages(
 			continue;
 		}
 		packagePaths.push(pkgPath);
+		installed.push(pkg);
 	}
 
-	if (packagePaths.length === 0) return;
+	if (packagePaths.length === 0) return [];
 
 	await uploadPackages(packagePaths, sshPort, undefined, undefined, logger);
 
@@ -175,6 +179,8 @@ export async function installPackages(
 	} catch {
 		// Expected — connection drops during reboot
 	}
+
+	return installed;
 }
 
 /** List all package names available in an extracted all_packages directory.
@@ -199,18 +205,19 @@ export async function downloadAndListPackages(
 	return listAvailablePackages(extractDir);
 }
 
-/** Download all packages and install every one of them. Useful for API schema generation. */
+/** Download all packages and install every one of them. Useful for API schema generation.
+ *  Returns the names of packages that were installed. */
 export async function installAllPackages(
 	version: string,
 	arch: Arch,
 	sshPort: number,
 	httpPort: number,
 	logger?: ProgressLogger,
-): Promise<void> {
+): Promise<string[]> {
 	const log = logger ?? createLogger();
 	const extractDir = await downloadPackages(version, arch, undefined, logger);
 	const allPkgs = listAvailablePackages(extractDir);
-	if (allPkgs.length === 0) return;
+	if (allPkgs.length === 0) return [];
 	log.status(`Installing all ${allPkgs.length} packages: ${allPkgs.join(", ")}`);
-	await installPackages(allPkgs, version, arch, sshPort, httpPort, logger);
+	return installPackages(allPkgs, version, arch, sshPort, httpPort, logger);
 }

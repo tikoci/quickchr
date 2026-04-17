@@ -67,6 +67,25 @@ aarch64 on x86_64 TCG is significantly slower than native but works.
 | `MISSING_FIRMWARE` on arm64 | UEFI pkg not installed | `apt-get` step logs |
 | Port conflict | stale machine from prior run | `machine.json` port fields |
 | `sshpass` not found | missing dep | `apt-get`/`brew install` step |
+| First-run slower than 20 min | Initial download of versioned CHR images (7.20.7, 7.20.8) | Add those versions to the image cache key or wait for second run |
+
+## Integration Test Parallelism
+
+`bun test test/integration/` runs all 8 test files concurrently — each in a separate worker process, up to CPU count (4 on GitHub runners). This means up to 4 CHR instances may boot simultaneously.
+
+**Port allocation is safe** — `findAvailablePortBlock` probes TCP ports rather than just reading state files, preventing most bind conflicts. Low-probability race: two processes both probe a port before QEMU binds it, both succeed, one fails to start. If this shows up in CI, run sequentially:
+
+```bash
+# Sequential file execution (slower, no port races):
+for f in test/integration/*.test.ts; do QUICKCHR_INTEGRATION=1 bun test "$f" || break; done
+```
+
+**Version-specific images**: `provisioning.test.ts` downloads CHR 7.20.7 and 7.20.8 in addition to stable. These are cached after the first run. First CI run after a cache miss will be slower.
+
+**Integration test timeout**: 30 minutes in CI. This covers:
+- Up to 4 parallel CHR boots with KVM (~60s each)
+- First-run old-version image downloads (7.20.7, 7.20.8)
+- TCG fallback if KVM unavailable (significantly slower)
 
 ## Coverage Thresholds
 

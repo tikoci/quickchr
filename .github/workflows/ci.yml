@@ -223,7 +223,7 @@ jobs:
           echo "::group::Integration test output"
           QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
           echo "::endgroup::"
-        timeout-minutes: 20
+        timeout-minutes: 30
 
       - name: Write integration summary
         if: always()

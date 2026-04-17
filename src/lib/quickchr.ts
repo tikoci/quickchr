@@ -453,6 +453,15 @@ function createInstance(state: MachineState): ChrInstance {
 			const timeout = defaultBootTimeout(state.arch, true, accel);
 			await waitForBoot(ports.http, timeout, rebootAuth);
 
+			// Persist installed packages to machine.json
+			const current = loadMachine(state.name);
+			if (current) {
+				const merged = new Set([...(current.packages ?? []), ...installed]);
+				current.packages = [...merged];
+				saveMachine(current);
+			}
+			state.packages = [...new Set([...(state.packages ?? []), ...installed])];
+
 			return installed;
 		},
 
@@ -1265,11 +1274,23 @@ export class QuickCHR {
 		await Bun.sleep(2000);
 
 		if (opts.installAllPackages) {
-			await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
+			const installed = await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
 			await instance.waitForBoot(bootTimeout);
+			const current = loadMachine(machineState.name);
+			if (current) {
+				current.packages = installed;
+				saveMachine(current);
+			}
+			machineState.packages = installed;
 		} else if (opts.packages && opts.packages.length > 0) {
-			await installPackages(opts.packages, machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
+			const installed = await installPackages(opts.packages, machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
 			await instance.waitForBoot(bootTimeout);
+			const current = loadMachine(machineState.name);
+			if (current) {
+				current.packages = installed;
+				saveMachine(current);
+			}
+			machineState.packages = installed;
 		}
 
 		if (hasDeviceModeProvisioning) {

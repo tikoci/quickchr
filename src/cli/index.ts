@@ -122,10 +122,8 @@ async function main() {
 				break;
 			case "list":
 			case "ls":
-				await cmdList();
-				break;
 			case "status":
-				await cmdStatus(args.slice(1));
+				await cmdList(args.slice(1));
 				break;
 			case "remove":
 			case "rm":
@@ -147,7 +145,11 @@ async function main() {
 				await cmdGet(args.slice(1));
 				break;
 			case "license":
+				console.error("Note: 'quickchr license' is deprecated. Use 'quickchr set <name> --license' instead.");
 				await cmdLicense(args.slice(1));
+				break;
+			case "set":
+				await cmdSet(args.slice(1));
 				break;
 			case "disk":
 				await cmdDisk(args.slice(1));
@@ -1314,14 +1316,91 @@ async function cmdStop(argv: string[]) {
 	console.log(`${statusIcon("stopped")} ${bold(name)} stopped`);
 }
 
-async function cmdList() {
-	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { table, statusIcon, formatPorts, formatNetworks, dim } = await import("./format.ts");
+async function cmdList(argv: string[] = []) {
+	const { flags, positional } = parseFlags(argv);
+	const asJson = flagBool(flags, "json");
+	const name = positional[0];
 
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+
+	if (name) {
+		const { statusIcon, bold, dim, link, formatPorts, formatNetworks, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
+
+		const instance = QuickCHR.get(name);
+		if (!instance) {
+			console.error(machineNotFoundMessage(name));
+			process.exit(1);
+		}
+
+		const s = instance.state;
+
+		if (asJson) {
+			const creds = s.status === "running" ? await resolveDisplayCredentials(s) : null;
+			console.log(JSON.stringify({
+				name: s.name,
+				status: s.status,
+				version: s.version,
+				arch: s.arch,
+				cpu: s.cpu,
+				mem: s.mem,
+				networks: s.networks,
+				ports: s.ports,
+				pid: s.pid ?? null,
+				packages: s.packages,
+				machineDir: s.machineDir,
+				createdAt: s.createdAt,
+				lastStartedAt: s.lastStartedAt ?? null,
+				credentials: creds,
+			}, null, 2));
+			return;
+		}
+
+		console.log(`\n${statusIcon(s.status)} ${bold(s.name)}`);
+		console.log(`  Version:    ${s.version} (${s.arch})`);
+		console.log(`  CPU/Mem:    ${s.cpu} vCPU${s.cpu > 1 ? "s" : ""}, ${s.mem} MB`);
+		console.log(`  Network:    ${formatNetworks(s.networks)}`);
+		console.log(`  Ports:      ${formatPorts(s.ports)}`);
+		console.log(`  Status:     ${s.status}${s.pid ? ` (PID ${s.pid})` : ""}`);
+		console.log(`  Created:    ${new Date(s.createdAt).toLocaleString()}`);
+		if (s.lastStartedAt) console.log(`  Started:    ${new Date(s.lastStartedAt).toLocaleString()}`);
+		if (s.packages.length > 0) console.log(`  Packages:   ${s.packages.join(", ")}`);
+		console.log(`  Dir:        ${dim(s.machineDir)}`);
+		console.log(`  Logs:       ${dim(`${s.machineDir}/qemu.log`)}`);
+
+		if (s.status === "running") {
+			const creds = await resolveDisplayCredentials(s);
+			console.log();
+			console.log(`  REST:       ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`);
+			console.log(`  WinBox:     127.0.0.1:${instance.ports.winbox}`);
+			console.log(`  SSH:        ${formatSshCommand(creds.user, instance.sshPort)}`);
+			if (creds.user !== "admin") {
+				console.log(`  Login:      ${creds.user} / ${creds.password || "(no password)"}`);
+			}
+			console.log(`  Serial:     ${dim(`${s.machineDir}/serial.sock`)}`);
+			console.log();
+			console.log(`  ${dim("Tip:")} quickchr stop ${s.name}`);
+		} else {
+			console.log();
+			console.log(`  ${dim("Tip:")} quickchr start ${s.name}  |  quickchr remove ${s.name}`);
+		}
+		console.log();
+		return;
+	}
+
+	const { table, statusIcon, formatPorts, formatNetworks, dim } = await import("./format.ts");
 	const machines = QuickCHR.list();
 
 	if (machines.length === 0) {
-		console.log("No instances. Run 'quickchr start' to create one.");
+		if (asJson) {
+			console.log("[]");
+		} else {
+			console.log("No instances. Run 'quickchr start' to create one.");
+		}
+		return;
+	}
+
+	if (asJson) {
+		console.log(JSON.stringify(machines, null, 2));
 		return;
 	}
 
@@ -1339,54 +1418,6 @@ async function cmdList() {
 	console.log(table(headers, rows));
 }
 
-async function cmdStatus(argv: string[]) {
-	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, bold, dim, link, formatPorts, formatNetworks, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
-
-	const name = argv[0];
-
-	if (!name) {
-		await cmdList();
-		return;
-	}
-
-	const instance = QuickCHR.get(name);
-	if (!instance) {
-		console.error(machineNotFoundMessage(name));
-		process.exit(1);
-	}
-
-	const s = instance.state;
-	console.log(`\n${statusIcon(s.status)} ${bold(s.name)}`);
-	console.log(`  Version:    ${s.version} (${s.arch})`);
-	console.log(`  CPU/Mem:    ${s.cpu} vCPU${s.cpu > 1 ? "s" : ""}, ${s.mem} MB`);
-	console.log(`  Network:    ${formatNetworks(s.networks)}`);
-	console.log(`  Ports:      ${formatPorts(s.ports)}`);
-	console.log(`  Status:     ${s.status}${s.pid ? ` (PID ${s.pid})` : ""}`);
-	console.log(`  Created:    ${new Date(s.createdAt).toLocaleString()}`);
-	if (s.lastStartedAt) console.log(`  Started:    ${new Date(s.lastStartedAt).toLocaleString()}`);
-	if (s.packages.length > 0) console.log(`  Packages:   ${s.packages.join(", ")}`);
-	console.log(`  Dir:        ${dim(s.machineDir)}`);
-	console.log(`  Logs:       ${dim(`${s.machineDir}/qemu.log`)}`);
-
-	if (s.status === "running") {
-		const creds = await resolveDisplayCredentials(s);
-		console.log();
-		console.log(`  REST:       ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`);
-		console.log(`  WinBox:     127.0.0.1:${instance.ports.winbox}`);
-		console.log(`  SSH:        ${formatSshCommand(creds.user, instance.sshPort)}`);
-		if (creds.user !== "admin") {
-			console.log(`  Login:      ${creds.user} / ${creds.password || "(no password)"}`);
-		}
-		console.log(`  Serial:     ${dim(`${s.machineDir}/serial.sock`)}`);
-		console.log();
-		console.log(`  ${dim("Tip:")} quickchr stop ${s.name}`);
-	} else {
-		console.log();
-		console.log(`  ${dim("Tip:")} quickchr start ${s.name}  |  quickchr remove ${s.name}`);
-	}
-	console.log();
-}
 
 async function cmdGet(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
@@ -1585,7 +1616,7 @@ async function cmdClean(argv: string[]) {
 	console.log(`${bold(name)} reset to fresh image.`);
 }
 
-async function cmdLicense(argv: string[]) {
+async function applyLicense(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold, machineNotFoundMessage } = await import("./format.ts");
@@ -1593,7 +1624,7 @@ async function cmdLicense(argv: string[]) {
 	const name = positional[0] ?? flag(flags, "name");
 
 	if (!name) {
-		console.error("Usage: quickchr license <name> [--level=p1|p10|unlimited]");
+		console.error("Usage: quickchr set <name> --license [--level=p1|p10|unlimited]");
 		process.exit(1);
 	}
 
@@ -1607,7 +1638,6 @@ async function cmdLicense(argv: string[]) {
 		process.exit(1);
 	}
 
-	// Resolve credentials: explicit flags → env vars → stored credentials
 	let account = flag(flags, "account") ?? process.env.MIKROTIK_WEB_ACCOUNT;
 	let password = flag(flags, "password") ?? process.env.MIKROTIK_WEB_PASSWORD;
 	const level = (flag(flags, "level") as import("../lib/types.ts").LicenseLevel | undefined) ?? "p1";
@@ -1646,10 +1676,38 @@ async function cmdLicense(argv: string[]) {
 		clack.outro("");
 	}
 
+	const before = instance.state.licenseLevel ?? "free";
 	console.log(`Applying license level=${level} to ${bold(name)}...`);
 	await instance.license({ account: account as string, password: password as string, level });
-	console.log(`License applied: ${level}`);
+	console.log(`License applied: ${before} → ${level}`);
 }
+
+async function cmdSet(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const name = positional[0];
+
+	if (!name) {
+		console.error("Usage: quickchr set <name> --license [--level=p1|p10|unlimited]");
+		process.exit(1);
+	}
+
+	const wantsLicense = flagBool(flags, "license");
+
+	if (!wantsLicense) {
+		console.error("Nothing to set. Available flags: --license");
+		process.exit(1);
+	}
+
+	if (wantsLicense) {
+		const subcmdArgs = [name, ...Object.entries(flags).flatMap(([k, v]) => v === true ? [`--${k}`] : [`--${k}=${v}`]), ...positional.slice(1)];
+		await applyLicense(subcmdArgs);
+	}
+}
+
+async function cmdLicense(argv: string[]) {
+	await applyLicense(argv);
+}
+
 
 async function cmdDisk(argv: string[]) {
 	const { positional } = parseFlags(argv);
@@ -2217,14 +2275,15 @@ Commands:
   add [options]           Create a new CHR machine (without starting)
   start [<name>|options]  Start or restart a CHR instance
   stop [<name>|--all]     Stop instance(s) — print list if no name
-  list                    List all instances (plain table)
-  status [<name>]         Detailed status — list all if no name
+  list [<name>] [--json]  List all instances, or detail for one
+  status                  Alias for list
   console <name>          Attach to serial console of a running instance
   exec <name> <command>   Run a RouterOS CLI command on a running instance
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
   get <name> [group]          Show machine config (license, device-mode, admin)
-  license <name>          Apply/renew CHR trial license
+  set <name> --license    Apply/renew CHR trial license
+  license <name>          Deprecated — use 'set <name> --license'
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
   networks                Network discovery & socket management
@@ -2359,10 +2418,20 @@ Options:
   --all       Stop all running instances.`);
 			break;
 		case "status":
-			console.log(`quickchr status [<name>]
+			console.log(`quickchr status [<name>] [--json]
+
+Alias for 'quickchr list'. See 'quickchr help list'.`);
+			break;
+		case "list":
+			console.log(`quickchr list [<name>] [--json]
+
+List all CHR instances or show detailed info for one.
 
   <name>      Show detailed status for a specific instance.
-              Omit to list all instances.`);
+              Omit to list all instances in a table.
+  --json      Output JSON (array of all machines, or object for one).
+
+'quickchr status' is an alias for this command.`);
 			break;
 		case "doctor":
 			console.log(`quickchr doctor
@@ -2443,8 +2512,31 @@ Options:
 When no group is given, all properties are shown.
 The machine must be running to query live properties.`);
 			break;
+		case "set":
+			console.log(`quickchr set <name> --license [options]
+
+Set properties on a CHR instance.
+
+  <name>              Name of a running CHR instance (required).
+
+Flags:
+  --license           Apply or renew a CHR trial license.
+
+License options (used with --license):
+  --level <level>     License level: p1 (1 Gbps), p10 (10 Gbps), unlimited (default: p1)
+  --account <email>   MikroTik.com account email
+  --password <pass>   MikroTik.com password
+
+Credential resolution order:
+  1. --account / --password flags
+  2. MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD environment variables
+  3. OS native secret store (macOS Keychain / Linux Keyring)
+  4. ~/.config/quickchr/credentials.json (fallback)`);
+			break;
 		case "license":
 			console.log(`quickchr license <name> [options]
+
+Deprecated. Use 'quickchr set <name> --license' instead.
 
 Apply or renew a CHR trial license via MikroTik.com.
 Free CHR runs at 1 Mbps — a trial license unlocks full speed.

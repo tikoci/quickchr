@@ -310,6 +310,10 @@ describe.skipIf(SKIP)("instance-level package methods", () => {
 			expect(installed).toContain(first);
 			if (first !== last) expect(installed).toContain(last);
 
+			// Verify state persistence — machine.json must reflect installed packages
+			expect(instance.state.packages).toContain(first);
+			if (first !== last) expect(instance.state.packages).toContain(last);
+
 			// Verify against /system/package that each package is actually active
 			const systemPkgs = await instance.rest("/system/package") as Array<Record<string, unknown>>;
 			expect(Array.isArray(systemPkgs)).toBe(true);

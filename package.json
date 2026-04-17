@@ -1,6 +1,6 @@
 {
   "name": "@tikoci/quickchr",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI and library to download, launch, and manage MikroTik CHR virtual machines via QEMU",
   "module": "src/index.ts",
   "main": "src/index.ts",
