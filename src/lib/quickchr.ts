@@ -1006,7 +1006,7 @@ export class QuickCHR {
 					deviceMode: opts.deviceMode ?? existing.deviceMode,
 					user: opts.user ?? existing.user,
 					disableAdmin: opts.disableAdmin ?? existing.disableAdmin,
-					license: opts.license ? await resolveLicenseInput(opts.license) ?? undefined : undefined,
+					license: opts.license,
 					secureLogin: opts.secureLogin,
 				};
 				const hasPending = !!(
@@ -1201,7 +1201,7 @@ export class QuickCHR {
 				deviceMode: requestedDeviceMode,
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
-				license: opts.license ? await resolveLicenseInput(opts.license) ?? undefined : undefined,
+				license: opts.license,
 				secureLogin: opts.secureLogin,
 			}, launchConfig, logger);
 		}
@@ -1244,7 +1244,7 @@ export class QuickCHR {
 			deviceMode?: DeviceModeOptions;
 			user?: { name: string; password: string };
 			disableAdmin?: boolean;
-			license?: LicenseOptions;
+			license?: LicenseInput;
 			secureLogin?: boolean;
 		},
 		launchConfig: QemuLaunchConfig,
@@ -1279,7 +1279,13 @@ export class QuickCHR {
 		if (opts.license) {
 			log.status("Applying CHR license...");
 			const resolvedLicense = await resolveLicenseInput(opts.license);
-			if (resolvedLicense) try {
+			if (!resolvedLicense) {
+				throw new QuickCHRError(
+					"PROCESS_FAILED",
+					"License requested but no MikroTik web credentials were available. Set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or run 'quickchr login'.",
+				);
+			}
+			try {
 				await renewLicense(chrPorts.http, resolvedLicense, undefined, undefined, log);
 				// Read back the actual applied level — RouterOS is the source of truth.
 				let actualLevel: string = resolvedLicense.level ?? "p1";
@@ -1298,7 +1304,11 @@ export class QuickCHR {
 				machineState.licenseLevel = actualLevel as LicenseLevel;
 				log.status(`  License applied: free → ${actualLevel}`);
 			} catch (e) {
-				log.warn(`License renewal failed: ${e instanceof Error ? e.message : String(e)}`);
+				if (e instanceof QuickCHRError) throw e;
+				throw new QuickCHRError(
+					"PROCESS_FAILED",
+					`License renewal failed: ${e instanceof Error ? e.message : String(e)}`,
+				);
 			}
 		}
 
@@ -1331,7 +1341,7 @@ export class QuickCHR {
 			deviceMode?: DeviceModeOptions;
 			user?: { name: string; password: string };
 			disableAdmin?: boolean;
-			license?: LicenseOptions;
+			license?: LicenseInput;
 			secureLogin?: boolean;
 		},
 		logger?: ProgressLogger,

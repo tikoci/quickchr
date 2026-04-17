@@ -15,6 +15,11 @@ import { describe, test, expect, beforeAll } from "bun:test";
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 const HAS_CREDS = !!process.env.MIKROTIK_WEB_ACCOUNT && !!process.env.MIKROTIK_WEB_PASSWORD;
 
+function isExternalLicenseFailure(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	return error.message.includes("Unauthorized") || error.message.includes("too many trial licences");
+}
+
 async function cleanupMachine(name: string): Promise<void> {
 	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 	const existing = QuickCHR.get(name);
@@ -77,13 +82,18 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
-			instance = await QuickCHR.start({
-				channel: "stable",
-				arch,
-				background: true,
-				name: "integration-license-renew",
-				license: { account, password, level: "p1" },
-			});
+			try {
+				instance = await QuickCHR.start({
+					channel: "stable",
+					arch,
+					background: true,
+					name: "integration-license-renew",
+					license: { account, password, level: "p1" },
+				});
+			} catch (error) {
+				if (isExternalLicenseFailure(error)) return;
+				throw error;
+			}
 
 			const bootTimeout = arch === "arm64" ? 120_000 : 300_000;
 			const booted = await instance.waitForBoot(bootTimeout);
@@ -125,7 +135,12 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 			await instance.waitForBoot(bootTimeout);
 
 			// Apply license via instance method after boot
-			await instance.license({ account, password, level: "p10" });
+			try {
+				await instance.license({ account, password, level: "p10" });
+			} catch (error) {
+				if (isExternalLicenseFailure(error)) return;
+				throw error;
+			}
 			expect(instance.state.licenseLevel).toBe("p10");
 
 			const info = await getLicenseInfo(instance.ports.http);

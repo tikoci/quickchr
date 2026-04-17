@@ -26,8 +26,9 @@
     "lint:typecheck": "tsc --noEmit",
     "lint:markdown": "bunx markdownlint-cli2 '**/*.md'",
     "test": "bun test test/unit/",
+    "test:examples": "bun test examples/",
     "test:integration": "QUICKCHR_INTEGRATION=1 bun test test/integration/",
-    "test:all": "QUICKCHR_INTEGRATION=1 bun test",
+    "test:all": "QUICKCHR_INTEGRATION=1 bun test test/unit/ test/integration/ examples/",
     "dev": "bun run src/cli/index.ts"
   },
   "devDependencies": {
