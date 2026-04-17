@@ -50,6 +50,20 @@ describe("QuickCHR.start name validation", () => {
 			throw e;
 		}
 	});
+
+	test("blocks provisioning on RouterOS versions older than 7.20.8", async () => {
+		try {
+			await QuickCHR.start({
+				name: "old-version-provision",
+				version: "7.10.0",
+				dryRun: true,
+				secureLogin: true,
+			});
+			expect.unreachable("should have thrown");
+		} catch (e) {
+			expectErrorCode(e, "PROVISIONING_VERSION_UNSUPPORTED");
+		}
+	});
 });
 
 describe("acquireLock", () => {

@@ -407,6 +407,7 @@ export type ErrorCode =
 	| "SPAWN_FAILED"
 	| "NETWORK_UNAVAILABLE"
 	| "INVALID_NETWORK"
+	| "PROVISIONING_VERSION_UNSUPPORTED"
 	| "STATE_ERROR";
 
 export class QuickCHRError extends Error {

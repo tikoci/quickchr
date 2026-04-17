@@ -7,6 +7,10 @@ import {
 	generateMachineName,
 	resolveVersion,
 	resolveAllVersions,
+	compareRouterOsVersion,
+	isProvisioningSupportedVersion,
+	assertProvisioningSupportedVersion,
+	parseVersionParts,
 } from "../../src/lib/versions.ts";
 
 describe("isValidVersion", () => {
@@ -89,6 +93,37 @@ describe("generateMachineName", () => {
 		expect(
 			generateMachineName("7.22.1", "x86", ["7.22.1-x86-1", "7.22.1-x86-2", "7.22.1-x86-3"]),
 		).toBe("7.22.1-x86-4");
+	});
+});
+
+describe("RouterOS semantic version helpers", () => {
+	test("parseVersionParts handles patchless and suffix variants", () => {
+		expect(parseVersionParts("7.20")).toEqual([7, 20, 0]);
+		expect(parseVersionParts("7.20.8")).toEqual([7, 20, 8]);
+		expect(parseVersionParts("7.20rc1")).toEqual([7, 20, 0]);
+		expect(parseVersionParts("7.20.8beta2")).toEqual([7, 20, 8]);
+	});
+
+	test("compareRouterOsVersion orders versions semantically", () => {
+		expect(compareRouterOsVersion("7.20.7", "7.20.8")).toBeLessThan(0);
+		expect(compareRouterOsVersion("7.20.8", "7.20.8")).toBe(0);
+		expect(compareRouterOsVersion("7.21", "7.20.8")).toBeGreaterThan(0);
+		expect(compareRouterOsVersion("7.20.8rc1", "7.20.8beta1")).toBe(0);
+	});
+
+	test("isProvisioningSupportedVersion enforces 7.20.8 floor", () => {
+		expect(isProvisioningSupportedVersion("7.20.7")).toBe(false);
+		expect(isProvisioningSupportedVersion("7.20.8")).toBe(true);
+		expect(isProvisioningSupportedVersion("7.22.1")).toBe(true);
+	});
+
+	test("assertProvisioningSupportedVersion throws dedicated error below floor", () => {
+		try {
+			assertProvisioningSupportedVersion("7.10.0", "provision this machine");
+			expect.unreachable("expected provisioning version gate to throw");
+		} catch (e) {
+			expect((e as { code?: string }).code).toBe("PROVISIONING_VERSION_UNSUPPORTED");
+		}
 	});
 });
 

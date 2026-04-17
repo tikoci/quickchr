@@ -201,6 +201,12 @@ async function main() {
 			if (err.installHint) {
 				console.error(`  Hint: ${err.installHint}`);
 			}
+			if (err.code === "PROVISIONING_VERSION_UNSUPPORTED") {
+				console.error("  Why this happened: provisioning is intentionally limited to RouterOS 7.20.8+ to reduce version-specific failures.");
+				console.error("  Try this:");
+				console.error("    1) Use --version 7.20.8 or newer (or long-term channel).");
+				console.error("    2) For older 7.x, run boot-only (no provisioning flags).");
+			}
 			process.exit(1);
 		}
 		throw e;

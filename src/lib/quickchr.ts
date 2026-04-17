@@ -20,7 +20,12 @@ import type {
 } from "./types.ts";
 import { QuickCHRError, ARCHES } from "./types.ts";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning } from "./platform.ts";
-import { resolveVersion, isValidVersion, generateMachineName } from "./versions.ts";
+import {
+	resolveVersion,
+	isValidVersion,
+	generateMachineName,
+	assertProvisioningSupportedVersion,
+} from "./versions.ts";
 import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString, hasUserModeNetwork } from "./network.ts";
 import {
 	getUsedPortBases,
@@ -80,6 +85,26 @@ function defaultBootTimeout(arch: Arch, withPackages?: boolean, accel?: string):
 	const base = Math.ceil(120_000 * factor);
 	// Package reinstall adds a full reboot cycle — extend by the same factor.
 	return withPackages ? base * 2 : base;
+}
+
+function hasProvisioningMutations(opts: {
+	installAllPackages?: boolean;
+	packages?: string[];
+	hasDeviceModeProvisioning?: boolean;
+	user?: { name: string; password: string };
+	disableAdmin?: boolean;
+	license?: LicenseInput;
+	secureLogin?: boolean;
+}): boolean {
+	return !!(
+		opts.installAllPackages ||
+		(opts.packages?.length ?? 0) > 0 ||
+		opts.hasDeviceModeProvisioning ||
+		opts.user ||
+		opts.disableAdmin ||
+		opts.license ||
+		opts.secureLogin === true
+	);
 }
 
 // --- Socket registry lifecycle helpers ---
@@ -348,6 +373,7 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async license(opts: LicenseOptions): Promise<void> {
+			assertProvisioningSupportedVersion(state.version, "apply a license");
 			const auth = resolveAuth(state);
 			await renewLicense(ports.http, opts, undefined, undefined, undefined, auth.header);
 			// Persist the applied level in state
@@ -362,6 +388,7 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async setDeviceMode(options: DeviceModeOptions, logger?: ProgressLogger): Promise<void> {
+			assertProvisioningSupportedVersion(state.version, "set device-mode");
 			const log = logger ?? createLogger();
 			const resolved = resolveDeviceModeOptions(options);
 			for (const w of resolved.warnings) log.warn(`Device-mode: ${w}`);
@@ -381,6 +408,7 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async installPackage(packages: string | string[]): Promise<string[]> {
+			assertProvisioningSupportedVersion(state.version, "install packages");
 			const names = typeof packages === "string" ? [packages] : packages;
 			if (names.length === 0) return [];
 
@@ -832,6 +860,20 @@ export class QuickCHR {
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
+		const resolvedDeviceMode = resolveDeviceModeOptions(opts.deviceMode);
+		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
+
+		if (hasProvisioningMutations({
+			installAllPackages: opts.installAllPackages,
+			packages: opts.packages,
+			hasDeviceModeProvisioning,
+			user: opts.user,
+			disableAdmin: opts.disableAdmin,
+			license: opts.license,
+			secureLogin: opts.secureLogin,
+		})) {
+			assertProvisioningSupportedVersion(version, "provision this machine");
+		}
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -921,6 +963,18 @@ export class QuickCHR {
 		} else {
 			const channel = opts.channel ?? "stable";
 			version = await resolveVersion(channel);
+		}
+
+		if (hasProvisioningMutations({
+			installAllPackages: opts.installAllPackages,
+			packages: opts.packages,
+			hasDeviceModeProvisioning,
+			user: opts.user,
+			disableAdmin: opts.disableAdmin,
+			license: opts.license,
+			secureLogin: opts.secureLogin,
+		})) {
+			assertProvisioningSupportedVersion(version, "provision this machine");
 		}
 
 		// Resolve architecture
@@ -1196,6 +1250,7 @@ export class QuickCHR {
 		logger?: ProgressLogger,
 	): Promise<void> {
 		const log = logger ?? createLogger();
+		assertProvisioningSupportedVersion(machineState.version, "provision this machine");
 		const resolvedDeviceMode = resolveDeviceModeOptions(opts.deviceMode);
 		for (const warning of resolvedDeviceMode.warnings) {
 			log.warn(`Device-mode: ${warning}`);

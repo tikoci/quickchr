@@ -290,6 +290,11 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	// ── 6. Provisioning gate ─────────────────────────────────────────────
 	// Everything after this point (packages, device-mode, login, license)
 	// requires booting the CHR and connecting via REST API.
+	const { resolveVersion, MIN_PROVISION_VERSION, isProvisioningSupportedVersion } = await import("../lib/versions.ts");
+	const resolvedVersion = version ?? await resolveVersion(channel ?? "stable");
+	version = resolvedVersion;
+	const provisioningSupported = isProvisioningSupportedVersion(resolvedVersion);
+
 	let installAllPackages = false;
 	let packages: string[] = [];
 	let deviceMode: DeviceModeOptions | undefined;
@@ -297,12 +302,29 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	let disableAdmin = false;
 	let secureLogin: boolean | undefined;
 	let license: LicenseOptions | undefined;
+	let wantProvision = false;
 
-	const wantProvision = await clack.confirm({
-		message: "Configure the router after boot? (packages, login, device-mode, license)",
-		initialValue: true,
-	});
-	if (clack.isCancel(wantProvision)) { clack.cancel("Cancelled."); process.exit(0); }
+	if (provisioningSupported) {
+		const provisionChoice = await clack.confirm({
+			message: "Configure the router after boot? (packages, login, device-mode, license)",
+			initialValue: true,
+		});
+		if (clack.isCancel(provisionChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+		wantProvision = provisionChoice;
+	} else {
+		clack.log.warn(
+			`Provisioning is disabled for RouterOS ${resolvedVersion}. quickchr provisioning supports ${MIN_PROVISION_VERSION}+ only.`,
+		);
+		clack.log.info("Boot-only mode remains fully available for this version.");
+		const continueBootOnly = await clack.confirm({
+			message: "Continue in boot-only mode (no packages/login/device-mode/license changes)?",
+			initialValue: true,
+		});
+		if (clack.isCancel(continueBootOnly) || !continueBootOnly) {
+			clack.cancel("Cancelled.");
+			process.exit(0);
+		}
+	}
 
 	if (wantProvision) {
 		// 6a. Extra packages
@@ -530,9 +552,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 
 	// Pre-warm image cache BEFORE starting any spinner so that download progress
 	// prints cleanly without interleaving with spinner escape codes.
-	const { resolveVersion } = await import("../lib/versions.ts");
 	const { ensureCachedImage } = await import("../lib/images.ts");
-	const resolvedVersion = opts.version ?? await resolveVersion(opts.channel ?? "stable");
 	opts.version = resolvedVersion; // pin so QuickCHR.start doesn't resolve again
 
 	// Route pre-warm messages through clack so they render inside the prompt flow

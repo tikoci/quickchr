@@ -7,6 +7,7 @@ import { QuickCHRError } from "./types.ts";
 
 const UPGRADE_BASE = "https://upgrade.mikrotik.com/routeros/NEWESTa7";
 const DOWNLOAD_BASE = "https://download.mikrotik.com/routeros";
+export const MIN_PROVISION_VERSION = "7.20.8";
 
 /** Fetch the latest version for a given channel from MikroTik's upgrade server. */
 export async function resolveVersion(channel: Channel): Promise<string> {
@@ -45,6 +46,52 @@ export async function resolveAllVersions(): Promise<Record<Channel, string>> {
 /** Validate a version string matches RouterOS format: MAJOR.MINOR[.PATCH][betaN|rcN] */
 export function isValidVersion(version: string): boolean {
 	return /^\d+\.\d+(\.\d+)?(beta\d+|rc\d+)?$/.test(version);
+}
+
+/** Parse a RouterOS version into numeric parts. beta/rc suffixes are ignored for ordering. */
+export function parseVersionParts(version: string): [number, number, number] {
+	const match = version.match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:beta\d+|rc\d+)?$/);
+	if (!match) {
+		throw new QuickCHRError("INVALID_VERSION", `Invalid version: ${version}`);
+	}
+
+	const major = Number.parseInt(match[1] ?? "0", 10);
+	const minor = Number.parseInt(match[2] ?? "0", 10);
+	const patch = Number.parseInt(match[3] ?? "0", 10);
+	return [major, minor, patch];
+}
+
+/** Compare two RouterOS versions semantically. */
+export function compareRouterOsVersion(left: string, right: string): number {
+	const [leftMajor, leftMinor, leftPatch] = parseVersionParts(left);
+	const [rightMajor, rightMinor, rightPatch] = parseVersionParts(right);
+
+	if (leftMajor !== rightMajor) return leftMajor - rightMajor;
+	if (leftMinor !== rightMinor) return leftMinor - rightMinor;
+	return leftPatch - rightPatch;
+}
+
+/** True if RouterOS version is supported for quickchr provisioning mutations. */
+export function isProvisioningSupportedVersion(
+	version: string,
+	minimumVersion = MIN_PROVISION_VERSION,
+): boolean {
+	return compareRouterOsVersion(version, minimumVersion) >= 0;
+}
+
+/** Guard provisioning operations to reduce version-dependent failure modes. */
+export function assertProvisioningSupportedVersion(
+	version: string,
+	operation: string,
+	minimumVersion = MIN_PROVISION_VERSION,
+): void {
+	if (isProvisioningSupportedVersion(version, minimumVersion)) return;
+
+	throw new QuickCHRError(
+		"PROVISIONING_VERSION_UNSUPPORTED",
+		`Cannot ${operation} on RouterOS ${version}. quickchr provisioning supports ${minimumVersion}+ only.`,
+		`Use RouterOS ${minimumVersion}+ for provisioning, or run boot-only without provisioning flags.`,
+	);
 }
 
 /** Build the MikroTik download URL for a CHR .img.zip. */
