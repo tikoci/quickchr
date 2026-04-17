@@ -15,7 +15,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { request as nodeRequest } from "node:http";
-import { QuickCHR } from "../../src/lib/quickchr.ts";
+import { QuickCHR } from "../../../src/lib/quickchr.ts";
 
 const CHR_PORT = 9100;
 const BASE_URL = `http://127.0.0.1:${CHR_PORT}`;
@@ -229,7 +229,7 @@ describe.skipIf(!process.env.QUICKCHR_INTEGRATION)(
 				// Step 3: Restart on same port
 				console.log("[RESTART] Step 3: Restarting CHR on same port...");
 				// Use start directly — it should reuse the same port
-				const restarted = await QuickCHR.start({
+				await QuickCHR.start({
 					name: "lab-pool",
 				});
 

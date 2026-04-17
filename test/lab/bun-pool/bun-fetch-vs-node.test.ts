@@ -52,7 +52,7 @@
  * ═══════════════════════════════════════════════════════════════════════
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { request as nodeRequest } from "node:http";
 
 const CHR_PORT = 9100;

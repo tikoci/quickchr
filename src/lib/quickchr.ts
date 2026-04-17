@@ -275,7 +275,8 @@ function createInstance(state: MachineState): ChrInstance {
 				// Allow caller to override Authorization via opts.headers
 				if (opts?.headers) {
 					const h = new Headers(opts.headers);
-					if (h.has("Authorization")) authHeader = h.get("Authorization")!;
+					const overrideAuth = h.get("Authorization");
+					if (overrideAuth) authHeader = overrideAuth;
 				}
 				const method = (opts?.method ?? "GET").toUpperCase();
 				const bodyStr = opts?.body != null ? String(opts.body) : null;

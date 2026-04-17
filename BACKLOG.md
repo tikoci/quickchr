@@ -137,14 +137,14 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 
 #### Provisioning Version Guardrails (high priority, scope narrowing)
 
-- [ ] **Enforce provisioning minimum RouterOS version: 7.20.8 (first long-term baseline).** If requested version is `< 7.20.8`, quickchr may still create/start the CHR, but MUST block provisioning steps with a clear, actionable message. This is a deliberate failure-mode reduction: narrow supported provisioning behavior to modern long-term semantics.
+- [x] **Enforce provisioning minimum RouterOS version: 7.20.8 (first long-term baseline).** If requested version is `< 7.20.8`, quickchr may still create/start the CHR, but MUST block provisioning steps with a clear, actionable message. This is a deliberate failure-mode reduction: narrow supported provisioning behavior to modern long-term semantics.
 - [ ] Wizard default tightening: when user intends provisioning, default version choice to long-term and preselect `7.20.8+` compatible targets; require explicit confirmation to proceed with an older 7.x non-provisioned machine.
 - [ ] Define and enforce what counts as "provisioning" for version gating (library + CLI + wizard): managed user creation, admin disable, license operations, package provisioning, device-mode mutations, and any post-boot REST mutation step. Boot/start-only flows remain allowed on older 7.x.
-- [ ] Centralize version gate in one library helper (single source of truth) and call it from all entry points (`QuickCHR.start`, CLI commands, wizard actions, direct `set`/`license` paths) so UI/API/CLI behavior cannot drift.
-- [ ] Wizard UX for `< 7.20.8`: keep machine creation available, but disable provisioning choices with inline rationale + suggested fix (`choose >=7.20.8`, `skip provisioning`, or `upgrade image`).
+- [x] Centralize version gate in one library helper (single source of truth) and call it from all entry points (`QuickCHR.start`, CLI commands, wizard actions, direct `set`/`license` paths) so UI/API/CLI behavior cannot drift.
+- [x] Wizard UX for `< 7.20.8`: keep machine creation available, but disable provisioning choices with inline rationale + suggested fix (`choose >=7.20.8`, `skip provisioning`, or `upgrade image`).
 - [ ] CLI/API error design for blocked provisioning on older versions: include exact requested version, required minimum (`7.20.8`), what operation was blocked, and a concrete next action. Mirror this in wizard hints so errors are always "helpful with fix".
 - [ ] Docs/help/JSDoc alignment pass: document "provisioning supports 7.20.8+" consistently in `README.md`, MANUAL (when added), command `--help`, and public API JSDoc (`StartOptions`, provisioning-related methods).
-- [ ] Integration tests for guardrail behavior: (1) older 7.x can boot without provisioning, (2) provisioning request on older 7.x fails fast with expected error code/message/hint, (3) 7.20.8+ provisioning path remains green.
+- [x] Integration tests for guardrail behavior: (1) older 7.x can boot without provisioning, (2) provisioning request on older 7.x fails fast with expected error code/message/hint, (3) 7.20.8+ provisioning path remains green.
 - [ ] Add a short compatibility matrix (feature -> minimum RouterOS) and make device-mode explicitly "unsupported by quickchr provisioning" below the baseline even when attributes exist, to avoid semantic traps like 7.10 behavior differences.
 - [ ] Publish explicit support policy in docs: "provisioning is validated/tested on 7.20.8+; older 7.x is boot-only." Keep policy text in one source and link it from README/help to prevent drift.
 

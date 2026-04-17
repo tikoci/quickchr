@@ -23,10 +23,101 @@ async function cleanupMachine(name: string): Promise<void> {
 
 describe.skipIf(SKIP)("user provisioning", () => {
 	beforeAll(async () => {
-		for (const name of ["integration-prov-bg", "integration-prov-disable", "integration-prov-fg", "integration-prov-managed"]) {
+		for (const name of [
+			"integration-prov-bg",
+			"integration-prov-disable",
+			"integration-prov-fg",
+			"integration-prov-managed",
+			"integration-prov-old-boot",
+			"integration-prov-floor-green",
+			"integration-prov-old-blocked",
+		]) {
 			await cleanupMachine(name);
 		}
 	});
+
+	test("old 7.x boot-only is allowed", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				version: "7.20.7",
+				arch: "x86",
+				background: true,
+				name: "integration-prov-old-boot",
+				secureLogin: false,
+			});
+
+			const booted = await instance.waitForBoot(120_000);
+			expect(booted).toBe(true);
+
+			const resp = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{
+					headers: { Authorization: `Basic ${btoa("admin:")}` },
+					signal: AbortSignal.timeout(10_000),
+				},
+			);
+			expect(resp.status).toBe(200);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-old-boot");
+		}
+	}, 300_000);
+
+	test("old 7.x provisioning is blocked with explicit code/message", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+
+		await expect(QuickCHR.start({
+			version: "7.20.7",
+			arch: "x86",
+			background: true,
+			name: "integration-prov-old-blocked",
+			secureLogin: true,
+		})).rejects.toMatchObject({
+			code: "PROVISIONING_VERSION_UNSUPPORTED",
+			message: expect.stringContaining("7.20.8+"),
+		});
+
+		expect(QuickCHR.get("integration-prov-old-blocked")).toBeNull();
+	}, 60_000);
+
+	test("7.20.8 provisioning path remains green", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { getInstanceCredentials } = await import("../../src/lib/credentials.ts");
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				version: "7.20.8",
+				arch: "x86",
+				background: true,
+				name: "integration-prov-floor-green",
+				secureLogin: true,
+			});
+
+			const creds = await getInstanceCredentials("integration-prov-floor-green");
+			expect(creds).not.toBeNull();
+			expect(creds?.user).toBe("quickchr");
+
+			const resp = await fetch(
+				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
+				{
+					headers: { Authorization: `Basic ${btoa(`${creds?.user}:${creds?.password}`)}` },
+					signal: AbortSignal.timeout(10_000),
+				},
+			);
+			expect(resp.status).toBe(200);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-prov-floor-green");
+		}
+	}, 300_000);
 
 	test("background mode: custom user created and accessible via REST", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");

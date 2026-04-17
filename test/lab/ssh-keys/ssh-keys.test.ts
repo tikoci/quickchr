@@ -10,14 +10,13 @@
 
 import { describe, test, expect, afterAll } from "bun:test";
 import { execSync, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { request as nodeRequest } from "node:http";
 
 const HTTP_PORT = process.env.CHR_HTTP_PORT ?? "9100";
 const SSH_PORT = process.env.CHR_SSH_PORT ?? "9102";
-const BASE = `http://127.0.0.1:${HTTP_PORT}`;
 const AUTH = `Basic ${Buffer.from("admin:").toString("base64")}`;
 
 function restCall(

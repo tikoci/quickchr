@@ -2,7 +2,7 @@
  * Unit tests for license types, credential utilities, and package lists.
  */
 
-import { describe, test, expect, afterEach, afterAll } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { LICENSE_LEVELS, KNOWN_PACKAGES_X86, KNOWN_PACKAGES_ARM64, knownPackagesForArch } from "../../src/lib/types.ts";
 import { credentialStorageLabel } from "../../src/lib/credentials.ts";
@@ -125,9 +125,7 @@ describe("renewLicense — error paths", () => {
 	test("throws PROCESS_FAILED on network error", async () => {
 		// Mock: readiness check passes (returns valid license data),
 		// but renew POST endpoint causes a connection error (server stops before POST)
-		let requestCount = 0;
 		const { port, server: s } = await startMockServer((req, res) => {
-			requestCount++;
 			if (req.url?.includes("/rest/system/license") && !req.url?.includes("/renew")) {
 				// License readiness check — return valid data
 				res.writeHead(200, { "Content-Type": "application/json" });
