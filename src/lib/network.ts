@@ -474,7 +474,7 @@ function resolveSocketNamed(
 	if (!entry) {
 		throw new QuickCHRError(
 			"NETWORK_UNAVAILABLE",
-			`Named socket "${name}" not found — create it first with 'quickchr network create ${name}'`,
+			`Named socket "${name}" not found — create it first with 'quickchr networks sockets create ${name}'`,
 		);
 	}
 	if (entry.mode === "mcast") {

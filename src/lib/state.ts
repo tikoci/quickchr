@@ -8,8 +8,9 @@ import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { networkModeToConfigs } from "./network.ts";
 
-/** Get the quickchr data directory root. */
+/** Get the quickchr data directory root. Override with QUICKCHR_DATA_DIR env var. */
 export function getDataDir(): string {
+	if (process.env.QUICKCHR_DATA_DIR) return process.env.QUICKCHR_DATA_DIR;
 	if (process.platform === "win32") {
 		const appData = process.env.LOCALAPPDATA || join(process.env.USERPROFILE || "", "AppData", "Local");
 		return join(appData, "quickchr");

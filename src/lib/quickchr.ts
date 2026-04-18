@@ -18,7 +18,7 @@ import type {
 	SnapshotInfo,
 	StartOptions,
 } from "./types.ts";
-import { QuickCHRError, ARCHES } from "./types.ts";
+import { QuickCHRError, ARCHES, CHANNELS } from "./types.ts";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning } from "./platform.ts";
 import {
 	resolveVersion,
@@ -966,10 +966,13 @@ export class QuickCHR {
 		// Resolve version
 		let version: string;
 		if (opts.version) {
-			if (!isValidVersion(opts.version)) {
+			if ((CHANNELS as string[]).includes(opts.version)) {
+				version = await resolveVersion(opts.version as Channel);
+			} else if (!isValidVersion(opts.version)) {
 				throw new QuickCHRError("INVALID_VERSION", `Invalid version: ${opts.version}`);
+			} else {
+				version = opts.version;
 			}
-			version = opts.version;
 		} else {
 			const channel = opts.channel ?? "stable";
 			version = await resolveVersion(channel);
@@ -1151,6 +1154,7 @@ export class QuickCHR {
 
 		// Build QEMU args and spawn
 		const platform = await detectPlatform();
+		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
 
@@ -1165,8 +1169,6 @@ export class QuickCHR {
 			networks: resolvedNetworks,
 			background: spawnInBackground,
 		};
-
-		registerSocketMembers(state);
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const wrapper = extractWrapper(resolvedNetworks);
@@ -1400,6 +1402,7 @@ export class QuickCHR {
 		const spawnBackground = hasProvisioning ? true : background;
 
 		const platform = await detectPlatform();
+		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
 
@@ -1414,8 +1417,6 @@ export class QuickCHR {
 			networks: resolvedNetworks,
 			background: spawnBackground,
 		};
-
-		registerSocketMembers(state);
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const wrapper = extractWrapper(resolvedNetworks);

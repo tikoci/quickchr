@@ -13,23 +13,27 @@ import {
 import { QuickCHRError } from "../../src/lib/types.ts";
 
 const TEST_DIR = join(import.meta.dir, ".tmp-socket-registry-test");
-const origEnv = process.env.HOME;
+const origDataDir = process.env.QUICKCHR_DATA_DIR;
 
 beforeEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
 	mkdirSync(TEST_DIR, { recursive: true });
-	process.env.HOME = TEST_DIR;
+	process.env.QUICKCHR_DATA_DIR = TEST_DIR;
 });
 
 afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
-	process.env.HOME = origEnv;
+	if (origDataDir !== undefined) {
+		process.env.QUICKCHR_DATA_DIR = origDataDir;
+	} else {
+		delete process.env.QUICKCHR_DATA_DIR;
+	}
 });
 
 describe("getSocketRegistryDir", () => {
 	test("returns networks dir and creates it", () => {
 		const dir = getSocketRegistryDir();
-		expect(dir).toEndWith(join("quickchr", "networks"));
+		expect(dir).toEndWith("networks");
 		expect(Bun.file(dir).size).toBeDefined(); // dir exists
 	});
 });
