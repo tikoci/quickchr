@@ -2,13 +2,21 @@
  * Image download, ZIP extraction, and cache management.
  */
 
-import { existsSync, copyFileSync, readdirSync, renameSync } from "node:fs";
+import { existsSync, copyFileSync, readdirSync, renameSync, unlinkSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { chrDownloadUrl, chrImageBasename } from "./versions.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
+import { assertSufficientQuickchrStorage } from "./storage.ts";
+
+function finalizeExtractedImage(zipPath: string, imgPath: string): string {
+	if (existsSync(imgPath) && existsSync(zipPath)) {
+		unlinkSync(zipPath);
+	}
+	return imgPath;
+}
 
 /** Download a CHR image ZIP if not already cached. Returns path to the ZIP. */
 export async function downloadImage(
@@ -85,7 +93,7 @@ export async function extractImage(
 	const imgPath = join(cache, imgName);
 
 	if (existsSync(imgPath)) {
-		return imgPath;
+		return finalizeExtractedImage(zipPath, imgPath);
 	}
 
 	const log = logger ?? createLogger();
@@ -127,7 +135,7 @@ export async function extractImage(
 		}
 	}
 
-	return imgPath;
+	return finalizeExtractedImage(zipPath, imgPath);
 }
 
 /** Download and extract a CHR image. Returns path to the raw .img in cache. */
@@ -144,8 +152,10 @@ export async function ensureCachedImage(
 		log.status(`  Using cached image: ${chrImageBasename(version, arch)}`);
 		return imgPath;
 	}
+	assertSufficientQuickchrStorage(`cache CHR ${version} (${arch})`);
 	const zipPath = await downloadImage(version, arch, cacheDir, logger);
-	return extractImage(zipPath, cacheDir, logger);
+	const extractedImgPath = await extractImage(zipPath, cacheDir, logger);
+	return finalizeExtractedImage(zipPath, extractedImgPath);
 }
 
 /** Copy a cached image to a machine's working directory as disk.img. */

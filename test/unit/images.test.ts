@@ -158,6 +158,7 @@ describe("extractImage", () => {
 		expect(result).toBe(join(TMP, "chr-7.22.1-arm64.img"));
 		expect(existsSync(result)).toBe(true);
 		expect(existsSync(join(TMP, "chr-7.22.1.img"))).toBe(false);
+		expect(existsSync(zipPath)).toBe(false);
 	});
 
 	test("throws PROCESS_FAILED when unzip exits non-zero", async () => {
@@ -239,5 +240,6 @@ describe("ensureCachedImage", () => {
 		const result = await ensureCachedImage("7.22.1", "x86", TMP);
 		expect(result).toBe(join(TMP, "chr-7.22.1.img"));
 		expect(fetchCalled).toBe(false);
+		expect(existsSync(zipPath)).toBe(false);
 	});
 });

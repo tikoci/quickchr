@@ -32,6 +32,9 @@ describe.skipIf(SKIP)("library API", () => {
 		const bunCheck = result.checks.find((c) => c.label === "Bun runtime");
 		expect(bunCheck).toBeDefined();
 		expect(bunCheck?.status).toBe("ok");
+
+		const storageCheck = result.checks.find((c) => c.label === "Storage (.local)" || c.label === "Storage");
+		expect(storageCheck).toBeDefined();
 	});
 
 	test("resolveVersion returns valid version", async () => {

@@ -1,4 +1,5 @@
 [test]
+preload = ["./test/preload.ts"]
 coverageThreshold = { lines = 0.50, functions = 0.70 }
 coveragePathIgnorePatterns = [
   "src/lib/channels.ts"

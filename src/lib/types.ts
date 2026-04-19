@@ -408,6 +408,7 @@ export type ErrorCode =
 	| "NETWORK_UNAVAILABLE"
 	| "INVALID_NETWORK"
 	| "PROVISIONING_VERSION_UNSUPPORTED"
+	| "INSUFFICIENT_DISK_SPACE"
 	| "STATE_ERROR";
 
 export class QuickCHRError extends Error {

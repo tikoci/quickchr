@@ -43,7 +43,7 @@ import {
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
-import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots } from "./disk.ts";
+import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
@@ -67,6 +67,7 @@ import {
 } from "./device-mode.ts";
 import type { LicenseOptions } from "./types.ts";
 import { toChrPorts } from "./network.ts";
+import { assertSufficientQuickchrStorage, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
 import { existsSync, readdirSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -896,6 +897,7 @@ export class QuickCHR {
 		const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
 
 		const machineDir = getMachineDir(name);
+		assertSufficientQuickchrStorage(`prepare CHR ${name}`);
 		ensureDir(machineDir);
 		const lockPath = join(machineDir, ".start-lock");
 		acquireLock(lockPath);
@@ -1083,6 +1085,7 @@ export class QuickCHR {
 
 		// Acquire a lock to prevent concurrent starts of the same machine
 		const machineDir = getMachineDir(name);
+		assertSufficientQuickchrStorage(`start CHR ${name}`);
 		ensureDir(machineDir);
 		const lockPath = join(machineDir, ".start-lock");
 		acquireLock(lockPath);
@@ -1563,20 +1566,15 @@ export class QuickCHR {
 		});
 
 		// Cache
-		try {
-			const cached = listCachedImages();
-			checks.push({
-				label: "Cache",
-				status: "ok",
-				detail: `${cached.length} image${cached.length !== 1 ? "s" : ""} cached`,
-			});
-		} catch {
-			checks.push({
-				label: "Cache",
-				status: "ok",
-				detail: "empty",
-			});
-		}
+		const storage = getQuickchrStorageReport();
+		const cached = listCachedImages();
+		checks.push({
+			label: "Cache",
+			status: "ok",
+			detail: cached.length > 0
+				? `${cached.length} image${cached.length !== 1 ? "s" : ""}, ${formatDiskSize(storage.cacheBytes)} cached`
+				: "empty (0 B)",
+		});
 
 		// Machines
 		const machines = refreshAllStatuses();
@@ -1584,7 +1582,19 @@ export class QuickCHR {
 		checks.push({
 			label: "Machines",
 			status: "ok",
-			detail: `${machines.length} instance${machines.length !== 1 ? "s" : ""} (${running} running)`,
+			detail: `${machines.length} instance${machines.length !== 1 ? "s" : ""} (${running} running, ${formatDiskSize(storage.machinesBytes)} on disk)`,
+		});
+
+		let storageDetail = `${storage.path}: ${formatDiskSize(storage.freeBytes)} free; ${formatQuickchrUsage(storage)}`;
+		if (storage.status === "error") {
+			storageDetail += ` — below required minimum ${formatDiskSize(storage.recommendedFreeBytes)}`;
+		} else if (storage.status === "warn") {
+			storageDetail += ` — low headroom (target ${formatDiskSize(storage.warningFreeBytes)} free)`;
+		}
+		checks.push({
+			label: storage.label === ".local" ? "Storage (.local)" : "Storage",
+			status: storage.status,
+			detail: storageDetail,
 		});
 
 		// socat (optional, for serial console piping)
