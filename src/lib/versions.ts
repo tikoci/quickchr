@@ -8,6 +8,61 @@ import { QuickCHRError } from "./types.ts";
 const UPGRADE_BASE = "https://upgrade.mikrotik.com/routeros/NEWESTa7";
 const DOWNLOAD_BASE = "https://download.mikrotik.com/routeros";
 export const MIN_PROVISION_VERSION = "7.20.8";
+export const PROVISIONING_FEATURE_LABEL = "post-boot provisioning";
+export const PROVISIONING_FEATURE_SUMMARY = "packages, login/user changes, license, and device-mode";
+export const PROVISIONING_BOOT_ONLY_SUMMARY = "Boot-only features such as disks, networks, and other QEMU-local setup remain available on older 7.x releases.";
+
+export interface RouterOsCompatibilityRow {
+	feature: string;
+	minimumVersion: string;
+	notes: string;
+}
+
+export const ROUTEROS_COMPATIBILITY_MATRIX: RouterOsCompatibilityRow[] = [
+	{
+		feature: "Boot / start / stop",
+		minimumVersion: "any RouterOS 7.x",
+		notes: "Boot-only path. QEMU-local only; no RouterOS mutations required.",
+	},
+	{
+		feature: "Disk resize / extra disks / disk inspection",
+		minimumVersion: "any RouterOS 7.x",
+		notes: "Host-side qemu-img features. Requires qemu-img, not RouterOS provisioning support.",
+	},
+	{
+		feature: "Network attachment / port mappings",
+		minimumVersion: "any RouterOS 7.x",
+		notes: "QEMU networking setup before or during boot.",
+	},
+	{
+		feature: "Managed login, custom user, disable-admin",
+		minimumVersion: MIN_PROVISION_VERSION,
+		notes: "Mutates RouterOS after boot; handled as quickchr provisioning.",
+	},
+	{
+		feature: "Package install / install-all-packages",
+		minimumVersion: MIN_PROVISION_VERSION,
+		notes: "Uploads packages and reboots after boot-time provisioning starts.",
+	},
+	{
+		feature: "License apply / renew",
+		minimumVersion: MIN_PROVISION_VERSION,
+		notes: "RouterOS license workflow varies by version; quickchr validates this path on the baseline and newer.",
+	},
+	{
+		feature: "Device-mode changes",
+		minimumVersion: MIN_PROVISION_VERSION,
+		notes: "Explicitly unsupported below the baseline even if older RouterOS builds expose some attributes.",
+	},
+];
+
+export function provisioningSupportSummary(minimumVersion = MIN_PROVISION_VERSION): string {
+	return `quickchr validates ${PROVISIONING_FEATURE_LABEL} on RouterOS ${minimumVersion}+ only; older 7.x remains boot-only.`;
+}
+
+export function provisioningSupportHint(minimumVersion = MIN_PROVISION_VERSION): string {
+	return `Use --channel long-term or --version ${minimumVersion}+ for ${PROVISIONING_FEATURE_SUMMARY}, or keep the older version without provisioning options.`;
+}
 
 /** Fetch the latest version for a given channel from MikroTik's upgrade server. */
 export async function resolveVersion(channel: Channel): Promise<string> {
@@ -89,8 +144,8 @@ export function assertProvisioningSupportedVersion(
 
 	throw new QuickCHRError(
 		"PROVISIONING_VERSION_UNSUPPORTED",
-		`Cannot ${operation} on RouterOS ${version}. quickchr provisioning supports ${minimumVersion}+ only.`,
-		`Use RouterOS ${minimumVersion}+ for provisioning, or run boot-only without provisioning flags.`,
+		`Cannot ${operation} on RouterOS ${version}. ${provisioningSupportSummary(minimumVersion)} ${PROVISIONING_BOOT_ONLY_SUMMARY}`,
+		provisioningSupportHint(minimumVersion),
 	);
 }
 

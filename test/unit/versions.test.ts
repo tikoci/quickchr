@@ -123,6 +123,8 @@ describe("RouterOS semantic version helpers", () => {
 			expect.unreachable("expected provisioning version gate to throw");
 		} catch (e) {
 			expect((e as { code?: string }).code).toBe("PROVISIONING_VERSION_UNSUPPORTED");
+			expect((e as { message?: string }).message).toContain("boot-only");
+			expect((e as { installHint?: string }).installHint).toContain("--channel long-term");
 		}
 	});
 });

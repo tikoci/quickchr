@@ -62,6 +62,28 @@ describe("QuickCHR.start name validation", () => {
 			expect.unreachable("should have thrown");
 		} catch (e) {
 			expectErrorCode(e, "PROVISIONING_VERSION_UNSUPPORTED");
+			expect((e as { message?: string }).message).toContain("managed login");
+		}
+	});
+
+	test("allows disk and network setup on older RouterOS versions without provisioning", async () => {
+		try {
+			const instance = await QuickCHR.start({
+				name: "old-version-boot-only",
+				version: "7.10.0",
+				dryRun: true,
+				secureLogin: false,
+				bootSize: "1G",
+				extraDisks: ["512M"],
+				networks: ["user"],
+			});
+			expect(instance.state.version).toBe("7.10.0");
+			expect(instance.state.bootSize).toBe("1G");
+			expect(instance.state.extraDisks).toEqual(["512M"]);
+		} catch (e: unknown) {
+			const code = (e as { code?: string }).code;
+			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
+			throw e;
 		}
 	});
 });

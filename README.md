@@ -154,6 +154,25 @@ quickchr doctor
 | `--timeout-extra <s>` | Add extra seconds to the auto-computed boot timeout | |
 | `--dry-run` | Print what would run without executing | |
 
+### RouterOS Provisioning Support Policy
+
+quickchr separates **boot-only** machine management from **post-boot provisioning**.
+
+- **Boot-only / QEMU-local features work on older RouterOS 7.x builds:** image download, boot/start, disk resize, extra disks, network attachment, and port mappings.
+- **Post-boot provisioning is validated/tested on RouterOS 7.20.8+ only:** package install, managed login or custom user creation, disabling admin, CHR license operations, and device-mode changes.
+- This is a **quickchr support policy**, not a RouterOS claim that older versions can never work. We intentionally stop at the first long-term baseline to avoid version-specific provisioning traps that are not covered by tests.
+- If you plan to provision, prefer **`--channel long-term`** or an explicit version **`>= 7.20.8`**.
+
+| Feature | Minimum RouterOS | Notes |
+|---------|------------------|-------|
+| Boot / start / stop | Any RouterOS 7.x | Boot-only path; no post-boot RouterOS mutations |
+| Disk resize / extra disks / disk inspection | Any RouterOS 7.x | Requires host `qemu-img`; QEMU-local only |
+| Network attachment / port mappings | Any RouterOS 7.x | QEMU networking setup; not provisioning |
+| Managed login / custom user / disable-admin | 7.20.8+ | Post-boot provisioning |
+| Package install / install-all-packages | 7.20.8+ | Post-boot provisioning |
+| License apply / renew | 7.20.8+ | Post-boot provisioning |
+| Device-mode changes | 7.20.8+ | Post-boot provisioning; intentionally unsupported below the baseline |
+
 ### Background vs Foreground Mode
 
 By default `quickchr start` runs QEMU in the **background**: QEMU is spawned as a detached process and the command returns once CHR has booted. Use `quickchr list`, `quickchr status`, and `quickchr stop` to manage it.
@@ -280,4 +299,3 @@ afterAll(async () => {
 ## License
 
 MIT
-

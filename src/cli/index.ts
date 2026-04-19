@@ -5,6 +5,13 @@
 
 import type { StartOptions, Arch, Channel, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { parseNetworkSpecifier } from "../lib/network.ts";
+import {
+	MIN_PROVISION_VERSION,
+	PROVISIONING_BOOT_ONLY_SUMMARY,
+	PROVISIONING_FEATURE_SUMMARY,
+	provisioningSupportHint,
+	provisioningSupportSummary,
+} from "../lib/versions.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -204,9 +211,10 @@ async function main() {
 				console.error(`  Hint: ${err.installHint}`);
 			}
 			if (err.code === "PROVISIONING_VERSION_UNSUPPORTED") {
-				console.error("  Why this happened: provisioning is intentionally limited to RouterOS 7.20.8+ to reduce version-specific failures.");
+				console.error(`  Why this happened: ${provisioningSupportSummary(MIN_PROVISION_VERSION)}`);
+				console.error(`  ${PROVISIONING_BOOT_ONLY_SUMMARY}`);
 				console.error("  Try this:");
-				console.error("    1) Use --version 7.20.8 or newer (or long-term channel).");
+				console.error(`    1) ${provisioningSupportHint(MIN_PROVISION_VERSION)}`);
 				console.error("    2) For older 7.x, run boot-only (no provisioning flags).");
 			}
 			process.exit(1);
@@ -2297,6 +2305,11 @@ Environment:
   MIKROTIK_WEB_ACCOUNT    MikroTik.com account email (for license)
   MIKROTIK_WEB_PASSWORD   MikroTik.com password (for license)
 
+Provisioning support:
+  ${provisioningSupportSummary(MIN_PROVISION_VERSION)}
+  ${PROVISIONING_BOOT_ONLY_SUMMARY}
+  Prefer --channel long-term when you plan to use ${PROVISIONING_FEATURE_SUMMARY}.
+
 Run 'quickchr help <command>' for command-specific help.`);
 }
 
@@ -2307,6 +2320,11 @@ function printCommandHelp(command: string) {
 
 Create a new CHR machine without starting it.
 Use 'quickchr start <name>' to boot it afterwards.
+
+Post-boot provisioning flags in this command (--add-package, --install-all-packages,
+--add-user, --disable-admin, managed login, and device-mode) are validated on
+RouterOS ${MIN_PROVISION_VERSION}+ only. Older 7.x remains boot-only. Disk and network
+options still work on older versions when the required host tools are installed.
 
 Options:
   --name <name>         Instance name (required)
@@ -2373,6 +2391,11 @@ Examples:
 
 Creation flags below apply when using 'start' to create a new machine in one step.
 For a clearer create-then-boot flow, prefer 'quickchr add' followed by 'quickchr start <name>'.
+
+Post-boot provisioning flags in this command (${PROVISIONING_FEATURE_SUMMARY}) are
+validated on RouterOS ${MIN_PROVISION_VERSION}+ only. Older 7.x remains boot-only.
+Disk and network options still work on older versions when the required host tools
+are installed.
 
 Options:
   --all                 Start all stopped machines
@@ -2579,4 +2602,3 @@ Credential resolution order (highest priority first):
 }
 
 main();
-

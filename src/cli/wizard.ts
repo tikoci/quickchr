@@ -33,8 +33,12 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	if (versionSource === "channel") {
 		const ch = await clack.select({
 			message: "Select channel:",
-			options: CHANNELS.map((c) => ({ value: c, label: c })),
-			initialValue: "stable" as Channel,
+			options: CHANNELS.map((c) => ({
+				value: c,
+				label: c,
+				hint: c === "long-term" ? "recommended for provisioning" : undefined,
+			})),
+			initialValue: "long-term" as Channel,
 		});
 		if (clack.isCancel(ch)) { clack.cancel("Cancelled."); process.exit(0); }
 		channel = ch;
@@ -290,10 +294,17 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	// ── 6. Provisioning gate ─────────────────────────────────────────────
 	// Everything after this point (packages, device-mode, login, license)
 	// requires booting the CHR and connecting via REST API.
-	const { resolveVersion, MIN_PROVISION_VERSION, isProvisioningSupportedVersion } = await import("../lib/versions.ts");
-	const resolvedVersion = version ?? await resolveVersion(channel ?? "stable");
+	const {
+		resolveVersion,
+		MIN_PROVISION_VERSION,
+		isProvisioningSupportedVersion,
+		PROVISIONING_BOOT_ONLY_SUMMARY,
+		provisioningSupportSummary,
+		provisioningSupportHint,
+	} = await import("../lib/versions.ts");
+	let resolvedVersion = version ?? await resolveVersion(channel ?? "long-term");
 	version = resolvedVersion;
-	const provisioningSupported = isProvisioningSupportedVersion(resolvedVersion);
+	let provisioningSupported = isProvisioningSupportedVersion(resolvedVersion);
 
 	let installAllPackages = false;
 	let packages: string[] = [];
@@ -312,17 +323,27 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 		if (clack.isCancel(provisionChoice)) { clack.cancel("Cancelled."); process.exit(0); }
 		wantProvision = provisionChoice;
 	} else {
-		clack.log.warn(
-			`Provisioning is disabled for RouterOS ${resolvedVersion}. quickchr provisioning supports ${MIN_PROVISION_VERSION}+ only.`,
-		);
-		clack.log.info("Boot-only mode remains fully available for this version.");
-		const continueBootOnly = await clack.confirm({
-			message: "Continue in boot-only mode (no packages/login/device-mode/license changes)?",
-			initialValue: true,
+		clack.log.warn(`RouterOS ${resolvedVersion}: ${provisioningSupportSummary(MIN_PROVISION_VERSION)}`);
+		clack.log.info(PROVISIONING_BOOT_ONLY_SUMMARY);
+		clack.log.info(provisioningSupportHint(MIN_PROVISION_VERSION));
+		const unsupportedAction = await clack.select({
+			message: "How do you want to proceed?",
+			options: [
+				{ value: "switch", label: "Use the long-term channel instead", hint: "recommended to enable provisioning" },
+				{ value: "boot-only", label: "Keep this version in boot-only mode", hint: "no packages/login/device-mode/license changes" },
+				{ value: "cancel", label: "Cancel" },
+			],
+			initialValue: "switch",
 		});
-		if (clack.isCancel(continueBootOnly) || !continueBootOnly) {
+		if (clack.isCancel(unsupportedAction) || unsupportedAction === "cancel") {
 			clack.cancel("Cancelled.");
 			process.exit(0);
+		}
+		if (unsupportedAction === "switch") {
+			channel = "long-term";
+			resolvedVersion = await resolveVersion(channel);
+			version = resolvedVersion;
+			provisioningSupported = true;
 		}
 	}
 
@@ -535,7 +556,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	const netSummary = networks.map((n) => typeof n === "string" ? n : n.type).join(", ");
 
 	// Build a readable multi-line summary for the confirmation prompt
-	const summaryParts = [`${version ?? channel} / ${arch}`];
+	const summaryParts = [`${resolvedVersion} / ${arch}`];
 	if (netSummary) summaryParts.push(`networks: ${netSummary}`);
 	if (pkgSummary) summaryParts.push(pkgSummary);
 	if (deviceMode) {

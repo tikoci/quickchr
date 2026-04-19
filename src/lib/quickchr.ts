@@ -25,6 +25,7 @@ import {
 	isValidVersion,
 	generateMachineName,
 	assertProvisioningSupportedVersion,
+	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
 import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString, hasUserModeNetwork } from "./network.ts";
 import {
@@ -106,6 +107,51 @@ function hasProvisioningMutations(opts: {
 		opts.license ||
 		opts.secureLogin === true
 	);
+}
+
+function listProvisioningMutations(opts: {
+	installAllPackages?: boolean;
+	packages?: string[];
+	hasDeviceModeProvisioning?: boolean;
+	user?: { name: string; password: string };
+	disableAdmin?: boolean;
+	license?: LicenseInput;
+	secureLogin?: boolean;
+}): string[] {
+	const operations: string[] = [];
+	if (opts.installAllPackages) {
+		operations.push("install all packages");
+	} else if ((opts.packages?.length ?? 0) > 0) {
+		operations.push("install extra packages");
+	}
+	if (opts.user) {
+		operations.push("create a custom user");
+	} else if (opts.secureLogin === true) {
+		operations.push("create a managed login");
+	}
+	if (opts.disableAdmin) {
+		operations.push("disable the default admin account");
+	}
+	if (opts.license) {
+		operations.push("apply a license");
+	}
+	if (opts.hasDeviceModeProvisioning) {
+		operations.push("change device-mode");
+	}
+	return operations;
+}
+
+function joinHumanList(items: string[]): string {
+	if (items.length <= 1) return items[0] ?? "";
+	if (items.length === 2) return `${items[0]} and ${items[1]}`;
+	return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+}
+
+function describeProvisioningOperation(opts: Parameters<typeof listProvisioningMutations>[0]): string {
+	const operations = listProvisioningMutations(opts);
+	if (operations.length === 0) return `use ${PROVISIONING_FEATURE_LABEL}`;
+	if (operations.length === 1) return operations[0] ?? `use ${PROVISIONING_FEATURE_LABEL}`;
+	return `use ${PROVISIONING_FEATURE_LABEL} (${joinHumanList(operations)})`;
 }
 
 // --- Socket registry lifecycle helpers ---
@@ -883,7 +929,15 @@ export class QuickCHR {
 			license: opts.license,
 			secureLogin: opts.secureLogin,
 		})) {
-			assertProvisioningSupportedVersion(version, "provision this machine");
+			assertProvisioningSupportedVersion(version, describeProvisioningOperation({
+				installAllPackages: opts.installAllPackages,
+				packages: opts.packages,
+				hasDeviceModeProvisioning,
+				user: opts.user,
+				disableAdmin: opts.disableAdmin,
+				license: opts.license,
+				secureLogin: opts.secureLogin,
+			}));
 		}
 
 		const existingNames = listMachineNames();
@@ -989,7 +1043,15 @@ export class QuickCHR {
 			license: opts.license,
 			secureLogin: opts.secureLogin,
 		})) {
-			assertProvisioningSupportedVersion(version, "provision this machine");
+			assertProvisioningSupportedVersion(version, describeProvisioningOperation({
+				installAllPackages: opts.installAllPackages,
+				packages: opts.packages,
+				hasDeviceModeProvisioning,
+				user: opts.user,
+				disableAdmin: opts.disableAdmin,
+				license: opts.license,
+				secureLogin: opts.secureLogin,
+			}));
 		}
 
 		// Resolve architecture
@@ -1265,12 +1327,20 @@ export class QuickCHR {
 		logger?: ProgressLogger,
 	): Promise<void> {
 		const log = logger ?? createLogger();
-		assertProvisioningSupportedVersion(machineState.version, "provision this machine");
 		const resolvedDeviceMode = resolveDeviceModeOptions(opts.deviceMode);
+		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
+		assertProvisioningSupportedVersion(machineState.version, describeProvisioningOperation({
+			installAllPackages: opts.installAllPackages,
+			packages: opts.packages,
+			hasDeviceModeProvisioning,
+			user: opts.user,
+			disableAdmin: opts.disableAdmin,
+			license: opts.license,
+			secureLogin: opts.secureLogin,
+		}));
 		for (const warning of resolvedDeviceMode.warnings) {
 			log.warn(`Device-mode: ${warning}`);
 		}
-		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 		const accel = await detectAccel(machineState.arch);
 		const bootTimeout = defaultBootTimeout(machineState.arch, opts.installAllPackages || (opts.packages?.length ?? 0) > 0, accel);
 		const chrPorts = toChrPorts(machineState.ports);

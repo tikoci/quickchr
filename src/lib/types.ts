@@ -185,13 +185,22 @@ export interface StartOptions {
 	cpu?: number;
 	mem?: number;
 	background?: boolean;
+	/** Extra packages to install after boot.
+	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	packages?: string[];
-	/** Install all packages from the all_packages ZIP (overrides packages[]). */
+	/** Install all packages from the all_packages ZIP (overrides packages[]).
+	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	installAllPackages?: boolean;
+	/** Create a user after boot.
+	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	user?: { name: string; password: string };
+	/** Disable the default admin account after boot.
+	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	disableAdmin?: boolean;
 	/** Create a 'quickchr' managed account with a generated password.  Defaults to true.
-	 *  Set to false to keep admin with no password (exec still works). */
+	 *  Set to false to keep admin with no password (exec still works).
+	 *  Enabling the managed login path is quickchr provisioning, so it is validated/tested
+	 *  on RouterOS 7.20.8+ only. */
 	secureLogin?: boolean;
 	portBase?: number;
 	excludePorts?: ServiceName[];
@@ -206,9 +215,11 @@ export interface StartOptions {
 	dryRun?: boolean;
 	/** Apply a CHR trial license after boot via /system/license/renew.
 	 *  Pass a level string (e.g. "p1") to auto-resolve MikroTik credentials,
-	 *  or a LicenseOptions object to supply credentials explicitly. */
+	 *  or a LicenseOptions object to supply credentials explicitly.
+	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	license?: LicenseInput;
-	/** Configure /system/device-mode after boot. If omitted, CHR boots with RouterOS defaults (mode=advanced). */
+	/** Configure /system/device-mode after boot. If omitted, CHR boots with RouterOS defaults (mode=advanced).
+	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	deviceMode?: DeviceModeOptions;
 	/** Boot disk size override (e.g. "512M", "2G"). Requires `qemu-img` on the host.
 	 *  Converts the boot disk to qcow2 before first boot. */
@@ -281,9 +292,11 @@ export interface ChrInstance {
 	rest(path: string, opts?: RequestInit): Promise<unknown>;
 	/** Run a RouterOS CLI command against the instance. */
 	exec(command: string, opts?: ExecOptions): Promise<ExecResult>;
-	/** Apply or renew a CHR trial license. */
+	/** Apply or renew a CHR trial license.
+	 *  quickchr validates this provisioning flow on RouterOS 7.20.8+ only. */
 	license(opts: LicenseOptions): Promise<void>;
 	/** Change device-mode on a running instance (e.g. enable container, rose, etc.).
+	 *  quickchr validates this provisioning flow on RouterOS 7.20.8+ only.
 	 *  This requires a hard QEMU power-cycle to confirm the change — the instance
 	 *  will briefly stop and restart. Wait for the returned promise before using the
 	 *  instance again.
@@ -295,6 +308,7 @@ export interface ChrInstance {
 	 *  Downloads and caches the all_packages ZIP on the first call. */
 	availablePackages(): Promise<string[]>;
 	/** Install extra package(s), reboot, and wait until REST API is ready again.
+	 *  quickchr validates this provisioning flow on RouterOS 7.20.8+ only.
 	 *  Accepts a single package name or an array. Returns the names that were
 	 *  actually installed (missing packages are skipped with a warning). */
 	installPackage(packages: string | string[]): Promise<string[]>;
