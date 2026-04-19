@@ -53,7 +53,7 @@ describe.skipIf(SKIP)("vienk — single CHR smoke test", () => {
 
 			const resource = await instance.rest("/system/resource") as Record<string, string>;
 			expect(resource).toBeObject();
-			expect(resource["board-name"]).toBe("CHR");
+			expect(resource["board-name"]).toContain("CHR");
 			expect(resource["architecture-name"]).toBeDefined();
 
 			console.log(

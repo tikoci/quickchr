@@ -1,46 +1,38 @@
-import { describe, test, expect, afterEach, mock } from "bun:test";
+import { describe, test, expect, afterEach, beforeEach } from "bun:test";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { deleteInstanceCredentials, getInstanceCredentials, getStoredCredentials, saveCredentials, saveInstanceCredentials, credentialStorageLabel, deleteCredentials } from "../../src/lib/credentials.ts";
 
+const TMP = join(import.meta.dir, ".tmp-credentials");
+const HOME = join(TMP, "home");
+const originalBunSecrets = Bun.secrets;
 const originalEnv = {
 	account: process.env.MIKROTIK_WEB_ACCOUNT,
 	password: process.env.MIKROTIK_WEB_PASSWORD,
+	home: process.env.HOME,
 };
 
-function makeSecretsMock() {
-	return {
-		secretGet: mock(async (_service: string, _name: string) => null as string | null),
-		secretSet: mock(async (_service: string, _name: string, _value: string) => {}),
-		secretDelete: mock(async (_service: string, _name: string) => false),
-		secretStorageLabel: mock(() => "mock storage"),
-		secretGetSync: mock((_service: string, _name: string) => null as string | null),
-		secretSetSync: mock((_service: string, _name: string, _value: string) => {}),
-		secretDeleteSync: mock((_service: string, _name: string) => false),
-	};
+function setBunSecrets(value: typeof Bun.secrets | undefined): void {
+	Object.defineProperty(Bun, "secrets", {
+		value,
+		writable: true,
+		enumerable: true,
+		configurable: false,
+	});
 }
 
-const secretsMock = makeSecretsMock();
-
-function resetSecretsMock(): void {
-	secretsMock.secretGet.mockReset();
-	secretsMock.secretGet.mockImplementation(async () => null);
-	secretsMock.secretSet.mockReset();
-	secretsMock.secretSet.mockImplementation(async () => {});
-	secretsMock.secretDelete.mockReset();
-	secretsMock.secretDelete.mockImplementation(async () => false);
-	secretsMock.secretStorageLabel.mockReset();
-	secretsMock.secretStorageLabel.mockImplementation(() => "mock storage");
-	secretsMock.secretGetSync.mockReset();
-	secretsMock.secretGetSync.mockImplementation(() => null);
-	secretsMock.secretSetSync.mockReset();
-	secretsMock.secretSetSync.mockImplementation(() => {});
-	secretsMock.secretDeleteSync.mockReset();
-	secretsMock.secretDeleteSync.mockImplementation(() => false);
+function configPath(service: string): string {
+	const safeName = service.replace(/[^a-zA-Z0-9._-]/g, "_");
+	return join(HOME, ".config", "quickchr", `${safeName}.json`);
 }
 
-mock.module("../../src/lib/secrets.ts", () => secretsMock);
-
-const credentialsPromise = import("../../src/lib/credentials.ts");
+beforeEach(() => {
+	process.env.HOME = HOME;
+});
 
 afterEach(() => {
+	setBunSecrets(originalBunSecrets);
+
 	if (originalEnv.account === undefined) {
 		delete process.env.MIKROTIK_WEB_ACCOUNT;
 	} else {
@@ -53,92 +45,124 @@ afterEach(() => {
 		process.env.MIKROTIK_WEB_PASSWORD = originalEnv.password;
 	}
 
-	resetSecretsMock();
+	if (originalEnv.home === undefined) {
+		delete process.env.HOME;
+	} else {
+		process.env.HOME = originalEnv.home;
+	}
+
+	rmSync(TMP, { recursive: true, force: true });
 });
 
 describe("credentials helpers", () => {
 	test("getStoredCredentials prefers environment variables over the secret store", async () => {
+		let getCalls = 0;
+		setBunSecrets({
+			get: async () => {
+				getCalls += 1;
+				return "should-not-be-used";
+			},
+			set: async () => {},
+			delete: async () => false,
+		});
+
 		process.env.MIKROTIK_WEB_ACCOUNT = "env-account";
 		process.env.MIKROTIK_WEB_PASSWORD = "env-password";
 
-		const credentials = await credentialsPromise;
-		await expect(credentials.getStoredCredentials()).resolves.toEqual({
+		await expect(getStoredCredentials()).resolves.toEqual({
 			account: "env-account",
 			password: "env-password",
 		});
-		expect(secretsMock.secretGet).not.toHaveBeenCalled();
+		expect(getCalls).toBe(0);
 	});
 
 	test("getStoredCredentials falls back to the secret store and requires both values", async () => {
-		secretsMock.secretGet.mockImplementation(async (_service, name) =>
-			name === "account" ? "stored-account" : "stored-password"
-		);
+		setBunSecrets({
+			get: async ({ name }: { service: string; name: string }) =>
+				name === "account" ? "stored-account" : "stored-password",
+			set: async () => {},
+			delete: async () => false,
+		});
 
 		delete process.env.MIKROTIK_WEB_ACCOUNT;
 		delete process.env.MIKROTIK_WEB_PASSWORD;
 
-		const credentials = await credentialsPromise;
-		await expect(credentials.getStoredCredentials()).resolves.toEqual({
+		await expect(getStoredCredentials()).resolves.toEqual({
 			account: "stored-account",
 			password: "stored-password",
 		});
 
-		secretsMock.secretGet.mockImplementation(async (_service, name) =>
-			name === "account" ? "stored-account" : null
-		);
-		await expect(credentials.getStoredCredentials()).resolves.toBeNull();
+		setBunSecrets({
+			get: async ({ name }: { service: string; name: string }) =>
+				name === "account" ? "stored-account" : null,
+			set: async () => {},
+			delete: async () => false,
+		});
+
+		await expect(getStoredCredentials()).resolves.toBeNull();
 	});
 
 	test("saveCredentials and deleteCredentials delegate to the secret store", async () => {
-		const credentials = await credentialsPromise;
+		const calls: string[] = [];
+		setBunSecrets({
+			get: async () => null,
+			set: async ({ service, name, value }: { service: string; name: string; value: string }) => {
+				calls.push(`set:${service}:${name}:${value}`);
+			},
+			delete: async ({ service, name }: { service: string; name: string }) => {
+				calls.push(`delete:${service}:${name}`);
+				return true;
+			},
+		});
 
-		await credentials.saveCredentials("alice", "pw");
-		expect(secretsMock.secretSet.mock.calls).toEqual([
-			["com.quickchr.mikrotik-web", "account", "alice"],
-			["com.quickchr.mikrotik-web", "password", "pw"],
-		]);
+		await saveCredentials("alice", "pw");
+		await deleteCredentials();
 
-		await credentials.deleteCredentials();
-		expect(secretsMock.secretDelete.mock.calls).toEqual([
-			["com.quickchr.mikrotik-web", "account"],
-			["com.quickchr.mikrotik-web", "password"],
+		expect(calls).toEqual([
+			"set:com.quickchr.mikrotik-web:account:alice",
+			"set:com.quickchr.mikrotik-web:password:pw",
+			"delete:com.quickchr.mikrotik-web:account",
+			"delete:com.quickchr.mikrotik-web:password",
 		]);
 	});
 
-	test("credentialStorageLabel proxies the secrets label", async () => {
-		secretsMock.secretStorageLabel.mockReturnValue("config file (/tmp/test)");
+	test("credentialStorageLabel reflects live storage mode", () => {
+		setBunSecrets(undefined);
+		expect(credentialStorageLabel()).toBe(`config file (${join(HOME, ".config", "quickchr")})`);
 
-		const credentials = await credentialsPromise;
-		expect(credentials.credentialStorageLabel()).toBe("config file (/tmp/test)");
+		setBunSecrets({
+			get: async () => null,
+			set: async () => {},
+			delete: async () => false,
+		});
+		expect(credentialStorageLabel()).toBe("OS credential store (via Bun.secrets)");
 	});
 
-	test("getInstanceCredentials returns parsed credentials and rejects corrupt entries", async () => {
-		secretsMock.secretGetSync.mockReturnValueOnce('{"user":"quickchr","password":"secret"}');
-
-		const credentials = await credentialsPromise;
-		expect(credentials.getInstanceCredentials("alpha")).toEqual({
+	test("getInstanceCredentials returns parsed credentials and rejects corrupt entries", () => {
+		saveInstanceCredentials("alpha", "quickchr", "secret");
+		expect(getInstanceCredentials("alpha")).toEqual({
 			user: "quickchr",
 			password: "secret",
 		});
 
-		secretsMock.secretGetSync.mockReturnValueOnce("{not-json");
-		expect(credentials.getInstanceCredentials("alpha")).toBeNull();
+		const path = configPath("com.quickchr.instance");
+		writeFileSync(path, '{\n  "alpha": "{not-json"\n}', "utf8");
+		expect(getInstanceCredentials("alpha")).toBeNull();
 
-		secretsMock.secretGetSync.mockReturnValueOnce('{"user":"quickchr"}');
-		expect(credentials.getInstanceCredentials("alpha")).toBeNull();
+		writeFileSync(path, '{\n  "alpha": "{\\"user\\":\\"quickchr\\"}"\n}', "utf8");
+		expect(getInstanceCredentials("alpha")).toBeNull();
 	});
 
-	test("saveInstanceCredentials and deleteInstanceCredentials use sync secret helpers", async () => {
-		const credentials = await credentialsPromise;
+	test("saveInstanceCredentials and deleteInstanceCredentials use config-backed sync storage", () => {
+		saveInstanceCredentials("alpha", "quickchr", "secret");
 
-		credentials.saveInstanceCredentials("alpha", "quickchr", "secret");
-		expect(secretsMock.secretSetSync).toHaveBeenCalledWith(
-			"com.quickchr.instance",
-			"alpha",
-			'{"user":"quickchr","password":"secret"}',
-		);
+		const path = configPath("com.quickchr.instance");
+		expect(existsSync(path)).toBe(true);
+		expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+			alpha: '{"user":"quickchr","password":"secret"}',
+		});
 
-		credentials.deleteInstanceCredentials("alpha");
-		expect(secretsMock.secretDeleteSync).toHaveBeenCalledWith("com.quickchr.instance", "alpha");
+		deleteInstanceCredentials("alpha");
+		expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({});
 	});
 });
