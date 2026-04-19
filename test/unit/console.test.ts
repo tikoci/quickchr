@@ -1,10 +1,12 @@
 import { describe, test, expect, afterEach, beforeEach } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createServer, type Server, type Socket as NetSocket } from "node:net";
 import { stripAnsi, consoleExec, isConsoleReady } from "../../src/lib/console.ts";
 
-const TMP = join(import.meta.dir, ".tmp-console-test");
+// Use tmpdir() because Unix domain sockets don't work on FUSE/sshfs mounts (e.g. Multipass)
+const TMP = join(tmpdir(), "quickchr-tmp-console-test");
 
 beforeEach(() => {
 	mkdirSync(TMP, { recursive: true });

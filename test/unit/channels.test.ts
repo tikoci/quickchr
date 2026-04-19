@@ -1,11 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { monitorCommand, serialStreams, qgaCommand } from "../../src/lib/channels.ts";
 import type { QuickCHRError } from "../../src/lib/types.ts";
 
-const TMP = join(import.meta.dir, ".tmp-channels-test");
+// Use tmpdir() because Unix domain sockets don't work on FUSE/sshfs mounts (e.g. Multipass)
+const TMP = join(tmpdir(), "quickchr-tmp-channels-test");
 
 beforeEach(() => {
 	mkdirSync(TMP, { recursive: true });

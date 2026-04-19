@@ -24,6 +24,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 - Integration tests: use `describe.skipIf(!process.env.QUICKCHR_INTEGRATION)`
 - Long-running tests: set timeout as second arg to `test("...", async () => {...}, 120_000)`
 - Temp directories: create in `import.meta.dir`, clean up in `afterEach`
+- Unix socket tests: use `join(tmpdir(), "quickchr-tmp-<name>")` from `node:os` — FUSE mounts (e.g. Multipass) don't support Unix domain sockets
 - Always clean up CHR instances in a `finally` block so failures don't leak machines
 
 ## Running

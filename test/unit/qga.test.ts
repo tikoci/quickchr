@@ -1,6 +1,7 @@
 import { describe, test, expect, afterEach, beforeEach } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createServer, type Server, type Socket as NetSocket } from "node:net";
 import {
 	stripSyncMarkers,
@@ -22,7 +23,8 @@ import {
 	qgaFileRead,
 } from "../../src/lib/qga.ts";
 
-const TMP = join(import.meta.dir, ".tmp-qga-test");
+// Use tmpdir() because Unix domain sockets don't work on FUSE/sshfs mounts (e.g. Multipass)
+const TMP = join(tmpdir(), "quickchr-tmp-qga-test");
 
 beforeEach(() => {
 	mkdirSync(TMP, { recursive: true });
