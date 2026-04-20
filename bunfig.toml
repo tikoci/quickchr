@@ -1,6 +1,9 @@
 [test]
 preload = ["./test/preload.ts"]
-coverageThreshold = { lines = 0.50, functions = 0.70 }
+# Coverage thresholds enforced in CI workflow (.github/workflows/ci.yml) as
+# aggregate values with overrides via workflow_dispatch inputs. Bun's
+# coverageThreshold is per-file in newer versions and would fail individual
+# low-coverage files (CLI entry, password.ts, etc.) we don't gate on.
 coveragePathIgnorePatterns = [
   "src/lib/channels.ts"
 ]
