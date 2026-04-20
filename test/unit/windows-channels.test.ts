@@ -108,10 +108,13 @@ code: "MACHINE_STOPPED",
 });
 });
 
-test("serialStreams throws MACHINE_STOPPED when named pipe does not exist", () => {
-expect(() => serialStreams(TMP)).toThrow(
-expect.objectContaining({ code: "MACHINE_STOPPED" }),
-);
+test("serialStreams returns streams without throwing when named pipe does not exist (deferred error)", () => {
+// On Windows, channelFileExists() always returns true — named pipes aren't
+// filesystem entries. serialStreams() creates and returns stream objects
+// without checking pipe existence; the MACHINE_STOPPED error surfaces async.
+const result = serialStreams(TMP);
+expect(result).toHaveProperty("readable");
+expect(result).toHaveProperty("writable");
 });
 });
 
@@ -141,9 +144,11 @@ machineDir: TMP,
 };
 }
 
-test("does not throw even when no .sock files exist in machineDir", async () => {
+test("stops gracefully even when no .sock files exist in machineDir", async () => {
 const state = makeMachineState({ pid: 999_999_999 });
-await expect(stopMachineByName("test", state)).resolves.not.toThrow();
+// stopMachineByName returns false when the PID is already dead
+// (.resolves.not.toThrow() fails in Bun when the promise resolves with `false`)
+await expect(stopMachineByName("test", state)).resolves.toBe(false);
 });
 
 test("no .sock files are created or expected in machineDir", async () => {

@@ -34,10 +34,17 @@ afterEach(() => {
 
 describe("storage helpers", () => {
 	test("reports .local as the default storage root", () => {
-		const report = getQuickchrStorageReport();
-		expect(report.label).toBe(".local");
-		expect(report.path).toBe(join(TEST_DIR, ".local"));
-		expect(report.freeBytes).toBeGreaterThan(0);
+		if (process.platform === "win32") {
+			// On Windows getDataDir() uses LOCALAPPDATA — the label is always "data dir"
+			const report = getQuickchrStorageReport();
+			expect(report.label).toBe("data dir");
+			expect(report.freeBytes).toBeGreaterThan(0);
+		} else {
+			const report = getQuickchrStorageReport();
+			expect(report.label).toBe(".local");
+			expect(report.path).toBe(join(TEST_DIR, ".local"));
+			expect(report.freeBytes).toBeGreaterThan(0);
+		}
 	});
 
 	test("uses QUICKCHR_DATA_DIR as the storage root override", () => {
@@ -49,14 +56,18 @@ describe("storage helpers", () => {
 	});
 
 	test("summarizes quickchr usage across cache and machines", () => {
-		const cacheDir = join(TEST_DIR, ".local", "share", "quickchr", "cache");
-		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "vm1");
-		const notesDir = join(TEST_DIR, ".local", "share", "quickchr");
+		// Set QUICKCHR_DATA_DIR explicitly for cross-platform isolation.
+		// On Windows getDataDir() reads LOCALAPPDATA (not HOME), so HOME alone is
+		// insufficient to redirect storage to the temp test directory.
+		const dataDir = join(TEST_DIR, ".local", "share", "quickchr");
+		process.env.QUICKCHR_DATA_DIR = dataDir;
+		const cacheDir = join(dataDir, "cache");
+		const machineDir = join(dataDir, "machines", "vm1");
 		mkdirSync(cacheDir, { recursive: true });
 		mkdirSync(machineDir, { recursive: true });
 		writeFileSync(join(cacheDir, "chr.img"), "cache-data");
 		writeFileSync(join(machineDir, "disk.img"), "machine-data");
-		writeFileSync(join(notesDir, "notes.txt"), "misc");
+		writeFileSync(join(dataDir, "notes.txt"), "misc");
 
 		const report = getQuickchrStorageReport();
 		expect(report.cacheBytes).toBe("cache-data".length);

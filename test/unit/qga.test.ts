@@ -158,8 +158,9 @@ describe("qgaSync", () => {
 
 	test("throws on connection refused (no server)", async () => {
 		const sockPath = join(TMP, "nonexistent.sock");
+		// ENOENT (socket file doesn't exist) maps to MACHINE_STOPPED — machine not running
 		await expect(qgaSync(sockPath, 2000)).rejects.toMatchObject({
-			code: "PROCESS_FAILED",
+			code: "MACHINE_STOPPED",
 		});
 	});
 });

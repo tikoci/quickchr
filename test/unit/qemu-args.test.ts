@@ -42,10 +42,13 @@ describe("buildQemuArgs", () => {
 			const machineIdx = args.indexOf("-M");
 			expect(args[machineIdx + 1]).toBe("virt");
 		} catch (e: unknown) {
-			// Skip if QEMU not installed
-			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
-				console.log("Skipping: QEMU not installed");
-				return;
+			// Skip if QEMU not installed or arm64 firmware not found
+			if (e && typeof e === "object" && "code" in e) {
+				const code = (e as { code: string }).code;
+				if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") {
+					console.log(`Skipping: ${code}`);
+					return;
+				}
 			}
 			throw e;
 		}

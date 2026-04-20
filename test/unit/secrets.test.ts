@@ -48,7 +48,10 @@ describe("secrets config-file fallback", () => {
 		const path = configPath(HOME, service);
 		expect(existsSync(path)).toBe(true);
 		expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ token: "abc123" });
-		expect(statSync(path).mode & 0o777).toBe(0o600);
+		// Windows always reports 0o666 regardless of requested mode — skip the assertion
+		if (process.platform !== "win32") {
+			expect(statSync(path).mode & 0o777).toBe(0o600);
+		}
 		expect(secrets.secretGetSync(service, "token")).toBe("abc123");
 
 		expect(secrets.secretDeleteSync(service, "token")).toBe(true);

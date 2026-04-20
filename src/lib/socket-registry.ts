@@ -66,9 +66,14 @@ export function createNamedSocket(
 }
 
 export function getNamedSocket(name: string): SocketEntry | undefined {
-	const path = socketPath(name);
-	if (!existsSync(path)) return undefined;
-	return JSON.parse(readFileSync(path, "utf-8")) as SocketEntry;
+	// Use try/catch instead of existsSync — on Windows, Bun's existsSync can
+	// return false for a file that was just written (caching bug). readFileSync
+	// is always authoritative and avoids the TOCTOU race.
+	try {
+		return JSON.parse(readFileSync(socketPath(name), "utf-8")) as SocketEntry;
+	} catch {
+		return undefined;
+	}
 }
 
 export function listNamedSockets(): SocketEntry[] {

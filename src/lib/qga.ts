@@ -149,8 +149,10 @@ function connectSocket(socketPath: string, timeoutMs: number): Promise<Socket> {
 			finish();
 		};
 
-		const onError = (err: Error) => {
-			finish(new QuickCHRError("PROCESS_FAILED", `QGA connection failed: ${err.message}`));
+		const onError = (err: NodeJS.ErrnoException) => {
+			// ENOENT on connect = named pipe / socket does not exist = machine not running
+			const code = err.code === "ENOENT" ? "MACHINE_STOPPED" : "PROCESS_FAILED";
+			finish(new QuickCHRError(code, `QGA connection failed: ${err.message}`));
 		};
 
 		socket.on("connect", onConnect);
