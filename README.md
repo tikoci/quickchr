@@ -31,11 +31,15 @@ sudo dnf install qemu-kvm qemu-system-aarch64 edk2-aarch64 qemu-img
 
 # Arch
 sudo pacman -S qemu-full
+```
 
-# Windows (winget)
+```powershell
+# Windows — install QEMU (qemu-img is included)
 winget install SoftwareFreedomConservancy.QEMU
-winget install cloudbase.qemu-img
-winget install Oven-sh.Bun
+
+# Install Bun (PowerShell — matches bun.sh official install docs)
+powershell -c "irm bun.sh/install.ps1 | iex"
+# Alternative: winget install Oven-sh.Bun
 ```
 
 ### Install
@@ -55,10 +59,22 @@ bun add @tikoci/quickchr
 
 ### CLI Usage
 
-```bash
-# Interactive setup wizard (first-time)
-quickchr setup
+The easiest way to start is the interactive wizard — it walks through
+every option and starts the CHR for you:
 
+```bash
+quickchr setup
+```
+
+![quickchr setup wizard walkthrough](./docs/images/wizard-demo.gif)
+
+Or run `quickchr` with no arguments on a TTY to get the same wizard
+automatically. See [MANUAL.md §3 setup](./MANUAL.md#setup) for a
+step-by-step breakdown of every wizard prompt.
+
+All wizard options are also available as flags for scripting:
+
+```bash
 # Create a machine without starting it
 quickchr add --name my-chr --channel stable --arch arm64
 

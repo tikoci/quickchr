@@ -57,10 +57,10 @@ by the user (or their AI agent) using `quickchr` as a building block.
 
 | Component | Required for | Install |
 |---|---|---|
-| Bun ≥ 1.1 | runtime | <https://bun.sh> |
-| `qemu-system-x86_64` | x86 CHR | brew/apt/dnf/pacman/winget |
-| `qemu-system-aarch64` | arm64 CHR | brew/apt/dnf/pacman/winget |
-| `qemu-img` | `--boot-size`, `--add-disk`, snapshots | usually packaged with QEMU |
+| Bun ≥ 1.1 | runtime | macOS/Linux: `curl -fsSL https://bun.sh/install \| bash` · Windows: `powershell -c "irm bun.sh/install.ps1 \| iex"` (or `winget install Oven-sh.Bun`) |
+| `qemu-system-x86_64` | x86 CHR | brew/apt/dnf/pacman · Windows: `winget install SoftwareFreedomConservancy.QEMU` |
+| `qemu-system-aarch64` | arm64 CHR | brew/apt/dnf/pacman · Windows: bundled in the SFC QEMU package above |
+| `qemu-img` | `--boot-size`, `--add-disk`, snapshots | included in all standard QEMU packages (brew, apt, dnf, SFC installer) |
 | UEFI firmware (edk2) | arm64 CHR | `qemu-efi-aarch64` (apt), `edk2-aarch64` (dnf), bundled with `qemu` (brew) |
 | `socket_vmnet` (optional) | rootless `shared`/`bridged` networking on macOS | `brew install socket_vmnet` |
 | `socat` (optional) | piping serial console externally | brew/apt |
@@ -97,6 +97,8 @@ state. Exit code is `0` when no checks return `error` (warnings are OK).
 ```bash
 quickchr doctor              # human-readable
 ```
+
+![quickchr doctor output](./images/doctor-demo.gif)
 
 Use this whenever a `start` fails — the diagnostic almost always points
 at a missing dependency, missing firmware, or insufficient disk.
@@ -275,15 +277,63 @@ goes through QEMU monitor). `list` and `delete` work in either state
 
 #### `setup`
 
-Interactive wizard (`@clack/prompts`) that walks through machine
-creation, network selection, user/admin setup, optional license, and
-device-mode. Loops with a main menu so users can create multiple
-machines or tweak settings. Runs by default when `quickchr` is invoked
-with no command and stdout is a TTY.
+Interactive wizard (`@clack/prompts`) that walks through all machine creation
+options and starts the CHR. Triggered by `quickchr setup` or automatically
+when `quickchr` is run with no subcommand on a TTY.
 
-The wizard never sets `secureLogin: true` directly — the "managed login"
-choice sets `disableAdmin: true` and the provisioning step auto-creates
-the `quickchr` user from that signal.
+![quickchr setup wizard walkthrough](./images/wizard-demo.gif)
+
+**First-run detection**: if no machines exist yet, the wizard opens with a
+welcome message before the first prompt.
+
+**Setup menu loop**: when running via `quickchr setup` (not the bare `quickchr`
+shortcut), a main menu appears after each machine starts, offering to create
+another machine, view status, or quit.
+
+**Wizard steps** (all traced from `src/cli/wizard.ts`):
+
+| Step | Prompt | Default | Corresponding flag |
+|---|---|---|---|
+| 1 | Version source: channel or specific | channel | `--channel` / `--version` |
+| 2 | Channel (if channel chosen) | `long-term` | `--channel` |
+| 3 | Architecture | host native | `--arch` |
+| 4 | Instance name | auto-generated | `--name` |
+| 5 | CPU cores | 1 | `--cpu` |
+| 6 | Memory | 256 MB | `--mem` |
+| 7 | Boot disk format (qcow2 / raw) | qcow2 | `--boot-disk-format` |
+| 8 | Boot disk resize (optional, qcow2 only) | no resize | `--boot-size` |
+| 9 | Extra blank disks (repeatable) | none | `--add-disk` |
+| 10 | Additional networks (macOS/Linux) | user-mode only | `--add-network` |
+| 11 | Provisioning (packages, device-mode, user, license) | optional | various |
+| 12 | Run mode: background / foreground | background | `--bg` / `--fg` |
+| 13 | Final confirmation | — | — |
+
+Steps 7–9 are skipped when `qemu-img` is absent (a warning is shown). Step 10
+only appears when the platform supports networks beyond user-mode (macOS or
+Linux). The provisioning gate (step 11) only appears for RouterOS ≥ 7.20.8;
+older versions show an upgrade prompt.
+
+**Provisioning sub-steps** (within step 11):
+
+| Sub-step | Options |
+|---|---|
+| Packages | No extra / All packages / Choose (multiselect per arch) |
+| Device-mode | no / yes → profile (rose/advanced/basic/home) + extra feature flags |
+| Login | quickchr managed (recommended) / custom user+pass / keep admin no-password |
+| License | no / yes → level (p1/p10/unlimited) + credentials (stored or entered) |
+
+**Post-start**: after a successful background boot, the wizard shows port
+details (REST URL, SSH, WinBox), login credentials, and optionally installs
+shell completions if not yet configured.
+
+**Notes**:
+
+- The wizard never sets `secureLogin: true` directly. "Managed login" sets
+  `disableAdmin: true`; the provisioning step auto-creates the `quickchr`
+  managed user from that signal.
+- Set `QUICKCHR_NO_PROMPT=1` to suppress all wizard flows (useful in scripts
+  and CI pipelines).
+- `Ctrl-C` at any prompt cleanly cancels with no partial machine left behind.
 
 #### `completions [bash|zsh|fish]`
 

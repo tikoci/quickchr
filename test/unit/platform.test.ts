@@ -79,8 +79,12 @@ describe("getQemuInstallHint", () => {
 		expect(getQemuInstallHint("pacman")).toContain("qemu");
 	});
 
-	test("winget: returns winget install command", () => {
-		expect(getQemuInstallHint("winget")).toContain("winget install");
+	test("winget: returns winget install command for SoftwareFreedomConservancy.QEMU only", () => {
+		const hint = getQemuInstallHint("winget");
+		// Must point to the SFC package (standard QEMU for Windows, includes qemu-img)
+		expect(hint).toBe("winget install SoftwareFreedomConservancy.QEMU");
+		// Must NOT suggest the outdated cloudbase/qemu-img standalone package (only v2.3.0 exists)
+		expect(hint).not.toContain("cloudbase");
 	});
 
 	test("unknown: returns generic install note", () => {
