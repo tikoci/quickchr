@@ -22,11 +22,12 @@ const DEFAULT_MCAST_GROUP = "230.0.0.1";
 
 // In-memory write-through cache — works around Bun Windows FS caching bugs
 // where writeFileSync followed by immediate readdirSync/readFileSync returns stale data.
-const _cache = new Map<string, SocketEntry>();
+// Uses a plain object (not Map) to avoid potential Bun Map quirks on Windows.
+let _cache: Record<string, SocketEntry> = Object.create(null);
 
 /** Reset in-memory socket cache. Exported for test cleanup only. */
 export function _resetSocketCache(): void {
-	_cache.clear();
+	_cache = Object.create(null);
 }
 
 export function getSocketRegistryDir(): string {
@@ -41,7 +42,7 @@ function socketPath(name: string): string {
 
 function saveEntry(entry: SocketEntry): void {
 	writeFileSync(socketPath(entry.name), JSON.stringify(entry, null, "\t") + "\n");
-	_cache.set(entry.name, entry);
+	_cache[entry.name] = entry;
 }
 
 function allocatePort(existing: SocketEntry[]): number {
@@ -54,7 +55,7 @@ export function createNamedSocket(
 	name: string,
 	opts?: { mode?: "mcast" | "listen-connect"; port?: number; mcastGroup?: string },
 ): SocketEntry {
-	if (_cache.has(name) || existsSync(socketPath(name))) {
+	if (name in _cache || existsSync(socketPath(name))) {
 		throw new QuickCHRError("STATE_ERROR", `Named socket "${name}" already exists`);
 	}
 
@@ -76,11 +77,10 @@ export function createNamedSocket(
 }
 
 export function getNamedSocket(name: string): SocketEntry | undefined {
-	const cached = _cache.get(name);
-	if (cached) return cached;
+	if (name in _cache) return _cache[name];
 	try {
 		const entry = JSON.parse(readFileSync(socketPath(name), "utf-8")) as SocketEntry;
-		_cache.set(name, entry);
+		_cache[name] = entry;
 		return entry;
 	} catch {
 		return undefined;
@@ -89,25 +89,26 @@ export function getNamedSocket(name: string): SocketEntry | undefined {
 
 export function listNamedSockets(): SocketEntry[] {
 	const dir = getSocketRegistryDir();
-	const merged = new Map<string, SocketEntry>(_cache);
+	const merged: Record<string, SocketEntry> = { ..._cache };
 	try {
 		for (const file of readdirSync(dir)) {
 			if (!file.endsWith(".json")) continue;
 			const name = file.replace(/\.json$/, "");
-			if (!merged.has(name)) {
+			if (!(name in merged)) {
 				try {
 					const entry = JSON.parse(readFileSync(join(dir, file), "utf-8")) as SocketEntry;
-					merged.set(name, entry);
-					_cache.set(name, entry);
+					merged[name] = entry;
+					_cache[name] = entry;
 				} catch {}
 			}
 		}
 	} catch {}
-	return [...merged.values()];
+	return Object.values(merged);
 }
 
 export function removeNamedSocket(name: string): boolean {
-	const wasCached = _cache.delete(name);
+	const wasCached = name in _cache;
+	delete _cache[name];
 	const path = socketPath(name);
 	if (!existsSync(path)) return wasCached;
 	rmSync(path);

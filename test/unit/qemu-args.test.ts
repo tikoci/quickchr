@@ -136,11 +136,10 @@ describe("buildQemuArgs", () => {
 	test("background mode uses socket channels", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ background: true }));
-			// On Unix: .sock files; on Windows: named pipes (\\.\pipe\...-serial / ...-monitor)
-			// Both appear as a `path=` value in a -chardev socket arg.
-			const serialArg = args.find((a) => a.includes("serial0") && a.includes("path="));
+			// On Unix: .sock files with path=; on Windows: TCP with host=/port=
+			const serialArg = args.find((a) => a.includes("serial0") && (a.includes("path=") || a.includes("host=")));
 			expect(serialArg).toBeDefined();
-			const monitorArg = args.find((a) => a.includes("monitor0") && a.includes("path="));
+			const monitorArg = args.find((a) => a.includes("monitor0") && (a.includes("path=") || a.includes("host=")));
 			expect(monitorArg).toBeDefined();
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
@@ -160,8 +159,8 @@ describe("buildQemuArgs", () => {
 			const args = await buildQemuArgs(makeConfig({ background: false }));
 			const stdioArg = args.find((a) => a.includes("stdio"));
 			expect(stdioArg).toBeDefined();
-			// Monitor socket is present in both Unix (.sock) and Windows (named pipe) modes
-			const monitorArg = args.find((a) => a.includes("monitor0") && a.includes("path="));
+			// Monitor present on both Unix (path=) and Windows (host=/port=)
+			const monitorArg = args.find((a) => a.includes("monitor0") && (a.includes("path=") || a.includes("host=")));
 			expect(monitorArg).toBeDefined();
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
