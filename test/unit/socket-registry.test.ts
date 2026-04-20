@@ -9,6 +9,7 @@ import {
 	addSocketMember,
 	removeSocketMember,
 	getSocketRegistryDir,
+	_resetSocketCache,
 } from "../../src/lib/socket-registry.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
@@ -19,6 +20,7 @@ beforeEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
 	mkdirSync(TEST_DIR, { recursive: true });
 	process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+	_resetSocketCache();
 });
 
 afterEach(() => {

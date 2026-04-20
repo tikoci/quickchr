@@ -20,6 +20,8 @@ const EFI_CODE_PATHS = [
 	"/usr/share/edk2-armvirt/aarch64/QEMU_EFI.fd",
 	// Generic
 	"/usr/share/qemu-efi-aarch64/QEMU_EFI.fd",
+	// Windows (winget QEMU)
+	`${process.env.PROGRAMFILES || "C:\\Program Files"}\\qemu\\share\\edk2-aarch64-code.fd`,
 ];
 
 const EFI_VARS_PATHS = [
@@ -29,6 +31,8 @@ const EFI_VARS_PATHS = [
 	"/usr/share/edk2/aarch64/QEMU_VARS.fd",
 	"/usr/share/edk2-armvirt/aarch64/vars-template-pflash.raw",
 	"/usr/share/qemu-efi-aarch64/QEMU_VARS.fd",
+	// Windows (winget QEMU)
+	`${process.env.PROGRAMFILES || "C:\\Program Files"}\\qemu\\share\\edk2-arm-vars.fd`,
 ];
 
 /** Detect the system package manager. */
