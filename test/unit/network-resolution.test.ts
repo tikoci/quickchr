@@ -1,7 +1,14 @@
-import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 import * as platformMod from "../../src/lib/platform.ts";
-import * as socketRegistryMod from "../../src/lib/socket-registry.ts";
+import {
+	createNamedSocket,
+	addSocketMember,
+	removeNamedSocket,
+	_resetSocketCache,
+} from "../../src/lib/socket-registry.ts";
 
 const mockDaemonRunning = mock(() => true);
 mock.module("../../src/lib/platform.ts", () => ({
@@ -225,39 +232,29 @@ describe("resolveNetworkConfig", () => {
 	// ── Socket: named ─────────────────────────────────────────────────
 
 	describe("socket-named", () => {
-		let getNamedSocketFn = mock((_name?: unknown) => undefined as unknown);
-
-		mock.module("../../src/lib/socket-registry.ts", () => ({
-			...socketRegistryMod,
-			getNamedSocket: (...args: unknown[]) => getNamedSocketFn(args[0]),
-		}));
+		const TEST_DIR = join(import.meta.dir, ".tmp-network-resolution-sockets");
+		const origDataDir = process.env.QUICKCHR_DATA_DIR;
 
 		beforeEach(() => {
-			getNamedSocketFn = mock((_name?: unknown) => undefined as unknown);
+			rmSync(TEST_DIR, { recursive: true, force: true });
+			mkdirSync(TEST_DIR, { recursive: true });
+			process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+			_resetSocketCache();
 		});
 
-		afterAll(() => {
-			// Restore the REAL socket-registry module so other test files (e.g.
-			// socket-registry.test.ts) don't see this mocked getNamedSocket.
-			// Bun's mock.module is process-wide and persists across files.
-			mock.module("../../src/lib/socket-registry.ts", () => ({
-				...socketRegistryMod,
-			}));
+		afterEach(() => {
+			rmSync(TEST_DIR, { recursive: true, force: true });
+			if (origDataDir !== undefined) {
+				process.env.QUICKCHR_DATA_DIR = origDataDir;
+			} else {
+				delete process.env.QUICKCHR_DATA_DIR;
+			}
+			_resetSocketCache();
 		});
 
-		test("resolves mcast socket", async () => {
-			getNamedSocketFn.mockReturnValue({
-				name: "mylink",
-				mode: "mcast",
-				mcastGroup: "230.0.0.1",
-				port: 4000,
-				createdAt: "",
-				members: [],
-			});
-			const { resolveNetworkConfig: resolve } = await import(
-				"../../src/lib/network.ts"
-			);
-			const result = resolve(
+		test("resolves mcast socket", () => {
+			createNamedSocket("mylink", { mode: "mcast", port: 4000, mcastGroup: "230.0.0.1" });
+			const result = resolveNetworkConfig(
 				cfg({ type: "socket", name: "mylink" }),
 				linuxCtx(),
 			);
@@ -265,18 +262,9 @@ describe("resolveNetworkConfig", () => {
 			expect(netdev).toBe("socket,id=net0,mcast=230.0.0.1:4000");
 		});
 
-		test("resolves listen-connect: first member listens", async () => {
-			getNamedSocketFn.mockReturnValue({
-				name: "mylink",
-				mode: "listen-connect",
-				port: 4000,
-				createdAt: "",
-				members: [],
-			});
-			const { resolveNetworkConfig: resolve } = await import(
-				"../../src/lib/network.ts"
-			);
-			const result = resolve(
+		test("resolves listen-connect: first member listens", () => {
+			createNamedSocket("mylink", { mode: "listen-connect", port: 4000 });
+			const result = resolveNetworkConfig(
 				cfg({ type: "socket", name: "mylink" }),
 				linuxCtx(),
 			);
@@ -284,18 +272,10 @@ describe("resolveNetworkConfig", () => {
 			expect(netdev).toBe("socket,id=net0,listen=:4000");
 		});
 
-		test("resolves listen-connect: subsequent members connect", async () => {
-			getNamedSocketFn.mockReturnValue({
-				name: "mylink",
-				mode: "listen-connect",
-				port: 4000,
-				createdAt: "",
-				members: ["chr1"],
-			});
-			const { resolveNetworkConfig: resolve } = await import(
-				"../../src/lib/network.ts"
-			);
-			const result = resolve(
+		test("resolves listen-connect: subsequent members connect", () => {
+			createNamedSocket("mylink", { mode: "listen-connect", port: 4000 });
+			addSocketMember("mylink", "chr1");
+			const result = resolveNetworkConfig(
 				cfg({ type: "socket", name: "mylink" }),
 				linuxCtx(),
 			);
@@ -303,13 +283,9 @@ describe("resolveNetworkConfig", () => {
 			expect(netdev).toBe("socket,id=net0,connect=127.0.0.1:4000");
 		});
 
-		test("throws when socket not found", async () => {
-			getNamedSocketFn.mockReturnValue(undefined);
-			const { resolveNetworkConfig: resolve } = await import(
-				"../../src/lib/network.ts"
-			);
+		test("throws when socket not found", () => {
 			expect(() =>
-				resolve(
+				resolveNetworkConfig(
 					cfg({ type: "socket", name: "missing" }),
 					linuxCtx(),
 				),
