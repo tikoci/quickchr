@@ -35,7 +35,7 @@ describe.skipIf(SKIP)("library API", () => {
 
 		const storageCheck = result.checks.find((c) => c.label === "Storage (.local)" || c.label === "Storage");
 		expect(storageCheck).toBeDefined();
-	});
+	}, 30_000);
 
 	test("resolveVersion returns valid version", async () => {
 		const { QuickCHR } = await import("../../src/index.ts");

@@ -241,7 +241,7 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 		expect(instance).toBeDefined();
 		const { isConsoleReady } = await import("../../src/lib/console.ts");
 		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
-		const status = await isConsoleReady(instance!.state.machineDir, 10_000);
+		const status = await isConsoleReady(instance!.state.machineDir, 10_000, instance!.state.portBase);
 		expect(status === "ready" || status === "login").toBe(true);
 	}, 30_000);
 

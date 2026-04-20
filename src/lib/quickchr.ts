@@ -1083,10 +1083,12 @@ export class QuickCHR {
 		const arch: Arch = opts.arch ?? hostArchToChr();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 
-		// Check prerequisites
-		requireQemu(arch);
-		if (arch === "arm64") {
-			requireFirmware();
+		// Check prerequisites (skip for dry-run — no QEMU needed)
+		if (!opts.dryRun) {
+			requireQemu(arch);
+			if (arch === "arm64") {
+				requireFirmware();
+			}
 		}
 
 		// Resolve name
