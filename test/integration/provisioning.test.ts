@@ -43,7 +43,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 		try {
 			instance = await QuickCHR.start({
 				version: "7.20.7",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-old-boot",
 				secureLogin: false,
@@ -73,7 +73,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 
 		await expect(QuickCHR.start({
 			version: "7.20.7",
-			arch: "x86",
+			arch: process.arch === "arm64" ? "arm64" : "x86",
 			background: true,
 			name: "integration-prov-old-blocked",
 			secureLogin: true,
@@ -93,7 +93,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 		try {
 			instance = await QuickCHR.start({
 				version: "7.20.8",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-floor-green",
 				secureLogin: true,
@@ -126,7 +126,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-bg",
 				user: { name: "testuser", password: "TestPass1" },
@@ -154,7 +154,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-disable",
 				user: { name: "skyfi", password: "SkyfiPass1" },
@@ -199,7 +199,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-fg",
 				user: { name: "fguser", password: "FgPass1" },
@@ -229,7 +229,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-managed",
 				secureLogin: true,
@@ -275,7 +275,7 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			// we must explicitly wait for REST before using the console.
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-console",
 				secureLogin: false,
@@ -365,7 +365,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-corner",
 			});
@@ -395,7 +395,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-corner",
 				user: { name: "groupcheck", password: "GroupPass1" },
@@ -440,7 +440,7 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-ssh-key",
 				secureLogin: true,

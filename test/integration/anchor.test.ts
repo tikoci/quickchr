@@ -73,7 +73,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 
 			instance = await QuickCHR.start({
 				channel: "stable",
-				arch: "x86",
+				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: MACHINE_NAME,
 			});
