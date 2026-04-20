@@ -62,7 +62,11 @@ function directorySize(path: string): number {
 		if (entry.isDirectory()) {
 			total += directorySize(fullPath);
 		} else {
-			total += lstatSync(fullPath).size;
+			try {
+				total += lstatSync(fullPath).size;
+			} catch {
+				// Skip entries that can't be stat'd (e.g. Windows named pipes throw EACCES)
+			}
 		}
 	}
 	return total;

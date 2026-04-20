@@ -20,6 +20,7 @@ const tmpHome = join(import.meta.dir, "tmp-completions-home");
 const SHELLS: SupportedShell[] = ["bash", "zsh", "fish"];
 
 const originalHome = process.env.HOME;
+const originalDataDir = process.env.QUICKCHR_DATA_DIR;
 const originalShell = process.env.SHELL;
 const originalFishVersion = process.env.FISH_VERSION;
 const originalZshVersion = process.env.ZSH_VERSION;
@@ -35,6 +36,8 @@ beforeEach(() => {
 
 afterEach(() => {
 	process.env.HOME = originalHome;
+	if (originalDataDir === undefined) delete process.env.QUICKCHR_DATA_DIR;
+	else process.env.QUICKCHR_DATA_DIR = originalDataDir;
 	process.env.SHELL = originalShell;
 	if (originalFishVersion === undefined) delete process.env.FISH_VERSION;
 	else process.env.FISH_VERSION = originalFishVersion;
@@ -355,6 +358,7 @@ describe("installCompletions / uninstallCompletions", () => {
 describe("listMachineNamesForCompletion", () => {
 	test("lists machine directories from quickchr state", () => {
 		process.env.HOME = tmpHome;
+		process.env.QUICKCHR_DATA_DIR = join(tmpHome, ".local", "share", "quickchr");
 		const machinesDir = join(tmpHome, ".local", "share", "quickchr", "machines");
 		for (const name of ["alpha", "beta"]) {
 			mkdirSync(join(machinesDir, name), { recursive: true });
@@ -368,6 +372,7 @@ describe("listMachineNamesForCompletion", () => {
 describe("listRunningMachineNamesForCompletion", () => {
 	test("returns only running machines and skips unreadable state files", () => {
 		process.env.HOME = tmpHome;
+		process.env.QUICKCHR_DATA_DIR = join(tmpHome, ".local", "share", "quickchr");
 		const machinesDir = join(tmpHome, ".local", "share", "quickchr", "machines");
 		mkdirSync(join(machinesDir, "alpha"), { recursive: true });
 		writeFileSync(join(machinesDir, "alpha", "machine.json"), JSON.stringify({ status: "running" }));

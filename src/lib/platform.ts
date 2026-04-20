@@ -198,7 +198,7 @@ export function getQemuInstallHint(pkgMgr?: PackageManager): string {
 		case "pacman":
 			return "sudo pacman -S qemu-full";
 		case "winget":
-			return "winget install QEMU.QEMU";
+			return "winget install SoftwareFreedomConservancy.QEMU";
 		default:
 			return "Install QEMU (including qemu-system-* and qemu-img)";
 	}

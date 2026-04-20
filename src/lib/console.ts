@@ -17,10 +17,9 @@
  * - On first boot: license [Y/n] prompt, then forced password change
  */
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { connect, type Socket } from "node:net";
 import { QuickCHRError } from "./types.ts";
+import { channelPath, channelFileExists } from "./channels.ts";
 
 /** Default timeout for console operations. */
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -62,8 +61,8 @@ interface ConsoleSessionState {
  * Connect to the serial console socket and start buffer accumulation.
  */
 function openSession(machineDir: string): ConsoleSessionState {
-	const socketPath = join(machineDir, "serial.sock");
-	if (!existsSync(socketPath)) {
+	const socketPath = channelPath(machineDir, "serial");
+	if (!channelFileExists(socketPath)) {
 		throw new QuickCHRError(
 			"MACHINE_STOPPED",
 			"Serial socket not found — is the machine running in background mode?",
@@ -339,7 +338,13 @@ export async function consoleExec(
 		// Wait for socket to connect
 		await new Promise<void>((resolve, reject) => {
 			session.socket.once("connect", resolve);
-			session.socket.once("error", reject);
+			session.socket.once("error", (err: NodeJS.ErrnoException) => {
+				if (err.code === "ENOENT" || err.code === "ECONNREFUSED") {
+					reject(new QuickCHRError("MACHINE_STOPPED", "Serial channel not found — is the machine running in background mode?"));
+				} else {
+					reject(err);
+				}
+			});
 		});
 
 		// Ensure logged in and at CLI prompt

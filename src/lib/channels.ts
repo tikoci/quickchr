@@ -19,7 +19,7 @@ import { qgaKvmWarning } from "./platform.ts";
  * On Unix: a .sock file in machineDir.
  * On Windows: a named pipe — both QEMU and Node.js net.connect() recognize \\.\pipe\ paths.
  */
-function channelPath(machineDir: string, channel: "monitor" | "serial" | "qga"): string {
+export function channelPath(machineDir: string, channel: "monitor" | "serial" | "qga"): string {
 	if (process.platform === "win32") {
 		return `\\\\.\\pipe\\quickchr-${basename(machineDir)}-${channel}`;
 	}
@@ -27,7 +27,7 @@ function channelPath(machineDir: string, channel: "monitor" | "serial" | "qga"):
 }
 
 /** Return true if the channel IPC endpoint can be checked via existsSync (Unix only). */
-function channelFileExists(path: string): boolean {
+export function channelFileExists(path: string): boolean {
 	if (process.platform === "win32") {
 		// Named pipes don't appear as regular filesystem entries — let connect() fail instead.
 		return true;

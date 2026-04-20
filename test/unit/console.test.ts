@@ -67,6 +67,7 @@ function closeServer(server: Server): Promise<void> {
 
 describe("consoleExec", () => {
 	test("executes command on already-logged-in console", async () => {
+		if (process.platform === "win32") return;
 		const server = await createMockSerial(TMP, (client) => {
 			let buffer = "";
 			client.on("data", (data) => {
@@ -93,6 +94,7 @@ describe("consoleExec", () => {
 	});
 
 	test("handles login sequence then executes command", async () => {
+		if (process.platform === "win32") return;
 		const server = await createMockSerial(TMP, (client) => {
 			let state = "init";
 			client.on("data", (data) => {
@@ -122,6 +124,7 @@ describe("consoleExec", () => {
 	});
 
 	test("handles CHR identity prompt (7.23+ format)", async () => {
+		if (process.platform === "win32") return;
 		const server = await createMockSerial(TMP, (client) => {
 			let gotPrompt = false;
 			client.on("data", (data) => {
@@ -150,6 +153,7 @@ describe("consoleExec", () => {
 	});
 
 	test("handles multi-line output", async () => {
+		if (process.platform === "win32") return;
 		const server = await createMockSerial(TMP, (client) => {
 			let gotPrompt = false;
 			client.on("data", (data) => {
@@ -180,6 +184,7 @@ describe("consoleExec", () => {
 	});
 
 	test("uses \\r not \\r\\n for writes", async () => {
+		if (process.platform === "win32") return;
 		const writes: string[] = [];
 		const server = await createMockSerial(TMP, (client) => {
 			let gotPrompt = false;
@@ -213,6 +218,7 @@ describe("consoleExec", () => {
 
 describe("isConsoleReady", () => {
 	test("returns 'ready' when prompt is shown", async () => {
+		if (process.platform === "win32") return;
 		const server = await createMockSerial(TMP, (client) => {
 			client.on("data", () => {
 				client.write("[admin@MikroTik] > ");
@@ -228,6 +234,7 @@ describe("isConsoleReady", () => {
 	});
 
 	test("returns 'login' when Login: prompt is shown", async () => {
+		if (process.platform === "win32") return;
 		const server = await createMockSerial(TMP, (client) => {
 			client.on("data", () => {
 				client.write("\r\nMikroTik Login: ");

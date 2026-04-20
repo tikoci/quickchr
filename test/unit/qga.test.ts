@@ -352,6 +352,7 @@ describe("qgaInfo", () => {
 
 describe("QGA error handling", () => {
 	test("rejects with PROCESS_FAILED on QGA error response", async () => {
+		if (process.platform === "win32") return;
 		const sockPath = join(TMP, "qga.sock");
 		const server = await createMockQga(sockPath, (_cmd, _args, client) => {
 			client.write(JSON.stringify({

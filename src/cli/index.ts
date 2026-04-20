@@ -2622,4 +2622,4 @@ Credential resolution order (highest priority first):
 	}
 }
 
-main();
+if (import.meta.main) main();
