@@ -1,6 +1,7 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 
 import * as platformMod from "../../src/lib/platform.ts";
+import * as socketRegistryMod from "../../src/lib/socket-registry.ts";
 
 const mockDaemonRunning = mock(() => true);
 mock.module("../../src/lib/platform.ts", () => ({
@@ -227,6 +228,7 @@ describe("resolveNetworkConfig", () => {
 		let getNamedSocketFn = mock((_name?: unknown) => undefined as unknown);
 
 		mock.module("../../src/lib/socket-registry.ts", () => ({
+			...socketRegistryMod,
 			getNamedSocket: (...args: unknown[]) => getNamedSocketFn(args[0]),
 		}));
 
