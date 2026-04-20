@@ -201,7 +201,7 @@ describe("downloadPackages", () => {
 
 		await expect(downloadPackages("7.22.1", "x86", cacheDir)).rejects.toMatchObject({
 			code: "PROCESS_FAILED",
-			message: expect.stringContaining("Failed to extract packages"),
+			message: expect.stringContaining("ZIP extraction failed"),
 		});
 	});
 });

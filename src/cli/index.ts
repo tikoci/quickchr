@@ -2189,7 +2189,7 @@ async function cmdLogs(argv: string[]) {
 
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { join } = await import("node:path");
-	const { existsSync } = await import("node:fs");
+	const { existsSync, readFileSync, statSync, openSync, readSync, closeSync } = await import("node:fs");
 	const { machineNotFoundMessage } = await import("./format.ts");
 
 	const instance = QuickCHR.get(name);
@@ -2217,14 +2217,35 @@ async function cmdLogs(argv: string[]) {
 	}
 
 	if (follow) {
-		const tail = Bun.spawn(["tail", "-f", "-n", String(lines), logPath], {
-			stdout: "inherit",
-			stderr: "inherit",
-		});
-		await tail.exited;
+		// Pure JS follow mode: print last N lines then poll for new content.
+		const printLastLines = (n: number) => {
+			const content = readFileSync(logPath, "utf-8");
+			const allLines = content.split("\n");
+			const slice = allLines.slice(-n);
+			process.stdout.write(slice.join("\n"));
+			if (slice.at(-1) !== "") process.stdout.write("\n");
+		};
+		printLastLines(lines);
+		let fileSize = statSync(logPath).size;
+		const interval = setInterval(() => {
+			try {
+				const newSize = statSync(logPath).size;
+				if (newSize > fileSize) {
+					const buf = new Uint8Array(newSize - fileSize);
+					const fd = openSync(logPath, "r");
+					readSync(fd, buf, 0, buf.length, fileSize);
+					closeSync(fd);
+					process.stdout.write(new TextDecoder().decode(buf));
+					fileSize = newSize;
+				}
+			} catch { /* file may rotate or be removed */ }
+		}, 250);
+		process.on("SIGINT", () => { clearInterval(interval); process.exit(0); });
+		await new Promise<void>(() => { /* keep alive until SIGINT */ });
 	} else {
-		const tail = Bun.spawnSync(["tail", "-n", String(lines), logPath], { stdout: "pipe" });
-		process.stdout.write(tail.stdout);
+		const content = readFileSync(logPath, "utf-8");
+		const allLines = content.split("\n");
+		process.stdout.write(allLines.slice(-lines).join("\n") + "\n");
 	}
 }
 

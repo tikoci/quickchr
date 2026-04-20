@@ -50,9 +50,10 @@ export function detectCurrentShell(): ShellInfo {
 	// Resolve full path for the detected binary (or fall back to $SHELL).
 	let shell: string;
 	if (detectedBinary) {
-		const which = Bun.spawnSync(["which", detectedBinary], { stdout: "pipe", stderr: "pipe" });
+		const probe = process.platform === "win32" ? ["where.exe", detectedBinary] : ["which", detectedBinary];
+		const which = Bun.spawnSync(probe, { stdout: "pipe", stderr: "pipe" });
 		shell = which.exitCode === 0
-			? new TextDecoder().decode(which.stdout).trim()
+			? new TextDecoder().decode(which.stdout).trim().split(/\r?\n/)[0] ?? detectedBinary
 			: detectedBinary;
 	} else {
 		const shellEnv = process.env.SHELL ?? "";

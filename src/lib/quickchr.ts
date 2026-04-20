@@ -19,7 +19,7 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES, CHANNELS } from "./types.ts";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
 	resolveVersion,
 	isValidVersion,
@@ -701,9 +701,31 @@ async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> 
 	return false;
 }
 
+/** Wait for CHR to boot with periodic progress status updates every 20s. */
+async function waitForBootWithProgress(
+	instance: ChrInstance,
+	timeoutMs: number,
+	log: ProgressLogger,
+	label: string,
+): Promise<boolean> {
+	log.status(label);
+	const start = Date.now();
+	const progressInterval = setInterval(() => {
+		const elapsedS = Math.round((Date.now() - start) / 1000);
+		const remainingS = Math.max(0, Math.round((timeoutMs - (Date.now() - start)) / 1000));
+		log.status(`  Still waiting for CHR to boot... (${elapsedS}s elapsed, up to ${remainingS}s remaining)`);
+	}, 20_000);
+	try {
+		return await instance.waitForBoot(timeoutMs);
+	} finally {
+		clearInterval(progressInterval);
+	}
+}
+
 async function hardRebootMachine(
 	state: MachineState,
 	launchConfig: QemuLaunchConfig,
+	log: ProgressLogger,
 ): Promise<"monitor" | "signal"> {
 	if (!state.pid) {
 		throw new QuickCHRError("PROCESS_FAILED", "Cannot hard-reboot machine: missing QEMU pid");
@@ -715,7 +737,7 @@ async function hardRebootMachine(
 		await monitorCommand(state.machineDir, "quit", 4000);
 	} catch (e) {
 		method = "signal";
-		console.warn(`Device-mode: monitor quit failed, falling back to process terminate (${e instanceof Error ? e.message : String(e)})`);
+		log.warn(`Device-mode: monitor quit failed, falling back to process terminate (${e instanceof Error ? e.message : String(e)})`);
 	}
 
 	const exited = await waitForPidExit(state.pid, 5000);
@@ -866,10 +888,10 @@ async function applyDeviceMode(
 	}
 
 	if (requiresPowerCycle) {
-		const rebootMethod = await hardRebootMachine(machineState, launchConfig);
+		const rebootMethod = await hardRebootMachine(machineState, launchConfig, log);
 		log.status(`  Device-mode power-cycled via ${rebootMethod === "monitor" ? "QEMU monitor quit" : "process terminate"}`);
 
-		const rebooted = await instance.waitForBoot(bootTimeout);
+		const rebooted = await waitForBootWithProgress(instance, bootTimeout, log, "  Waiting for CHR to reboot after device-mode power-cycle...");
 		if (!rebooted) {
 			throw new QuickCHRError(
 				"BOOT_TIMEOUT",
@@ -1350,7 +1372,7 @@ export class QuickCHR {
 
 		if (opts.installAllPackages) {
 			const installed = await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
-			await instance.waitForBoot(bootTimeout);
+			await waitForBootWithProgress(instance, bootTimeout, log, "  Waiting for CHR to reboot after package installation...");
 			const current = loadMachine(machineState.name);
 			if (current) {
 				current.packages = installed;
@@ -1359,7 +1381,7 @@ export class QuickCHR {
 			machineState.packages = installed;
 		} else if (opts.packages && opts.packages.length > 0) {
 			const installed = await installPackages(opts.packages, machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
-			await instance.waitForBoot(bootTimeout);
+			await waitForBootWithProgress(instance, bootTimeout, log, "  Waiting for CHR to reboot after package installation...");
 			const current = loadMachine(machineState.name);
 			if (current) {
 				current.packages = installed;
@@ -1668,12 +1690,12 @@ export class QuickCHR {
 		});
 
 		// socat (optional, for serial console piping)
-		const socatResult = Bun.spawnSync(["which", "socat"], { stdout: "pipe", stderr: "pipe" });
-		if (socatResult.exitCode === 0) {
+		const socatPath = findCommandOnPath("socat");
+		if (socatPath) {
 			checks.push({
 				label: "socat",
 				status: "ok",
-				detail: new TextDecoder().decode(socatResult.stdout).trim(),
+				detail: socatPath,
 			});
 		} else {
 			checks.push({

@@ -5,8 +5,8 @@
  * manages process spawn/stop, and handles PID tracking.
  */
 
-import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync, truncateSync } from "node:fs";
+import { join, basename } from "node:path";
 import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware } from "./platform.ts";
@@ -188,12 +188,16 @@ function buildChannelArgs(
 	machineDir: string,
 	background: boolean,
 ): void {
-	const monitorSock = join(machineDir, "monitor.sock");
-	const serialSock = join(machineDir, "serial.sock");
-	const qgaSock = join(machineDir, "qga.sock");
+	// On Windows, QEMU uses named pipes for IPC (no AF_UNIX socket support in cloudbase build).
+	// Both QEMU and Node.js net.connect() recognize the \\.\pipe\ prefix as named pipes.
+	const machineName = basename(machineDir);
+	const isWin = process.platform === "win32";
+	const monitorSock = isWin ? `\\\\.\\pipe\\quickchr-${machineName}-monitor` : join(machineDir, "monitor.sock");
+	const serialSock = isWin ? `\\\\.\\pipe\\quickchr-${machineName}-serial` : join(machineDir, "serial.sock");
+	const qgaSock = isWin ? `\\\\.\\pipe\\quickchr-${machineName}-qga` : join(machineDir, "qga.sock");
 
 	if (background) {
-		// Background: all channels on Unix sockets
+		// Background: all channels on sockets/pipes
 		args.push(
 			"-chardev", `socket,id=monitor0,path=${monitorSock},server=on,wait=off`,
 			"-mon", "chardev=monitor0,mode=readline",
@@ -232,15 +236,14 @@ function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: st
 	const varsSize = statSync(destPath).size;
 
 	if (varsSize !== codeSize) {
-		// Use dd to truncate/pad to exact size
-		const result = Bun.spawnSync(
-			["dd", "if=/dev/zero", `of=${destPath}`, "bs=1", `count=0`, `seek=${codeSize}`],
-			{ stdout: "pipe", stderr: "pipe" },
-		);
-		if (result.exitCode !== 0) {
+		// Pad or truncate vars to match code ROM size — truncateSync extends with
+		// zero bytes when target is larger, and truncates when smaller.
+		try {
+			truncateSync(destPath, codeSize);
+		} catch (e) {
 			throw new QuickCHRError(
 				"PROCESS_FAILED",
-				`Failed to size-match EFI vars: ${new TextDecoder().decode(result.stderr)}`,
+				`Failed to size-match EFI vars: ${e instanceof Error ? e.message : String(e)}`,
 			);
 		}
 	}

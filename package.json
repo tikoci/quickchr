@@ -30,7 +30,7 @@
     "test:integration": "QUICKCHR_INTEGRATION=1 bun test test/integration/",
     "test:all": "QUICKCHR_INTEGRATION=1 bun test test/unit/ test/integration/ examples/",
     "dev": "bun run src/cli/index.ts",
-    "install:deps:ubuntu": "sudo apt-get --yes install qemu-system-x86 qemu-system-arm qemu-efi-aarch64 qemu-utils socat unzip && curl -fsSL https://bun.sh/install | bash"
+    "install:deps:ubuntu": "sudo apt-get --yes install qemu-system-x86 qemu-system-arm qemu-efi-aarch64 qemu-utils socat && curl -fsSL https://bun.sh/install | bash"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",
+    "fflate": "^0.8.2",
     "typescript": "^5"
   },
   "private": false,

@@ -2,7 +2,7 @@
  * Extra package download and installation for CHR instances.
  */
 
-import { existsSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, unlinkSync, chmodSync } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import type { Arch } from "./types.ts";
@@ -11,6 +11,7 @@ import { packagesDownloadUrl } from "./versions.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { restPost } from "./rest.ts";
+import { extractZip } from "./zip.ts";
 
 /** Download and extract the all-packages ZIP for a version/arch. Returns the extract dir. */
 export async function downloadPackages(
@@ -50,16 +51,7 @@ export async function downloadPackages(
 
 	// Extract
 	ensureDir(extractDir);
-	const result = Bun.spawnSync(["unzip", "-o", zipPath, "-d", extractDir], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	if (result.exitCode !== 0) {
-		throw new QuickCHRError(
-			"PROCESS_FAILED",
-			`Failed to extract packages: ${new TextDecoder().decode(result.stderr)}`,
-		);
-	}
+	extractZip(zipPath, extractDir);
 
 	return extractDir;
 }
@@ -92,9 +84,19 @@ export async function uploadPackages(
 ): Promise<void> {
 	// Use SSH_ASKPASS to supply the password without requiring sshpass.
 	// SSH_ASKPASS_REQUIRE=prefer (OpenSSH 8.4+) works even without a display.
-	const askpassPath = join(tmpdir(), `quickchr-askpass-${process.pid}.sh`);
-	await Bun.write(askpassPath, `#!/bin/sh\nprintf '%s' '${password.replace(/'/g, "'\\''")}'`);
-	Bun.spawnSync(["chmod", "+x", askpassPath]);
+	// SSH_ASKPASS: a small helper program that prints the password when invoked.
+	// On Windows: .cmd script (OpenSSH Windows calls it as a process, not a shell).
+	// On Unix: .sh script with execute bit set via chmodSync.
+	const isWindows = process.platform === "win32";
+	const ext = isWindows ? ".cmd" : ".sh";
+	const askpassPath = join(tmpdir(), `quickchr-askpass-${process.pid}${ext}`);
+	if (isWindows) {
+		// Windows .cmd: OpenSSH reads stdout from the helper
+		await Bun.write(askpassPath, `@echo off\r\necho ${password.replace(/[&|<>^%]/g, "^$&")}\r\n`);
+	} else {
+		await Bun.write(askpassPath, `#!/bin/sh\nprintf '%s' '${password.replace(/'/g, "'\\''")}'`);
+		chmodSync(askpassPath, 0o755);
+	}
 
 	const scpEnv: Record<string, string> = {
 		...(process.env as Record<string, string>),

@@ -46,7 +46,7 @@ export function detectPackageManager(): PackageManager {
 }
 
 /** Find a command on PATH. Uses `where.exe` on Windows and `which` elsewhere. */
-function findCommandOnPath(cmd: string): string | undefined {
+export function findCommandOnPath(cmd: string): string | undefined {
 	try {
 		const probe = process.platform === "win32" ? ["where.exe", cmd] : ["which", cmd];
 		const result = Bun.spawnSync(probe, { stdout: "pipe", stderr: "pipe" });

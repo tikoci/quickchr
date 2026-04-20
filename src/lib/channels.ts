@@ -7,21 +7,42 @@
  */
 
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { connect } from "node:net";
 import type { Arch, QgaCommand } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { qgaProbe, qgaRawCommand } from "./qga.ts";
 import { qgaKvmWarning } from "./platform.ts";
 
-/** Send a command to the QEMU monitor via Unix socket and return the response. */
+/**
+ * Resolve the IPC path for a QEMU channel (monitor, serial, qga).
+ * On Unix: a .sock file in machineDir.
+ * On Windows: a named pipe — both QEMU and Node.js net.connect() recognize \\.\pipe\ paths.
+ */
+function channelPath(machineDir: string, channel: "monitor" | "serial" | "qga"): string {
+	if (process.platform === "win32") {
+		return `\\\\.\\pipe\\quickchr-${basename(machineDir)}-${channel}`;
+	}
+	return join(machineDir, `${channel}.sock`);
+}
+
+/** Return true if the channel IPC endpoint can be checked via existsSync (Unix only). */
+function channelFileExists(path: string): boolean {
+	if (process.platform === "win32") {
+		// Named pipes don't appear as regular filesystem entries — let connect() fail instead.
+		return true;
+	}
+	return existsSync(path);
+}
+
+/** Send a command to the QEMU monitor and return the response. */
 export async function monitorCommand(
 	machineDir: string,
 	command: string,
 	timeoutMs: number = 5000,
 ): Promise<string> {
-	const socketPath = join(machineDir, "monitor.sock");
-	if (!existsSync(socketPath)) {
+	const socketPath = channelPath(machineDir, "monitor");
+	if (!channelFileExists(socketPath)) {
 		throw new QuickCHRError(
 			"MACHINE_STOPPED",
 			"Monitor socket not found — is the machine running in background mode?",
@@ -68,7 +89,13 @@ export async function monitorCommand(
 
 		socket.on("error", (err) => {
 			clearTimeout(timeout);
-			reject(new QuickCHRError("PROCESS_FAILED", `Monitor connection failed: ${err.message}`));
+			const code = (err as NodeJS.ErrnoException).code;
+			// ENOENT = named pipe not found (Windows); ECONNREFUSED = server not listening
+			if (code === "ENOENT" || code === "ECONNREFUSED") {
+				reject(new QuickCHRError("MACHINE_STOPPED", "Monitor not available — is the machine running in background mode?"));
+			} else {
+				reject(new QuickCHRError("PROCESS_FAILED", `Monitor connection failed: ${err.message}`));
+			}
 		});
 	});
 }
@@ -78,8 +105,8 @@ export function serialStreams(machineDir: string): {
 	readable: ReadableStream<Uint8Array>;
 	writable: WritableStream<Uint8Array>;
 } {
-	const socketPath = join(machineDir, "serial.sock");
-	if (!existsSync(socketPath)) {
+	const socketPath = channelPath(machineDir, "serial");
+	if (!channelFileExists(socketPath)) {
 		throw new QuickCHRError(
 			"MACHINE_STOPPED",
 			"Serial socket not found — is the machine running in background mode?",
@@ -140,8 +167,8 @@ export async function qgaCommand(
 		console.warn(kvmWarning);
 	}
 
-	const socketPath = join(machineDir, "qga.sock");
-	if (!existsSync(socketPath)) {
+	const socketPath = channelPath(machineDir, "qga");
+	if (!channelFileExists(socketPath)) {
 		throw new QuickCHRError(
 			"MACHINE_STOPPED",
 			"QGA socket not found — is the machine running in background mode?",
@@ -158,8 +185,9 @@ export function isQgaReady(
 ): Promise<boolean> {
 	if (arch === "arm64") return Promise.resolve(false);
 
-	const socketPath = join(machineDir, "qga.sock");
-	if (!existsSync(socketPath)) return Promise.resolve(false);
+	const socketPath = channelPath(machineDir, "qga");
+	// On Unix, skip the connect attempt entirely if the socket file doesn't exist.
+	if (process.platform !== "win32" && !existsSync(socketPath)) return Promise.resolve(false);
 
 	return qgaProbe(socketPath, 5000);
 }

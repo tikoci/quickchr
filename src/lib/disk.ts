@@ -33,7 +33,7 @@ export function isValidDiskSize(size: string): boolean {
 }
 
 function normalizeDiskSize(size: string, label: string): string {
-	const normalized = size.trim();
+	const normalized = size.trim().toUpperCase();
 	if (!isValidDiskSize(normalized)) {
 		throw new QuickCHRError(
 			"INVALID_DISK_SIZE",

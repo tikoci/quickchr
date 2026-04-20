@@ -1,10 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { zipSync } from "fflate";
 import { listCachedImages, downloadImage, extractImage, ensureCachedImage, copyImageToMachine } from "../../src/lib/images.ts";
 
 const TMP = join(import.meta.dir, ".tmp-images-test");
-const originalSpawnSync = Bun.spawnSync;
 
 beforeEach(() => {
 	mkdirSync(TMP, { recursive: true });
@@ -12,7 +12,6 @@ beforeEach(() => {
 
 afterEach(() => {
 	rmSync(TMP, { recursive: true, force: true });
-	Bun.spawnSync = originalSpawnSync;
 });
 
 describe("listCachedImages", () => {
@@ -118,76 +117,45 @@ describe("copyImageToMachine", () => {
 });
 
 describe("extractImage", () => {
-	test("returns cached extracted image without invoking unzip", async () => {
+	test("returns cached extracted image without invoking extraction", async () => {
 		const zipPath = join(TMP, "chr-7.22.1.img.zip");
 		const imgPath = join(TMP, "chr-7.22.1.img");
 		writeFileSync(zipPath, "fake zip");
 		writeFileSync(imgPath, "already extracted");
 
-		let unzipCalled = false;
-		Bun.spawnSync = ((..._args) => {
-			unzipCalled = true;
-			return {
-				exitCode: 0,
-				success: true,
-				stdout: new Uint8Array(),
-				stderr: new Uint8Array(),
-			} as ReturnType<typeof Bun.spawnSync>;
-		}) as typeof Bun.spawnSync;
-
 		const result = await extractImage(zipPath, TMP);
 		expect(result).toBe(imgPath);
-		expect(unzipCalled).toBe(false);
 	});
 
-	test("renames the extracted image when unzip output omits the arm64 suffix", async () => {
+	test("renames the extracted image when zip contains file without arm64 suffix", async () => {
 		const zipPath = join(TMP, "chr-7.22.1-arm64.img.zip");
-		writeFileSync(zipPath, "fake zip");
-
-		Bun.spawnSync = ((..._args) => {
-			writeFileSync(join(TMP, "chr-7.22.1.img"), "arm64 image");
-			return {
-				exitCode: 0,
-				success: true,
-				stdout: new Uint8Array(),
-				stderr: new Uint8Array(),
-			} as ReturnType<typeof Bun.spawnSync>;
-		}) as typeof Bun.spawnSync;
+		// MikroTik sometimes ships arm64 ZIPs with chr-X.Y.Z.img (no -arm64 suffix) inside
+		const zipData = zipSync({ "chr-7.22.1.img": new TextEncoder().encode("arm64 image content") });
+		writeFileSync(zipPath, zipData);
 
 		const result = await extractImage(zipPath, TMP);
 		expect(result).toBe(join(TMP, "chr-7.22.1-arm64.img"));
 		expect(existsSync(result)).toBe(true);
+		expect(readFileSync(result, "utf-8")).toBe("arm64 image content");
 		expect(existsSync(join(TMP, "chr-7.22.1.img"))).toBe(false);
 		expect(existsSync(zipPath)).toBe(false);
 	});
 
-	test("throws PROCESS_FAILED when unzip exits non-zero", async () => {
+	test("throws PROCESS_FAILED on corrupt ZIP data", async () => {
 		const zipPath = join(TMP, "chr-7.22.1.img.zip");
-		writeFileSync(zipPath, "corrupt zip");
-
-		Bun.spawnSync = ((..._args) => ({
-			exitCode: 1,
-			success: false,
-			stdout: new Uint8Array(),
-			stderr: new TextEncoder().encode("unzip: bad magic number"),
-		}) as ReturnType<typeof Bun.spawnSync>) as typeof Bun.spawnSync;
+		writeFileSync(zipPath, "this is not a valid zip");
 
 		await expect(extractImage(zipPath, TMP)).rejects.toMatchObject({
 			code: "PROCESS_FAILED",
-			message: expect.stringContaining("unzip failed"),
+			message: expect.stringContaining("ZIP extraction failed"),
 		});
 	});
 
-	test("throws PROCESS_FAILED when unzip succeeds but the expected image is still missing", async () => {
+	test("throws PROCESS_FAILED when zip extracts but expected image is missing", async () => {
 		const zipPath = join(TMP, "chr-7.22.1-arm64.img.zip");
-		writeFileSync(zipPath, "fake zip");
-
-		Bun.spawnSync = ((..._args) => ({
-			exitCode: 0,
-			success: true,
-			stdout: new Uint8Array(),
-			stderr: new Uint8Array(),
-		}) as ReturnType<typeof Bun.spawnSync>) as typeof Bun.spawnSync;
+		// ZIP contains a file with a completely unrelated name
+		const zipData = zipSync({ "unrelated-file.txt": new TextEncoder().encode("wrong content") });
+		writeFileSync(zipPath, zipData);
 
 		await expect(extractImage(zipPath, TMP)).rejects.toMatchObject({
 			code: "PROCESS_FAILED",
@@ -220,22 +188,14 @@ describe("ensureCachedImage", () => {
 
 	test("uses a cached zip and extracts it when the image is missing", async () => {
 		const zipPath = join(TMP, "chr-7.22.1.img.zip");
-		writeFileSync(zipPath, "fake zip");
+		const zipData = zipSync({ "chr-7.22.1.img": new TextEncoder().encode("fresh image") });
+		writeFileSync(zipPath, zipData);
 
 		let fetchCalled = false;
 		globalThis.fetch = makeMockFetch(() => {
 			fetchCalled = true;
 			return Promise.resolve(new Response(""));
 		});
-		Bun.spawnSync = ((..._args) => {
-			writeFileSync(join(TMP, "chr-7.22.1.img"), "fresh image");
-			return {
-				exitCode: 0,
-				success: true,
-				stdout: new Uint8Array(),
-				stderr: new Uint8Array(),
-			} as ReturnType<typeof Bun.spawnSync>;
-		}) as typeof Bun.spawnSync;
 
 		const result = await ensureCachedImage("7.22.1", "x86", TMP);
 		expect(result).toBe(join(TMP, "chr-7.22.1.img"));

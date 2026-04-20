@@ -9,6 +9,7 @@ import { QuickCHRError } from "./types.ts";
 import { chrDownloadUrl, chrImageBasename } from "./versions.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
+import { extractZip } from "./zip.ts";
 import { assertSufficientQuickchrStorage } from "./storage.ts";
 
 function finalizeExtractedImage(zipPath: string, imgPath: string): string {
@@ -99,15 +100,7 @@ export async function extractImage(
 	const log = logger ?? createLogger();
 	log.status(`Extracting: ${basename(zipPath)}`);
 
-	const result = Bun.spawnSync(["unzip", "-o", zipPath, "-d", cache], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-
-	if (result.exitCode !== 0) {
-		const stderr = new TextDecoder().decode(result.stderr);
-		throw new QuickCHRError("PROCESS_FAILED", `unzip failed: ${stderr}`, "Install unzip");
-	}
+	extractZip(zipPath, cache);
 
 	// MikroTik x86 ZIPs contain chr-X.Y.Z.img (no arch suffix).
 	// Our ZIP is named chr-X.Y.Z.img.zip (without -x86 for x86). Check if we need to

@@ -314,14 +314,17 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	let secureLogin: boolean | undefined;
 	let license: LicenseOptions | undefined;
 	let wantProvision = false;
-
-	if (provisioningSupported) {
+	const askProvisionChoice = async (): Promise<boolean> => {
 		const provisionChoice = await clack.confirm({
 			message: "Configure the router after boot? (packages, login, device-mode, license)",
 			initialValue: true,
 		});
 		if (clack.isCancel(provisionChoice)) { clack.cancel("Cancelled."); process.exit(0); }
-		wantProvision = provisionChoice;
+		return provisionChoice;
+	};
+
+	if (provisioningSupported) {
+		wantProvision = await askProvisionChoice();
 	} else {
 		clack.log.warn(`RouterOS ${resolvedVersion}: ${provisioningSupportSummary(MIN_PROVISION_VERSION)}`);
 		clack.log.info(PROVISIONING_BOOT_ONLY_SUMMARY);
@@ -344,6 +347,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 			resolvedVersion = await resolveVersion(channel);
 			version = resolvedVersion;
 			provisioningSupported = true;
+			wantProvision = await askProvisionChoice();
 		}
 	}
 
