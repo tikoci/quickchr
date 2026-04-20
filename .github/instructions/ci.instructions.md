@@ -10,18 +10,18 @@ applyTo: ".github/workflows/**"
 **Triggers**: push/PR to `main`, `workflow_dispatch` (manual with optional inputs)
 
 ```
-lint (ubuntu-latest)           unit-tests (ubuntu-latest)
-    Biome + tsc --noEmit           bun test test/unit/ --coverage
+lint (ubuntu-latest)           unit-tests (ubuntu-latest)     windows-unit-tests (windows-latest)
+    Biome + tsc --noEmit           bun test test/unit/ --coverage  bun test test/unit/ (always)
          ↘                        ↙
-         integration (matrix)                        windows-unit-tests (windows-latest)
-           linux/x86_64  ← ubuntu-latest       (always)   ← dispatch: windows=true
+         integration (matrix)
+           linux/x86_64  ← ubuntu-latest       (always)
            linux/aarch64 ← ubuntu-24.04-arm    (always)
            macos/arm64   ← macos-15            (dispatch: macos=true)
            macos/x86_64  ← macos-13            (dispatch: macos=true)
 ```
 
 Lint and unit-tests run **in parallel**.  Integration waits for both via `needs:`.
-`windows-unit-tests` runs independently (no `needs:`); it is gated by `windows: true`.
+`windows-unit-tests` runs independently (no `needs:`) on every push/PR to main.
 
 ## Windows Unit Tests
 

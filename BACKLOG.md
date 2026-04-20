@@ -95,13 +95,13 @@ Before the first `git push` to `tikoci/quickchr`, tidy the repo so first-time vi
 - [x] Update `README.md` flag table — added `--add-network`, corrected `--fg`/`--bg` aliases, full flag table with all current options (`36ad135`).
 - [x] Fix port-layout offsets note — README table now shows +0..+9 matching actual implementation (`36ad135`).
 - [x] Split `README.md` → `CONTRIBUTING.md` — dev setup, `bun run check`, architecture rules, integration test policy moved to `CONTRIBUTING.md` (`36ad135`).
-- [ ] Add `CHANGELOG.md` (or decide against it explicitly) — a short "Unreleased" section now seeds the discipline for future releases
-- [ ] Consider `SECURITY.md` — minimal pointer ("report via GitHub security advisories") is enough
+- [x] Add `CHANGELOG.md` — created with "Unreleased" section + [0.2.0] covering all implemented features
+- [x] `SECURITY.md` — created minimal pointer to GitHub Security Advisories
 
 **Agent-facing discoverability (user flagged this):**
 
 - [ ] Create a `quickchr` SKILL.md for `~/.copilot/skills/` (and/or `skills/` in-repo) so agents using Copilot/Claude discover quickchr as the CHR-via-QEMU entrypoint. Describe trigger terms ("spin up CHR", "boot RouterOS locally", "CHR integration test") and link to MANUAL.md once written. Check with `~/.copilot/skills/routeros-qemu-chr/SKILL.md` — may be the right home rather than a new skill
-- [ ] JSDoc audit on the public barrel (`src/index.ts` + `src/lib/quickchr.ts`) — `QuickCHR.start()`, `ChrInstance.exec/rest/qga/snapshot/serial`, `StartOptions` fields. Today a type-only consumer knows the shape but not the semantics (e.g. "what does `installAllPackages` imply for boot time?"). Restraml integration already flagged readiness-contract ambiguity (P1 → "Clearer `start()` readiness contract"); JSDoc is how that promise shows up in IDE hovers without an `await ready` shim
+- [x] JSDoc audit on the public barrel (`src/index.ts` + `src/lib/quickchr.ts`) — added module-level `@packageDocumentation` to barrel, class-level doc on `QuickCHR`, interface-level doc on `ChrInstance`, and field-level JSDoc on all `StartOptions` fields including `installAllPackages` boot-time caveat
 - [x] Comment audit — searched for stale `// TODO` / `// FIXME` / `// XXX` in `src/`; none found (`36ad135`).
 
 **Cross-platform smoke-test (the other user-flagged gap):**
@@ -180,7 +180,7 @@ The manual drives CLI design decisions forward — writing how it *should* work 
 
 ### Docs & Project
 
-- [ ] Split README.md → CONTRIBUTING.md: move `git clone`, dev setup, and contributor workflow out of README so it focuses on end-user usage
+- [x] Split README.md → CONTRIBUTING.md: already done in `36ad135`
 - [x] Align test coverage organically — don't chase numbers, but audit gaps. Coverage report captured Apr 2026; specific gaps tracked in "Test Coverage Gaps" section below.
 
 ### Test Coverage Gaps
@@ -263,7 +263,7 @@ From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should 
 - [ ] `wizard.ts`: run a doctor-style storage preflight before entering the interactive flow (or inline at wizard startup) so low-disk and other prerequisite issues are visible before the user spends time answering prompts. Keep it non-interactive and obvious; decide whether this should run full doctor or a focused subset (storage + prerequisites only).
 
 **CI-gated / platform-specific:**
-- [ ] `state.ts` / `platform.ts`: Windows path logic (`LOCALAPPDATA`, `USERPROFILE`, PowerShell qemu paths) — needs Windows CI runner (tracked under P4)
+- [x] `state.ts` / `platform.ts`: Windows path logic — Windows CI runner now always-on (unit tests exercise `LOCALAPPDATA`/`USERPROFILE` paths, `where.exe`, `winget` detection)
 - [ ] `platform.ts`: KVM detection with `/dev/kvm` present/absent — Linux CI matrix should exercise both paths explicitly
 
 ### Provisioning correctness — verify what you write
@@ -694,7 +694,7 @@ The refactoring is not all-or-nothing. Incremental steps:
 
 ### CI
 
-- [ ] Windows CI runner — add after existing macOS/Linux matrix is proven stable. Windows adds new challenges (HAXM?, path conventions, no KVM/HVF).
+- [x] Windows CI runner — `windows-unit-tests` job now runs on every push/PR to main (unit tests only; integration tests are future work)
 - [ ] Multi-version test matrix — run integration tests across RouterOS versions. Simpler than other tikoci projects since quickchr doesn't rebuild per release.
 
 ---

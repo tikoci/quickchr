@@ -916,6 +916,20 @@ async function applyDeviceMode(
 	log.status(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
 }
 
+/**
+ * Main entry point for managing MikroTik CHR virtual machines via QEMU.
+ *
+ * All methods are static — there is no instance state on the class itself.
+ * Use {@link QuickCHR.start} to create and boot a CHR, which returns a
+ * {@link ChrInstance} runtime handle for interacting with it.
+ *
+ * @example
+ * ```ts
+ * const chr = await QuickCHR.start({ channel: "stable", arch: "arm64" });
+ * const info = await chr.rest("/system/resource");
+ * await chr.remove();
+ * ```
+ */
 // biome-ignore lint/complexity/noStaticOnlyClass: QuickCHR is the public API — class provides a clear namespace for consumers
 export class QuickCHR {
 	/** Create a new CHR machine (download image, allocate ports, write config) without starting it.

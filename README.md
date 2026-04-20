@@ -1,5 +1,11 @@
 # quickchr
 
+> **Experimental** — quickchr is under active development. Most testing has been on
+> macOS (Apple Silicon + Intel), with CI on Linux (x86_64 + aarch64). Windows support
+> is early-stage: unit tests pass on `windows-latest` CI, but integration tests
+> (running a real CHR via QEMU for Windows) are not yet automated. Expect rough edges
+> on Windows — bug reports welcome.
+
 CLI and library to download, launch, and manage MikroTik CHR virtual machines via QEMU.
 
 ## Quick Start
@@ -26,8 +32,10 @@ sudo dnf install qemu-kvm qemu-system-aarch64 edk2-aarch64 qemu-img
 # Arch
 sudo pacman -S qemu-full
 
-# Windows
-winget install QEMU.QEMU
+# Windows (winget)
+winget install SoftwareFreedomConservancy.QEMU
+winget install cloudbase.qemu-img
+winget install Oven-sh.Bun
 ```
 
 ### Install

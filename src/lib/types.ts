@@ -184,13 +184,30 @@ export interface MachineState extends MachineConfig {
 
 // --- Start Options ---
 
+/**
+ * Options for creating and starting a CHR instance.
+ *
+ * Boot-only options (version, arch, cpu, mem, networks, disks) work with any RouterOS 7.x.
+ * Post-boot provisioning options (packages, user, license, deviceMode) require RouterOS ≥ 7.20.8
+ * and will throw if used with an older version.
+ *
+ * When `installAllPackages` is set, boot time increases significantly (full package install
+ * requires SCP upload + reboot cycle, typically 60–120s extra on native acceleration).
+ */
 export interface StartOptions {
+	/** RouterOS version to use (e.g. "7.22.1"). Mutually exclusive with `channel`. */
 	version?: string;
+	/** Release channel to resolve latest version from. Default: "stable". */
 	channel?: Channel;
+	/** Guest architecture. Default: matches host (arm64 on Apple Silicon, x86 on Intel/AMD). */
 	arch?: Arch;
+	/** Instance name. Auto-generated from version+arch if omitted. Must not start with "-". */
 	name?: string;
+	/** Number of virtual CPUs. Default: 1. */
 	cpu?: number;
+	/** Memory in MiB. Default: 512 (1024 for cross-arch TCG emulation). */
 	mem?: number;
+	/** Run QEMU in background (true, default) or foreground with serial console on stdio (false). */
 	background?: boolean;
 	/** Extra packages to install after boot.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
@@ -209,8 +226,11 @@ export interface StartOptions {
 	 *  Enabling the managed login path is quickchr provisioning, so it is validated/tested
 	 *  on RouterOS 7.20.8+ only. */
 	secureLogin?: boolean;
+	/** Starting port number for this instance's port block. Auto-allocated if omitted. */
 	portBase?: number;
+	/** Services to exclude from port mappings (e.g. ["winbox", "api-ssl"]). */
 	excludePorts?: ServiceName[];
+	/** Additional custom port mappings appended to the default set. */
 	extraPorts?: PortMapping[];
 	/** @deprecated Use `networks` instead. Kept for backward compatibility. */
 	network?: NetworkMode;
@@ -218,7 +238,9 @@ export interface StartOptions {
 	 *  Default (when omitted): single user-mode NIC.
 	 *  When specified: count of entries = count of NICs (explicit control). */
 	networks?: NetworkSpecifier[];
+	/** Install OS-level dependencies (QEMU, firmware) automatically if missing. */
 	installDeps?: boolean;
+	/** Print QEMU command and config without actually starting the VM. */
 	dryRun?: boolean;
 	/** Apply a CHR trial license after boot via /system/license/renew.
 	 *  Pass a level string (e.g. "p1") to auto-resolve MikroTik credentials,
@@ -266,6 +288,16 @@ export interface ChrLoadSample {
 	memUsedMb: number;
 }
 
+/**
+ * Runtime handle for a CHR virtual machine.
+ *
+ * Returned by {@link QuickCHR.start}. Provides methods to interact with the running
+ * (or stopped) instance: REST API calls, CLI command execution, QGA, serial console,
+ * snapshots, licensing, and lifecycle management.
+ *
+ * After `QuickCHR.start()` resolves, the instance is REST-ready — all requested
+ * provisioning (packages, license, device-mode, user creation) has completed.
+ */
 export interface ChrInstance {
 	name: string;
 	state: MachineState;

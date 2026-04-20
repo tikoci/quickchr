@@ -88,8 +88,9 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 Three jobs — lint and unit-tests run in parallel; integration is gated on both:
 
 ```
-lint                    unit-tests
-Biome + tsc --noEmit    bun test test/unit/ --coverage
+lint                    unit-tests                windows-unit-tests
+Biome + tsc --noEmit    bun test test/unit/       bun test test/unit/
+                        --coverage                (windows-latest, always)
         ↘               ↙
         integration (matrix)
           linux/x86_64  (always)

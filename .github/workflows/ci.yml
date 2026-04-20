@@ -6,6 +6,7 @@ name: CI
 # Jobs:
 #   lint          — Biome + TypeScript type-check (parallel with unit-tests)
 #   unit-tests    — bun:test unit suite + coverage enforcement (parallel with lint)
+#   windows-unit-tests — bun:test unit suite on Windows (always-on, parallel)
 #   integration   — matrix boot-test on linux/x86_64 + linux/aarch64
 #                   (+ macOS arm64/x86_64 when dispatched with macos: true)
 #
@@ -29,7 +30,7 @@ on:
         default: false
       windows:
         type: boolean
-        description: "Include Windows runner for unit tests (windows-latest)"
+        description: "DEPRECATED — Windows unit tests now run on every push/PR. This input is ignored."
         required: false
         default: false
       min-funcs:
@@ -142,12 +143,11 @@ jobs:
 
   # ── Windows unit tests ──────────────────────────────────────────────────────
   # Runs Windows-only tests (named pipes, Job Object detach, LOCALAPPDATA paths).
-  # Enabled via workflow_dispatch with windows: true.  Platform-skipped tests
+  # Runs on every push/PR to main.  Platform-skipped tests
   # (skipIf(platform !== "win32")) execute only here; they are skipped on Linux/macOS.
   # Integration tests on Windows (QEMU for Windows) are future work.
   windows-unit-tests:
     name: Unit Tests (windows-latest)
-    if: github.event.inputs.windows == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

@@ -1,7 +1,25 @@
 /**
- * @tikoci/quickchr — CHR QEMU Manager CLI & Library
+ * @module @tikoci/quickchr
  *
- * Public API barrel export.
+ * CLI and library to download, launch, and manage MikroTik CHR virtual machines via QEMU.
+ *
+ * ## Quick start
+ * ```ts
+ * import { QuickCHR } from "@tikoci/quickchr";
+ *
+ * const chr = await QuickCHR.start({ channel: "stable" });
+ * const info = await chr.rest("/system/resource");
+ * console.log(info);
+ * await chr.remove();
+ * ```
+ *
+ * ## Key exports
+ * - {@link QuickCHR} — Main class with static methods: `start()`, `add()`, `list()`, `get()`, `doctor()`
+ * - {@link ChrInstance} — Runtime handle returned by `start()`: `stop()`, `remove()`, `rest()`, `exec()`, `snapshot`, etc.
+ * - {@link StartOptions} — All options for creating/starting a CHR instance
+ * - {@link QuickCHRError} — Typed errors with codes like `MISSING_QEMU`, `TIMEOUT`, `EXEC_FAILED`
+ *
+ * @packageDocumentation
  */
 
 // Main class
