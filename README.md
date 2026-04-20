@@ -304,6 +304,15 @@ afterAll(async () => {
 | `MIKROTIK_WEB_PASSWORD` | MikroTik.com password (for license renewal) |
 | `QUICKCHR_INTEGRATION` | Set to `1` to run integration tests |
 
+## Documentation
+
+- **[MANUAL.md](./MANUAL.md)** — complete reference: every CLI command,
+  every library API, provisioning, channels, networking, storage,
+  errors. Source-checked.
+- **[DESIGN.md](./DESIGN.md)** — architecture, layers, design principles.
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — dev setup and `bun run check`.
+- **[CHANGELOG.md](./CHANGELOG.md)** — release history.
+
 ## License
 
 MIT

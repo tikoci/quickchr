@@ -1,1357 +1,422 @@
 # quickchr Backlog
 
+> Open work and design questions still under discussion live below. Completed items are collapsed to one-liners — full implementation notes are in git history, MANUAL.md, DESIGN.md, or `.github/instructions/*.md`. See the signal extraction report (in session state) for the mapping.
+
 ## Completed
 
 <details>
-<summary>P0 — MVP (all done)</summary>
+<summary>P0 — MVP</summary>
 
-- [x] Core library modules (types, platform, versions, network, state, images, qemu, channels)
-- [x] QuickCHR class API (start, list, get, doctor)
-- [x] ChrInstance (stop, remove, clean, rest, monitor, serial, qga)
-- [x] CLI with subcommands (start, stop, list, status, remove, clean, doctor, version, help)
-- [x] Interactive wizard (@clack/prompts)
-- [x] Unit tests (versions, network, state, platform, qemu-args)
-- [x] Integration test scaffolds (start-stop, library-api)
+- [x] Core library modules, QuickCHR API, ChrInstance, CLI subcommands, wizard, unit tests, integration scaffolds
 
 </details>
 
 <details>
-<summary>P1 — Robustness (all done)</summary>
+<summary>P1 — Robustness</summary>
 
-- [x] Foreground mode correctly awaits QEMU exit
-- [x] Package SCP uses `sshpass` for RouterOS empty-password auth
-- [x] Background mode is default; `--fg`/`--foreground` opts in to foreground
-- [x] Arch-specific package lists (zerotier/wifi-qcom arm64-only)
-- [x] `start --all` restarts all stopped machines
-- [x] Interactive selectors for all commands when no name given
-- [x] `remove --all` removes all machines
-- [x] Foreground tips printed before QEMU launches
-- [x] `status` output includes WinBox URL, SSH tip, state explanation
-- [x] `sshpass` in `doctor` dependency check
-- [x] `QUICKCHR_NO_PROMPT=1` suppresses interactive prompts
-- [x] `waitForBoot` accepts 401/403 as "booted"
-- [x] Boot timeout unified to 120s
-- [x] Warning on boot timeout with pending provisioning
-- [x] SSH warmup delay (2s) after HTTP up
-- [x] Package install integration test (`container` package + REST verify)
-- [x] Integration tests mandatory before commits
-- [x] Foreground provisioning: boot → provision → attach serial (skip in non-TTY)
-- [x] Wizard hints per mode (Ctrl-A X vs Ctrl-C)
-- [x] Wizard 2s sleep before QEMU launch
-- [x] `isPortAvailable` TCP connect probe (not SO_REUSEADDR bind)
-- [x] `detectAccel` arm64 HVF uses `process.arch` (Intel Mac safety)
-- [x] Provisioning integration test (user creation, admin disable, foreground non-TTY)
-- [x] Dynamic package list via `all_packages.zip` download (no static `KNOWN_PACKAGES`)
+- [x] Foreground/background modes, package provisioning (sshpass), arch-specific packages, `--all` flags
+- [x] Interactive selectors removed (replaced by shell completions), boot timeout scaling, port probing
+- [x] Dynamic package list via `all_packages.zip`, integration test coverage (provisioning, packages)
 
 </details>
 
 <details>
-<summary>CI & Publish (done)</summary>
+<summary>CI & Publish</summary>
 
-- [x] CI matrix: linux/x86_64 + linux/aarch64; macOS optional via dispatch
-- [x] Coverage enforcement: 75% funcs / 60% lines (warn, not hard-fail). Actual Apr 2026 baseline: **79.59% funcs / 67.86% lines** — above thresholds, but with room to improve in lower-covered library entrypoints.
-- [x] CI artifacts: coverage-report (14d), integration-logs-{platform} (7d)
-- [x] Step summaries written to `$GITHUB_STEP_SUMMARY`
-- [x] `publish.yml` runs repo checks (`bun run check`) + unit tests + linux/x86 integration before npm publish
+- [x] CI matrix (linux x86/arm64, macOS dispatch), coverage 79.59% funcs / 67.86% lines (above thresholds)
+- [x] Artifacts (coverage-report 14d, integration-logs 7d), `publish.yml` gating
 
 </details>
 
 <details>
-<summary>Wizard / CLI UX polish (Apr 2026, done)</summary>
+<summary>Wizard / CLI UX</summary>
 
-- [x] Shell completions (bash/zsh/fish) — `quickchr completions --install`, context-aware machine name completion. **zsh verified; bash/fish untested on real shells** (see `Pre-GitHub Push` below).
-- [x] Wizard main-menu loop — returns to home after each action instead of exiting
-- [x] Wizard `Back` option at every submenu; brew-style snapshot hints
-- [x] Snapshot API + CLI + wizard UX (`savevm`/`loadvm`/`delvm`/list, `--json` output, 16-item cap, qcow2 guard)
-- [x] Disk management: `--boot-size`, `--add-disk` (repeatable), `quickchr disk <name>`, integration-tested
-- [x] Status/info shows credentials for managed user (`d451df1`)
-- [x] Spinner interleaving fix via `onProgress` callback (`a1fa7c3`)
-- [x] Orphaned machine-dir detection in `doctor` with cleanup on spawn failure
-- [x] socket_vmnet daemon detection with `pgrep` (socket file persists after daemon exit)
+- [x] Shell completions (bash/zsh/fish) context-aware machine names (`f7ca662`)
+- [x] Wizard main-menu loop, `Back` navigation, snapshot UX (qcow2 guard, 16-item cap)
+- [x] Disk management (`--boot-size`, `--add-disk`), credentials in status, orphaned-dir cleanup (`a1fa7c3`)
 
 </details>
 
 ---
 
-## P1 — Ship Shape
-
-Tighten before expanding. These are preconditions for most items below.
+## Open Work
 
 ### Pre-GitHub Push (ship readiness)
 
-Before the first `git push` to `tikoci/quickchr`, tidy the repo so first-time visitors (humans + agents) find what they expect. Most items here are low-effort "brew-style" grooming — not design work.
-
 **Repo hygiene:**
 
-- [x] Add `LICENSE` file at repo root — MIT license added (`a8c8cad`)
-- [x] Remove or populate stale `test.jpg` (0-byte file at repo root) — removed (`a8c8cad`)
-- [x] Reconcile `/index.ts` vs `/src/index.ts` — root `index.ts` deleted (`a8c8cad`)
-- [x] `.gitignore`: `.venv/`, `coverage/`, `*.jpg` added (`a8c8cad`)
-- [x] Bump `package.json` version from `0.1.0` before first publish. Bumped to `0.2.0` (`36ad135`). **Even minors** are "release" and **odd minors** are "pre-release", each has own patch#, major stays at 0 until significant test/usage on **all** platform/arch combos.
+- [x] LICENSE file (MIT, `a8c8cad`)
+- [x] Removed stale test.jpg, reconciled /index.ts (`a8c8cad`)
+- [x] .gitignore cleanup (`a8c8cad`)
+- [x] Bumped to 0.1.1 (`36ad135`). Per the odd/even policy, 0.1.1 is the first GitHub release (CI not yet green on hosted repo). Promote to 0.2.x after CI passes on the GitHub Actions runner matrix.
 
-**Docs drift (README is stale):**
+**Docs:**
 
-- [x] Update `README.md` CLI examples — full rewrite (`36ad135`): added `setup`, `snapshot`/`snap`, `exec`, `console`, `qga`, `networks`, `completions`, `disk`, `set`, `get`, and all others.
-- [x] Update `README.md` flag table — added `--add-network`, corrected `--fg`/`--bg` aliases, full flag table with all current options (`36ad135`).
-- [x] Fix port-layout offsets note — README table now shows +0..+9 matching actual implementation (`36ad135`).
-- [x] Split `README.md` → `CONTRIBUTING.md` — dev setup, `bun run check`, architecture rules, integration test policy moved to `CONTRIBUTING.md` (`36ad135`).
-- [x] Add `CHANGELOG.md` — created with "Unreleased" section + [0.2.0] covering all implemented features
-- [x] `SECURITY.md` — created minimal pointer to GitHub Security Advisories
+- [x] README.md full rewrite (`36ad135`): all commands, full flag table, port offsets corrected
+- [x] Split README → CONTRIBUTING.md (`36ad135`)
+- [x] CHANGELOG.md created ([0.1.1] covering all implemented features as of first GitHub push)
+- [x] SECURITY.md (minimal, points to GitHub Security Advisories)
+- [x] JSDoc audit on barrel + QuickCHR + StartOptions (`36ad135`)
+- [x] Comment audit (no stale TODO/FIXME in src/) (`36ad135`)
 
-**Agent-facing discoverability (user flagged this):**
+**Agent discoverability:**
 
-- [ ] Create a `quickchr` SKILL.md for `~/.copilot/skills/` (and/or `skills/` in-repo) so agents using Copilot/Claude discover quickchr as the CHR-via-QEMU entrypoint. Describe trigger terms ("spin up CHR", "boot RouterOS locally", "CHR integration test") and link to MANUAL.md once written. Check with `~/.copilot/skills/routeros-qemu-chr/SKILL.md` — may be the right home rather than a new skill
-- [x] JSDoc audit on the public barrel (`src/index.ts` + `src/lib/quickchr.ts`) — added module-level `@packageDocumentation` to barrel, class-level doc on `QuickCHR`, interface-level doc on `ChrInstance`, and field-level JSDoc on all `StartOptions` fields including `installAllPackages` boot-time caveat
-- [x] Comment audit — searched for stale `// TODO` / `// FIXME` / `// XXX` in `src/`; none found (`36ad135`).
+- [ ] Create SKILL.md for `~/.copilot/skills/` so agents discover quickchr as CHR-via-QEMU entrypoint (trigger: "spin up CHR", "boot RouterOS locally"). Check if `~/.copilot/skills/routeros-qemu-chr/SKILL.md` should be the home instead
 
-**Cross-platform smoke-test (the other user-flagged gap):**
+**Cross-platform testing:**
 
-- [ ] Test from a Linux host on the same LAN — closer to CI than local macOS. Workflow: on macOS, `cd ~/GitHub/quickchr && git bundle create /tmp/quickchr.bundle --all`, then `scp /tmp/quickchr.bundle linuxbox:/tmp/`, then on the Linux box `git clone /tmp/quickchr.bundle quickchr && cd quickchr && bun install && bun run check && QUICKCHR_INTEGRATION=1 bun test test/integration/`. Alternative (no bundle): enable SSH on Mac and `git clone amm0@<mac-hostname>.local:GitHub/quickchr` from the Linux box — pull-only, keeps the Mac as origin until push.
-- [ ] Verify `quickchr completions --install` works end-to-end on bash and fish (currently only zsh tested — commit `f7ca662` flags this)
-- [ ] Verify `qemu-img` detection + `--boot-size` path on Linux (Intel Mac tested; arm64 Linux needs its own pass once KVM is detected)
+- [ ] Test from Linux host (bundle workflow: `git bundle create`, `scp`, `git clone`, `bun install && QUICKCHR_INTEGRATION=1 bun test`)
+- [ ] Verify `quickchr completions --install` on bash and fish (zsh tested, bash/fish untested on real shells per `f7ca662`)
+- [ ] Verify `qemu-img` detection + `--boot-size` on Linux (Intel Mac tested, arm64 Linux needs KVM pass)
 
-**Test coverage gaps that are still "lurking":**
+**Test coverage gaps:**
 
-The latest unit-coverage pass moved the original hot spots materially:
+Coverage is 79.59% funcs / 67.86% lines (above thresholds). Remaining sub-70 candidates: `rest.ts` (41.76%), `packages.ts` (37.78%), `device-mode.ts` (61.36%), `platform.ts` (57.98%), `qemu.ts` (69.81%). Don't chase numbers; add tests when they prove correctness of uncovered paths.
 
-- [x] `credentials.ts` (100.00% lines) — new unit tests cover env-var precedence, secret-store fallback, save/delete delegation, storage label passthrough, and corrupt per-instance JSON handling (`test/unit/credentials.test.ts`)
-- [x] `license.ts` — **license error classification fix** (`8c1a193`): `classifyRenewResponse()` now detects `"ERROR: ..."` in RouterOS status field (HTTP 200 body). Previously misclassified as "pending" → 90s poll timeout. Root cause proven via `curl` against running CHR. Two new unit tests grounded in observed response shapes (too many trials, unauthorized). Response patterns documented in `routeros-rest.instructions.md`.
-- [x] `secrets.ts` (94.59% lines) — config-file fallback is now covered directly (sync helpers, Bun.secrets throw-fallback, delete path, storage label). `configDir()` now resolves `HOME` / `USERPROFILE` / `homedir()` at call time so temp-HOME tests are deterministic (`test/unit/secrets.test.ts`)
-- [x] `completions.ts` (73.74% lines) — expanded unit coverage now exercises shell-specific env detection, XDG path handling, install/uninstall idempotence, rc-file append behavior, and machine-name discovery from state dirs. A real Linux/Homebrew smoke test is still useful for the remaining brew-specific path branches
-- [x] `images.ts` (98.33% lines) — added coverage for `extractImage()` / `ensureCachedImage()` cache, rename, and missing-image failure branches in addition to the existing `downloadImage()` paths (`test/unit/images.test.ts`)
-
-Coverage is informational here — don't add tests for the sake of the number. After this pass, the remaining sub-70 follow-up candidates that still look worth a second look are `rest.ts` (41.76% lines), `packages.ts` (37.78%), `device-mode.ts` (61.36%), `platform.ts` (57.98%), and `qemu.ts` (69.81%).
-
-### Anchor Manual (MANUAL.md)
-
-Highest-priority doc task *after CLI command work stabilises*. Write a comprehensive user guide **describing exactly how quickchr works today** — every command, every option, every provisioning step, port layout, storage layout. Like tikoci/mikropkl's QEMU.md but better. This is the "anchor document" (same concept as anchor tests): a human-readable spec that both users and agents reference, and that surfaces gaps when reality diverges from documentation. Sequenced after `exec`, `set`/`get`, and `list`/`status` merge — no point documenting commands that are about to change.
-
-- [ ] Draft MANUAL.md covering current CLI, library API, provisioning, and storage layout
-- [ ] Include command tree diagram (becomes input for CLI rationalization)
-- [ ] Document `exec` design: `exec --via=auto|ssh|rest|qga` (auto = try REST `/execute` first, future SSH fallback). Commands are passed through as-is — no auto-wrapping. For structured JSON output, callers wrap commands themselves: `:put [:serialize to=json [/system/resource/print]]`. The `as-string` parameter in the POST body makes execution synchronous (without it, RouterOS returns a job ID like `{"ret":"*5"}`). Future: promote common commands to get native JSON via built-in `:serialize` wrapping, `--output=json|csv|tsv|yaml`.
-- [ ] Document `console`/`attach` as the name for interactive serial access (currently hidden in `start --fg`)
-
-The manual drives CLI design decisions forward — writing how it *should* work forces the design questions that "CLI rationalization" was deferring. But writing it *too early* means constant rewrites as commands evolve. Current priority: examples and `exec` first (they're the "strawman" tests for CLI ergonomics), MANUAL.md follows once the command surface is more stable.
+- [x] credentials.ts, license.ts, secrets.ts, completions.ts, images.ts (all above 73%)
+- [ ] Cache retention policy for CHR images and extra packages (design needed: age-based vs count-based, user-facing commands, avoid deleting assets for active machines)
 
 ### Provisioning
 
-#### Provisioning Version Guardrails (high priority, scope narrowing)
+<details>
+<summary>Completed provisioning work</summary>
 
-- [x] **Enforce provisioning minimum RouterOS version: 7.20.8 (first long-term baseline).** If requested version is `< 7.20.8`, quickchr may still create/start the CHR, but MUST block provisioning steps with a clear, actionable message. This is a deliberate failure-mode reduction: narrow supported provisioning behavior to modern long-term semantics.
-- [x] Wizard default tightening: wizard now defaults channel selection to **long-term**, keeps version pinning available for discovery, and requires an explicit boot-only vs switch-to-long-term choice before proceeding with an older 7.x target.
-- [x] Define and enforce what counts as "provisioning" for version gating (library + CLI + wizard): managed user creation, admin disable, license operations, package provisioning, device-mode mutations, and any post-boot REST mutation step. Boot/start-only flows remain allowed on older 7.x.  ==> "Define" ... what counts ... here is my take:
-  
-  - "provisioning" means we need to send commands to RouterOS _after_ booting, so attaching network and disk to machine is not provisioning, while licensing, device-mode, and user management all "provisioning". => dividing line is known routeros command vs QEMU/local tools -> local tooling we check, anything 7.20.8 and newer we'll handle commands (since, at this point all work 7.20.8+ [likely some before, but 1st long-term == 7.20.8 -> our start of support])
-  - we [largely] depend on SLiRP to do any provisioning, no SLiRP?  we'd have to do "digging" to find the IP address (for example vmnet-shared..._could_ we find the IP, sure: MNDP discovery [mikrotik sends UDP broadcasts], presumablity network scan)
+- [x] Version guardrails (7.20.8+ for provisioning, older 7.x boot-only)
+- [x] Centralized version gate, wizard UX for old versions, CLI/API error design
+- [x] Integration tests (old version boot-only, provisioning block, 7.20.8+ green path)
+- [x] Compatibility matrix, device-mode version gate, support policy published
+- [x] `/system/device-mode` support, `instance.setDeviceMode()`, license verify read-back
+- [x] License auth resolution (`renewLicense`/`getLicenseInfo` use `resolveAuth()`)
+- [x] Console provisioning engine (`src/lib/console.ts`), wired to `exec --via=console`
+- [x] Console fallback when REST times out, `ensureLoggedIn` logout guard
+- [x] `disableAdmin()` race fix (verify with new-user creds, 20s deadline) (`b512137`)
+- [x] Timeout scaling (`accelTimeoutFactor`, `defaultBootTimeout`, `--timeout-extra`, 8 unit tests)
 
-- [x] Centralize version gate in one library helper (single source of truth) and call it from all entry points (`QuickCHR.start`, CLI commands, wizard actions, direct `set`/`license` paths) so UI/API/CLI behavior cannot drift.
-- [x] Wizard UX for `< 7.20.8`: keep machine creation available, but disable provisioning choices with inline rationale + suggested fix (`choose >=7.20.8`, `skip provisioning`, or `upgrade image`).
-- [x] CLI/API error design for blocked provisioning on older versions: include exact requested version, required minimum (`7.20.8`), what operation was blocked, and a concrete next action. Mirror this in wizard hints so errors are always "helpful with fix".
-- [x] Docs/help/JSDoc alignment pass: document "provisioning supports 7.20.8+" consistently in `README.md`, MANUAL (when added), command `--help`, and public API JSDoc (`StartOptions`, provisioning-related methods).
-- [x] Integration tests for guardrail behavior: (1) older 7.x can boot without provisioning, (2) provisioning request on older 7.x fails fast with expected error code/message/hint, (3) 7.20.8+ provisioning path remains green.
-- [x] Add a short compatibility matrix (feature -> minimum RouterOS) and make device-mode explicitly "unsupported by quickchr provisioning" below the baseline even when attributes exist, to avoid semantic traps like 7.10 behavior differences.
-- [x] Publish explicit support policy in docs: "provisioning is validated/tested on 7.20.8+; older 7.x is boot-only." Keep policy text in one source and link it from README/help to prevent drift.
-  - ensure integrations tests cover the current release channels with all provisioning
-- [x] `/system/device-mode` support — `update container=yes scheduler=yes ...` with mode selection (`advanced`/`enterprise`/etc). Required for containers and other restricted features. Opt-in only (not configured unless explicitly requested). CHR ships with mode=advanced. Wizard defaults to rose when user opts in.
-- [x] `instance.setDeviceMode(options)` — allow changing device-mode on a running instance via the library API. Requires the hard-reboot QEMU flow, unlike most config changes that are simple REST calls. Useful for test scenarios that need to toggle device-mode features between runs.
-- [x] License apply should read back and verify via REST after write — `getLicenseInfo()` called after `renewLicense()` in `_provisionInstance`; only updates `actualLevel` if the read-back confirms a non-free level. Early detection beats debugging later.
-- [x] `license.ts` auth: `renewLicense()` and `getLicenseInfo()` default to `admin:` credentials. If a machine has `disableAdmin: true` with a provisioned user, license operations will fail with 401. Should accept or resolve credentials via `resolveAuth()` like `exec()` does.
-- [x] First-boot serial console provisioning engine (from `~/GitHub/chr-armed`): prompt detection with buffer offset tracking, `\r` not `\r\n` for PTY. `src/lib/console.ts` handles: login sequence (Login:, Password:), license `[Y/n]:` prompt, password change skip (Ctrl-C), and command execution over serial. Version-proof prompt pattern (`] > ` suffix). Wired into `instance.exec()` as `--via=console`. Unit tests in `test/unit/console.test.ts`, integration tests in `test/integration/exec.test.ts`.
-- [x] Console-based provisioning — `provision.ts` accepts optional `machineDir`; if REST times out (30s), falls back to `consoleProvision()` which uses `consoleExec()` for user creation and admin disable. `ensureLoggedIn()` now logs out any stale serial session before re-authenticating as the desired user (`/quit\r` + hasQuit guard). `exec --via=auto` also falls back to console on REST unreachable. Integration-tested.
-- [x] **Fix: `disableAdmin()` race condition** — `disableAdmin()` now accepts optional `verifyAuth` parameter for read-back verification using alternate credentials (e.g. the new user created before disabling admin). Verification poll loop catches transient errors (401 from disabled admin, network blips) instead of aborting. Deadline increased to 20s. `provision()` passes new user's auth for verification.
-- [x] **Timeout scaling rules** — implemented `accelTimeoutFactor()`, updated `defaultBootTimeout()` with real accel detection, added `--timeout-extra` flag, 8 unit tests (`b512137`)
+</details>
 
 ### Robustness
 
-- [x] Graceful SIGINT/SIGTERM cleanup in foreground mode (currently leaves pid file)
-- [x] Lock file to prevent concurrent starts of same machine
-- [x] Better error messages for common QEMU failures (EFI size mismatch, permission denied)
-- [x] Retry download on transient network errors
-- [x] Machine name validation — reject names starting with `-` to prevent flag confusion (e.g. `quickchr start -fg` creating a machine named `-fg`)
-- [ ] **Boot-wait progress UX** — the spinner can be stuck at "Booting CHR and installing all packages..." for 400–600s with no indication of what's happening. Progress messages are now emitted every 20s during boot waits, but could be more informative: show HTTP probe attempts, distinguish "waiting for OS" vs "waiting for REST to init", and surface the remaining timeout budget. _Partially addressed: `waitForBootWithProgress` added; per-probe logging not yet implemented._
-- [ ] **Windows named-pipe channel reliability** — QEMU's cloudbase Windows build behavior with named pipes under load or rapid reconnect is untested. Verify monitor, serial, and QGA channels on Windows with a real running CHR. If named-pipe connections are unreliable, consider a TCP port-based fallback (monitor TCP = portBase + 7). Track any symptoms (connect errors, stale data, QEMU-side issues) before assuming named pipes "just work".
-- [ ] LLM-actionable error diagnostics: review all error paths and progress states for what additional context would help an LLM agent resolve the issue without extra tool calls. Not just `qemu.log` — consider what 50 chars of related detail might save an agent from guessing which file to read next. Structured error payloads with `{ code, message, hint, diagnostics? }` shape. Similar to how the wizard provides contextual help, the API/errors should carry enough info to act on. May also apply to progress events. Start with an audit of current error paths to identify what *would* help and what *would* hurt (noise), then decide scope. This is a design question first, implementation second.
-- [ ] `/system/shutdown` exec returns HTTP 400 — handle gracefully in `exec()`. RouterOS closes the connection during shutdown; treat as expected behavior, not error. **Needs local testing first:** enable RouterOS debug logging (`/system/logging/add topics=debug,!packet,!raw`) and use `/log/print where message~"shutdown"` to understand the exact sequence. Consider using `/tool/sniffer` or host-side `tcpdump`/`tshark` to capture the HTTP exchange. Also test via QEMU monitor and serial to see the shutdown sequence from multiple angles. Don't code-and-pray — get data first.
-- [x] ether1 DHCP ordering: **Experiment completed (2026-04-17, `test/lab/slirp-hostfwd/`).** SLiRP hostfwd **requires** a guest IP — without 10.0.2.15 on the interface, TCP connects (SLiRP accepts host-side) but HTTP hangs (guest never SYN-ACKs). This means SLiRP MUST be ether1 (gets auto DHCP client → 10.0.2.15 from SLiRP's built-in DHCP server). Reversed order (shared=ether1, user=ether2) causes `waitForBoot` 120s timeout. Current `user`-first ordering is correct. Shared/bridged on ether2+ needs manual `/ip/dhcp-client/add interface=ether2 default-route-distance=2` via REST after boot — this is a provisioning step, not a design flaw. **Hazard for TCG (ARM64 runners):** SLiRP half-open connections (connect succeeds, data never flows) burn the full per-probe HTTP timeout on every `waitForBoot` probe, compounding under slow TCG emulation.
-- [ ] Wizard: show post-start credential access info when managed login is used — explain `quickchr exec <cmd>`, `quickchr get <machine> creds`, or API method to retrieve credentials. Important for bridged VMs where localhost port forwarding isn't the only access path. **Credential philosophy:** quickchr is a test harness; easy access matters more than hardening. Show credentials in UI. Core rule: a user process can access our passwords (same privilege boundary), but credentials should not persist in logs or be usable for remote access. Threat model: prevent off-box access via bridge→CHR→local network (could bypass OS firewall), not prevent same-user access to stored passwords.
-- [ ] Wizard remediation map: for every common setup/provisioning failure code, show a "Why this happened" + "Try this" suggestion (one-liner each). Goal: wizard feels seamless and self-healing rather than "error-only".
-- [x] **HTTP consolidation — `rest.ts` module** — created `src/lib/rest.ts` as single module for ALL CHR REST calls (`restGet`, `restPost`, `restPatch`, `restRequest`). Uses `node:http` + `agent: false` + `setTimeout`/`done` flag pattern. Mechanically replaced ALL 13 `fetch()` CHR REST calls across 7 files (`license.ts`, `provision.ts`, `device-mode.ts`, `quickchr.ts`, `qemu.ts`, `exec.ts`, `packages.ts`, `cli/index.ts`). External URLs (versions, images, packages) remain as `fetch()` — correct per design. `startDeviceModeUpdate` (device-mode.ts) converted from inline `node:http` to `restPost` (eliminated ECONNRESET noise in tests). Three Bun bugs documented in `.github/instructions/bun-http.instructions.md`.
-- [x] **`start()` always waits for boot** — `QuickCHR.start()` JSDoc promises "REST-ready" but background+no-provisioning returned immediately without `waitForBoot`. Fixed both `start()` and `_launchExisting` to always call `waitForBoot` in background mode. Caused `deviceMode=skip` integration test to timeout on REST call (CHR hadn't booted yet).
+<details>
+<summary>Completed robustness work</summary>
 
-### Docs & Project
+- [x] SIGINT/SIGTERM cleanup, lock file, error messages (EFI mismatch, permission denied)
+- [x] Retry download on network errors, machine name validation (reject `-` prefix)
+- [x] ether1 DHCP ordering experiment (SLiRP hostfwd requires 10.0.2.15, user-first correct, lab: `test/lab/slirp-hostfwd/`)
+- [x] HTTP consolidation (`rest.ts` module, node:http + agent:false, all 13 fetch() CHR calls replaced)
+- [x] `start()` always waits for boot (background+no-provisioning was immediate without waitForBoot)
 
-- [x] Split README.md → CONTRIBUTING.md: already done in `36ad135`
-- [x] Align test coverage organically — don't chase numbers, but audit gaps. Coverage report captured Apr 2026; specific gaps tracked in "Test Coverage Gaps" section below.
+</details>
 
-### Test Coverage Gaps
+**Open robustness items:**
 
-From `bun test --coverage` (Apr 2026). Don't chase numbers — each item should prove correctness of the covered path, not just hit lines.
+- [ ] Boot-wait progress UX — `waitForBootWithProgress` added; per-probe logging (HTTP attempt, REST init, timeout budget) not yet implemented
+- [ ] Windows named-pipe reliability — monitor/serial/QGA channels untested under load on Windows. Consider TCP port fallback (monitor = portBase + 7) if pipes unreliable
+- [ ] LLM-actionable error diagnostics — structured `{code, message, hint, diagnostics?}` payloads with 50-char context to reduce agent guesswork
+- [ ] `/system/shutdown` exec returns HTTP 400 — handle gracefully. **Test locally first:** enable RouterOS debug logging (`/system/logging`, `/log/print`), capture HTTP via `/tool/sniffer` or `tshark`, understand shutdown sequence
+- [ ] Wizard remediation map — per-failure-code "Why" + "Try this" suggestions for seamless UX
+- [ ] Wizard post-start credential access info when managed login used (explain `exec`, `get <machine> creds`, API method for bridged VMs)
+- [ ] Wizard storage preflight — run doctor-style checks before interactive flow (low-disk, prerequisites) so failures happen early
 
-**State utilities (unit — no QEMU):**
-- [x] `state.ts`: unit tests for `updateMachineStatus`, `isMachineRunning`, `refreshAllStatuses`, and `pruneCache` — added to `test/unit/state.test.ts` (11 new tests)
+### Documentation
 
-**QEMU build + error paths (unit — no QEMU):**
-- [x] `qemu.ts`: unit tests for TCG-specific arg generation (`tb-size=256`, correct CPU per arch) — added to `test/unit/qemu-args.test.ts`
-- [x] `qemu.ts`: vmnet-shared and vmnet-bridge network mode arg generation — added to `test/unit/qemu-args.test.ts`
-- [x] `qemu.ts`: additional `buildQemuErrorMessage` patterns — EFI+size branch covered
-- [x] `qemu.ts`: `waitForBoot` timeout/warning branch — mock-fetch unit tests for 401 (booted), 200 (booted), connection-refused timeout added to `test/unit/qemu-args.test.ts` (3 tests)
-- [x] `qemu.ts`: `stopQemu` dead-PID path (returns false) and `spawnQemu` empty-args guard (throws SPAWN_FAILED) — added to `test/unit/qemu-args.test.ts`
-- [x] `qemu.ts`: `stopMachineByName` — no-pid early-return and socket-file cleanup tested — added to `test/unit/qemu-args.test.ts`
+- [ ] Draft MANUAL.md covering CLI, library API, provisioning, storage layout. Command tree diagram for CLI rationalization. Document `exec` design (`--via=auto|ssh|rest|qga|console`), `console`/`attach` as serial access
 
-**Image management (unit — mock fetch/fs):**
-- [x] `images.ts`: unit test `listCachedImages` for empty, absent, and populated cache dirs — `test/unit/images.test.ts` (new file, 4 tests)
-- [x] `images.ts`: `downloadImage` error paths — HTTP 4xx (non-retriable abort), 5xx retry exhaustion, cached-zip path, successful download — mock `fetch`; added to `test/unit/images.test.ts` (4 new tests)
-- [x] `images.ts`: `copyImageToMachine` — copies source .img to disk.img in machine dir; added to `test/unit/images.test.ts`
-- [x] `images.ts`: `extractImage` / `ensureCachedImage` — added unit coverage for cached-image short-circuit, arm64 rename fallback, and missing-image failure branches in `test/unit/images.test.ts`
+<details>
+<summary>Completed test coverage work</summary>
 
-**Credentials + secret storage (unit — mocked store + temp HOME):**
-- [x] `secrets.ts`: sync config-file store, Bun.secrets throw-fallback, delete cleanup, and storage-label paths — `test/unit/secrets.test.ts` (4 tests). `configDir()` now resolves `HOME` / `USERPROFILE` / `homedir()` at call time so the fallback path can be exercised deterministically
-- [x] `credentials.ts`: env precedence, stored-account fallback, save/delete delegation, storage label passthrough, and corrupt instance-credential handling — `test/unit/credentials.test.ts` (6 tests)
+- [x] State, QEMU, images, channels, credentials, secrets, completions, license, platform unit tests
+- [x] Instance lifecycle integration tests (remove running, clean, provision corner cases)
+- [x] Device-mode feature flags, exec (REST/QGA/console), SSH key provisioning
+- [x] Anchor test (`test/integration/anchor.test.ts`) — 34 field-presence assertions across 6 endpoints
+- [x] Windows unit tests (paths, channels, spawn) run in CI on every push/PR
 
-**Shell completions (unit — temp HOME):**
-- [x] `completions.ts`: shell-specific env detection, XDG bash path handling, rc-file append/idempotence, and machine-name/running-machine discovery — expanded `test/unit/completions.test.ts`
-
-**License error paths (unit — mock fetch):**
-- [x] `license.ts`: unit tests for `renewLicense` and `getLicenseInfo` error branches (network error, HTTP 4xx/5xx, level normalisation) using mocked fetch — added to `test/unit/license.test.ts` (6 new tests). **Updated:** rewrote from `globalThis.fetch` mocking to `node:http` `createServer` mock servers after `license.ts` was converted to use `rest.ts` (node:http). Pattern: `startMockServer()` returns `{port, close}`, pass port to function under test, cleanup in `afterEach`.
-
-**Channels (unit + integration):**
-- [x] `channels.ts`: unit tests for `monitorCommand` error paths (socket-not-found, server-close-before-prompt, quit resolves), `serialStreams` no-socket, `qgaCommand` arm64 guard — `test/unit/channels.test.ts` (new file, 6 tests)
-- [x] `channels.ts + quickchr.ts`: integration test for `instance.serial()` — readable stream delivers bytes from a running CHR's serial console — added to `test/integration/start-stop.test.ts`
-
-**Instance lifecycle (integration — needs running QEMU):**
-- [x] `quickchr.ts`: integration test for `instance.remove()` on a *running* machine — stop-then-delete path — added to `test/integration/start-stop.test.ts`
-- [x] `quickchr.ts`: integration test for `instance.clean()` — reset disk image from cache, verify CHR returns to factory state (custom user gone, admin/empty works) — added to `test/integration/start-stop.test.ts`
-- [x] `quickchr.ts`: bug fix — `clean()` test was missing `waitForBoot` after `_launchExisting` restart; REST assertions raced the boot and failed intermittently; fixed in `test/integration/start-stop.test.ts`
-- [x] `provision.ts`: provisioning corner cases — invalid group → PROCESS_FAILED; new user placed in "full" group with write access — added to `test/integration/provisioning.test.ts`
-
-**Package management (unit):**
-- [x] `packages.ts`: `downloadPackages` — cached extractDir path (no fetch), HTTP error (mock fetch), corrupt-zip extraction failure — added to `test/unit/packages.test.ts` (3 tests)
-- [ ] Cache retention policy for CHR images and extra packages — current behavior keeps extracted assets indefinitely and now removes image ZIPs after successful extraction, but we still need a scheme for purging older cached images and extra-package payloads safely. Design needed: age-based vs. count-based retention, user-facing commands/flags, and how to avoid deleting assets for active machines.
-
-**Version resolution (unit — mock fetch):**
-- [x] `versions.ts`: `resolveVersion` — HTTP error and invalid-body branches; `resolveAllVersions` — all 4 channels via mocked server — added to `test/unit/versions.test.ts` (5 tests)
-
-**Platform detection (unit):**
-- [x] `platform.ts`: `getQemuInstallHint` for all package managers (brew, apt, dnf, pacman, winget, unknown) — added to `test/unit/platform.test.ts` (6 tests)
-- [x] `platform.ts`: `getQemuVersion` — nonexistent binary returns undefined, installed binary returns semver string — added to `test/unit/platform.test.ts`
-- [x] `platform.ts`: `requireQemu` / `requireFirmware` — conditional tests (skip when binary/firmware absent or present as appropriate) — added to `test/unit/platform.test.ts`
-
-**Device-mode feature flags (integration):**
-- [x] `device-mode.ts`: integration test for `mode=basic` with `enable: [bandwidth-test, ipsec]` + `disable: [zerotier]` — verifies non-rose mode + non-empty enable/disable arrays are fully applied and confirmed via `verifyDeviceMode`; covers the CLI `--device-mode-enable`/`--device-mode-disable` code path end-to-end — added to `test/integration/device-mode.test.ts`
-- [x] `device-mode.ts`: **Bun connection pool fix** (`980ef4b`) — `startDeviceModeUpdate` rewrote from `fetch()` to `node:http` + `agent: false`. Root cause: `waitForDeviceModeApi` polls `GET /device-mode` in a loop, leaving pooled connections to that host:port in Bun's connection pool. The subsequent `POST` to the same host reused a pooled connection with a stale GET response buffered — RouterOS returned the cached data in <2ms, making every attempt look like "returned early" and exhausting all 5 retries. `agent: false` forces a fresh TCP connection for the POST, which RouterOS must actually block until power-cycle confirmation. **Further consolidated**: `startDeviceModeUpdate` now uses `restPost()` from `rest.ts` (eliminates inline `node:http`, eliminates ECONNRESET stderr noise in tests).
-- [ ] `quickchr.ts`: `hardRebootMachine` signal fallback — monitor socket unavailable → SIGTERM cascade. Device-mode integration test covers the monitor-quit path only; signal path is untested. **Needs systematic failure-mode testing first.** All provisioning steps need clear documentation of their failure modes — happy path works great, but removing deps or using different versions/distros could each have their own failure modes. Test locally to understand what the reboot path actually needs 100%, then code the fix. Don't try to fix uncovered failure paths based on guesses — data from running tests should guide the changes. Goal: provisioning should be "transactional" — you get the machine you wanted, or you don't (not "working BUT with warnings").
-
-**Exec (unit + integration):**
-- [x] `auth.ts`: unit tests for `resolveAuth()` — explicit override, provisioned user, admin fallback, disableAdmin edge case — `test/unit/exec.test.ts` (5 tests)
-- [x] `exec.ts`: unit tests for `restExecute()` — POST body with `as-string`, command pass-through (no wrapping), ret extraction, empty array, error codes, message field — `test/unit/exec.test.ts` (8 tests)
-- [x] `exec.ts`: **simplified exec design** — removed automatic `:serialize to=json` wrapping (`output: "json"` option removed). Commands are passed through as-is with `"as-string": true` in POST body for synchronous execution. Callers wrap `:serialize` themselves when needed.
-- [x] `exec.ts`: integration test restructured — shares single CHR instance across REST, QGA, and console transports. Tests: identity text, caller-wrapped `:serialize` for JSON, log command, `:put` value pass-through, QGA probe/exec/info (x86), console ready/exec/multi-line.
-- [x] `exec.ts`: **critical fix** — `"as-string"` in POST body makes `/rest/execute` run synchronously (returns `{"ret":"output"}`) instead of returning a job ID (`{"ret":"*5"}`). **Behavior is presence-based, not value-based**: any value (`true`, `false`, `""`, `"false"`) triggers synchronous mode; omitting the key entirely triggers async mode. Canonical value is `true` (boolean). Without this, commands run in background.
-- [x] `exec.ts`: **Bun connection pool fix** (`0c0f1b1`) — replaced `fetch()` with `node:http` + `agent: false` in `restExecute`. Bun pools TCP connections by host:port and ignores `Connection: close`; when a prior test's machine port is recycled, pooled connections return stale responses. `agent: false` forces a fresh TCP connection per call, bypassing the pool. This is the canonical fix for any code path where a GET precedes a POST to the same host (see also `device-mode.ts`). **Further consolidated**: `restExecute` now uses `restPost()` from `rest.ts` (eliminates inline `node:http`).
-- [x] `exec.ts`: integration test for exec with provisioned user credentials — starts CHR with `secureLogin: true`, execs as managed user and with explicit credentials from secrets store.
-- [x] `exec.ts`: integration test for invalid command error path (e.g. `/nonexistent/garbage`) — expects `QuickCHRError("EXEC_FAILED")` thrown by `restExecute` on HTTP 4xx.
-- [x] `cli/index.ts`: `cmdExec` flag parsing — `parseFlags` exported; unit tests in `test/unit/cli-exec-flags.test.ts` cover `--via`, `--user`, `--password`, `--timeout`, `--no-X`, positional separation.
-
-**Boot reliability & wizard UX:**
-- [x] `qemu.ts`: **Bun connection pool fix for `waitForBoot`** (`425d601`) — `waitForBoot` rewrote from `fetch()` to `node:http` + `agent: false`. Same root cause as the `exec.ts`/`device-mode.ts` pool fixes: when Bun's pool has a stale connection to a port from a previous CHR instance, polls return errors even though the new CHR is responding correctly. `agent: false` forces a fresh TCP connection per poll, bypassing the pool. This was the root cause of wizard boot timeouts after integration test runs (integration machines briefly hold ports that the wizard later reuses). Confirmed fix by starting a machine on the exact port that was previously held, getting successful REST response. **Further consolidated**: `waitForBoot` now uses `restGet()` from `rest.ts` (eliminates inline `nodeGet` function).
-- [x] `quickchr.ts`: **auto-cleanup on boot timeout** (`425d601`) — both `BOOT_TIMEOUT` throw sites now call `instance.stop()` + `instance.remove()` before throwing. Previously, a boot timeout left the QEMU process running and machine state on disk, requiring manual cleanup. Now the wizard shows "Machine has been cleaned up automatically." instead of telling the user to manually run `rm`.
-- [x] `qemu-args.test.ts`: rewrote `waitForBoot` unit tests from `globalThis.fetch` mock to `Bun.serve({port:0})` real local servers (same pattern as `exec.test.ts`). The prior mock pattern was silently bypassed once `waitForBoot` switched to `node:http`.
-- [x] `wizard.ts`: elapsed-time counter during boot wait (`425d601`) — spinner updates every 3s with "Booting CHR... (45s)" so the user can see progress during the 240s boot wait instead of a static unresponsive spinner.
-- [x] `auth.ts` / `credentials.ts` / `secrets.ts`: **Keychain hang fix** (`979f236`) — `resolveAuth()` made synchronous; instance credentials stored in config file only (no `Bun.secrets` / macOS Keychain) via new `secretGetSync`/`secretSetSync`/`secretDeleteSync`. Root cause: `Bun.secrets.get()` triggers a macOS Keychain authorization dialog; in `bun test` (no TTY), the dialog can never be approved and the Promise never resolves, hanging all integration tests at their full timeout. MikroTik web credentials (licensing) still use `Bun.secrets` — those are only accessed in wizard CLI paths that have a TTY.
-- [x] `qemu.ts` / `exec.ts` / `anchor.test.ts`: **Bun `req.destroy()` bug fix** (`979f236`) — `nodeGet()` and `restExecute()` rewrote timeout handling from `req.setTimeout + req.destroy` to `setTimeout + direct reject() + done flag`. Root cause: Bun's `node:http` `req.destroy()` does NOT emit the `error` event on the request (unlike standard Node.js), so `req.on("error", reject)` was never invoked after a timeout, leaving the Promise permanently pending. In `waitForBoot`, SLIRP accepts TCP connections before CHR's HTTP server is ready — `nodeGet` connected but never got a response. The Promise hung forever, causing wizard/provision boot detection to hang (never returning `false`) instead of timing out cleanly. **Bun-specific gotcha**: any `node:http` code ported from Node.js that uses `req.destroy()` for timeouts needs this fix pattern.
-- [ ] `wizard.ts`: wizard session log (`setup-log.json`) — when a wizard session starts a machine (name confirmed), write an incremental log of what was shown to the user, answers selected, provisioning steps run, and final outcome to the machine directory. Survives Ctrl-C if written incrementally. Useful for debugging failed provisions, cross-referencing config, and auditing what the wizard actually did vs. what the user remembers. Design decision needed: log path (machine dir vs. separate log dir), format (JSON vs. JSONL vs. NDJSON), and rotation policy. Start with machine-dir NDJSON; revisit if volume becomes an issue.
-- [ ] `wizard.ts`: run a doctor-style storage preflight before entering the interactive flow (or inline at wizard startup) so low-disk and other prerequisite issues are visible before the user spends time answering prompts. Keep it non-interactive and obvious; decide whether this should run full doctor or a focused subset (storage + prerequisites only).
-
-**CI-gated / platform-specific:**
-- [x] `state.ts` / `platform.ts`: Windows path logic — Windows CI runner now always-on (unit tests exercise `LOCALAPPDATA`/`USERPROFILE` paths, `where.exe`, `winget` detection)
-- [ ] `platform.ts`: KVM detection with `/dev/kvm` present/absent — Linux CI matrix should exercise both paths explicitly
-
-### Provisioning correctness — verify what you write
-
-Integration tests and internal provisioning code check `board-name` and similar REST fields in ways that are fragile. The rule is: **verify what we write by reading it back** — not just that the box is up. Today some checks (e.g. `board-name` assertions in tests) are probes for aliveness rather than correctness of a provisioning write. Real verification means: if `start()` applies device-mode, read the mode back and compare; if a user is created, read the user back and compare group/name; if a license is applied, read the level back and compare. Fragile liveness checks imply the *core* provisioning sequence may be fragile too. Action items:
-
-**Known bugs:**
-- [x] `machine.json` `packages` field records `[]` even when all packages were requested and installed. Fixed (`36ad135`): `installPackages()`/`installAllPackages()` now return `Promise<string[]>`; `_provisionInstance` captures the list and calls `saveMachine()` to persist. Integration-tested in `start-stop.test.ts`.
-- [x] License renewal error classification — `classifyRenewResponse()` misclassified `"ERROR: ..."` status as "pending", causing 90s poll. Fixed (`8c1a193`): now throws immediately with actual error text.
-
-- [x] Audit every REST assertion in integration tests — classify as "liveness check" or "write-verify". Done: board-name checks in start-stop and device-mode tests labeled as liveness; version check labeled as write-verify.
-- [x] Where provisioning claims to verify but the assertion is loose — reviewed; `toContain("CHR")` for liveness is intentional (CHR board-name format), `toContain(state.version)` for version is correct (RouterOS appends channel suffix). No tightening needed.
-- [x] Startup race (wrong array body from /system/resource): identified as boot timing race, NOT the expired-admin flag. Comments in `waitForBoot` (qemu.ts), `waitForRest`/`disableAdmin` (provision.ts), and device-mode.ts all updated to say "startup race" not "expired admin quirk".
-- [x] Consider an anchor test concept for provisioning: a reference CHR started under controlled conditions whose full REST state is snapshotted and diffed on each run. Differences surface RouterOS schema changes before they break production workflows. **Done** (`3580d53`): `test/integration/anchor.test.ts` boots x86 CHR and verifies field presence on 6 REST endpoints (resource, identity, license, user, device-mode, ip/address, interface). 34 assertions. Note: corrected field is `system-id` (not `software-id`) for the license endpoint — also fixed in `cmdGet`. **Post-boot quirk handled** (`d917665`): replaced static 3s sleep with `fetchUntilHasKeys` retry helper (20s per endpoint) — consistent with `getLicenseInfo`/`readDeviceMode` fixes. The startup race affects all non-resource endpoints, not just `/system/resource`. Value testing deferred (fields, not values — avoids version churn). **Bun pool fix** (`980ef4b`): replaced all `fetch()` calls in anchor test with `nodeGet()` (`node:http` + `agent: false`) — when a prior test's machine is stopped and its port is recycled to the anchor machine, Bun's pool returns stale responses causing false failures in the full suite (passes in isolation). Pattern confirmed: all integration test code that directly calls `fetch()` to a CHR port should use `node:http` + `agent: false`.
-
-### RouterOS "expired admin" is not a REST blocker
-
-Multiple agents (and past code paths) have treated the admin account's `expired: true` flag as a REST API blocker and added workarounds accordingly. **It is not.** The `expired` flag only prompts a password-change screen at CLI/Winbox/SSH login (and even then can be bypassed with Ctrl-C). RouterOS REST API and API sockets are unaffected — authenticated requests with `admin:""` succeed on a fresh CHR image regardless of the expired flag. Workarounds built on this incorrect assumption (`clearAdminExpiry`, polling until `board-name` appears in shape-checks) add complexity without fixing a real problem.
-
-- [x] Audit `provision.ts` and any code with comments referencing "expired" or "quirk" — Done: all "expired admin quirk" comments corrected to "startup race". `clearAdminExpiry` kept (best-effort, catch-all) but docstring corrected: the expired flag does NOT affect REST, it only affects CLI/Winbox/SSH login. Candidate for removal after integration test confirms no regression.
-- [x] **`clearAdminExpiry` removed** (`3580d53`) — integration test (provisioning-integ) confirmed `clearAdminExpiry` is a no-op for REST provisioning. Function and call site deleted from `provision.ts`. No regression in provisioning tests.
-- [x] Update `.github/instructions/` to document that `expired: true` does not affect REST API — Done: `provisioning.instructions.md` and `general.instructions.md` already updated in prior commit.
-- [x] If a genuine startup race (not the expired flag) causes early REST responses to return wrong data — confirmed: it IS a startup race. `waitForBoot` guards `/system/resource` with two-consecutive-OK. **Note (`d917665`)**: the startup race also affects other non-resource endpoints (`/system/identity`, `/system/license`, `/system/device-mode`). Those callers must retry independently — `getLicenseInfo` (15s retry), `readDeviceMode` (30s AbortSignal), and `fetchUntilHasKeys` in anchor test (20s) all implement this pattern.
-
-### `secureLogin` default and provisioning philosophy
-
-`secureLogin` currently defaults to `true`, meaning every `QuickCHR.start()` call auto-creates a `quickchr` managed user unless the caller opts out with `secureLogin: false`. This is the wrong default for a programmatic API: callers should specify what they need; unspecified features should be no-ops. The cascade: unintended provisioning adds latency, creates credentials that tests don't expect, and makes `resolveAuth()` non-deterministic for callers that haven't thought about auth. The right default is `false` — skip provisioning unless asked. Callers who want a managed account opt in explicitly. The wizard can still default to `true` for the interactive path.
-
-- [x] Change `secureLogin` default to `false` in `provision()` and `_provisionInstance()` — provisioning should be explicit opt-in, not opt-out. Done: all `!== false` checks changed to `=== true`; provisioning.test.ts updated to pass `secureLogin: true` explicitly.
-- [x] Review all `QuickCHR.start()` call sites (tests, examples, CLI) — add explicit `secureLogin: true` where the managed account is actually needed, remove `secureLogin: false` guards added as workarounds.
-- [ ] Consider renaming to `createManagedUser` or splitting into a separate `provision.user` option group for clarity (tracked here; don't rename without also updating wizard, CLI flags, and docs).
-- [ ] Provisioning as a whole: the current model bundles package install, device-mode, license, and user creation into a single `_provisionInstance` call. Consider making each step an explicit opt-in with no implicit activation. Goal: `start()` is fast and predictable by default; callers who need provisioning compose it explicitly. The wizard can still bundle common combinations (and default `secureLogin: true` for interactive paths). This is the "composition over configuration" philosophy: each provisioning step is a building block, `_provisionInstance` is one opinionated composition, callers can build their own.
+</details>
 
 ### Lab-Verified RouterOS REST Behavior (May 2026)
 
-Comprehensive lab experiments run against CHR 7.22.1 (x86_64) documented exact REST API behavior for four critical subsystems. Lab test files in `test/lab/`, skill references in `~/.copilot/skills/routeros-fundamentals/references/`:
+<details>
+<summary>Lab experiments (test/lab/) documented exact REST API behavior</summary>
 
-- **device-mode-rest.md** — POST update ALWAYS blocks HTTP (even no-op); activation-timeout range 10s–1d; attempt-count tested to 12 with no REST limit (docs say "max 3" — appears CLI-only); flagged is independent of attempt-count
-- **packages-rest.md** — **CRITICAL: `/system/reboot` does NOT apply package changes; must use `/system/package/apply-changes`**. Built-in packages (12 on CHR) need enable + apply-changes only — no SCP upload needed. `scheduled` values: `""`, `"scheduled for enable"`, `"scheduled for disable"` (not "scheduled for install")
-- **async-commands-rest.md** — `duration="Xs"` → `.section` arrays; `once=""` → single-element array; no param → blocks forever. `once="false"` does NOT activate once mode (unlike `as-string` which is purely presence-based)
-- **licensing-rest.md** — Free CHR: `{level:"free",system-id:"..."}` (only 2 fields). Error strings appear inside HTTP 200 responses — must check for "ERROR:" prefix. `duration` parameter controls server wait time
+- device-mode-rest.md — POST always blocks; activation-timeout 10s–1d; attempt-count tested to 12; flagged independent
+- packages-rest.md — `/system/package/apply-changes` required (NOT `/system/reboot`); `scheduled` values documented
+- async-commands-rest.md — `duration="Xs"` → `.section` arrays; `once=""` → single-element; `once="false"` does NOT activate
+- licensing-rest.md — Free CHR 2 fields only; error strings inside HTTP 200; `duration` controls server wait
+- Lab tests in `test/lab/<topic>/` with `REPORT.md` files. See `test/lab/README.md`.
 
-Existing references updated: `device-mode.md` (attempt-count limit corrected), `extra-packages.md` (apply-changes vs reboot fix). Instructions updated: `routeros-rest.instructions.md` (license response shapes with .section keys, once="false" caveat).
+</details>
 
-Lab tests reorganized into `test/lab/<topic>/` subdirectories with `REPORT.md` lab reports bridging SKILL references ↔ test code. See `test/lab/README.md` for structure and running instructions.
+### SKILL References
 
-### Missing SKILL References (to create)
+<details>
+<summary>Completed SKILL.md files (~/.copilot/skills/routeros-fundamentals/references/)</summary>
 
-- [ ] **`quickchr-automation.md`** — How to use quickchr itself as a tool (trigger terms: "spin up CHR", "boot RouterOS", "CHR integration test"). Document `QuickCHR.start()` options, `ChrInstance` methods, port block layout, dry-run mode. May belong in `~/.copilot/skills/routeros-qemu-chr/` rather than a new skill. (See also P6 item on quickchr SKILL.md)
-- [x] **`routeros-scripting.md`** (reference) — Updated with: `:execute` vs `:do`, `:parse`, array operations, `:serialize`/`:deserialize` (JSON), `/system/script` repository, script permissions/policies, variable scope gotchas. Verified against rosetta page 47579229. (Session: 2025-07-17)
-- [x] **`routeros-firewall-rest.md`** (reference) — Created. Covers `/ip/firewall/filter`, `/nat`, `/mangle` CRUD; `place-before` ordering gotcha (15 mentions); `.id` references; filtering/proplist; 5 common patterns. Source: rosetta MCP. (Session: 2025-07-17)
-- [x] **`routeros-users-rest.md`** (reference) — Created. Covers `/user` CRUD, `/user/group`, `/user/ssh-keys` (add + import), admin expired flag (REST unaffected), password change. Source: rosetta pages 8978504, 47579162, 132350014 + quickchr provisioning code. (Session: 2025-07-17)
-- [x] **`routeros-networking-rest.md`** (reference) — Created. Covers `/ip/address`, `/ip/route`, `/ip/dhcp-client`, `/ip/dhcp-server`, `/ip/dns`, `/interface`. Source: rosetta MCP (9 pages). (Session: 2025-07-17)
-- [x] **`bun-runtime-gotchas.md`** — Created. Consolidated 4 bugs: req.destroy() silence (confirmed), connection pool (disproved), Bun.secrets keychain (confirmed), test runner event loop sharing (confirmed). HTTP client decision matrix. Source: bun-pool lab + bun-http.instructions.md. (Session: 2025-07-17)
-- [ ] **`routeros-logging-rest.md`** (reference) — `/log/print` via REST, topic hierarchy, filtering with `where`. Useful for debugging provisioning and RouterOS troubleshooting. (Identified 2025-07-17)
-- [ ] **`qemu-monitor-protocol.md`** (reference) — QEMU monitor socket commands (`system_reset`, `quit`, `info status`, `info chardev`). Critical for quickchr automation but undocumented as a SKILL reference. (Identified 2025-07-17)
-- [ ] **`routeros-identity-rest.md`** (reference) — `/system/identity` GET/set, `/system/resource` full field list. Used by every boot detection and health check path. (Identified 2025-07-17)
+- [x] routeros-scripting.md — `:execute` vs `:do`, `:parse`, `:serialize`, script permissions/policies
+- [x] routeros-firewall-rest.md — `/ip/firewall/filter`, `/nat`, `/mangle` CRUD; `place-before` gotchas
+- [x] routeros-users-rest.md — `/user` CRUD, `/user/group`, `/user/ssh-keys`, admin expired flag (REST unaffected)
+- [x] routeros-networking-rest.md — `/ip/address`, `/ip/route`, `/ip/dhcp-client`, `/ip/dns`, `/interface`
+- [x] bun-runtime-gotchas.md — 4 bugs consolidated (req.destroy silence, connection pool, Keychain, event loop)
 
-### Open Lab Tests (to run)
+</details>
 
-- [ ] **SCP package upload** — Exercise the full SCP → apply-changes path with a third-party `.npk`. Current package lab only covers built-in packages
-- [ ] **QGA file delivery** — Can `guest-file-write` deliver `.npk` files on x86 CHR? Would eliminate SCP dependency for package provisioning
-- [x] **SSH key provisioning** — Lab complete (2025-07-17). Two methods: `add` (inline key, RSA only on 7.10) and `import` (upload file first). ed25519/ECDSA unsupported on 7.10 — need version testing on 7.18+. DELETE returns 204. SSH login verified working immediately after key install. See `test/lab/ssh-keys/REPORT.md`
-- [x] **Multi-package enable** — Tested on 7.10 (2025-07-17). `enable`/`disable` + `reboot` works. **Key finding: `/system/package/apply-changes` was added in RouterOS 7.18** — versions <7.18 MUST use `/system/reboot`. Updated container SKILL.md with version note.
-- [ ] **Serial console device-mode** — Observe the countdown timer on serial during device-mode/update. Not tested via quickchr's serial channel
-- [ ] **Large duration async** — What happens with `duration="60s"` on monitor-traffic? Is the response streamed or buffered? Memory implications
-- [ ] **License success shape** — Run `/system/license/renew` with valid credentials to confirm the `"done"` success path (currently skipped, needs `MIKROTIK_WEB_USER`/`MIKROTIK_WEB_PASS`)
-- [ ] **apply-changes consistency** — Partially addressed: confirmed `apply-changes` first appeared in 7.18 via rosetta command version check. More version-specific testing still useful
-- [ ] **once="false" on other commands** — Verify the `once="false"` exception on commands beyond monitor-traffic (check-for-updates, ethernet/monitor)
-- [ ] **ed25519 SSH key version** — When exactly was ed25519 key support added? Test on 7.16+ or 7.18+ CHR. (Identified during SSH key lab, 2025-07-17)
+**Missing SKILL references (to create):**
 
-### Bun HTTP Client — Open Question
+- [ ] quickchr-automation.md — Trigger terms, `QuickCHR.start()` options, `ChrInstance` methods, port block layout
+- [ ] routeros-logging-rest.md — `/log/print`, topic hierarchy, filtering with `where`
+- [ ] qemu-monitor-protocol.md — Monitor socket commands (`system_reset`, `quit`, `info status`)
+- [ ] routeros-identity-rest.md — `/system/identity` GET/set, `/system/resource` full field list
 
-The codebase uses two HTTP clients with no crisp rule for when to use which:
+**Open lab tests (to run):**
 
-| Where | Client | Why |
-|-------|--------|-----|
-| `rest.ts` (CHR REST) | `node:http` + `agent:false` | Originally: pool bug. Actually: `req.destroy()` bug |
-| `versions.ts`, `images.ts`, `packages.ts` | `fetch()` | External URLs — no timeout/destroy concerns |
-| Integration tests | `node:http` helpers | Copied from rest.ts pattern |
+- [ ] SCP package upload — Third-party `.npk` via SCP → apply-changes
+- [ ] QGA file delivery — Can `guest-file-write` deliver `.npk` on x86 CHR?
+- [ ] Multi-package enable version test — Apply-changes first in 7.18; <7.18 must use `/system/reboot`
+- [ ] Serial console device-mode — Observe countdown timer during device-mode/update
+- [ ] Large duration async — Memory implications of `duration="60s"` on monitor-traffic
+- [ ] License success shape — Confirm `"done"` path with valid MikroTik.com credentials
+- [ ] ed25519 SSH key version — When added? Test on 7.16+/7.18+ CHR
 
-**The pool bug was NOT reproduced** (see `test/lab/bun-pool/REPORT.md`). The real reason rest.ts needs node:http is **Bug 2** from `bun-http.instructions.md`: Bun's `req.destroy()` doesn't emit the `error` event, causing promise hangs on timeout. This IS reproducible and IS a real problem for long-polling/blocking endpoints like device-mode.
+<details>
+<summary>Completed lab tests</summary>
 
-**What we need** (in priority order):
+- [x] SSH key provisioning lab (2025-07-17) — `add` (inline RSA-only on 7.10) vs `import` (upload file); ed25519/ECDSA unsupported on 7.10; DELETE 204; `test/lab/ssh-keys/REPORT.md`
+- [x] Multi-package enable (7.10 tested) — `enable`/`disable` + `reboot` works; `/system/package/apply-changes` added in 7.18
+- [x] SLiRP hostfwd experiment (2026-04-17) — Requires guest IP 10.0.2.15; user-first ordering correct; `test/lab/slirp-hostfwd/`
+- [x] Bun HTTP pool (disproved) — `test/lab/bun-pool/REPORT.md`
 
-1. **Crisp rule**: "Use `fetch()` everywhere except when you need `req.destroy()` with guaranteed error propagation (long-polling/blocking REST endpoints)." Update `bun-http.instructions.md` to lead with this rule instead of the pool bug narrative
-2. **Bun bug report**: File issue for `req.destroy()` not emitting error. If fixed, rest.ts could migrate back to fetch()
-3. **Periodic re-test**: When Bun ships a major version, re-run `test/lab/bun-pool/` to track pool behavior
-4. **Eventual unification**: If Bun fixes destroy + pool, migrate rest.ts back to fetch() and remove the node:http dependency. Until then, the mixed pattern is correct but the documentation should explain WHY (destroy bug, not pool bug)
+</details>
+
+### Bun HTTP Client Decision
+
+**Rule:** Use `fetch()` except for long-polling/blocking CHR REST endpoints (device-mode, exec).
+**Reason:** Bun's `req.destroy()` doesn't emit error → promise hangs on timeout (real bug, reproducible). The pool bug was NOT reproduced (`test/lab/bun-pool/REPORT.md`).
+
+**TODO:**
+1. File Bun issue for `req.destroy()` error silence
+2. Re-test on Bun major versions
+3. Unify to `fetch()` if Bun fixes it
 
 ---
 
-## P2 — CLI & UX
-
-### Design Principles
-
-**Interactive prompts are confined to `setup` (and future `tui`).** Every other command is non-interactive — no clack selectors, no `QUICKCHR_NO_PROMPT=1` needed. Without a `<name>` argument, commands print a helpful machine list with a tip instead of launching a selector. Shell completions cover the "discovery" need that interactive selectors were filling. This makes every command safe for scripts, LLMs, CI, and pipes by default.
-
-**`start`/`stop` are pure operations.** They start or stop a machine. No wizard, no creation, no prompts. `add` creates machines. `setup` is the interactive wizard for humans exploring the tool.
-
-**`set`/`get` for machine configuration.** License, device-mode, admin accounts — anything that mutates machine config goes through `set`. Avoids a proliferation of top-level commands (`quickchr license`, `quickchr device-mode`, `quickchr admin`, etc.). Loosely follows RouterOS `set`/`get` naming.
-
-**`--json` and `--yaml` on all read commands.** Structured output for scripts and LLMs. Plain table is the default for humans.
-
-### Command Reference (target design)
-
-```text
-quickchr — MikroTik CHR QEMU Manager
-
-Usage:
-  quickchr                           Run 'setup' wizard (TTY) or 'help' (non-TTY / QUICKCHR_NO_PROMPT=1)
-  quickchr <command> [options]
-
-Lifecycle:
-  add <name> [options]    Create a new CHR instance (download image, allocate ports)
-  start [<name>|--all]    Start existing instance(s). No name → list startable machines with tip
-  stop [<name>|--all]     Stop instance(s). No name → list stoppable machines with tip
-  remove [<name>|--all]   Remove instance(s) and disk. No name → list removable machines with tip
-  clean [<name>]          Reset instance disk to fresh image. No name → list machines with tip
-
-Interaction:
-  exec <name> <command>   Run RouterOS CLI command (--via=auto|ssh|rest|qga)
-  console <name>          Attach to serial console (interactive TTY required)
-  logs <name>             Tail qemu.log
-
-Configuration:
-  set <name> [options]    Set machine properties (see 'quickchr help set')
-  get <name> [options]    Get machine properties (--json, --yaml)
-
-Inspection:
-  list [--json|--yaml]    List all instances with summary status
-  networks [--json]       List available networks (interfaces, named sockets)
-  doctor [--json]         Check prerequisites and system health
-
-Interactive:
-  setup                   Interactive wizard — create, manage, configure machines (TTY only)
-
-Meta:
-  version                 Show version info
-  help [command]          Show help
-
-Environment:
-  QUICKCHR_NO_PROMPT=1    Force non-interactive (bare 'quickchr' runs 'help' instead of 'setup')
-  MIKROTIK_WEB_ACCOUNT    MikroTik.com account email (for license via 'set')
-  MIKROTIK_WEB_PASSWORD   MikroTik.com password (for license via 'set')
-```
-
-### Command Details
-
-#### `add` — Create Machine (replaces old `start` wizard path)
-
-Takes the same options as the current `start` wizard but as CLI flags. Errors on duplicate name. Non-interactive.
-
-```text
-quickchr add my-chr --version stable --arch x86_64 --mem 512 --add-network user
-quickchr add rb-sim --version long-term --emulate-device rb5009
-quickchr add arm-test --arch arm64 --packages container,zerotier
-```
-
-- [x] Implement `add` command with all current `start` creation options
-- [x] Error on duplicate name (currently silent overwrite risk)
-- [x] After creation, print machine summary and `tip: quickchr start my-chr`
-
-#### `start` / `stop` — Pure Operations
-
-`start <name>` starts a stopped machine. `start --all` starts all stopped machines. No name and no `--all` → print list of startable machines with tip.
-
-```text
-$ quickchr start
-NAME        STATUS    VERSION    ARCH
-my-chr      stopped   7.22       x86_64
-arm-test    stopped   7.22       arm64
-
-tip: quickchr start <name>  or  quickchr start --all
-
-$ quickchr start my-chr
-● my-chr started (http://127.0.0.1:9100)
-```
-
-- [x] Refactor `start` to remove wizard/creation logic — **done**. `start()` in `quickchr.ts` is pure start; no wizard/selector/creation logic present. Wizard lives in `src/cli/wizard.ts` (CLI layer only).
-- [x] `start` without name: list startable machines, print tip, exit 0
-- [x] `stop` without name: list stoppable machines, print tip, exit 0
-- [x] Remove all clack selectors from `start` and `stop`
-- [x] `--all` flag on both
-
-#### `set` / `get` — Machine Configuration
-
-> **Architecture note (biggest current gap):** The set/get scheme needs a rational design for two scopes: **machine settings** (license, device-mode, admin accounts — things that mutate a running or stopped CHR) and **user preferences** (UI defaults, preferred transport, default credentials, always-use-this-password, don't-show-provisioning-progress — things that control quickchr behavior across all machines). Machine settings win over user preferences when both are set. User preferences are few (maybe a dozen at most) and none are critical today, but the *capability* is needed — without it, adding/fixing stuff is harder because there's no place to stash an option. Consider a path-based hierarchy so there's room to grow (similar to network specifiers where we leave parsing flexible). Machine settings have their own complexity: is the machine running? do we have credentials? should we start it to apply this? These are NOT like shell `set`/`echo $VAR`. The "concept" needs to manifest so it becomes a prompt to add a setting when needed — NOT "let's make everything a setting."
-
-Unified interface for machine properties that were previously separate commands or only in the wizard.
-
-```text
-# License
-quickchr set my-chr --license --account user@example.com --password secret
-quickchr set my-chr --license                    # uses MIKROTIK_WEB_ACCOUNT/PASSWORD env
-
-# Device mode
-quickchr set my-chr --device-mode advanced
-quickchr set my-chr --device-mode-enable ipsec,bandwidth-test
-quickchr set my-chr --device-mode-disable zerotier
-
-# Admin account
-quickchr set my-chr --disable-builtin-admin
-quickchr set my-chr --add-admin-user deploy --password secret123
-
-# Read back
-quickchr get my-chr                              # all settable properties
-quickchr get my-chr --json                       # structured output
-quickchr get my-chr license                      # specific property group
-quickchr get my-chr device-mode
-quickchr get my-chr admin                        # RouterOS users in group=full
-```
-
-- [x] Implement `set` command — started with `--license` flag (`36ad135`): `quickchr set <name> --license` applies license using existing `license.ts` logic. Device-mode and admin account remain deferred.
-- [x] Implement `get` command — `cmdGet` in `src/cli/index.ts` (`a8c8cad`). Queries live CHR REST endpoints (license, device-mode, admin users). Pretty-print or `--json`. Graceful offline handling. Fixed license field: `system-id` not `software-id`.
-- [x] `get` without a property group: shows all settable config (license level, device-mode, admin users) — already implemented via `if (!group || group === "license")` / `group === "device-mode"` / `group === "admin"` pattern in `cmdGet`.
-- [x] Deprecate standalone `license` command → alias to `set <name> --license`. Dispatcher now prints deprecation warning and routes to `applyLicense()` (`36ad135`).
-
-#### `remove` / `clean` — Non-Interactive
-
-Without a name: print list of machines with tip. No selectors.
-
-```text
-$ quickchr remove
-NAME        STATUS    VERSION    ARCH
-my-chr      stopped   7.22       x86_64
-arm-test    running   7.22       arm64     (stop first)
-
-tip: quickchr remove <name>  or  quickchr remove --all
-
-$ quickchr remove my-chr
-my-chr removed.
-```
-
-- [x] Remove clack selectors from `remove` and `clean`
-- [x] Print machine list with tip when no name given
-- [x] `--all` flag on `remove` (already exists). Add to `clean`.
-- [x] For running machines in `remove` list, show "(stop first)" hint
-
-#### `list` — Unified Machine List
-
-Merge current `list` and `status` into one command. `list` shows the summary table. `list <name>` shows detailed status for one machine (what `status <name>` does today). `status` becomes an alias for `list`.
-
-```text
-$ quickchr list
-NAME        STATUS    VERSION    ARCH      PORTS           NETWORKS
-my-chr      running   7.22       x86_64    9100-9109       user
-hub         running   7.22       x86_64    9110-9119       user, socket::hub-a, socket::hub-b
-branch-a    stopped   7.22       x86_64    9120-9129       user, socket::hub-a
-
-$ quickchr list my-chr
-Name:       my-chr
-Status:     running (PID 12345)
-Version:    7.22 (stable)
-Arch:       x86_64
-...
-
-$ quickchr list --json
-[{"name":"my-chr","status":"running",...}]
-```
-
-- [x] Merge `list` and `status` — `list [<name>] [--json]` for both table and detail; `cmdStatus` eliminated (`36ad135`)
-- [x] Keep `status` as alias for `list` — dispatcher routes `status` → `cmdList()` (`36ad135`)
-- [x] `--json` / `--yaml` output on `list` — `--json` implemented; YAML deferred
-- [ ] Enrichment: pull live QEMU stats (CPU, memory) via monitor channel for `list <name>` detail view
-- [ ] Show network info (names, any downgrades) in both table and detail views
-
-#### `setup` — Interactive Wizard
-
-All interactive UI lives here. The "home screen" for humans exploring quickchr.
-
-```text
-$ quickchr setup
-
-  ◆ quickchr setup
-  │
-  │ What would you like to do?
-  │ ○ Create a new machine
-  │ ○ Manage machines (start/stop/remove)
-  │ ○ Configure networks
-  │ └
-```
-
-**Flow when zero machines exist:** Jump straight to "Create a new machine" (current wizard flow).
-
-**Flow when machines exist:**
-
-- **Create** → current wizard flow → `add` under the hood
-- **Manage** → list machines with state → per-machine choices:
-  - Running: start, stop, "stop and edit" (future)
-  - Stopped: start, edit config (stub as unimplemented for now), remove
-- **Networks** → show available networks by type:
-  - `user`: list machines with user networks and their port mappings. Tip: controlled by machine config.
-  - `socket`: list active named sockets with connected machines. Option to add new socket link between machines.
-  - `shared`/`bridge`: show available platform networks (vmnet on macOS, TAPs on Linux). Stub for now — full implementation deferred to P5 networking work.
-
-- [x] Create `setup` command with top-level menu
-- [x] Wire "Create" to existing wizard flow
-- [x] Wire "Manage" to machine list with per-machine actions
-- [x] Stub "Networks" with basic listing, mark advanced networking as unimplemented
-- [x] Make bare `quickchr` (no args, TTY) invoke `setup`
-- [x] Make bare `quickchr` (no args, non-TTY or `QUICKCHR_NO_PROMPT=1`) invoke `help`
-
-#### `exec` — Run RouterOS Commands
-
-- [x] `quickchr exec <name> <command>` — REST `/execute` transport with `as-string` for synchronous execution. Commands passed through as-is (no auto-wrapping). `--via=auto|rest` (auto defaults to REST). `--user`, `--password`, `--timeout` overrides. Smart auth via `resolveAuth()` uses provisioned credentials from machine.json.
-- [ ] `quickchr exec --json` — re-add `--json` flag that auto-wraps commands in `[:serialize to=json [...]]`. Removed in simplification pass; callers currently wrap manually. Add back as opt-in convenience. Sync with Output & Display: use `--serialize=json|yaml|dsv|tsv|csv` following RouterOS's own `[:serialize]` naming, keep `--json` as alias for discoverability.
-- [x] `resolveAuth()` in `src/lib/auth.ts` — centralised credential resolution (explicit → provisioned → admin default). Used by both `exec()` and `rest()`.
-- [x] **Fix: exec JSON mode `ret` extraction** — when RouterOS wraps `:put`/`:return` output as `{ "ret": "<json-string>" }`, the JSON mode code now extracts the inner value instead of double-stringifying the wrapper object. Unit tested.
-- [x] **Fix: exec integration test** — restructured to share single CHR instance (3× faster). Defensive assertions accommodate `/rest/execute` response format variations across RouterOS versions. Text mode tests success completion; JSON mode validates `board-name` via `:serialize`.
-- [ ] SSH transport (`--via=ssh`) — spawn `ssh -p <port>` subprocess. Required for commands that don't work well over REST (long-running, interactive). **Depends on SSH key provisioning:** the `quickchr` managed user path should generate and install an SSH key pair during provisioning, stored in the machine directory. This ensures SSH works even if the password is changed, and is more secure than password-based SSH. `sshpass` remains the fallback for admin/custom users.
-- [ ] `--via=auto` tries SSH first, falls back to REST `/execute` (current auto = REST only until SSH implemented). With SSH keys provisioned, SSH becomes the preferred transport (full CLI, no 60s timeout, interactive support).
-- [ ] `--output=csv|tsv|yaml` additional output formats for `exec` and other commands. `--yaml` is LLM/terminal-friendly (human-readable, equally parseable). JSON for programmatic callers (Python/matrica), YAML for interactive/agent use. Follow RouterOS `[:serialize]` option naming where practical.
-- [ ] `--lint` pre-validates commands via `/console/inspect request=completion` before execution — check result array for `"error"` or `"obj-invalid"` entries. Enabled by default (safe pre-flight check). `--skip-lint` to bypass. The core logic is ~50 lines wrapping `/console/inspect request=completion` (see `~/GitHub/lsp-routeros-ts` — most of that LSP just wraps this for VS Code; the inspect call itself is the source of truth for command validity). **Cross-project dependency:** may need small work in `~/GitHub/lsp-routeros-ts` to extract the inspect wrapper as a reusable module or dep. Side benefit: the same completion data enables terminal command completion for RouterOS commands — a major "wow factor" feature (imagine a colored fish-style console filling RouterOS commands). We do NOT want to wrap RouterOS setup in helper functions — we handle "setup", users handle RouterOS config. But `exec` is the star-of-the-show: one path to run any command using any interface, with sophisticated validation.
-- [ ] User preference overrides in `.local` config — `prefer-transport: ssh`, `default-timeout: 60`, etc. Links to `set`/`get` architecture: user preferences need a home. Some options may not be discoverable from CLI alone (user has hidden settings that affect behavior), which is half anti-pattern — but the capability is needed. Start stashing settings one at a time as needs arise, with a rational scheme. Settings should be surfacable in wizard and via `get`. Priority rising — limiting because there's no place to stash an option to control esoteric things that might be useful.
-
-> **Design note — "MCP-like API feel":** `exec` should feel like calling an MCP tool — caller provides a RouterOS command and gets back output. No need to know ports, protocols, or auth details. But every automatic choice is overridable (`--via`, `--user`, `--port`, etc.) for callers who need precise control. This mirrors MCP's pattern of sensible defaults with full override capability.
-
-#### `console` — Serial Console
-
-- [x] `quickchr console <name>` — attach to serial console of a running background instance (current `attachSerial` logic, promoted to top-level command). Requires TTY. The only interactive command besides `setup`.
-
-#### `logs` — QEMU Log
-
-- [x] `quickchr logs <name>` — tail `qemu.log`. `--follow` / `-f` for live tail. `-n N` for last N lines (`a8c8cad`). `--source=qemu|ros|all` and `--json` deferred (RouterOS `/log/print` integration).
-
-### Shell Completions
-
-Shell completions replace interactive selectors as the "discovery" mechanism for machine names and flags. Higher priority now that commands are non-interactive.
-
-> **Testing status:** Only `zsh` verified end-to-end. `fish` has a `bun` link error (quickchr not in PATH when installed via dev setup, not Homebrew). `bash` untested on real shells. Human testing needed across shells/OS — this is an open item. See cross-platform smoke-test section.
-
-- [x] Completions for bash, zsh, fish — subcommands, machine names (from state dir), `--flag` options. `quickchr completions --install` (auto-detects shell), `--uninstall`, `--status`, `--dry-run`. No new deps — pure string generation. Idempotent rc-file patching. Works without Homebrew (falls back to XDG/user dirs).
-- [x] Explore generating completions without requiring Homebrew/package install (standalone shell script that reads `~/.local/share/quickchr/machines/` for names) — done via hidden `quickchr completions --machines` / `--running` flags called by the scripts.
-- [x] Machine name completion should be context-aware: `start` completes to stopped machines, `stop` completes to running machines, etc.
-
-### Output & Display
-
-- [ ] ANSI table cleanup — replace heavy box-drawing borders with minimal ANSI style; improve color and terminal-width-aware column layout. No new borders on any new output.
-- [ ] `--json` / `--yaml` / `--serialize` output on: `list`, `get`, `networks`, `doctor`, `exec`. Follow RouterOS `[:serialize]` scheme: `--serialize=json|yaml|dsv|tsv|csv` with `--serialize-delimiter` and `--serialize-options` for fine control. Keep `--json`/`--yaml` as convenience aliases for discoverability (common CLI convention). TSV output should be carefully structured so `head`/`tail`/`cut` work without stripping "tip"/"help" chrome. Consistent structure across all commands.
-- [ ] `doctor` enhancements — OS-level diagnostics: `ps`/port scan correlated with PID files, stale machine detection, named socket port conflict detection. System-wide health. Goal: produce a "lab results" report that could be submitted to GitHub issues (with PII redacted) to shorten the break-fix cycle. Consider `doctor --export` for a structured diagnostic dump. What would help troubleshooting on non-Mac platforms or Macs without deps if you were given DoctorResults from a bug report?
-
-### TUI Mode (deferred — see Deferred section)
-
-Moved to Deferred. Design direction when ready: **content first, prettification later**. Goal: maximize useful info about quickchr state in 80×24 chars. Consider three density formats: 1 CHR (show everything), 2 CHRs (A/B test view), 20+ CHRs (compact table). A middle ground before full TUI: structured output suitable for `watch quickchr list --serialize=tsv` that fills 80×24 with the right details. Investigate if `@clack/prompts` progress controls could provide a lightweight `watch`-like refresh, or consider `blessed-contrib` for the full version.
-
-### Migration Path (current → target)
-
-The refactoring is not all-or-nothing. Incremental steps:
-
-1. [x] **Add `add` command** — copy current creation logic from `start`. Both work temporarily.
-2. [x] **Add `setup`** — move wizard from bare `quickchr` and `start` into `setup`.
-3. [x] **Strip `start`/`stop`** — selectors removed; machine-list+tip behavior implemented. Remaining pure-start cleanup tracked above.
-4. [x] **Strip `remove`/`clean`** — same pattern (list + tip).
-5. **Add `set`/`get`** — start with license (migrate from `license` command).
-6. **Merge `list`/`status`** — `list` does both, `status` becomes alias.
-7. **Deprecation notices** — old `license` command prints "use `set <name> --license`" for one release cycle.
-8. **Shell completions** — fill the gap left by removed selectors.
+## Open — CLI / UX
+
+### CLI Design Principles
+
+**Interactive prompts confined to `setup`** — All other commands non-interactive (no selectors). Without `<name>`, print list + tip.
+**`start`/`stop` are pure operations** — No wizard, no creation. `add` creates, `setup` is wizard.
+**`set`/`get` for machine config** — License, device-mode, admin accounts via unified interface.
+**`--json` and `--yaml` on all read commands** — Structured output for scripts/agents.
+
+<details>
+<summary>Completed CLI/UX work</summary>
+
+- [x] `add` command with all start creation options, error on duplicate (`36ad135`)
+- [x] `start`/`stop` refactored (wizard removed, list+tip for no-name, `--all` flag)
+- [x] `remove`/`clean` non-interactive (selectors removed, list+tip, `--all` on remove)
+- [x] `list` merged with `status` (summary table + detail view, `status` aliased to `list`, `--json`)
+- [x] `setup` wizard (top-level menu, zero-machine flow, manage/networks stubs)
+- [x] `exec` command (REST transport, `as-string` sync, auth resolution, `--via=auto|rest|qga|console`)
+- [x] `console` command (serial attach, TTY required)
+- [x] `logs` command (`--follow`, `-n N` lines, `a8c8cad`)
+- [x] `set`/`get` commands (`--license`, license/device-mode/admin query, `--json`)
+- [x] `snapshot` CLI + API + wizard UX (savevm/loadvm/delvm/list, qcow2 guard, 16-cap)
+- [x] Shell completions (bash/zsh/fish, context-aware, `quickchr completions --install`)
+- [x] `networks` command (list user/socket/shared/bridged, `--json`)
+- [x] `qga` command (ping/info/osinfo/hostname/time/file-read/file-write/exec, x86 only)
+
+</details>
+
+**Open CLI/UX work:**
+
+- [ ] `exec --json` / `--serialize=json|yaml|tsv|csv` — Re-add auto-wrap for `:serialize`. Canonical: `--serialize=`, `--json` as alias
+- [ ] SSH transport for `exec` — `--via=ssh` (key provisioning done, transport itself not implemented). Depends on SSH key in machine dir
+- [ ] `--via=auto` smart routing — REST first → console fallback → QGA (x86) → SSH. Currently REST-only
+- [ ] `exec --lint` — Pre-validate via `/console/inspect request=completion`. Depends on lsp-routeros-ts extraction (~50 lines)
+- [ ] User preference overrides / settings architecture — Design incomplete (`.local` config, `prefer-transport`, `default-timeout`). Half anti-pattern without clear scope
+- [ ] `list` enrichment — Live QEMU stats (CPU/mem via monitor) for detail view
+- [ ] `doctor` enhancements — OS-level diagnostics (ps/port scan, stale machines, socket conflicts), `--export` for bug reports
+- [ ] ANSI table cleanup — Minimal style, terminal-width-aware, no new box borders
+- [ ] `--serialize=` output on all read commands (list, get, networks, doctor, exec) — TSV for `head`/`tail`/`cut`
+- [ ] Version staleness reporting in `doctor` — Odd/even policy, days-behind-latest, color-coded status
 
 ---
 
-## P3 — Core Features
+## Open — Disks & Snapshots
 
-### Disks
+<details>
+<summary>Completed disks & snapshots work</summary>
 
-- [x] Extra disks — attach N additional blank qcow2 disks at specified sizes (`--add-disk 512M`), so RouterOS can format/use them. Implemented in CLI, wizard, library API, `quickchr disk`, and state persistence.
-- [x] Disk resize support (`--boot-size 512M` for the primary disk). Converts the boot disk to qcow2 before first boot and persists across `clean()`.
-- [x] Integration test: `QuickCHR.add()` + first `start()` with `bootSize` / `extraDisks` verifies disk artifacts and RouterOS-visible extra drives (`test/integration/disk.test.ts`)
-- [ ] Windows smoke test: global `bun install -g` + PATH detection for `qemu-system-*` and `qemu-img` in CI or a documented manual checklist
+- [x] Extra disks (`--add-disk 512M`), disk resize (`--boot-size`), qcow2 conversion, state persistence
+- [x] Integration tests (disk artifacts, RouterOS-visible drives)
+- [x] Snapshots (savevm/loadvm/delvm/list via monitor, `SnapshotInfo` type, `ChrInstance.snapshot` API)
+- [x] `quickchr snapshot` CLI (`--json`), wizard UX (formatted table, ISO dates, qcow2 guard)
 
-### Snapshots
+</details>
 
-- [x] QEMU snapshot/restore via monitor `savevm`/`loadvm` validated via integration test (`test/integration/disk.test.ts`) by restoring RouterOS identity after mutation
-- [x] Setup wizard (`setup` → Manage) exposes snapshot operations (`savevm`/`loadvm`/`delvm`/list) and disk layout context for safer operator workflows
-- [x] Structured `SnapshotInfo` type and parsing — `parseSnapshotList()` (QEMU monitor text), `listSnapshots()` (`qemu-img info --output=json`), `formatSnapshotTable()` for aligned display. Exported from `@tikoci/quickchr`.
-- [x] `ChrInstance.snapshot` convenience API — `.list()`, `.save(name?)`, `.load(name)`, `.delete(name)` with proper error handling, qcow2 guard, and auto-generated ISO date names.
-- [x] `quickchr snapshot <name> [list|save|load|delete]` CLI command with `--json` output for automation/agents. Alias: `snap`.
-- [x] Wizard snapshot UX overhaul — `clack.select()` for load/delete (no more typing names), formatted table for list, save defaults to ISO date, size info in hints, 16-item cap with CLI fallback guidance.
-- [x] qcow2 guard in wizard — snapshot menu only appears for qcow2 boot disks. Raw-disk machines see `⚠ no snapshots (raw disk)` note. Stopped machines get list-only access with hint.
-- [ ] RouterOS `:export` alongside VM snapshot — save a config dump when snapshotting for a richer "checkpoint" concept. Also useful as a standalone `exec` convenience (not tied to snapshots). Should be automatic unless disabled via user preference or if we don't have credentials. Warn if export fails (requires auth, while VM snapshot does not — this difference always matters when linking "transactions"). `:export` is a "script generator" that creates code to recreate the current config on a clean router — it is NOT a "config file." `:import` is roughly equivalent to `:execute` / `/rest/console/execute` which we already support. No loss on import capability; export is the valuable addition.
+**Open disks & snapshots:**
 
-### QGA (Guest Agent)
-
-- [x] QGA protocol implementation — `src/lib/qga.ts`: `qgaSync()` (handshake with 0xFF stripping), `qgaExec()` (base64 script execution with polling), `qgaProbe()` (availability detection), `qgaInfo()` (supported command listing). Wired into `instance.exec()` as `--via=qga` (x86 only). Unit tests in `test/unit/qga.test.ts` (20 tests), integration tests in `test/integration/exec.test.ts`.
-- [x] Integration tests for QGA on x86 — verify `guest-sync-delimited`, `qgaProbe`, `:put` exec, identity query, `guest-info` command listing.
-- [x] QGA file operations — `qgaFileWrite(socketPath, filename, content)` and `qgaFileRead(socketPath, filename)` in `qga.ts`. Write + read roundtrip confirmed working by mikropkl lab testing. Handles `guest-file-close` empty-response quirk gracefully. Callers must use flat RouterOS filenames (no paths).
-- [x] QGA typed API — `QgaCommand` union type in `types.ts` for IDE discoverability. High-level typed helpers exported from `qga.ts` and `src/index.ts`: `qgaPing`, `qgaGetOsInfo`, `qgaGetHostName`, `qgaGetTime`, `qgaGetTimezone`, `qgaGetNetworkInterfaces`, `qgaFsFreezeStatus`, `qgaFsFreezeFreeze`, `qgaFsFreezeThaw`, `qgaShutdown`, `qgaFileWrite`, `qgaFileRead`. `instance.qga(command: QgaCommand)` updated to use typed command names.
-- [x] `quickchr qga <name> <operation>` CLI command — exposes all QGA operations: `ping`, `info`, `osinfo`, `hostname`, `time`, `timezone`, `networks`, `fsfreeze-status`, `fsfreeze-freeze`, `fsfreeze-thaw`, `shutdown`, `file-write`, `file-read`, `exec`. Fails fast on ARM64 with informative message about planned support.
-- [ ] **x86 QGA broken on macOS / QEMU 10.x — root cause confirmed, QEMU bug** — Exhaustive investigation (2026-04-12) identified the exact failure: QEMU 10.x never sends `VIRTIO_CONSOLE_PORT_OPEN` (event 4) to the guest. Without it, the Linux `virtio_console` driver in RouterOS blocks forever in `port_fops_open()` → `wait_event_killable()`, so `qemu-ga` cannot open its device. Root cause: `virtconsole_enable_backend()` in `hw/char/virtio-console.c` (a) early-returns when no socket client is connected (`qemu_chr_fe_backend_connected` = false), so `chr_event` is never registered; even when a client later connects, there is no handler to call `virtio_serial_open()`. And (b) even when handlers *are* registered, `set_open=false` in `qemu_chr_fe_set_handlers` prevents replay of `CHR_EVENT_OPENED` on an already-open backend. Console ports (`virtconsole`) are immune because they call `virtio_serial_open()` directly in `virtconsole_realize()`. Non-console `virtserialport` (QGA) does not receive this treatment. Variables eliminated: machine type (q35/pc), accelerator (HVF/TCG), RouterOS version (7.20.8/7.22.1/7.22rc4), virtio-serial variant, chardev mode (server=on/server=off), connection timing (pre-boot/post-boot), KVM CPUID exposure. Confirmed with QEMU virtio trace and QEMU 10.2.0 source code. Detailed report: `docs/qga-x86-macos-qemu10-investigation.md`. Fix is in QEMU, not RouterOS. No practical workaround without patching QEMU or switching to a different QEMU-version/platform.
-- [ ] ARM64 QGA — MikroTik has an open bug for ARM64 guest agent support. Once fixed, extend tests to arm64. Be ready to test when the fix drops.
-- [ ] `--via=auto` smart routing — try REST first, fall back to QGA (x86), then console. Now that all three transports exist, `auto` can intelligently probe and select.
-
-### Machine Config
-
-- [ ] Config schema rationalization — separate "desired config" (cpu, mem, packages, network) from "runtime state" (pid, status, lastStartedAt). Users should be able to edit the config section and have changes apply on next start. Safe edits: cpu, mem, name. Complex edits: packages (drift detection between file and RouterOS). Document the schema and what is/isn't user-editable. Links to `set`/`get` architecture — `set` mutates the config section, `get` reads it.
-
-### Credentials
-
-- [x] **Credential overhaul** — replaced ~260 lines of OS-specific keychain code (`security` CLI / `secret-tool` / PowerShell) with `Bun.secrets` wrapper (`src/lib/secrets.ts`). Falls back to `~/.config/quickchr/` config files for Node.js / headless Linux compatibility.
-- [x] **Two credential scopes** — MikroTik web account (licensing via `com.quickchr.mikrotik-web` service) separated from per-instance CHR credentials (`com.quickchr.instance` service). Env vars: `MIKROTIK_WEB_ACCOUNT`/`MIKROTIK_WEB_PASSWORD`.
-- [x] **quickchr managed account** — new default: auto-creates a `quickchr` user with a generated password on each CHR instance. Password saved to secret store. Replaces reliance on `admin:""`. Opt out with `--no-secure-login`. Wizard offers 3 choices: managed (default), custom user, or keep admin.
-- [x] **`resolveAuth()` async + secrets lookup** — auth resolution now checks instance secrets (priority 2 after explicit args, before machine.json state). `remove()` and `clean()` clean up instance credentials.
-- [ ] Credential profiles — save/restore username+password per machine or as a shared default. `rest()` and CLI commands auto-use stored credentials.
-- [x] SSH key-based auth — generate/store SSH keys for CHR instances as alternative to password auth. **Done** (`3580d53`): `installSshKey()` in `provision.ts` generates ed25519 key pair, stores private key in `<machineDir>/ssh/id_ed25519`, uses `/rest/execute` scripting endpoint (commits synchronously vs `/rest/user/ssh-keys/add` which can return 200 before committing). Runs non-fatally at end of provisioning when `effectiveUser && machineDir`. Integration test in `provisioning.test.ts`. Prerequisite for `exec --via=ssh` (private key path now known). `sshpass` remains fallback for admin/custom users. Listing verification deadline increased 15s→30s (`d917665`) for robustness under competing QEMU resource pressure.
-
-### Version Checks
-
-- [ ] **Doctor version reporting** — `doctor` now shows installed QEMU binary version (`a8c8cad`). Remaining: report version staleness for quickchr itself and the active RouterOS image. Pre-release versions have odd minor numbers, release versions have even minor numbers. Show color-coded status: green = running latest release/pre-release, yellow = behind, red = very old. Display days since latest release. Example: `Running version 0.x.y (3 days behind latest release 0.x.z)`. This should be in `doctor` (discoverable, obvious) — not an auto-upgrader.
+- [ ] Windows smoke test (global install, PATH detection for `qemu-system-*` and `qemu-img`)
+- [ ] RouterOS `:export` alongside VM snapshot — Auto-save config dump when snapshotting (unless disabled/no-creds)
 
 ---
 
-## P4 — Distribution & Packaging
+## Open — QGA & Credentials
 
-### Publishing
+<details>
+<summary>Completed QGA & credential work</summary>
 
-- [ ] npm publish workflow needs `NPM_TOKEN` secret in repo settings (workflow exists)
-- [ ] CI image cache auto-invalidation — detect stale cache via RouterOS release feed instead of manual `-v1` suffix bumps
+- [x] QGA protocol (`qgaSync`, `qgaExec`, `qgaProbe`, `qgaInfo`), wired to `exec --via=qga` (x86 only)
+- [x] Integration tests (x86: sync, probe, exec, info); file operations (`qgaFileWrite`, `qgaFileRead`)
+- [x] Typed API (`QgaCommand` union, high-level helpers exported from index)
+- [x] `quickchr qga` CLI (ping/info/osinfo/hostname/time/networks/fsfreeze/shutdown/file-read/file-write/exec)
+- [x] Credential overhaul (`Bun.secrets` wrapper, config-file fallback, two scopes: MikroTik web + per-instance)
+- [x] Managed account (`quickchr` user auto-created, password in secret store, `--no-secure-login` opt-out)
+- [x] SSH key provisioning (ed25519, stored in `<machineDir>/ssh/`, `/rest/execute` scripting, `3580d53`)
 
-### Packaging
+</details>
 
-- [ ] Homebrew formula — first distribution target. Link to daemonization: a `brew services` managed quickchr could promote instances to launchd services. Homebrew is easiest to test (macOS primary platform); Deb package as second target (testable in CI).
-- [ ] `bun compile` binary builds — lower priority. Bun runtime dep is acceptable; avoids Gatekeeper/SmartScreen signing hassles on macOS/Windows.
-- [ ] AppImage or creative alternatives — keep the barrier low. Avoid signing/notarization overhead where possible.
+**Open QGA & credentials:**
 
-### Service Management
-
-- [ ] Daemonization support — promote a quickchr machine to a system service (launchd on macOS, systemd on Linux, Scheduled Tasks on Windows). Should be "proper" — wrapped in a real package, not loose files. Linked to Homebrew/Deb packaging.
-
-### CI
-
-- [x] Windows CI runner — `windows-unit-tests` job now runs on every push/PR to main (unit tests only; integration tests are future work)
-- [ ] Multi-version test matrix — run integration tests across RouterOS versions. Simpler than other tikoci projects since quickchr doesn't rebuild per release.
+- [ ] **x86 QGA broken on macOS / QEMU 10.x** — QEMU bug (never sends `VIRTIO_CONSOLE_PORT_OPEN`). Root cause confirmed. See `docs/qga-x86-macos-qemu10-investigation.md`. No workaround without patching QEMU
+- [ ] ARM64 QGA — MikroTik bug; once fixed, extend tests to arm64
+- [ ] `--via=auto` smart routing — REST → QGA (x86) → console → SSH (key provisioned, transport not impl)
+- [ ] Credential profiles — Save/restore user+password per machine or shared default (design incomplete, tracked in Deferred)
 
 ---
 
-## P5 — Networking
+## Open — Networking
 
-See [networking reference](./docs/networking.md) for platform internals (QEMU networking, socket_vmnet, TAP, Windows).
+See `docs/networking.md` for platform internals (QEMU, socket_vmnet, TAP, Windows). Priority: macOS (local) & Linux (CI) → Windows.
 
-Platform priority: macOS (focus: local) & Linux (focus: CI) → Windows.
+<details>
+<summary>Completed networking work</summary>
 
-### Networking Rationalization
+- [x] `--add-network` repeatable flag, network specifiers (user, socket::<name>, shared, bridged:<ifname>, aliases)
+- [x] Named socket state (`~/.local/share/quickchr/networks/<name>.json`), port allocation
+- [x] Platform resolution (shared/bridged → socket_vmnet or vmnet-shared or TAP), downgrade warnings
+- [x] Interface alias resolution (wifi/ethernet/auto), wizard networking UI (before provisioning, retry loop)
+- [x] `quickchr networks` command (list user/socket/shared/bridged, socket_vmnet detection, `--json`)
+- [x] macOS socket_vmnet detection (pgrep for live daemon, shared/bridged sockets), daemon wrapping
 
-The core tension: different use cases need different network modes, each with different `sudo`/privilege requirements and platform availability. quickchr needs a coherent story for how networking is configured across the CLI, library API, and wizard — without hiding the complexity from users who need to understand it.
+</details>
 
-**Network modes and their realities:**
+**Open networking:**
 
-| Mode | Platforms | Root/sudo? | CHR gets real IP? | Multi-CHR L2? | Host access? | Notes |
-|------|-----------|------------|-------------------|---------------|-------------|-------|
-| `user` (default) | All | No | No (NAT via hostfwd) | No | Yes (hostfwd) | Sufficient for REST API, SSH. restraml's use case |
-| `socket` | All | No | No | Yes (point-to-point) | No | QEMU `-netdev socket` for inter-VM links. listen/connect pairs on localhost ports. Simplest multi-CHR |
-| `vmnet-shared` | macOS | Yes (`sudo`) | Yes (DHCP from vmnet) | Yes | Yes (shared NAT) | Tested on Intel Mac (`~/GitHub/mikropkl`). macOS's built-in NAT network via `vmnet.framework` |
-| `vmnet-bridged` | macOS | Yes (`sudo`) | Yes (from LAN DHCP) | Yes (same bridge) | Yes (LAN peer) | Needs `ifname` selection (e.g. `en0`). Real LAN presence |
-| `tap` | Linux | Yes (or CAP_NET_ADMIN) | Depends on bridge config | Yes (same bridge) | Depends | User configures bridge externally; quickchr discovers + presents available TAPs |
-| `socket_vmnet` | macOS | Yes, but at `brew install`/launchd-changes | Yes (default NAT, custom launchd for more shared/bridging) | Yes | Yes | Use if present, show custom launchd.plists using it |
+- [ ] sudo handling — Transparent `sudo quickchr start` when vmnet/TAP needed. No daemon requirement. Wizard detects root, adjusts options
+- [ ] macOS vmnet-bridged filter — Only physical interfaces (Multipass bug: virtual/bridge → errors)
+- [ ] macOS multi-NIC socket_vmnet — Chained `socket_vmnet_client` calls (fd=3, fd=4). Verify exact fd numbering
+- [ ] Linux TAP discovery — `quickchr networks` shows available TAPs/bridges. Document `tap-chr-shared` convention
+- [ ] Linux CI — Rootless only (user + socket). No TAP unless self-hosted runners
+- [ ] Windows — Document TAP-Windows adapter install (OpenVPN TAP or wintun). No auto-config
+- [ ] `--emulate-device` hardware profiles — RB5009 (9 NICs), hAP ax3 (5 ports). Lookup table from rosetta device data
 
-### Rootless Network Topologies
-
-**Key insight: `user` + `socket` are the universal rootless pair.** The default is one `user` network (management via REST API hostfwd). Multi-CHR topologies add `socket` links for inter-VM data-plane connectivity. This combination is cross-platform, rootless, CI-friendly, and covers the majority of use cases (testing, training, tooling, CI). vmnet/TAP are "upgrades" for scenarios needing real LAN presence or host-visible broadcast domains. Rootless should be the default path — if someone sees three CHRs routing OSPF from `make` or `bun test`, *then* they'll be willing to `sudo` something for the next step. (Compare: Multipass requires a privileged daemon just to start — "Waiting for daemon..." with no workaround if launchd is unhappy.)
-
-For network admins familiar with GNS3/EVE-NG — quickchr rootless topologies are not trying to replace those tools for large-scale simulation. The sweet spot is 2-5 CHRs with realistic routing/VPN configs, automatable from a Makefile or test script, runnable in CI. The fun "two-cute-by-half" tricks (PPPoE over socket, VXLAN overlays, IPSec site-to-site — all rootless) are worth calling out in MANUAL.md for network engineers who'll appreciate the cleverness. See [networking reference](./docs/networking.md) for detailed topology recipes.
-
-#### Cross-Platform Network Abstraction
-
-The `--add-network` scheme operates at a level above QEMU's `-netdev` — like common hypervisors (VirtualBox, UTM, Multipass) that abstract into "host-only", "shared/NAT", and "bridged". The same `--add-network` flag expresses *intent*, and quickchr resolves it to the best available mechanism on the current platform. This is the key design principle: **you should be able to construct a cross-platform `--add-network` command** that works on macOS, Linux, and (eventually) Windows — quickchr adapts to whatever networking infrastructure is available.
-
-**Generic specifiers** (cross-platform):
-
-| Specifier | Intent | Root? |
-|-----------|--------|-------|
-| `user` | Management NIC with port forwarding (SLIRP) | No |
-| `socket::<name>` | Named inter-VM L2 link | No |
-| `shared` | NAT network; CHR gets DHCP IP from host | Depends on platform driver |
-| `bridged:<ifname>` | Bridge to a physical interface | Depends on platform driver |
-
-**Convenience aliases** (resolve to `bridged:<detected-interface>`):
-
-| Alias | Detection | Notes |
-|-------|-----------|-------|
-| `wifi` | macOS: Wi-Fi `en*`; Linux: `wlan*`/`wlp*` | First wireless interface |
-| `ethernet` | macOS: Ethernet `en*`; Linux: `eth*`/`enp*` | First wired interface, fail if none |
-| `auto` | `ethernet` then `wifi` fallback | First wired, then wireless |
-
-**Platform resolution for `shared`:**
-
-| Step | macOS | Linux |
-|------|-------|-------|
-| Preferred | `socket_vmnet` shared daemon → QEMU runs unprivileged | User-owned TAP (e.g. `tap-chr-shared`) exists → use it |
-| Fallback | Running as root → QEMU built-in `-netdev vmnet-shared` | Running as root → create TAP + iptables NAT |
-| Fail | Error with setup hint: `brew install socket_vmnet` | Error with TAP creation instructions |
-
-**Platform resolution for `bridged:<ifname>`:**
-
-| Step | macOS | Linux |
-|------|-------|-------|
-| Preferred | `socket_vmnet` bridged daemon for `<ifname>` → unprivileged | User-owned TAP on bridge containing `<ifname>` |
-| Fallback | Root → QEMU built-in `-netdev vmnet-bridged,ifname=<iface>` | Root → create TAP, add to bridge |
-| Fail | Error with socket_vmnet bridged setup instructions | Error with bridge/TAP creation instructions |
-
-**Network downgrade:** If infrastructure isn't available and quickchr isn't root, it warns and degrades to `user`. `quickchr list` shows the downgrade: `ether2: shared → user (socket_vmnet not found)`. No silent failures.
-
-**Windows:** `user` and `socket` work cross-platform. `shared` and `bridged` require TAP-Windows adapter (admin install once). Document the path; don't automate Windows networking config. Not a priority until macOS and Linux are solid.
-
-#### CLI Design: `--add-network`
-
-**Semantics:** Zero `--add-network` flags = default 1 `user` network (ether1). Once you specify ANY `--add-network`, you are specifying ALL networks — the count of `--add-network` flags equals the number of NICs. Use `--no-network` for zero NICs (headless/serial-only).
-
-```text
-# Default: 1 NIC (user)
-quickchr start test1
-
-# Explicit: same as default
-quickchr start test1 --add-network user
-
-# 2 NICs: user + named socket
-quickchr start hub --add-network user --add-network socket::spoke-a
-
-# 3 NICs: user + 2 named sockets
-quickchr start hub --add-network user --add-network socket::spoke-a --add-network socket::spoke-b
-
-# 9 NICs: emulate RB5009 layout
-quickchr start rb-sim --emulate-device rb5009
-
-# 0 NICs: serial-only (no networking)
-quickchr start headless --no-network
-```
-
-**Network specifier syntax:**
-
-*Cross-platform specifiers (preferred — see "Cross-Platform Network Abstraction" above for resolution chains):*
-
-| Specifier | Resolves to | Root? | Notes |
-|-----------|------------|-------|-------|
-| `user` | `-netdev user,hostfwd=...` | No | Management NIC with port forwarding |
-| `socket::<name>` | `-netdev socket,listen=:<auto-port>` or `connect` | No | Named socket. First machine to use a name listens, others connect. Port auto-allocated and tracked in `~/.local/share/quickchr/networks/<name>.json` |
-| `shared` | Platform-resolved (see resolution chain) | Varies | NAT network with DHCP. Prefers rootless driver (socket_vmnet, user-owned TAP) |
-| `bridged:<ifname>` | Platform-resolved (see resolution chain) | Varies | Bridge to physical interface. Also accepts aliases: `wifi`, `ethernet`, `auto` |
-
-*Explicit specifiers (advanced — bypass platform resolution):*
-
-| Specifier | Resolves to | Root? | Notes |
-|-----------|------------|-------|-------|
-| `socket:listen:<port>` | `-netdev socket,listen=:<port>` | No | Explicit port, listen side |
-| `socket:connect:<port>` | `-netdev socket,connect=127.0.0.1:<port>` | No | Explicit port, connect side |
-| `socket:mcast:<group>:<port>` | `-netdev socket,mcast=<group>:<port>` | No | Multicast socket, shared L2 segment |
-| `vmnet-shared` | `-netdev vmnet-shared` | Yes (whole QEMU) | macOS only. QEMU built-in — entire QEMU as root |
-| `vmnet-bridged:<ifname>` | `-netdev vmnet-bridged,ifname=<iface>` | Yes (whole QEMU) | macOS only. QEMU built-in bridged |
-| `tap:<ifname>` | `-netdev tap,ifname=<tap>,script=no` | No (if user-owned) | Linux only. Pre-created TAP device |
-
-**Named sockets (`socket::<name>`)** are the key usability improvement over explicit ports. quickchr tracks named socket state in `~/.local/share/quickchr/networks/<name>.json` — which port, which machine is listen vs connect. This avoids port conflicts and makes configs readable:
-
-```text
-quickchr start hub --add-network user --add-network socket::hub-to-a --add-network socket::hub-to-b
-quickchr start branch-a --add-network user --add-network socket::hub-to-a
-quickchr start branch-b --add-network user --add-network socket::hub-to-b
-```
-
-**Multi-NIC mapping in QEMU:** Each `--add-network` adds a `-netdev`/`-device virtio-net-pci` pair. RouterOS sees them as `ether1` (first `--add-network`), `ether2`, etc. Ordering is deterministic and matches the order of flags on the command line.
-
-**Cross-platform portability:** If `~/.local/share/quickchr` is synced between Mac and Linux, rootless configs (user + socket) work unchanged. Generic specifiers (`shared`, `bridged:en0`) use the same syntax but resolve differently per platform. Document the TAP naming convention so Linux users can create TAPs that align with the quickchr scheme.
-
-**Network downgrade:** If a machine config references `shared` or `bridged:en0` but quickchr can't resolve it (no socket_vmnet, no TAP, not root), show a yellow warning and downgrade to `user`. `quickchr list` clearly indicates downgraded networks (e.g., `ether2: shared → user (socket_vmnet not found)`). See "Cross-Platform Network Abstraction" for the full resolution chain.
-
-#### `quickchr networks` — Discovery Command
-
-Inspired by `multipass networks`. Lists available network interfaces and named sockets:
-
-```text
-$ quickchr networks
-TYPE            NAME            STATUS       NOTES
-user            (default)       always       hostfwd port forwarding
-socket          hub-to-a        active       listen:4001 (hub), connect (branch-a)
-socket          hub-to-b        active       listen:4002 (hub), connect (branch-b)
-shared          (socket_vmnet)  available    via socket_vmnet daemon (no root for QEMU)
-bridged         en0             available    Ethernet (Realtek), 1Gbps — alias: ethernet
-bridged         en1             available    Wi-Fi (AirPort), 802.11ac — alias: wifi
-
-$ quickchr networks   # on Linux
-TYPE            NAME            STATUS       NOTES
-user            (default)       always       hostfwd port forwarding
-shared          tap-chr-shared  available    user-owned TAP + NAT
-bridged         eth0            available    TAP on br0 — alias: ethernet
-```
-
-- [x] `quickchr networks` — list available networks. `--format json|table` output.
-- [x] macOS: detect socket_vmnet daemon (check socket files in `$(brew --prefix)/var/run/`). Show as `shared (socket_vmnet)` when available.
-- [x] macOS: enumerate physical interfaces via `networksetup -listallhardwareports`. Filter out virtual/bridge interfaces (Multipass learned the hard way — listing bridges QEMU can't bridge to caused bugs). Show interface aliases (wifi, ethernet).
-- [ ] Linux: `ip link show type tun` for TAPs, `ip link show type bridge` for bridges. Show which are user-owned.
-- [ ] Show active named sockets with port allocations and connected machines.
-
-#### `--emulate-device` — Hardware Profiles
-
-Shorthand for NIC count + other QEMU settings matching a specific MikroTik hardware model:
-
-```text
-quickchr start rb-sim --emulate-device rb5009
-# Expands to: --add-network user + 8x socket::<auto> (ether1..ether9)
-```
-
-- [ ] `--emulate-device <model>` — lookup in built-in table, expand to network + QEMU args. Start with RB5009 (9 NICs) and hAP ax3 (5 ports). WiFi interfaces won't work on CHR but interface count is useful for config testing.
-- [ ] Device table as JSON/YAML file in package. Possibly sourced from tikoci/rosetta device data (144 devices with specs).
-
-#### `--add-network` Implementation
-
-- [x] Implement `--add-network` CLI flag (repeatable). Parse the specifier syntax above.
-- [x] Extend `NetworkMode` type: `network: NetworkMode` → `networks: NetworkConfig[]`. Each entry has type, name, and platform-resolved QEMU args.
-- [x] Semantics: zero flags = `[user]`. Any flags = exactly what you specified (count of flags = count of NICs). `--no-network` = `[]`.
-- [x] Named socket state management: `~/.local/share/quickchr/networks/<name>.json` tracks port, listen machine, connect machines.
-- [x] Platform resolution engine: resolve generic specifiers (`shared`, `bridged:<ifname>`, aliases) to platform-specific QEMU args per the resolution chains above. Core function: `resolveNetworkSpecifier(spec, platform, isRoot) → { qemuArgs, wrapper?, downgraded? }`.
-- [x] Interface alias resolution: `wifi` → detect wireless interface; `ethernet` → detect wired interface; `auto` → wired then wireless. Use `networksetup -listallhardwareports` (macOS) or `ip link` (Linux).
-- [x] Network downgrade: if `shared`/`bridged` can't resolve, warn and degrade to `user`. Store both the requested specifier and actual resolved mode so `quickchr list` can show the downgrade.
-- [x] Wizard: detect available modes and only show viable options. Rootless: show `user` and `socket`. If socket_vmnet detected (macOS) or user-owned TAPs exist (Linux): show `shared` and `bridged`. If root: show all. **Wizard restructured: networking before provisioning, user/SLiRP always included, socket_vmnet retry loop, provisioning gate question.**
-- [x] Store in `machine.json`/`.yaml` as `networks: [...]` array with the original specifier (not the resolved form). Re-resolve on restart so platform changes (e.g. socket_vmnet installed) are picked up.
-- [ ] CI (GitHub Actions): `user` + `socket` only (no root). Document.
-
-#### sudo Handling
-
-- [ ] quickchr should NOT prompt for sudo itself, unless it clear that's is the user's intent.  `sudo quickchr start ...` when vmnet or TAP is needed should work.  More transparent, avoids privilege escalation surprises, matches mikropkl's `sudo qemu-system-*` pattern. The wizard detects root and adjusts available options.
-- [ ] **No daemon.** quickchr runs QEMU directly as a child process (foreground) or detached process (background). No launchd/systemd service required for basic operation. This is a deliberate contrast to Multipass's daemon architecture — no "Waiting for daemon..." failure mode, no socket permissions, no gRPC complexity. Daemonization (P4) is an optional promotion for long-running instances, not a requirement.
-
-#### Creative Networking Tricks (RouterOS-side, no root needed)
-
-RouterOS's own tunneling capabilities (VXLAN, PPPoE, EoIP/GRE, IPSec/L2TP, VRRP) work over rootless `socket` links to create advanced topologies without host privilege. Worth documenting in MANUAL.md as "rootless topology" recipes — see [networking reference](./docs/networking.md) for detailed examples. The one exception: **VRRP requires `shared` or `bridged`** because the VIP must float on a broadcast domain visible to the host.
-
-### Multipass Comparison Notes
-
-Reviewed Multipass (Canonical) as a reference for multi-VM CLI design. Key lessons:
-
-**Adopt:** `multipass networks` → `quickchr networks` (discovery). Always-present default NIC aligns with our `user` default. `--format json|yaml|csv|table` on inspection commands (tracked in P2). Mutable resources post-creation (`multipass set local.<instance>.cpus=4` on stopped instances — consider for quickchr config schema). Flat command namespace.
-
-**Avoid:** Daemon requirement (`multipassd` runs as privileged launchd service — broken daemon = nothing works). The `local.bridged-network` indirection for adding NICs to existing instances (set global pref, toggle per-instance — awkward). Driver-dependent networking (different behavior on QEMU vs Hyper-V vs VirtualBox — quickchr targets QEMU only, one backend = consistent). macOS vmnet-bridged only works with physical interfaces (Multipass discovered this via bugs — apply same filter in `quickchr networks`).
-
-### macOS
-
-**socket_vmnet is the preferred path for `shared` and `bridged` on macOS.** It splits privilege: the `socket_vmnet` daemon runs as root (via launchd), QEMU runs as the user. This is how Lima, Rancher Desktop, and Podman Desktop handle macOS networking. QEMU's built-in `-netdev vmnet-shared` / `vmnet-bridged` is the fallback — it works but requires the entire QEMU process to run as root (`sudo quickchr start`). See [networking reference](./docs/networking.md) for socket_vmnet internals, install steps, and multi-NIC fd passthrough details.
-
-- [x] Detect `socket_vmnet_client` binary (Homebrew: `$(brew --prefix)/opt/socket_vmnet/bin/socket_vmnet_client`)
-- [x] Detect running socket_vmnet daemons: check for shared socket at `$(brew --prefix)/var/run/socket_vmnet` and bridged sockets at `$(brew --prefix)/var/run/socket_vmnet.bridged.<iface>`. **Now uses pgrep to verify process is alive (socket file persists after daemon stops).**
-- [x] When `shared` specifier resolves on macOS: socket_vmnet first → vmnet-shared (root) → error with install hint
-- [x] When `bridged:<ifname>` resolves: socket_vmnet bridged for that interface → vmnet-bridged (root) → error
-- [x] `socket_vmnet_client` wraps the QEMU spawn: `Bun.spawn([socketVmnetClientBin, socketPath, qemuBin, ...qemuArgs])` — QEMU args use `-netdev socket,id=netN,fd=3` instead of `-netdev vmnet-shared`
-- [ ] Multi-NIC with two socket_vmnet networks: chained `socket_vmnet_client` calls, fd=3 then fd=4. Verify exact fd numbering before implementing (open question in networking reference)
-- [ ] vmnet-bridged only works with physical interfaces — filter virtual/bridge interfaces in `quickchr networks` (learned from Multipass bugs)
-- [ ] Reference: `~/GitHub/mikropkl` `qemu.sh` and `qemu.cfg` for working vmnet examples on Intel Mac
-
-### Linux
-
-- [ ] TAP networking: `shared` and `bridged:<ifname>` resolve to TAP devices on Linux (see resolution chain above). Philosophy is **discover and present**, don't configure. `quickchr networks` shows available TAPs and bridges. Don't edit `/etc/network/` or manage bridge creation — an agent can figure out the right TAP for a given OS in one prompt better than a generic script. Explicit `tap:<ifname>` specifier available as escape hatch.
-- [ ] Well-known TAP convention: document creating `tap-chr-shared` (for `shared` specifier resolution) and bridge-attached TAPs for `bridged`. Linux users who follow the convention get the same `--add-network shared` experience as macOS users with socket_vmnet.
-- [ ] CI (GitHub Actions): rootless only (`user` + `socket`). No TAP in CI unless runner has pre-configured TAPs (self-hosted runners).
-
-### Windows (low priority, document the scheme)
-
-- [ ] QEMU on Windows: `winget install QEMU.QEMU` or MSYS2. User-mode and socket networking work. No vmnet equivalent.
-- [ ] TAP equivalent: OpenVPN TAP-Windows adapter or WireGuard `wintun`. Both require admin install. `quickchr networks` could discover installed TAP adapters.
-- [ ] WHPX acceleration: Windows Hypervisor Platform as alternative to TCG. Requires Hyper-V enabled.
-- [ ] Document: "user + socket works everywhere. For bridged networking on Windows, install OpenVPN TAP adapter." Don't automate Windows networking config.
-
-### Multi-CHR (examples, not orchestration)
-
-quickchr is the QEMU expert. Orchestrating multi-router topologies is out of scope for the CLI/library itself — that's the user's (or their agent's) job.
-
-Provide an `examples/` directory with each scenario in three forms: **Makefile** (recipe-driven, tikoci tradition — see tikoci/netinstall), **bun:test** (library API, TypeScript), and **Python** (subprocess CLI, the language agents and network engineers both reach for). Building examples early finds CLI soft spots before we add more commands.
-
-**Example design principles:**
-
-- Every example must work with `user` + `socket` (rootless) as the baseline. Note vmnet/TAP as upgrades where relevant.
-- Every CHR keeps `user` mode (ether1) for management — tests assert via REST API over hostfwd.
-- Socket links create the data-plane topology. RouterOS protocols (OSPF, VXLAN, PPPoE, etc.) run on top.
-- At least tris, solis, and matrica should be CI-testable (rootless). divi requires root (VRRP needs shared broadcast domain on host).
-
-#### "tris" — 3-CHR Hub-and-Spoke (Latvian for "three") **[build first]**
-
-**Priority: build this first.** It exercises `socket` mode, multi-instance, and dynamic routing — all rootless and CI-testable. Findings here drive CLI design for all other examples.
-
-**Topology:**
-
-```text
-quickchr start hub      --add-network user --add-network socket::hub-a --add-network socket::hub-b
-quickchr start branch-a --add-network user --add-network socket::hub-a
-quickchr start branch-b --add-network user --add-network socket::hub-b
-
-                 user:hostfwd (REST mgmt)
-                        |
-                   +---------+
-                   |   HUB   |
-                   | ether1  | user (mgmt, port base 9100)
-                   | ether2  | socket::hub-a  ──── OSPF area 0
-                   | ether3  | socket::hub-b  ──── OSPF area 0
-                   +---------+
-                    /         \
-          socket::hub-a      socket::hub-b
-           /                        \
-   +-----------+              +-----------+
-   | BRANCH-A  |              | BRANCH-B  |
-   | ether1    | user (mgmt,  | ether1    | user (mgmt,
-   | ether2    | port 9110)   | ether2    | port 9120)
-   +-----------+ socket link  +-----------+ socket link
-                  to hub                    to hub
-```
-
-**RouterOS config on each:**
-
-- **Hub:** OSPF instance with two interfaces (ether2, ether3) in area 0. Redistribute connected. IP addresses on ether2 (10.0.1.1/30) and ether3 (10.0.2.1/30). A loopback or bridge with 10.0.0.1/32 as router-id.
-- **Branch-A:** OSPF on ether2 (10.0.1.2/30), area 0. Loopback 10.0.10.1/32 (advertised). Default route learned from hub.
-- **Branch-B:** OSPF on ether2 (10.0.2.2/30), area 0. Loopback 10.0.20.1/32 (advertised). Default route learned from hub.
-
-**What this validates:**
-
-- `--add-network socket:listen/connect` works for point-to-point links
-- Multiple CHR instances with different port bases coexist
-- OSPF adjacency forms over socket interfaces (proves L2 works)
-- Route propagation: Branch-A learns Branch-B's loopback via hub (proves L3 routing over socket works)
-- Test asserts via REST API: check `/routing/ospf/neighbor` for FULL state, check `/ip/route` for learned routes, ping far loopback via `/tool/ping`
-
-**CI-testable:** Yes (rootless, user + socket only).
-
-**Stretch goals:**
-
-- VXLAN overlay: Branch-A and Branch-B establish a VXLAN tunnel through the hub (L2 over L3 over L2). Validates overlay networking without root.
-- IPSec: site-to-site tunnel between branches through hub. Common MikroTik deployment pattern.
-
-- [ ] `examples/tris/Makefile`
-- [ ] `examples/tris/tris.test.ts` (bun:test)
-- [ ] `examples/tris/tris.py` (Python, subprocess CLI)
-- [ ] `examples/tris/README.md`
-- [ ] `examples/tris/hub.rsc` (RouterOS config)
-- [ ] `examples/tris/branch-a.rsc`
-- [ ] `examples/tris/branch-b.rsc`
-
-#### "divi" — 2-CHR Redundancy (Latvian for "two")
-
-**Requires root** (vmnet-shared for VRRP broadcast domain visible to host). Not CI-testable in GitHub Actions.
-
-**Topology:**
-
-```text
-sudo quickchr start chr-a --add-network user --add-network shared --add-network socket::divi-sync
-sudo quickchr start chr-b --add-network user --add-network shared --add-network socket::divi-sync
-
-     [macOS host / LAN]
-            |
-     shared (vmnet-shared on macOS, TAP+bridge on Linux)
-       |          |
-  +---------+ +---------+
-  |  CHR-A  | |  CHR-B  |
-  | ether1  | | ether1  | user (mgmt, hostfwd)
-  | ether2  | | ether2  | shared (VRRP)
-  | ether3  | | ether3  | socket::divi-sync (VXLAN sync)
-  +---------+ +---------+
-       |          |
-    VRRP VIP floats on shared
-    VXLAN tunnel over socket::divi-sync
-```
-
-**RouterOS config on each:**
-
-- **CHR-A (master):** VRRP instance on ether2 with priority 200, VIP 192.168.64.100/24 (vmnet-shared subnet). VXLAN interface over ether3 (socket link to CHR-B) for internal state sync or routed traffic.
-- **CHR-B (backup):** Same VRRP config, priority 100. Same VXLAN.
-
-**What this validates:**
-
-- `shared` and `socket::` mixed network modes with root
-- VRRP failover: stop CHR-A, verify VIP migrates to CHR-B (test via host ping to VIP)
-- VXLAN over socket: internal sync channel between routers
-
-**Linux equivalent:** The same `--add-network shared` command works — quickchr resolves to a TAP interface instead of vmnet. quickchr discovers existing TAPs and bridges; it doesn't create them.
-
-**Why root is unavoidable here:** VRRP sends gratuitous ARP on a shared broadcast domain. The host (or other LAN devices) need to see the VIP. Socket mode provides inter-VM L2 but is invisible to the host. vmnet-shared (or TAP+bridge) puts CHR traffic on a network the host participates in.
-
-- [ ] `examples/divi/Makefile`
-- [ ] `examples/divi/divi.test.ts` (bun:test)
-- [ ] `examples/divi/divi.py` (Python, subprocess CLI)
-- [ ] `examples/divi/README.md`
-- [ ] `examples/divi/chr-a.rsc`
-- [ ] `examples/divi/chr-b.rsc`
-
-#### "solis" — Sequential Version Migration (Latvian for "steps")
-
-Runs a **sequence**: load config into `long-term` CHR, export, load export into `stable` CHR, export, ... through `testing` and `development`. Detects config drift across RouterOS version migrations.
-
-**Arch choice:** x86 (broader user base, faster on Intel Mac with HVF, SeaBIOS — no firmware hassle). Uses `--emulate-device rb5009` to give the CHR 9 interfaces matching the RB5009 layout, so configs referencing `ether1`..`ether9` have somewhere to land.
-
-**Topology (per step, one CHR at a time):**
-
-```text
-quickchr start solis-lt --version long-term --emulate-device rb5009
-# Expands to: --add-network user + 8x socket::<auto> → ether1..ether9
-```
-
-The 9 socket NICs don't need to be connected — they exist purely so RouterOS sees the interfaces and the config can reference them.
-
-**Flow:**
-
-1. Start CHR at `long-term` version with 9 NICs
-2. Upload `.rsc` config via SCP or REST API file upload
-3. `/system/reset-configuration run-after-reset=<file> keep-users=yes skip-backup=yes`
-4. Wait for reboot, `:export file=step1` via REST `/execute` or SSH
-5. Download exported config, stop CHR
-6. Start new CHR at `stable` version with same 9 NICs
-7. Upload step1's export, repeat
-8. Continue through `testing` → `development`
-9. Diff the final export against the original input. Any differences = version migration changed the config
-
-**What this validates:**
-
-- quickchr version resolution across all 4 channels
-- `--add-network` with many unconnected sockets (interface count, not connectivity)
-- `.rsc` config import/export cycle via REST API
-- Sequential CHR lifecycle: create → provision → use → destroy → repeat
-
-**CI-testable:** Yes (rootless, user + unconnected sockets). Needs a sample `.rsc` config to ship with the example.
-
-- [ ] `examples/solis/Makefile`
-- [ ] `examples/solis/solis.test.ts` (bun:test)
-- [ ] `examples/solis/solis.py` (Python, subprocess CLI)
-- [ ] `examples/solis/README.md`
-- [ ] `examples/solis/rb5009-sample.rsc` (sample config — bridge, firewall, DHCP server, DNS, basic security)
-
-#### "matrica" — Parallel Version Matrix (Latvian for "matrix")
-
-Same concept as solis but runs all 4 versions **in parallel**, comparing exports at the end. Fast way to know if a config works as-is across all current RouterOS channels.
-
-**Arch choice:** ARM64 (complement to solis's x86, and ARM64 CHR has extra packages). Add `zerotier` and `container` packages to test configs that reference these. ARM64 on Intel Mac uses TCG (slower) but 4 parallel CHRs at ~20-60s boot each is still practical since the total wall-clock time is dominated by the slowest.
-
-**Topology:** Same as solis (`--emulate-device rb5009` for 9 NICs) but 4 CHRs running simultaneously on different port bases.
-
-```text
-quickchr start matrica-lt    --version long-term   --arch arm64 --port-base 9200 --emulate-device rb5009
-quickchr start matrica-st    --version stable       --arch arm64 --port-base 9210 --emulate-device rb5009
-quickchr start matrica-test  --version testing      --arch arm64 --port-base 9220 --emulate-device rb5009
-quickchr start matrica-dev   --version development  --arch arm64 --port-base 9230 --emulate-device rb5009
-```
-
-**Flow:**
-
-1. Start all 4 CHRs in parallel (different port bases, same .rsc config)
-2. Install `zerotier` + `container` packages on each (ARM64 has both)
-3. Upload config, reset-configuration on each
-4. Wait for all to reboot, export from each
-5. 4-way diff of exports. Differences = version-specific migration behavior
-
-**What this validates:**
-
-- 4 concurrent CHR instances (port allocation, no conflicts)
-- ARM64 CHR package install (zerotier, container — ARM64-only packages)
-- Parallel lifecycle management via library API
-- Cross-version config compatibility in a single test run
-
-**CI-testable:** Partially. ARM64 on x86 GitHub runners = TCG, very slow for 4 parallel VMs. Set `MATRICA_LITE=1` for a 2-channel variant that matches native arch (HVF on Apple Silicon) and skips extra packages — boots in ~30s instead of ~5min.
-
-- [x] `examples/matrica/matrica.test.ts` (bun:test) — LITE mode (`MATRICA_LITE=1`): 2 channels, native arch, no extra packages. Full mode: all 4 channels with native arch + zerotier + container.
-- [x] `examples/matrica/matrica.test.ts` — exec() test: identity + `:serialize` JSON on all instances (exercises exec from a different consumer than integration tests)
-- [x] `examples/matrica/Makefile`
-- [x] `examples/matrica/matrica.py` (Python, subprocess CLI)
-- [x] `examples/matrica/README.md`
-- [x] `examples/matrica/rb5009-arm64.rsc` (sample config with zerotier/container references)
-
-#### "trauks" - Testing an /app container (Latvian for "container")
-
-#### "vienkāršs" - Simple single-machine example (Latvian for "simple")
-
-Minimal example: one CHR, platform-native arch, no extra packages, basic REST API call. Designed as a quick-start / smoke-test and the simplest possible `examples/**` entry.
-
-**Topology:** Single CHR matching host arch (x86 on Intel, arm64 on Apple Silicon).
-
-```text
-quickchr start vienk --version stable
-```
-
-**Flow:**
-1. Start one CHR with defaults (native arch, no extra packages)
-2. Wait for boot, verify REST API responds
-3. Run a few `/system/resource/print`, `/interface/print` calls
-4. Stop and remove
-
-**What this validates:**
-- Basic start/stop/remove lifecycle
-- REST API connectivity via SLiRP port forwarding
-- Platform-native arch with hardware acceleration
-- Good first example for users learning the tool
-
-**CI-testable:** Yes — fast (~15s with KVM/HVF), no extra packages, no cross-arch. Ideal for both x86 and ARM64 runners.
-
-- [x] `examples/vienk/vienk.test.ts` — created (`36ad135`): 3 tests (boot, identity, interface list), native arch, stable version
-- [x] `examples/vienk/README.md` — created (`36ad135`): quickstart guide with timing table
-
-Simple example where an /app is test by bring it up in CHR, and the /app services offered.
-
-
-**Arch choice:** Both X86 and ARM64, to verify container is cross-platform.  Add `container` packages, with an extra user network for container to use (so both forwarded and "bridged" container networks can be tests).
-
-**Topology:** 
-
-```text
-quickchr start trauks-lt    --version stable   --arch arm64 --add-network --add-network 
-quickchr start trauks-st    --version stable   --arch x86 --add-network --add-network 
-```
-
-**Flow:**
-
-1. Start 2 CHRs in parallel, then on each:
-2. Install `container` packages on each
-3. Add tikoci/rosetta as /app container using QGA
-4. Verify configuration matches expected using QGA (including files)
-5. Act as MCP client to test /app container to verify it functional
-6. Remove /app to ensure it is cleaned up using QGA (including files)
-7. Reports test results and times
-
-**What this validates:**
-
-- Running a container works through QEMU
-- Real world need, testing a /app YAML from start to finish, including CI
-- Uses QGA as protocol
-
-**CI-testable:** 
-
-- GH workflow should be
-
-**Open**
-
-- If should use a "shared" since ports are not always knows.  For example, could assume just http expored.  For Rosetta as example `/app`, it needs two ports, with one used (http since)
-- If should add self-signed certs to show as secure even on CHR without automatic /ip/cloud.  Could doc, but should consider if example should be "complete" (since even if with /ip/cloud some users might want to self-signed or manually installed certs anyway).
-
-- [ ] `examples/trauks/trauks.test.ts` (bun:test) 
-- [ ] `examples/trauks/Makefile`
-- [ ] `examples/trauks/trauks.py` (Python, subprocess CLI)
-- [ ] `examples/trauks/README.md`
-- [ ] `examples/trauks/github-workflow.yaml` (CI only, but example of testing /app in GH) 
-
-#### Example Summary
-
-| Example | Arch | Root? | CI? | Network modes | Primary test |
-|---------|------|-------|-----|---------------|-------------|
-| **tris** | x86 | No | Yes | user + socket | OSPF, multi-CHR routing, VXLAN overlay |
-| **divi** | x86 | Yes | No | user + vmnet-shared + socket | VRRP failover, mixed network modes |
-| **solis** | x86 | No | Yes | user + socket (unconnected) | Sequential version migration, config drift |
-| **matrica** | arm64 | No | Partial | user + socket (unconnected) | Parallel version matrix, ARM64 packages |
-| **trauks** | arm64 + x86 | No | Own | user + user | Runs /app on X86 and ARM64, tests whole container lifecycle |
+**Rootless topologies (examples):**
+Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tunneling (VXLAN, PPPoE, GRE, IPSec, VRRP over shared/bridged) documented in MANUAL.md. Examples deferred to P6 below.
 
 ---
 
-## P6 — Ecosystem & Integrations
+## Open — Machine Config & Version Checks
+
+- [ ] Config schema rationalization — Separate "desired config" (cpu, mem, packages, networks) from "runtime state" (pid, status, lastStartedAt). Safe edits: cpu, mem, name. Document schema, user-editable sections
+- [ ] Doctor version reporting — quickchr staleness, RouterOS image staleness, color-coded status (odd/even policy, days-behind-latest)
+
+---
+
+## Open — Ecosystem & Integrations
 
 ### LLM & Agent Friendliness
 
-- [ ] Review CLI output and library API for LLM ergonomics — structured output options (JSON?), clear error messages, `QUICKCHR_NO_PROMPT` behavior audit
-- [ ] Copilot skills and `.prompt.md` files — teach agents how to use quickchr to spin up RouterOS test environments. Also update `~/.copilot/skills/routeros-qemu-chr/SKILL.md` to reference quickchr.
-- [ ] MCP server — expose quickchr API over MCP protocol. Lower priority than making CLI/library natively agent-friendly. Auth complexity (MikroTik credentials) makes MCP setup non-trivial. But tracked: enables tikoci project ecosystem (tikoci/restraml for schemas, tikoci/rosetta for docs-as-RAG).
+- [ ] Review CLI output and library API for LLM ergonomics — structured output options, clear error messages
+- [ ] Copilot skills and `.prompt.md` files — teach agents how to use quickchr. Update `~/.copilot/skills/routeros-qemu-chr/SKILL.md`
+- [ ] MCP server — expose quickchr API over MCP protocol. Lower priority than making CLI/library natively agent-friendly
 
 ### VS Code Integration
 
-- [ ] tikoci/vscode-tikbook — quickchr library as the backend for a CHR manager sidebar. Replaces earlier UTM-via-AppleScript experiment. Cross-platform where UTM was Mac-only.
-
-### RouterOS Config Diff
-
-- [ ] Capture config before/after — conceptually linked to snapshots. Broader challenge: RouterOS `:export` output varies by options and version (implied defaults shift between releases). Proper diffing may need tikoci/restraml `inspect.json` alignment. Track as exploratory.
+- [ ] tikoci/vscode-tikbook — quickchr library as backend for CHR manager sidebar (replaces UTM-via-AppleScript)
 
 ### Test Matrix Runner
 
-- [ ] Multi-version, multi-arch test runner using quickchr as the engine. Simpler here than in other tikoci projects since quickchr doesn't need to rebuild per RouterOS release — just re-run integration tests with a different `--version`.
+- [ ] Multi-version, multi-arch test runner using quickchr as engine. Simpler than other tikoci projects since quickchr doesn't rebuild per release
 
-### Cloud Deployment (future)
+### Library Consumer Friction (from restraml)
 
-Reference: `~/GitHub/chr-armed` — working code for CHR lifecycle on OCI (ARM64 A1.Flex + x86 E2.1.Micro) and AWS (x86 t3.micro). Provisioning via serial console with prompt detection + buffer offset tracking. Key lessons: ARM64 on AWS lacks ENA driver (use OCI for ARM64); raw OCI REST API (not SDK, Bun-compatible); security-list-first boot model (lock → boot → provision via serial → open ports). Archived pending quickchr maturity — once local CHR is solid, cloud targets can reuse the provisioning and image management layers.
+<details>
+<summary>Completed library consumer improvements</summary>
 
----
+- [x] One-shot "start + license" via `StartOptions.license`
+- [x] `instance.subprocessEnv()` helper for child processes (URLBASE, BASICAUTH)
+- [x] Clearer `start()` readiness contract in JSDoc (REST-ready when provisioning completes)
+- [x] Arch-aware defaults for `mem` and boot timeout
+- [x] `stop({ destroy: true })` option
+- [x] Instance-level package management (`availablePackages()`, `installPackage()`)
 
-## Cross-Cutting
+</details>
 
-Items that don't fit cleanly into one priority tier.
+### Examples (Rootless Multi-CHR Topologies)
 
-### Related tikoci Projects
+**Design principles:**
+- Every example must work with `user` + `socket` (rootless) as baseline
+- Every CHR keeps `user` mode (ether1) for management — tests assert via REST API
+- Socket links create data-plane topology. RouterOS protocols (OSPF, VXLAN, PPPoE) run on top
+- At least tris, solis, matrica CI-testable (rootless). divi requires root (VRRP)
 
-| Project | Relationship to quickchr |
-|---|---|
-| tikoci/restraml | **Beta customer #1.** RouterOS API schemas; `lookup.html` maps CLI→REST for `exec --via=rest`. Needs quickchr for local iteration on `deep-inspect.json` extraction. Use case: user-mode networking (REST API only). Wants ARM64 CHR for complete package schema (zerotier, wifi-qcom). Sequential package install for per-package schema attribution. Now has `instance.availablePackages()` + `instance.installPackage()` for iterative install-crawl-diff loops |
-| tikoci/rosetta | RouterOS docs as SQLite FTS5 RAG (MCP); helps agents write RouterOS commands |
-| tikoci/mikropkl | Pkl-based QEMU support; extensive QGA lab work; `qemu.sh` handles device-mode. **Vendor from here:** vmnet-shared/vmnet-bridge networking (tested on Intel Mac), `qemu.cfg` config separation pattern. `Lab/` has grounded QEMU facts from many experiments |
-| tikoci/netinstall | Elegant Makefile (~100 lines) for packaging; model for `examples/` Makefiles |
-| tikoci/vscode-tikbook | VS Code extension; will use quickchr as backend (replacing UTM) |
-| `~/GitHub/chr-armed` | OCI/AWS CHR deployment. **Vendor from here:** serial console provisioning (`src/oracle/console.ts`) — full first-boot sequence handling (license Y/n, password change, `\r` not `\r\n`). Also: ARM64 CHR lacks AWS ENA driver (MikroTik bug reported) |
-| `~/Lab/tiktui` | Archived HTMX+SSE experiment; lesson: don't combine experiments in one project |
+**Completed examples:**
 
-### Library consumer friction (from restraml integration tests)
+<details>
+<summary>matrica (parallel version matrix) and vienk (simple single-machine)</summary>
 
-The design intent of quickchr is one code base that handles "set up a CHR" for
-admins, testing, cloud, and library consumers — so many downstream tikoci
-projects can reach for it inside integration tests or bun scripts without
-re-rolling QEMU/provisioning glue. `restraml/scripts/deep-inspect-multi-arch.ts`
-is the first real external test of that surface (boots x86 + arm64 CHRs with
-all extra packages, applies p1 trial, spawns `deep-inspect.ts` as a subprocess
-against each). These are friction points it hit. None were blockers — all were
-worked around in the consumer — but each one is a place where a library ask
-should shift into quickchr itself, because the next consumer will hit the same
-thing.
+- [x] `examples/matrica/matrica.test.ts` — LITE mode (2 channels, native arch, no extra packages) + full mode (4 channels, native arch, zerotier+container)
+- [x] `examples/matrica/Makefile`, `matrica.py`, `README.md`, `rb5009-arm64.rsc`
+- [x] `examples/vienk/vienk.test.ts` — simple quickstart (boot, identity, interface list, native arch, stable) (`36ad135`)
+- [x] `examples/vienk/README.md` — quickstart guide with timing table
 
-- [x] **One-shot "start + license"** — common flow is boot → apply p1 trial →
-  use. Today that's `QuickCHR.start()` → `getStoredCredentials()` →
-  `instance.license({...})`, a three-step chain every caller re-writes.
-  Propose: `StartOptions.license: "p1" | "p10" | ...` which internally
-  resolves credentials via the existing `MIKROTIK_WEB_ACCOUNT` env vars or
-  `Bun.secrets` and applies the license before returning. Consumers that
-  want to bring their own credentials keep using `instance.license({...})`.
-  Unblocked by the Apr 2026 barrel-export of `getStoredCredentials`, but
-  that's the leaky form — this is the clean form.
-- [x] **`instance.subprocessEnv()` helper** — "run a child process against
-  this CHR over REST" is a common integration-test pattern. Today callers
-  hand-roll `URLBASE` (concatenating `restUrl` + `/rest`) and `BASICAUTH`
-  (guessing the right user:pass string from `secureLogin`). A helper
-  returning `Record<string, string>` for the env avoids hand-rolled URL
-  mistakes and makes the pattern copy-pasteable:
-  `Bun.spawn([...], { env: { ...process.env, ...chr.subprocessEnv() } })`.
-  Should honor `secureLogin` and any provisioned user so callers don't have
-  to know which auth form is active.
-- [x] **Clearer `start()` readiness contract.** With `installAllPackages: true`,
-  the returned instance is already REST-ready post-reboot — `waitForBoot()`
-  against it returns in ~2ms. That's fine behavior, but it wasn't obvious
-  from the type; restraml added a belt-and-suspenders `waitForBoot()` just
-  in case. Either the docstring on `start()` should explicitly state "the
-  returned instance is REST-reachable when `installAllPackages` is set", or
-  expose an explicit `ready: Promise<void>` on `ChrInstance` that resolves
-  once every provisioning step has settled. The goal: a caller reading the
-  types alone should know they don't need to add their own wait loop.
-- [x] **Arch-aware defaults for `mem` and boot timeout.** restraml hardcodes
-  `arm64 ? 1024 : 512` MB and `arm64 ? 300s : 120s` wait because TCG on x86
-  needs the headroom. Either quickchr's own defaults could distinguish arches
-  (and let the caller override), or there could be an advisory
-  `QuickCHR.recommendedStartOptions({ arch, installAllPackages })` that
-  returns a sensible baseline for the caller to merge in. Prefer the former
-  — callers shouldn't have to know that TCG needs more memory.
-- [x] **`stop({ destroy: true })` or explicit `destroy()`.** Today `stop()`
-  kills QEMU but leaves the machine directory on disk, which is right for
-  the `--keep-running` / post-mortem case but produces clutter when neither
-  flag is set. Orchestrators that spin up a throwaway CHR, crawl it, and
-  move on want a single call that fully cleans up. Could be an option on
-  `stop()` or a separate `instance.destroy()` that stops-then-removes.
-- [x] **VM-load telemetry during a window** (future, speculative). The
-  restraml crawl sees ~0.7% `/console/inspect` batch timeouts symmetrically
-  across x86 and arm64 — almost certainly parallelism-induced RouterOS
-  slowdown, not client timing, since it's reproducible and load-shaped
-  rather than load-rate-shaped. If quickchr exposed CPU / memory samples
-  from the QGA or QEMU monitor control channel for a caller-specified time
-  window (`instance.captureLoad({ durationMs, interval })` → time-series),
-  consumers could correlate retries with guest load spikes and start
-  answering "how much parallelism is too much for `/console/inspect` on
-  this RouterOS build". Related to the P3 QGA section, but this is the
-  *library API consumer* angle — a bun test that kicks off N concurrent
-  calls wants a load fingerprint back.
-- [x] **Instance-level package management (`availablePackages()` / `installPackage()`).**
-  Added `instance.availablePackages()` which returns the list of extra packages
-  available for this instance's version/arch (downloads + caches the ZIP), and
-  `instance.installPackage(name | names[])` which uploads, reboots, and waits
-  for boot — the full cycle as a single call. This is the primitive restraml
-  needs for iterative install-crawl-diff per-package provenance (BACKLOG Phase 5).
+</details>
+
+**Open examples:**
+
+- [ ] tris (3-CHR hub-and-spoke, OSPF) — Makefile, bun:test, Python, README, hub.rsc, branch-a.rsc, branch-b.rsc
+- [ ] divi (2-CHR redundancy, VRRP+VXLAN) — Requires root. Makefile, bun:test, Python, README, chr-a.rsc, chr-b.rsc
+- [ ] solis (sequential version migration) — Makefile, bun:test, Python, README, rb5009-sample.rsc
+- [ ] trauks (/app container testing) — Makefile, bun:test, Python, README, github-workflow.yaml
 
 ---
 
 ## Deferred
 
-Items moved here are not rejected — they're deferred until prerequisites are met or a need becomes clear.
+Items moved here are not rejected — deferred until prerequisites met or need becomes clear.
 
 ### TUI Mode
 
-> Deferred until: content layer is complete (doctor, logs, list, exec all produce structured output).
-> Prerequisite: `--serialize` output for all commands, settings architecture for preferences.
-
-- [ ] TUI (blessed-contrib / ink / bubbletea) — a dashboard showing live machine status, resource usage, logs, and command output. **Content first:** maximize useful information in 80×24 before building a dashboard shell. The dashboard is a rendering layer over structured data — build the data layer first. When ready, consider: multi-machine status grid, log tail with filtering, network topology view (from NIC config), resource sparklines (if QGA provides CPU/mem data).
+- [ ] TUI (blessed-contrib / ink / bubbletea) — **Content first:** maximize useful info in 80×24 before building dashboard. Dashboard is rendering layer over structured data — build data layer first (`--serialize` output, settings architecture)
 
 ### Templates & Upgrade
 
-- [ ] Machine templates (save/apply config presets) — lower priority; agents can already compose options. Revisit after config schema is solid.
-- [ ] `quickchr upgrade <name>` — in-place RouterOS version upgrade. Tension: test workflows prefer fresh instances over in-place mutation. May be better as a declarative `ensure.version` in machine config than an imperative command. Defer until config schema design settles.
+- [ ] Machine templates (save/apply config presets) — Lower priority; agents can already compose options
+- [ ] `quickchr upgrade <name>` — In-place RouterOS version upgrade. Tension: test workflows prefer fresh instances. May be better as declarative `ensure.version` in machine config
 
 ### Config Import/Export
 
-- [ ] Config `.rsc` / `.backup` import — load a RouterOS export script or backup as part of machine creation, for reproducible test environments.
-- [ ] `machine.json` → `machine.yaml` migration — YAML is friendlier for humans and LLMs. Accept `.json` as fallback; prefer `.yaml` when both exist.
+- [ ] Config `.rsc` / `.backup` import — Load RouterOS export/backup as part of machine creation
+- [ ] `machine.json` → `machine.yaml` migration — YAML friendlier for humans/LLMs
 
 ### Output Polish
 
-- [ ] `--no-ansi` flag for plain text output — complex with `@clack/prompts` (ANSI deeply embedded). ANSI may actually help LLM parsing (structural cues). Low priority unless a concrete consumer needs it.
-- [ ] Snapshot search in wizard — `@clack/prompts` search for machines/snapshots when lists grow large (>16 items). Not urgent for typical use.
+- [ ] `--no-ansi` flag — Complex with `@clack/prompts` (ANSI deeply embedded). ANSI may help LLM parsing
+- [ ] Snapshot search in wizard — `@clack/prompts` search for machines/snapshots when lists grow large (>16)
 
 ### Auto-Update
 
-- [ ] Auto-upgrade check — notify when a newer quickchr version is available. Should be a passive notice, not a blocker. Defer until version reporting in `doctor` is solid.
+- [ ] Auto-upgrade check — Notify when newer quickchr available. Passive notice, not blocker. Defer until version reporting in `doctor` solid
 
 ### Credential Profiles
 
-- [ ] Credential profiles — save/restore username+password per machine or as a shared default. `rest()` and CLI commands auto-use stored credentials. Low priority until settings architecture is in place.
+- [ ] Credential profiles — Save/restore username+password per machine or shared default (design incomplete)
+
+---
+
+## Won't Fix / Out of Scope
+
+- **Cloud deployment** — Reference: `~/GitHub/chr-armed` has working code for OCI + AWS. Archived pending quickchr maturity. Once local CHR is solid, cloud targets can reuse provisioning and image management layers.
+- **Multi-CHR orchestration** — Out of scope for CLI/library. `examples/` directory shows patterns; users/agents handle orchestration.
+- **Packaging (Homebrew/Deb)** — Deferred to P4 (lower priority than core functionality).
+- **Service management (launchd/systemd)** — Deferred to P4 (optional promotion for long-running instances, not requirement).
+

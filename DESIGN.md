@@ -1,5 +1,9 @@
 # quickchr Design
 
+> Architecture and rationale. For the user-facing reference (every CLI
+> command, every library API, provisioning, channels, networking, errors)
+> see **[MANUAL.md](./MANUAL.md)**.
+
 ## Architecture
 
 quickchr is a TypeScript/Bun CLI + importable library to manage MikroTik CHR virtual machines via QEMU.

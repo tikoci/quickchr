@@ -1,5 +1,9 @@
 # Contributing to quickchr
 
+> User-facing reference: **[MANUAL.md](./MANUAL.md)**.
+> Architecture: **[DESIGN.md](./DESIGN.md)**.
+> Agent-facing rules: **`.github/instructions/*.md`**.
+
 ## Development Setup
 
 ### Prerequisites

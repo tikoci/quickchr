@@ -40,6 +40,11 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 - Boot timeout auto-cleanup: failed boots remove QEMU process + state automatically
 - `secureLogin` default changed to `false` (explicit opt-in, not surprise provisioning)
 
-## [0.2.0] - 2026-04-20
+## [0.1.1] - 2026-04-20
 
-- Initial pre-release on npm as `@tikoci/quickchr`
+- First GitHub release as `tikoci/quickchr`. Pre-release per the odd/even
+  policy above: GitHub Actions CI has not yet run end-to-end against the
+  hosted repo. Promote to `0.2.0` only after a green CI run on `main`.
+- Not yet published to npm. Install from the GitHub repo (`bun add github:tikoci/quickchr`)
+  or by cloning. The npm publish workflow exists (`.github/workflows/publish.yml`)
+  but is gated on tagging `v0.2.0`.

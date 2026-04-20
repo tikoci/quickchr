@@ -56,3 +56,11 @@ MD048:
 
 # MD058 — blank lines around tables
 MD058: true
+
+# MD034 — no bare URLs (must be wrapped in <> or [text](url))
+# Catches accidentally pasted URLs that won't render as links in some viewers.
+MD034: true
+
+# MD042 — no empty links ([text]() or [text](#))
+# Catches forgotten link targets — pure signal, no false positives.
+MD042: true
