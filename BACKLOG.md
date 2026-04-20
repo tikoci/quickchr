@@ -68,6 +68,7 @@
 - [ ] Test from Linux host (bundle workflow: `git bundle create`, `scp`, `git clone`, `bun install && QUICKCHR_INTEGRATION=1 bun test`)
 - [ ] Verify `quickchr completions --install` on bash and fish (zsh tested, bash/fish untested on real shells per `f7ca662`)
 - [ ] Verify `qemu-img` detection + `--boot-size` on Linux (Intel Mac tested, arm64 Linux needs KVM pass)
+- [ ] **Run full integration suite on Windows (QEMU for Windows)** — currently only unit tests run on `windows-latest`. Requires: install QEMU for Windows in CI, validate named-pipe channels under load, confirm `socket_vmnet`-equivalent network plumbing or document SLiRP-only mode. Track CHR boot timing on Windows + KVM-equivalent (WHPX) vs TCG.
 
 **Test coverage gaps:**
 

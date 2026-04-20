@@ -10,18 +10,20 @@ applyTo: ".github/workflows/**"
 **Triggers**: push/PR to `main`, `workflow_dispatch` (manual with optional inputs)
 
 ```text
-lint (ubuntu-latest)           unit-tests (ubuntu-latest)     windows-unit-tests (windows-latest)
-    bun run check                  bun test test/unit/ --coverage  bun test test/unit/ (always)
-         ↘                        ↙
-         integration (matrix)
-           linux/x86_64  ← ubuntu-latest       (always)
-           linux/aarch64 ← ubuntu-24.04-arm    (always)
-           macos/arm64   ← macos-15            (dispatch: macos=true)
-           macos/x86_64  ← macos-13            (dispatch: macos=true)
+lint (ubuntu-latest) ──┐
+unit-tests (ubuntu-latest) ─┴→ integration-x86 (ubuntu-latest) ─┬→ integration-arm64 (ubuntu-24.04-arm)
+                                                                ├→ windows-unit-tests (windows-latest)
+                                                                └→ integration-macos (macos-15 + macos-13, dispatch only)
 ```
 
-Lint and unit-tests run **in parallel**.  Integration waits for both via `needs:`.
-`windows-unit-tests` runs independently (no `needs:`) on every push/PR to main.
+Lint and unit-tests run **in parallel**. `integration-x86` waits for both via `needs:`.
+`integration-arm64`, `windows-unit-tests`, and (when dispatched) `integration-macos`
+all depend on `integration-x86` — if the x86 core is broken, downstream platforms
+add no signal and waste runner minutes.
+
+**Why staged**: CI run #1 demonstrated that running everything in parallel hides
+the failure mode — a green Linux x86 alongside a red Windows OR a silently-failed
+arm64 produces a confusing dashboard. Gating on x86 makes the failure flow obvious.
 
 ## Windows Unit Tests
 
@@ -144,6 +146,37 @@ cache needs to be invalidated (e.g. corrupted image from a partial download).
 
 ## Adding a New Runner
 
-1. Add a new `include` entry to BOTH JSON strings in the `matrix: ${{ fromJSON(...) }}` expression
-2. Add apt/brew packages to `matrix.qemu-pkgs` (Linux) or the macOS brew step
-3. Verify `platform.ts` `EFI_CODE_PATHS` contains the firmware path for that distro/OS
+1. Add a new job in `ci.yml` (we no longer use a single fromJSON matrix — each platform
+   is its own job so dependencies stage cleanly: x86 first, then arm64/windows/macOS).
+2. Install the right apt/brew packages directly in the job's `Install QEMU + tools` step.
+   Required Linux apt packages by platform:
+   - **x86_64**: `qemu-system-x86 ipxe-qemu sshpass`
+   - **aarch64**: `qemu-system-arm qemu-efi-aarch64 ipxe-qemu sshpass`
+   - **`ipxe-qemu` is mandatory** on every Linux runner — it provides `efi-virtio.rom`
+     which `virtio-net-pci` needs. Missing it produces:
+     `qemu-system-aarch64: -device virtio-net-pci,netdev=net0: failed to find romfile "efi-virtio.rom"`
+     and QEMU exits before boot. CI run #1 hit this on aarch64 (and silently reported
+     green because of the pipefail bug — see "Pipefail rule" below).
+3. Verify `platform.ts` `EFI_CODE_PATHS` contains the firmware path for that distro/OS.
+4. Make the new job `needs: [integration-x86]` unless it's strictly faster than x86
+   (rare — Linux x86 is usually the fastest path).
+
+## Pipefail rule (MANDATORY)
+
+Every step that pipes `bun test` (or any failable command) into `tee` MUST start with
+`set -eo pipefail`. Without it, `tee`'s success masks the upstream failure and the step
+reports green even when tests fail.
+
+CI run #1's arm64 integration job reported green despite **every** CHR test failing
+with `SPAWN_FAILED` — `tee /tmp/integration-output.txt` was the actual exit code that
+the runner saw. The fix is one line at the top of each piped step:
+
+```yaml
+- name: Run integration tests
+  run: |
+    set -eo pipefail
+    QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
+```
+
+Coverage parsing was also moved from the test step into the `if: always()` summary step
+so the coverage table still appears on the dashboard when tests fail.

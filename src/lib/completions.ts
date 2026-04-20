@@ -74,7 +74,9 @@ export function detectCurrentShell(): ShellInfo {
 		}
 	}
 
-	const binary = shell.split("/").at(-1) ?? shell;
+	// Handle both POSIX (/) and Windows (\) separators — `where.exe bash` on
+	// windows-latest returns paths like "C:\Program Files\Git\bin\bash.exe".
+	const binary = (shell.split(/[\\/]/).at(-1) ?? shell).replace(/\.exe$/i, "");
 	const supported = (SUPPORTED_SHELLS as string[]).includes(binary);
 
 	return { shell, version, supported };
@@ -82,7 +84,8 @@ export function detectCurrentShell(): ShellInfo {
 
 /** Parse the shell binary name from a full path or name string. */
 export function shellBinary(shellInfo: ShellInfo): string {
-	return shellInfo.shell.split("/").at(-1) ?? shellInfo.shell;
+	const raw = shellInfo.shell.split(/[\\/]/).at(-1) ?? shellInfo.shell;
+	return raw.replace(/\.exe$/i, "");
 }
 
 // ─── Install paths ──────────────────────────────────────────────────────────

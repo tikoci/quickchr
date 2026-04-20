@@ -3,18 +3,27 @@ name: CI
 # Runs on every push/PR to main.  Also available as workflow_dispatch for manual
 # triggers with optional macOS runners and custom coverage thresholds.
 #
-# Jobs:
-#   lint          — repo checks (Biome + TypeScript + markdownlint, parallel with unit-tests)
-#   unit-tests    — bun:test unit suite + coverage enforcement (parallel with lint)
-#   windows-unit-tests — bun:test unit suite on Windows (always-on, parallel)
-#   integration   — matrix boot-test on linux/x86_64 + linux/aarch64
-#                   (+ macOS arm64/x86_64 when dispatched with macos: true)
+# Pipeline (staged — arm64/Windows/macOS only run after x86 integration is green,
+# so we don't burn runner minutes on platforms downstream of a broken core):
+#
+#   lint ────┐
+#   unit-tests (Linux) ─┴→ integration-x86 ──┬→ integration-arm64
+#                                            ├→ windows-unit-tests
+#                                            └→ integration-macos (dispatch only)
+#
+# Why staged: if x86 unit OR x86 integration fails, the bug is almost certainly
+# platform-agnostic and there's no signal to be gained from arm64/windows runs.
 #
 # Artifacts produced (retention: see each job):
 #   coverage-report                 — full bun coverage table text (14 days)
 #   integration-logs-{platform}     — bun output + machine.json + qemu.log (7 days)
 #
 # Step summaries written after each job for quick inspection without downloading artifacts.
+#
+# IMPORTANT: every step that pipes `bun test … | tee` MUST run under `set -eo pipefail`
+# (or the equivalent `shell: bash` default).  Without pipefail the `tee` exit code
+# masks bun's failure and the step reports green.  Run #1 had silent arm64 failures
+# because of this exact bug — see SESSION-NOTES / ci.instructions.md.
 
 on:
   push:
@@ -69,38 +78,48 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
 
+      # NOTE: pipefail is mandatory — without it the `tee` exit code masks bun's
+      # failure and the step reports green even when tests fail.
       - name: Run unit tests with coverage
         id: coverage
         run: |
+          set -eo pipefail
           echo "::group::Test output"
           bun test test/unit/ --coverage 2>&1 | tee /tmp/coverage-report.txt
           echo "::endgroup::"
 
-          # Parse the "All files" summary row from bun's coverage table.
-          # Table format: File | % Funcs | % Lines | Uncovered Line #s
-          FUNC_PCT=$(grep "^All files" /tmp/coverage-report.txt \
-            | awk -F'|' '{gsub(/ /,"",$2); print $2}')
-          LINE_PCT=$(grep "^All files" /tmp/coverage-report.txt \
-            | awk -F'|' '{gsub(/ /,"",$3); print $3}')
-          echo "funcs=${FUNC_PCT:-0}" >> "$GITHUB_OUTPUT"
-          echo "lines=${LINE_PCT:-0}" >> "$GITHUB_OUTPUT"
-          echo "Parsed coverage: functions=${FUNC_PCT}%  lines=${LINE_PCT}%"
-
+      # Always-run summary + coverage parse — runs on success AND failure so the
+      # coverage table appears in the job summary even when tests fail.
+      # Parses bun's coverage table "All files" row (format: File | % Funcs | % Lines | Uncovered)
       - name: Write coverage to job summary
         if: always()
+        id: parse-coverage
         run: |
+          set -eo pipefail
+          if [ ! -s /tmp/coverage-report.txt ]; then
+            echo "(no coverage report captured — bun test likely crashed before coverage)" \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo "funcs=0" >> "$GITHUB_OUTPUT"
+            echo "lines=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          FUNC_PCT=$(grep "^All files" /tmp/coverage-report.txt \
+            | awk -F'|' '{gsub(/ /,"",$2); print $2}' || echo 0)
+          LINE_PCT=$(grep "^All files" /tmp/coverage-report.txt \
+            | awk -F'|' '{gsub(/ /,"",$3); print $3}' || echo 0)
+          echo "funcs=${FUNC_PCT:-0}" >> "$GITHUB_OUTPUT"
+          echo "lines=${LINE_PCT:-0}" >> "$GITHUB_OUTPUT"
           {
             echo "## Unit Test Coverage"
             echo ""
             echo '```'
-            # Extract the coverage table (from first dashed separator to EOF)
             awk '/^-{10}/{found=1} found{print}' /tmp/coverage-report.txt
             echo '```'
             echo ""
             echo "| Metric    | Actual | Threshold |"
             echo "|-----------|--------|-----------|"
-            echo "| Functions | ${{ steps.coverage.outputs.funcs }}% | ${COVERAGE_MIN_FUNCS}% |"
-            echo "| Lines     | ${{ steps.coverage.outputs.lines }}% | ${COVERAGE_MIN_LINES}% |"
+            echo "| Functions | ${FUNC_PCT:-0}% | ${COVERAGE_MIN_FUNCS}% |"
+            echo "| Lines     | ${LINE_PCT:-0}% | ${COVERAGE_MIN_LINES}% |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage report
@@ -116,10 +135,11 @@ jobs:
       # without blocking merges.  Override via workflow_dispatch inputs to 0 if
       # you need to land a PR while coverage is temporarily below baseline.
       - name: Enforce coverage thresholds
+        if: always() && steps.coverage.outcome == 'success'
         continue-on-error: true
         run: |
-          FUNC_PCT="${{ steps.coverage.outputs.funcs }}"
-          LINE_PCT="${{ steps.coverage.outputs.lines }}"
+          FUNC_PCT="${{ steps.parse-coverage.outputs.funcs }}"
+          LINE_PCT="${{ steps.parse-coverage.outputs.lines }}"
           MIN_FUNCS="${COVERAGE_MIN_FUNCS}"
           MIN_LINES="${COVERAGE_MIN_LINES}"
           FAIL=0
@@ -139,67 +159,30 @@ jobs:
           fi
           echo "Coverage thresholds met: functions=${FUNC_PCT}% >= ${MIN_FUNCS}%, lines=${LINE_PCT}% >= ${MIN_LINES}%"
 
-  # ── Windows unit tests ──────────────────────────────────────────────────────
-  # Runs Windows-only tests (named pipes, Job Object detach, LOCALAPPDATA paths).
-  # Runs on every push/PR to main.  Platform-skipped tests
-  # (skipIf(platform !== "win32")) execute only here; they are skipped on Linux/macOS.
-  # Integration tests on Windows (QEMU for Windows) are future work.
-  windows-unit-tests:
-    name: Unit Tests (windows-latest)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - name: Run unit tests (includes Windows-specific tests)
-        run: bun test test/unit/
-
-  # ── Integration tests — per-arch matrix ─────────────────────────────────────
-  # Default: linux/x86_64 + linux/aarch64.
-  # Add macos/arm64 + macos/x86_64 via workflow_dispatch with macos: true.
-  #
-  # Each runner boots a CHR matching its native architecture:
-  #   linux/x86_64  → x86 CHR  via qemu-system-x86_64  (KVM if available, else TCG)
-  #   linux/aarch64 → arm64 CHR via qemu-system-aarch64 (KVM if available, else TCG)
-  #   macos/arm64   → arm64 CHR via qemu-system-aarch64 (HVF if kern.hv_support=1)
-  #   macos/x86_64  → x86 CHR  via qemu-system-x86_64  (HVF if kern.hv_support=1)
-  #
-  # quickchr's detectAccel() handles accelerator selection automatically — tests
-  # do not need arch-specific logic.  The arch is inferred from process.arch at
-  # test runtime (arm64 → arm64 CHR, x64 → x86 CHR).
-  #
-  # NOTE: x86_64 cross-arch on aarch64 (TCG) is NOT tested here — it is too slow
-  # (~5 min even on native I/O port emulation).  See DESIGN.md for details.
-  integration:
-    name: Integration (${{ matrix.name }})
+  # ── Integration tests — x86_64 (gate for arm64/windows/macos) ───────────────
+  # Single canonical integration runner. If this fails, downstream jobs do not
+  # run — there's no signal in arm64/windows when the core is broken.
+  integration-x86:
+    name: Integration (linux/x86_64)
     needs: [lint, unit-tests]
-    strategy:
-      fail-fast: false
-      # Dynamic matrix: include macOS runners only when dispatched with macos: true.
-      # JSON inline trick sourced from tikoci/mikropkl qemu-test.yaml.
-      matrix: ${{ fromJSON(github.event.inputs.macos == 'true' && '{"include":[{"runner":"ubuntu-latest","name":"linux/x86_64","artifact":"linux-x64","qemu-pkgs":"qemu-system-x86 sshpass"},{"runner":"ubuntu-24.04-arm","name":"linux/aarch64","artifact":"linux-arm64","qemu-pkgs":"qemu-system-arm qemu-efi-aarch64 sshpass"},{"runner":"macos-15","name":"macos/arm64","artifact":"macos-arm64"},{"runner":"macos-13","name":"macos/x86_64","artifact":"macos-x64"}]}' || '{"include":[{"runner":"ubuntu-latest","name":"linux/x86_64","artifact":"linux-x64","qemu-pkgs":"qemu-system-x86 sshpass"},{"runner":"ubuntu-24.04-arm","name":"linux/aarch64","artifact":"linux-arm64","qemu-pkgs":"qemu-system-arm qemu-efi-aarch64 sshpass"}]}') }}
-    runs-on: ${{ matrix.runner }}
-
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
 
-      - name: Install QEMU + tools (Linux)
-        if: runner.os == 'Linux'
+      # ipxe-qemu provides efi-virtio.rom (PXE boot ROM for virtio-net-pci).
+      # Without it, ARM64 virt machine fails with "failed to find romfile".
+      # Harmless on x86 — keep it consistent across runners.
+      - name: Install QEMU + tools
         run: |
+          set -eo pipefail
           echo "::group::apt-get install"
           sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ${{ matrix.qemu-pkgs }}
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-x86 ipxe-qemu sshpass
           echo "::endgroup::"
 
-      - name: Install QEMU + tools (macOS)
-        if: runner.os == 'macOS'
-        run: brew install qemu sshpass
-
-      # Allow the runner's user access to /dev/kvm.  If KVM is not available the
-      # udevadm trigger silently fails and quickchr falls back to TCG.
-      - name: Enable KVM (Linux)
-        if: runner.os == 'Linux'
+      - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -214,19 +197,14 @@ jobs:
       - name: Log platform + QEMU info
         run: |
           {
-            echo "### Platform: ${{ matrix.name }}"
+            echo "### Platform: linux/x86_64"
             echo "- OS: $(uname -s) $(uname -m)"
             qemu-system-x86_64 --version 2>/dev/null | head -1 || true
-            qemu-system-aarch64 --version 2>/dev/null | head -1 || true
             echo ""
           } >> "$GITHUB_STEP_SUMMARY"
           qemu-system-x86_64 --version 2>/dev/null || true
-          qemu-system-aarch64 --version 2>/dev/null || true
           uname -a
 
-      # Cache downloaded CHR images to avoid re-downloading on every run.
-      # Key includes OS+arch so different runners don't share incompatible caches.
-      # Cache misses (e.g. new RouterOS stable release) are safe — quickchr re-downloads.
       - name: Cache CHR images
         uses: actions/cache@v4
         with:
@@ -239,6 +217,188 @@ jobs:
       - name: Run integration tests
         id: inttest
         run: |
+          set -eo pipefail
+          echo "::group::Integration test output"
+          QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
+          echo "::endgroup::"
+        timeout-minutes: 30
+
+      - name: Write integration summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Tests — linux/x86_64"
+            echo ""
+            echo '```'
+            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-linux-x64
+          path: |
+            /tmp/integration-output.txt
+            ~/.local/share/quickchr/machines/**/*.json
+            ~/.local/share/quickchr/machines/**/*.log
+          retention-days: 7
+
+  # ── Integration tests — aarch64 (depends on x86 success) ────────────────────
+  # Boots ARM64 CHR via qemu-system-aarch64 (KVM if available on ubuntu-24.04-arm).
+  # Only runs after integration-x86 passes — see pipeline doc at top.
+  integration-arm64:
+    name: Integration (linux/aarch64)
+    needs: [integration-x86]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      # qemu-efi-aarch64 → UEFI firmware for virt machine
+      # ipxe-qemu       → efi-virtio.rom (required by virtio-net-pci, missing in run #1)
+      - name: Install QEMU + tools
+        run: |
+          set -eo pipefail
+          echo "::group::apt-get install"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-arm qemu-efi-aarch64 ipxe-qemu sshpass
+          echo "::endgroup::"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -w /dev/kvm ] 2>/dev/null; then
+            echo "KVM is available — hardware acceleration active"
+          else
+            echo "::notice::KVM not available — integration tests will use TCG (slower boot times expected)"
+          fi
+
+      - name: Log platform + QEMU info
+        run: |
+          {
+            echo "### Platform: linux/aarch64"
+            echo "- OS: $(uname -s) $(uname -m)"
+            qemu-system-aarch64 --version 2>/dev/null | head -1 || true
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          qemu-system-aarch64 --version 2>/dev/null || true
+          uname -a
+
+      - name: Cache CHR images
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Run integration tests
+        id: inttest
+        run: |
+          set -eo pipefail
+          echo "::group::Integration test output"
+          QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
+          echo "::endgroup::"
+        timeout-minutes: 30
+
+      - name: Write integration summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Tests — linux/aarch64"
+            echo ""
+            echo '```'
+            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-linux-arm64
+          path: |
+            /tmp/integration-output.txt
+            ~/.local/share/quickchr/machines/**/*.json
+            ~/.local/share/quickchr/machines/**/*.log
+          retention-days: 7
+
+  # ── Windows unit tests (depends on x86 integration success) ─────────────────
+  # Runs Windows-only tests (named pipes, Job Object detach, LOCALAPPDATA paths).
+  # Platform-skipped tests (skipIf(platform !== "win32")) execute only here; they
+  # are skipped on Linux/macOS.  Integration tests on Windows (QEMU for Windows)
+  # are tracked in BACKLOG.md as future work.
+  #
+  # Gated on integration-x86 so a Linux-side regression doesn't waste Windows
+  # runner minutes; the Windows unit suite is only meaningful once the core is OK.
+  windows-unit-tests:
+    name: Unit Tests (windows-latest)
+    needs: [integration-x86]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Run unit tests (includes Windows-specific tests)
+        run: bun test test/unit/
+
+  # ── macOS integration (dispatch only — depends on x86 success) ──────────────
+  # Add via workflow_dispatch with macos: true.  Boots ARM64 CHR on Apple silicon
+  # (HVF) and x86 CHR on Intel macOS (HVF).  detectAccel() handles selection.
+  integration-macos:
+    name: Integration (${{ matrix.name }})
+    needs: [integration-x86]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.macos == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            name: macos/arm64
+            artifact: macos-arm64
+          - runner: macos-13
+            name: macos/x86_64
+            artifact: macos-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install QEMU + tools
+        run: brew install qemu sshpass
+
+      - name: Log platform + QEMU info
+        run: |
+          {
+            echo "### Platform: ${{ matrix.name }}"
+            echo "- OS: $(uname -s) $(uname -m)"
+            qemu-system-x86_64 --version 2>/dev/null | head -1 || true
+            qemu-system-aarch64 --version 2>/dev/null | head -1 || true
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          qemu-system-x86_64 --version 2>/dev/null || true
+          qemu-system-aarch64 --version 2>/dev/null || true
+          uname -a
+
+      - name: Cache CHR images
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Run integration tests
+        run: |
+          set -eo pipefail
           echo "::group::Integration test output"
           QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
           echo "::endgroup::"
@@ -255,10 +415,6 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Upload bun test output + machine state/logs for post-mortem debugging.
-      # Excludes disk.img (large binary) — only JSON state and QEMU log.
-      # To debug a boot failure: check qemu.log for panic/error messages,
-      # machine.json for last-known state, integration-output.txt for test errors.
       - name: Upload integration logs
         if: always()
         uses: actions/upload-artifact@v4
