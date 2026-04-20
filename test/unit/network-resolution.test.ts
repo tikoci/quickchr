@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 import * as platformMod from "../../src/lib/platform.ts";
 import * as socketRegistryMod from "../../src/lib/socket-registry.ts";
@@ -234,6 +234,15 @@ describe("resolveNetworkConfig", () => {
 
 		beforeEach(() => {
 			getNamedSocketFn = mock((_name?: unknown) => undefined as unknown);
+		});
+
+		afterAll(() => {
+			// Restore the REAL socket-registry module so other test files (e.g.
+			// socket-registry.test.ts) don't see this mocked getNamedSocket.
+			// Bun's mock.module is process-wide and persists across files.
+			mock.module("../../src/lib/socket-registry.ts", () => ({
+				...socketRegistryMod,
+			}));
 		});
 
 		test("resolves mcast socket", async () => {
