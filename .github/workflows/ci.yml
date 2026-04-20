@@ -214,14 +214,26 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Run integration tests
+      - name: Run integration tests (sequential per-file)
         id: inttest
+        # Run files sequentially to avoid 4-way parallel CHR boot contention
+        # on 4-CPU runners (boot timeouts at 120s under heavy concurrent load).
+        # See .github/instructions/testing.instructions.md "Integration Test
+        # Parallelism" section.
         run: |
           set -eo pipefail
           echo "::group::Integration test output"
-          QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
+          : > /tmp/integration-output.txt
+          fail=0
+          for f in test/integration/*.test.ts; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a /tmp/integration-output.txt; then
+              fail=1
+            fi
+          done
           echo "::endgroup::"
-        timeout-minutes: 30
+          exit "$fail"
+        timeout-minutes: 50
 
       - name: Write integration summary
         if: always()
@@ -299,14 +311,26 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Run integration tests
+      - name: Run integration tests (sequential per-file)
         id: inttest
+        # Run files sequentially to avoid 4-way parallel CHR boot contention
+        # on 4-CPU runners (boot timeouts at 120s under heavy concurrent load).
+        # See .github/instructions/testing.instructions.md "Integration Test
+        # Parallelism" section.
         run: |
           set -eo pipefail
           echo "::group::Integration test output"
-          QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
+          : > /tmp/integration-output.txt
+          fail=0
+          for f in test/integration/*.test.ts; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a /tmp/integration-output.txt; then
+              fail=1
+            fi
+          done
           echo "::endgroup::"
-        timeout-minutes: 30
+          exit "$fail"
+        timeout-minutes: 50
 
       - name: Write integration summary
         if: always()
@@ -396,13 +420,22 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Run integration tests
+      - name: Run integration tests (sequential per-file)
+        # Same throttling rationale as Linux runners — see the integration-x86 job.
         run: |
           set -eo pipefail
           echo "::group::Integration test output"
-          QUICKCHR_INTEGRATION=1 bun test test/integration/ 2>&1 | tee /tmp/integration-output.txt
+          : > /tmp/integration-output.txt
+          fail=0
+          for f in test/integration/*.test.ts; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a /tmp/integration-output.txt; then
+              fail=1
+            fi
+          done
           echo "::endgroup::"
-        timeout-minutes: 30
+          exit "$fail"
+        timeout-minutes: 50
 
       - name: Write integration summary
         if: always()
