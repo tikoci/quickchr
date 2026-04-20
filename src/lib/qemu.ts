@@ -317,19 +317,47 @@ export async function spawnQemu(
 		// Open log file as an fd — more reliable than BunFile for subprocess stdio.
 		// After spawn, close parent's copy; child process inherits its own copy.
 		const logFd = openSync(logPath, "a");
-		const proc = Bun.spawn(spawnCmd, {
-			stdout: logFd,
-			stderr: logFd,
-			stdin: "ignore",
-		});
-		closeSync(logFd);
+
+		let spawnedPid: number;
+
+		if (process.platform === "win32") {
+			// On Windows, Bun.spawn().unref() does NOT escape the Windows Job Object.
+			// When the parent CLI process exits, Windows terminates all processes in
+			// the same job, killing QEMU. Use node:child_process with detached: true
+			// to create QEMU in a new process group outside the parent job object.
+			const { spawn: cpSpawn } = await import("node:child_process");
+			const [spawnBin, ...spawnArgs] = spawnCmd;
+			if (!spawnBin) throw new QuickCHRError("SPAWN_FAILED", "Empty QEMU args");
+			const child = cpSpawn(spawnBin, spawnArgs, {
+				detached: true,
+				stdio: ["ignore", logFd, logFd],
+				windowsHide: true,
+			});
+			closeSync(logFd);
+			if (child.pid === undefined) {
+				throw new QuickCHRError("SPAWN_FAILED", "Failed to spawn QEMU process on Windows");
+			}
+			child.unref();
+			spawnedPid = child.pid;
+		} else {
+			const proc = Bun.spawn(spawnCmd, {
+				stdout: logFd,
+				stderr: logFd,
+				stdin: "ignore",
+			});
+			closeSync(logFd);
+			// unref() lets the parent Bun process exit without waiting for QEMU.
+			// QEMU becomes an orphan adopted by init/launchd and keeps running.
+			proc.unref();
+			spawnedPid = proc.pid;
+		}
 
 		// Give QEMU 1.5 s to fully initialise — if it exits immediately the
 		// arguments were bad (e.g. port already in use). Detect this early so
 		// the caller gets a clear error instead of a 120-second waitForBoot.
 		await Bun.sleep(1500);
 		try {
-			process.kill(proc.pid, 0);
+			process.kill(spawnedPid, 0);
 		} catch {
 			let logTail = "(no log)";
 			try {
@@ -340,12 +368,8 @@ export async function spawnQemu(
 			throw new QuickCHRError("SPAWN_FAILED", buildQemuErrorMessage(logTail));
 		}
 
-		// unref() lets the parent Bun process exit without waiting for QEMU.
-		// QEMU becomes an orphan adopted by init/launchd and keeps running.
-		proc.unref();
-
-		writeFileSync(pidPath, String(proc.pid));
-		return { pid: proc.pid };
+		writeFileSync(pidPath, String(spawnedPid));
+		return { pid: spawnedPid };
 	}
 
 	// Foreground — stdin/stdout connected to terminal. Blocks until QEMU exits.
