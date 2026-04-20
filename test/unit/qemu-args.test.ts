@@ -132,9 +132,11 @@ describe("buildQemuArgs", () => {
 	test("background mode uses socket channels", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ background: true }));
-			const serialArg = args.find((a) => a.includes("serial.sock"));
+			// On Unix: .sock files; on Windows: named pipes (\\.\pipe\...-serial / ...-monitor)
+			// Both appear as a `path=` value in a -chardev socket arg.
+			const serialArg = args.find((a) => a.includes("serial0") && a.includes("path="));
 			expect(serialArg).toBeDefined();
-			const monitorArg = args.find((a) => a.includes("monitor.sock"));
+			const monitorArg = args.find((a) => a.includes("monitor0") && a.includes("path="));
 			expect(monitorArg).toBeDefined();
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
@@ -154,7 +156,8 @@ describe("buildQemuArgs", () => {
 			const args = await buildQemuArgs(makeConfig({ background: false }));
 			const stdioArg = args.find((a) => a.includes("stdio"));
 			expect(stdioArg).toBeDefined();
-			const monitorArg = args.find((a) => a.includes("monitor.sock"));
+			// Monitor socket is present in both Unix (.sock) and Windows (named pipe) modes
+			const monitorArg = args.find((a) => a.includes("monitor0") && a.includes("path="));
 			expect(monitorArg).toBeDefined();
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
@@ -605,16 +608,22 @@ describe("stopMachineByName", () => {
 	});
 
 	test("cleans up socket files even when PID is already dead", async () => {
-		writeFileSync(join(TMP_STOP, "monitor.sock"), "");
-		writeFileSync(join(TMP_STOP, "serial.sock"), "");
-		writeFileSync(join(TMP_STOP, "qga.sock"), "");
+		// On Windows, IPC uses named pipes (not .sock files) — skip file cleanup assertions.
+		// The important invariant on all platforms is that stopMachineByName does not throw.
+		if (process.platform !== "win32") {
+			writeFileSync(join(TMP_STOP, "monitor.sock"), "");
+			writeFileSync(join(TMP_STOP, "serial.sock"), "");
+			writeFileSync(join(TMP_STOP, "qga.sock"), "");
+		}
 
 		const state = makeMachineState({ pid: 999_999_999 });
 		await stopMachineByName("test", state);
 
-		expect(existsSync(join(TMP_STOP, "monitor.sock"))).toBe(false);
-		expect(existsSync(join(TMP_STOP, "serial.sock"))).toBe(false);
-		expect(existsSync(join(TMP_STOP, "qga.sock"))).toBe(false);
+		if (process.platform !== "win32") {
+			expect(existsSync(join(TMP_STOP, "monitor.sock"))).toBe(false);
+			expect(existsSync(join(TMP_STOP, "serial.sock"))).toBe(false);
+			expect(existsSync(join(TMP_STOP, "qga.sock"))).toBe(false);
+		}
 	});
 });
 

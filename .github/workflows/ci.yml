@@ -27,6 +27,11 @@ on:
         description: "Include macOS runners (arm64 silicon + Intel, HVF if available; costs more)"
         required: false
         default: false
+      windows:
+        type: boolean
+        description: "Include Windows runner for unit tests (windows-latest)"
+        required: false
+        default: false
       min-funcs:
         type: string
         description: "Function coverage floor % — build warns but does not fail below this (default: 75)"
@@ -134,6 +139,22 @@ jobs:
             exit 1
           fi
           echo "Coverage thresholds met: functions=${FUNC_PCT}% >= ${MIN_FUNCS}%, lines=${LINE_PCT}% >= ${MIN_LINES}%"
+
+  # ── Windows unit tests ──────────────────────────────────────────────────────
+  # Runs Windows-only tests (named pipes, Job Object detach, LOCALAPPDATA paths).
+  # Enabled via workflow_dispatch with windows: true.  Platform-skipped tests
+  # (skipIf(platform !== "win32")) execute only here; they are skipped on Linux/macOS.
+  # Integration tests on Windows (QEMU for Windows) are future work.
+  windows-unit-tests:
+    name: Unit Tests (windows-latest)
+    if: github.event.inputs.windows == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Run unit tests (includes Windows-specific tests)
+        run: bun test test/unit/
 
   # ── Integration tests — per-arch matrix ─────────────────────────────────────
   # Default: linux/x86_64 + linux/aarch64.

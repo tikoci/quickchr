@@ -17,9 +17,12 @@ import {
 } from "../../src/lib/state.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
-// Use a temp directory for tests
+// Use a temp directory for tests.
+// QUICKCHR_DATA_DIR is the cross-platform override — getDataDir() reads LOCALAPPDATA/USERPROFILE
+// on Windows (not HOME), so setting HOME alone would leave Windows pointing at the real data dir.
 const TEST_DIR = join(import.meta.dir, ".tmp-state-test");
-const origEnv = process.env.HOME;
+const origDataDir = process.env.QUICKCHR_DATA_DIR;
+const origHome = process.env.HOME;
 
 function makeMachine(name: string, portBase: number = 9100): MachineState {
 	return {
@@ -36,19 +39,26 @@ function makeMachine(name: string, portBase: number = 9100): MachineState {
 		extraPorts: [],
 		createdAt: new Date().toISOString(),
 		status: "stopped",
-		machineDir: join(TEST_DIR, ".local", "share", "quickchr", "machines", name),
+		machineDir: join(TEST_DIR, "machines", name),
 	};
 }
 
 beforeEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
 	mkdirSync(TEST_DIR, { recursive: true });
+	// QUICKCHR_DATA_DIR works on all platforms; HOME is kept for Unix paths outside getDataDir
+	process.env.QUICKCHR_DATA_DIR = TEST_DIR;
 	process.env.HOME = TEST_DIR;
 });
 
 afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
-	process.env.HOME = origEnv;
+	if (origDataDir === undefined) {
+		delete process.env.QUICKCHR_DATA_DIR;
+	} else {
+		process.env.QUICKCHR_DATA_DIR = origDataDir;
+	}
+	process.env.HOME = origHome;
 });
 
 describe("state persistence", () => {
@@ -197,7 +207,7 @@ describe("refreshAllStatuses", () => {
 
 describe("state migration — legacy network field", () => {
 	test('old machine.json with network: "user" → migrated to networks array', () => {
-		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "legacy-user");
+		const machineDir = join(TEST_DIR, "machines", "legacy-user");
 		mkdirSync(machineDir, { recursive: true });
 		const oldState = {
 			name: "legacy-user",
@@ -223,7 +233,7 @@ describe("state migration — legacy network field", () => {
 	});
 
 	test('old machine.json with network: "vmnet-shared" → migrated correctly', () => {
-		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "legacy-vmnet");
+		const machineDir = join(TEST_DIR, "machines", "legacy-vmnet");
 		mkdirSync(machineDir, { recursive: true });
 		const oldState = {
 			name: "legacy-vmnet",
@@ -249,7 +259,7 @@ describe("state migration — legacy network field", () => {
 	});
 
 	test("old machine.json with no network field → defaults to user", () => {
-		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "legacy-none");
+		const machineDir = join(TEST_DIR, "machines", "legacy-none");
 		mkdirSync(machineDir, { recursive: true });
 		const oldState = {
 			name: "legacy-none",
@@ -274,7 +284,7 @@ describe("state migration — legacy network field", () => {
 	});
 
 	test("old machine.json with vmnet-bridge object → migrated to bridged + shared", () => {
-		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "legacy-bridge");
+		const machineDir = join(TEST_DIR, "machines", "legacy-bridge");
 		mkdirSync(machineDir, { recursive: true });
 		const oldState = {
 			name: "legacy-bridge",
@@ -308,7 +318,7 @@ describe("state migration — legacy network field", () => {
 	});
 
 	test("new machine.json with networks field → no migration needed", () => {
-		const machineDir = join(TEST_DIR, ".local", "share", "quickchr", "machines", "new-format");
+		const machineDir = join(TEST_DIR, "machines", "new-format");
 		mkdirSync(machineDir, { recursive: true });
 		const newState = {
 			name: "new-format",

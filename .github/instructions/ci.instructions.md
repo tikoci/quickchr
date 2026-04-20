@@ -13,14 +13,27 @@ applyTo: ".github/workflows/**"
 lint (ubuntu-latest)           unit-tests (ubuntu-latest)
     Biome + tsc --noEmit           bun test test/unit/ --coverage
          ↘                        ↙
-         integration (matrix)
-           linux/x86_64  ← ubuntu-latest       (always)
+         integration (matrix)                        windows-unit-tests (windows-latest)
+           linux/x86_64  ← ubuntu-latest       (always)   ← dispatch: windows=true
            linux/aarch64 ← ubuntu-24.04-arm    (always)
            macos/arm64   ← macos-15            (dispatch: macos=true)
            macos/x86_64  ← macos-13            (dispatch: macos=true)
 ```
 
 Lint and unit-tests run **in parallel**.  Integration waits for both via `needs:`.
+`windows-unit-tests` runs independently (no `needs:`); it is gated by `windows: true`.
+
+## Windows Unit Tests
+
+The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`.
+Windows-only tests (`describe.skipIf(process.platform !== "win32")`) in:
+
+- `test/unit/windows-paths.test.ts` — `getDataDir()` (`LOCALAPPDATA`/`USERPROFILE`), `getMachinesDir()`, `getCacheDir()`, `findCommandOnPath()` uses `where.exe`, `detectPackageManager()` returns `"winget"`
+- `test/unit/windows-channels.test.ts` — `buildQemuArgs` produces `\\.\pipe\...` named pipe paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` for missing pipe; `stopMachineByName` handles no `.sock` files
+- `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`
+
+**Windows integration tests** (QEMU for Windows) are future work — not in CI yet.  
+To run locally on Windows: `bun test test/unit/`
 
 ## Integration Test Architecture Mapping
 
@@ -104,6 +117,7 @@ enforcement entirely for a specific run.
 | Input | Type | Default | Purpose |
 |-------|------|---------|---------|
 | `macos` | boolean | false | Add macos-15 (arm64) + macos-13 (x86) runners |
+| `windows` | boolean | false | Add windows-latest runner for Windows unit tests |
 | `min-funcs` | string | 75 | Function coverage threshold % |
 | `min-lines` | string | 60 | Line coverage threshold % |
 

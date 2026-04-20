@@ -21,13 +21,23 @@ afterEach(() => {
 
 describe("monitorCommand", () => {
 	test("throws MACHINE_STOPPED when monitor socket does not exist", async () => {
-		// TMP dir exists but contains no monitor.sock
+		// TMP dir exists but contains no monitor.sock (Unix) / named pipe (Windows).
+		// On Unix: channelFileExists returns false → immediate throw.
+		// On Windows: channelFileExists always returns true; net.connect() gets ENOENT
+		// from the missing named pipe → error handler maps to MACHINE_STOPPED.
 		await expect(monitorCommand(TMP, "info")).rejects.toMatchObject({
 			code: "MACHINE_STOPPED",
 		});
 	});
 
+	// Mock-server tests below bind a server to a Unix domain socket path.
+	// On Windows, channelPath() resolves to a named pipe (\\.\pipe\...) — a completely
+	// different address — so the client never reaches the mock server.
+	// These subtests are skipped on Windows; see test/unit/windows-channels.test.ts
+	// for Windows named-pipe equivalents.
+
 	test("throws MACHINE_STOPPED when socket closes before sending (qemu) prompt", async () => {
+		if (process.platform === "win32") return; // named-pipe mock not supported here
 		// A server that immediately kills incoming connections simulates a QEMU
 		// process that closed its monitor socket before becoming ready.
 		const sockPath = join(TMP, "monitor.sock");
@@ -47,6 +57,7 @@ describe("monitorCommand", () => {
 	});
 
 	test("resolves with empty string for quit command (socket closed by QEMU after prompt)", async () => {
+		if (process.platform === "win32") return; // named-pipe mock not supported here
 		// Simulate QEMU: send (qemu) prompt, receive command, then close socket.
 		// This is the expected behaviour after sending "quit".
 		const sockPath = join(TMP, "monitor.sock");
@@ -74,6 +85,8 @@ describe("monitorCommand", () => {
 
 describe("serialStreams", () => {
 	test("throws MACHINE_STOPPED when serial socket does not exist", () => {
+		// On Unix: existsSync check. On Windows: connect() ENOENT → MACHINE_STOPPED.
+		// Both paths produce MACHINE_STOPPED — assert the code, not the mechanism.
 		expect(() => serialStreams(TMP)).toThrow(
 			expect.objectContaining({ code: "MACHINE_STOPPED" } as Partial<QuickCHRError>),
 		);
