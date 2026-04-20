@@ -23,7 +23,7 @@ QUICKCHR_INTEGRATION=1 bun test examples/vienk/vienk.test.ts
 
 ## Expected Output
 
-```
+```text
 vienk — single CHR smoke test
   ✓ CHR boots and REST API responds
     RouterOS 7.22 (stable) (arm64) — uptime: 0h0m42s
@@ -42,6 +42,7 @@ vienk — single CHR smoke test
 ## Architecture
 
 The test auto-selects arch from `process.arch`:
+
 - `arm64` host → arm64 CHR (HVF/KVM)
 - `x64` host → x86 CHR (HVF/KVM on matching host)
 

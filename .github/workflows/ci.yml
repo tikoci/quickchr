@@ -4,7 +4,7 @@ name: CI
 # triggers with optional macOS runners and custom coverage thresholds.
 #
 # Jobs:
-#   lint          — Biome + TypeScript type-check (parallel with unit-tests)
+#   lint          — repo checks (Biome + TypeScript + markdownlint, parallel with unit-tests)
 #   unit-tests    — bun:test unit suite + coverage enforcement (parallel with lint)
 #   windows-unit-tests — bun:test unit suite on Windows (always-on, parallel)
 #   integration   — matrix boot-test on linux/x86_64 + linux/aarch64
@@ -48,18 +48,16 @@ env:
   COVERAGE_MIN_LINES: ${{ github.event.inputs.min-lines || '60' }}
 
 jobs:
-  # ── Lint + type-check ────────────────────────────────────────────────────────
+  # ── Repo checks ─────────────────────────────────────────────────────────────
   lint:
-    name: Lint & Type-check
+    name: Repo Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - name: Biome lint
-        run: bun run lint:biome
-      - name: TypeScript check
-        run: bun run lint:typecheck
+      - name: Run repo checks
+        run: bun run check
 
   # ── Unit tests + coverage ────────────────────────────────────────────────────
   # Runs in parallel with lint. Integration tests depend on both completing.

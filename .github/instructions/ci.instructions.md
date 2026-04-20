@@ -9,9 +9,9 @@ applyTo: ".github/workflows/**"
 **File**: `.github/workflows/ci.yml`
 **Triggers**: push/PR to `main`, `workflow_dispatch` (manual with optional inputs)
 
-```
+```text
 lint (ubuntu-latest)           unit-tests (ubuntu-latest)     windows-unit-tests (windows-latest)
-    Biome + tsc --noEmit           bun test test/unit/ --coverage  bun test test/unit/ (always)
+    bun run check                  bun test test/unit/ --coverage  bun test test/unit/ (always)
          ↘                        ↙
          integration (matrix)
            linux/x86_64  ← ubuntu-latest       (always)
@@ -107,7 +107,7 @@ Defaults (enforced as warnings, not hard failures):
 - **Lines**: 60%
 
 Current baseline (as of main):
-- Functions: 75.62% | Lines: 60.37%
+- Functions: 79.59% | Lines: 67.86%
 
 Override via dispatch inputs `min-funcs` / `min-lines`.  Set to `0` to skip
 enforcement entirely for a specific run.
@@ -125,7 +125,7 @@ enforcement entirely for a specific run.
 
 ```bash
 # What lint job runs:
-bun run lint:biome && bun run lint:typecheck
+bun run check
 
 # What unit-tests job runs (with coverage):
 bun test test/unit/ --coverage

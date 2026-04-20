@@ -14,11 +14,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
-      - run: bun run lint:biome
-      - run: bun run lint:typecheck
+      - run: bun run check
       - run: bun test test/unit/
+      - name: Install QEMU + tools
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends qemu-system-x86 sshpass
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -w /dev/kvm ] 2>/dev/null; then
+            echo "KVM is available — hardware acceleration active"
+          else
+            echo "::notice::KVM not available — publish integration tests will use TCG"
+          fi
+      - name: Run integration tests
+        run: QUICKCHR_INTEGRATION=1 bun test test/integration/
+        timeout-minutes: 30
       - name: Publish to npm
         run: bunx npm publish --access public --provenance
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

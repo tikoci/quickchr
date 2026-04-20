@@ -14,6 +14,7 @@ Tested SSH public key provisioning on RouterOS CHR via REST API. Two methods exi
 ### 1. Two Methods for SSH Key Installation
 
 **Method A: `PUT /rest/user/ssh-keys` (add)**
+
 - Accepts `user` and `key` (inline public key content as string)
 - Returns the created key entry with `.id`
 - Response shape: `{".id":"*2","RSA":"false","bits":"2048","key-owner":"<comment>","user":"admin"}`
@@ -26,6 +27,7 @@ curl -u admin: http://127.0.0.1:9100/rest/user/ssh-keys \
 ```
 
 **Method B: `POST /rest/user/ssh-keys/import` (import from file)**
+
 - Requires the public key to first be uploaded to the router's file system
 - Accepts `user` and `public-key-file` (filename on router)
 - Returns `[]` (empty array) on success
@@ -103,6 +105,7 @@ For `quickchr` SSH key provisioning:
 ### 7. Package apply-changes Version Discovery
 
 During this lab session, discovered that `/system/package/apply-changes` was **added in RouterOS 7.18**:
+
 - Versions < 7.18: Must use `/system/reboot` to apply package changes
 - Versions ≥ 7.18: Use `/system/package/apply-changes` (preferred, reboots and applies atomically)
 - Confirmed via rosetta `routeros_command_version_check` and live testing on 7.10
@@ -112,6 +115,7 @@ Updated `routeros-container/SKILL.md` to note this version dependency.
 ## Test File
 
 `test/lab/ssh-keys/ssh-keys.test.ts` — 7 tests covering:
+
 - RSA key add via PUT
 - ed25519 rejection (version-dependent)
 - ECDSA rejection (version-dependent)
@@ -127,6 +131,7 @@ Updated `routeros-container/SKILL.md` to note this version dependency.
 3. Does `import` support different file formats (PEM, DER)?
 
 > **Source:**
+>
 > - Lab: Live testing against CHR 7.10 (x86_64) on 2025-07-17
 > - Rosetta: `/user/ssh-keys` command tree — `add` args: key, user, comment; `import` args: user, public-key-file, info
 > - Rosetta: `routeros_command_version_check("/system/package/apply-changes")` → first_seen: 7.18

@@ -113,7 +113,7 @@ Values outside this range return immediate HTTP 400 with the range in the error 
 
 ### 7. quickchr automation pattern
 
-```
+```text
 POST update {container:"true", activation-timeout:"30s"}
   → blocks for ≤30s
 Sleep 2s (let RouterOS process the request)

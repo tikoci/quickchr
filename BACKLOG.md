@@ -49,10 +49,10 @@
 <summary>CI & Publish (done)</summary>
 
 - [x] CI matrix: linux/x86_64 + linux/aarch64; macOS optional via dispatch
-- [x] Coverage enforcement: 75% funcs / 60% lines (warn, not hard-fail). Actual Apr 2026 baseline: **92.48% funcs / 83.02% lines** — well above thresholds.
+- [x] Coverage enforcement: 75% funcs / 60% lines (warn, not hard-fail). Actual Apr 2026 baseline: **79.59% funcs / 67.86% lines** — above thresholds, but with room to improve in lower-covered library entrypoints.
 - [x] CI artifacts: coverage-report (14d), integration-logs-{platform} (7d)
 - [x] Step summaries written to `$GITHUB_STEP_SUMMARY`
-- [x] `publish.yml` runs lint (biome & tsc --noEmit) + unit tests before npm publish
+- [x] `publish.yml` runs repo checks (`bun run check`) + unit tests + linux/x86 integration before npm publish
 
 </details>
 

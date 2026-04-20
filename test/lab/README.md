@@ -68,7 +68,7 @@ All labs were conducted on:
 
 ## Relationship to Other Artifacts
 
-```
+```text
 SKILL.md references          ← authoritative rules for agents
   ↑ distilled from
 REPORT.md (this directory)   ← methodology + conclusions + open issues

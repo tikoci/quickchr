@@ -39,14 +39,14 @@ QUICKCHR_INTEGRATION=1 bun test test/integration/
 ### Linting and Type Checking
 
 ```bash
-bun run check           # Biome + tsc --noEmit
+bun run check           # Biome + tsc --noEmit + markdownlint
 bun run lint:biome      # Biome only
 bun run lint:typecheck  # tsc --noEmit only
 ```
 
 ### Project Structure
 
-```
+```text
 src/lib/    Pure library — no CLI deps, no process.exit()
 src/cli/    CLI layer — thin wrapper over src/lib/
 src/index.ts  Public barrel export for npm consumers
