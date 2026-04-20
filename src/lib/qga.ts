@@ -21,6 +21,7 @@
 
 import { connect, type Socket } from "node:net";
 import type {
+	ChannelTcpEndpoint,
 	QgaCommand,
 	QgaFsFreezeStatus,
 	QgaNetworkInterface,
@@ -118,12 +119,15 @@ export function parseQgaMessages(buffer: string): { messages: unknown[]; remaind
 }
 
 /**
- * Connect to a QGA Unix socket with timeout.
+ * Connect to a QGA socket or TCP endpoint with timeout.
  * Returns the connected socket or throws.
+ * Accepts either a Unix socket path (string) or a TCP endpoint ({host, port}).
  */
-function connectSocket(socketPath: string, timeoutMs: number): Promise<Socket> {
+function connectSocket(endpoint: string | ChannelTcpEndpoint, timeoutMs: number): Promise<Socket> {
 	return new Promise((resolve, reject) => {
-		const socket = connect({ path: socketPath });
+		const socket = typeof endpoint === "string"
+			? connect({ path: endpoint })
+			: connect(endpoint.port, endpoint.host);
 		let settled = false;
 
 		const finish = (err?: QuickCHRError) => {
@@ -235,10 +239,10 @@ function sendAndReceive(
  * (stale data from a previous session may cause the first sync to fail).
  */
 export async function qgaSync(
-	socketPath: string,
+	endpoint: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<{ socket: Socket; syncId: number }> {
-	const socket = await connectSocket(socketPath, timeoutMs);
+	const socket = await connectSocket(endpoint, timeoutMs);
 	const syncId = Date.now() % 1_000_000_000; // Keep it within safe integer range
 
 	try {
@@ -283,11 +287,11 @@ export async function qgaSync(
  * @param timeoutMs   Overall timeout for the operation
  */
 export async function qgaExec(
-	socketPath: string,
+	endpoint: string | ChannelTcpEndpoint,
 	script: string,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<QgaExecResult> {
-	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
+	const { socket } = await qgaSync(endpoint, Math.min(timeoutMs, 5000));
 
 	try {
 		// Send guest-exec with base64-encoded script
@@ -344,11 +348,11 @@ export async function qgaExec(
  * Returns true if guest-ping succeeds after sync, false otherwise.
  */
 export async function qgaProbe(
-	socketPath: string,
+	endpoint: string | ChannelTcpEndpoint,
 	timeoutMs: number = 5000,
 ): Promise<boolean> {
 	try {
-		const { socket } = await qgaSync(socketPath, timeoutMs);
+		const { socket } = await qgaSync(endpoint, timeoutMs);
 		try {
 			await sendAndReceive(
 				socket,
@@ -369,7 +373,7 @@ export async function qgaProbe(
  * Returns the list of supported command names and their enabled status.
  */
 export async function qgaInfo(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<QgaCommandInfo[]> {
 	const { socket } = await qgaSync(socketPath, timeoutMs);
@@ -396,12 +400,12 @@ export async function qgaInfo(
 
 /** Execute a raw QGA command and return its untyped `return` payload. */
 export async function qgaRawCommand(
-	socketPath: string,
+	endpoint: string | ChannelTcpEndpoint,
 	command: QgaCommand,
 	args?: Record<string, unknown>,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<unknown> {
-	return qgaRun<unknown>(socketPath, command, args, timeoutMs);
+	return qgaRun<unknown>(endpoint, command, args, timeoutMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -413,12 +417,12 @@ export async function qgaRawCommand(
  * raw `return` value, then destroy the socket.
  */
 async function qgaRun<T>(
-	socketPath: string,
+	endpoint: string | ChannelTcpEndpoint,
 	command: QgaCommand,
 	args?: Record<string, unknown>,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
-	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
+	const { socket } = await qgaSync(endpoint, Math.min(timeoutMs, 5000));
 	try {
 		const payload: Record<string, unknown> = { execute: command };
 		if (args) payload.arguments = args;
@@ -433,7 +437,7 @@ async function qgaRun<T>(
  * Throws on failure (use {@link qgaProbe} for a boolean version).
  */
 export async function qgaPing(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<void> {
 	await qgaRun<unknown>(socketPath, "guest-ping", undefined, timeoutMs);
@@ -449,7 +453,7 @@ export async function qgaPing(
  * ```
  */
 export async function qgaGetOsInfo(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<QgaOsInfo> {
 	const raw = await qgaRun<Record<string, unknown>>(socketPath, "guest-get-osinfo", undefined, timeoutMs);
@@ -466,7 +470,7 @@ export async function qgaGetOsInfo(
  * RouterOS identity name (equivalent to `/system identity get name`).
  */
 export async function qgaGetHostName(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<string> {
 	const raw = await qgaRun<Record<string, unknown>>(socketPath, "guest-get-host-name", undefined, timeoutMs);
@@ -477,7 +481,7 @@ export async function qgaGetHostName(
  * System time as nanoseconds since the Unix epoch.
  */
 export async function qgaGetTime(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<number> {
 	return qgaRun<number>(socketPath, "guest-get-time", undefined, timeoutMs);
@@ -487,7 +491,7 @@ export async function qgaGetTime(
  * Timezone configuration.  RouterOS CHR defaults to UTC (offset = 0).
  */
 export async function qgaGetTimezone(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<QgaTimezone> {
 	const raw = await qgaRun<Record<string, unknown>>(socketPath, "guest-get-timezone", undefined, timeoutMs);
@@ -503,7 +507,7 @@ export async function qgaGetTimezone(
  * `/interface print`.
  */
 export async function qgaGetNetworkInterfaces(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<QgaNetworkInterface[]> {
 	const raw = await qgaRun<Array<Record<string, unknown>>>(
@@ -528,7 +532,7 @@ export async function qgaGetNetworkInterfaces(
  * (held for snapshot consistency).
  */
 export async function qgaFsFreezeStatus(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<QgaFsFreezeStatus> {
 	const status = await qgaRun<string>(socketPath, "guest-fsfreeze-status", undefined, timeoutMs);
@@ -541,7 +545,7 @@ export async function qgaFsFreezeStatus(
  * Call {@link qgaFsFreezeThaw} immediately after capturing the snapshot.
  */
 export async function qgaFsFreezeFreeze(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<number> {
 	return qgaRun<number>(socketPath, "guest-fsfreeze-freeze", undefined, timeoutMs);
@@ -552,7 +556,7 @@ export async function qgaFsFreezeFreeze(
  * Returns the number of thawed filesystems.
  */
 export async function qgaFsFreezeThaw(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<number> {
 	return qgaRun<number>(socketPath, "guest-fsfreeze-thaw", undefined, timeoutMs);
@@ -566,7 +570,7 @@ export async function qgaFsFreezeThaw(
  * gracefully.
  */
 export async function qgaShutdown(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<void> {
 	const { socket } = await qgaSync(socketPath, Math.min(timeoutMs, 5000));
@@ -592,7 +596,7 @@ export async function qgaShutdown(
  * this is handled gracefully; the write still succeeds.
  */
 export async function qgaFileWrite(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	filename: string,
 	content: string,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
@@ -629,7 +633,7 @@ export async function qgaFileWrite(
  * Maximum file size: 1 MiB.
  */
 export async function qgaFileRead(
-	socketPath: string,
+	socketPath: string | ChannelTcpEndpoint,
 	filename: string,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<string> {

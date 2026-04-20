@@ -105,6 +105,13 @@ export const SERVICE_NAMES = Object.keys(SERVICE_PORTS) as ServiceName[];
 export const PORTS_PER_BLOCK = 10;
 export const DEFAULT_PORT_BASE = 9100;
 
+/**
+ * TCP endpoint for QEMU IPC channels on Windows.
+ * Used instead of named pipes when QEMU's Winsock bind() can't handle \\.\pipe\ paths.
+ * Offsets within the port block: monitor=+6, serial=+7, qga=+8.
+ */
+export type ChannelTcpEndpoint = { host: string; port: number };
+
 // --- Disk ---
 
 export type BootDiskFormat = "raw" | "qcow2";

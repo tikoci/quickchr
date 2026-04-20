@@ -28,6 +28,7 @@ function makeConfig(overrides: Partial<QemuLaunchConfig> = {}): QemuLaunchConfig
 		mem: 512,
 		cpu: 1,
 		ports,
+		portBase: 9100,
 		networks: [{ specifier: "user", id: "net0" }],
 		background: true,
 		...overrides,

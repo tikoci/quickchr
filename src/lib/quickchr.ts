@@ -45,7 +45,7 @@ import {
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
-import { monitorCommand, serialStreams, qgaCommand } from "./channels.ts";
+import { monitorCommand, serialStreams, qgaCommand, channelEndpoint } from "./channels.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
@@ -294,15 +294,15 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async monitor(command: string): Promise<string> {
-			return monitorCommand(state.machineDir, command);
+			return monitorCommand(state.machineDir, command, undefined, state.portBase);
 		},
 
 		serial(): { readable: ReadableStream; writable: WritableStream } {
-			return serialStreams(state.machineDir);
+			return serialStreams(state.machineDir, state.portBase);
 		},
 
 		async qga(command: QgaCommand, args?: object): Promise<unknown> {
-			return qgaCommand(state.machineDir, state.arch, command, args);
+			return qgaCommand(state.machineDir, state.arch, command, args, undefined, state.portBase);
 		},
 
 		async rest(path: string, opts?: RequestInit): Promise<unknown> {
@@ -371,8 +371,8 @@ function createInstance(state: MachineState): ChrInstance {
 				if (kvmWarning) {
 					console.warn(kvmWarning);
 				}
-				const socketPath = join(state.machineDir, "qga.sock");
-				const result = await qgaExec(socketPath, command, opts?.timeout ?? 30_000);
+				const endpoint = channelEndpoint(state.machineDir, "qga", state.portBase);
+				const result = await qgaExec(endpoint, command, opts?.timeout ?? 30_000);
 				return { output: result.stdout.trim(), via: "qga" };
 			}
 
@@ -384,6 +384,7 @@ function createInstance(state: MachineState): ChrInstance {
 					auth.user,
 					opts?.password ?? state.user?.password ?? "",
 					opts?.timeout ?? 30_000,
+					state.portBase,
 				);
 				return { output: result.output, via: "console" };
 			}
@@ -415,6 +416,7 @@ function createInstance(state: MachineState): ChrInstance {
 					auth.user,
 					opts?.password ?? state.user?.password ?? "",
 					opts?.timeout ?? 30_000,
+					state.portBase,
 				);
 				return { output: consoleResult.output, via: "console" };
 			}
@@ -540,8 +542,8 @@ function createInstance(state: MachineState): ChrInstance {
 			try {
 				// Use QEMU monitor `info cpus` for CPU and `info balloon` for memory.
 				const [cpuOut, balloonOut] = await Promise.all([
-					monitorCommand(state.machineDir, "info cpus", 3000),
-					monitorCommand(state.machineDir, "info balloon", 3000),
+					monitorCommand(state.machineDir, "info cpus", 3000, state.portBase),
+					monitorCommand(state.machineDir, "info balloon", 3000, state.portBase),
 				]);
 				// `info cpus` output: "* CPU #0: ... thread_id=N\n  CPU #1: ..."
 				// Each CPU line contains a user/sys/idle percent breakdown — but the
@@ -571,7 +573,7 @@ function createInstance(state: MachineState): ChrInstance {
 				// Try monitor first (works on running machines, gives live state)
 				if (state.status === "running") {
 					try {
-						const out = await monitorCommand(state.machineDir, "info snapshots");
+						const out = await monitorCommand(state.machineDir, "info snapshots", undefined, state.portBase);
 						return parseSnapshotList(out);
 					} catch { /* fall through to qemu-img */ }
 				}
@@ -594,7 +596,7 @@ function createInstance(state: MachineState): ChrInstance {
 				}
 
 				const snapName = name ?? new Date().toISOString().replace(/:/g, "-").replace(/\..+$/, "Z");
-				const out = await monitorCommand(state.machineDir, `savevm ${snapName}`);
+				const out = await monitorCommand(state.machineDir, `savevm ${snapName}`, undefined, state.portBase);
 				if (/^error[:\s]/i.test(out)) {
 					throw new QuickCHRError("PROCESS_FAILED", `savevm failed: ${out.trim()}`);
 				}
@@ -619,7 +621,7 @@ function createInstance(state: MachineState): ChrInstance {
 					throw new QuickCHRError("MACHINE_STOPPED", `Machine "${state.name}" must be running to load a snapshot.`);
 				}
 
-				const out = await monitorCommand(state.machineDir, `loadvm ${name}`);
+				const out = await monitorCommand(state.machineDir, `loadvm ${name}`, undefined, state.portBase);
 				if (/^error[:\s]/i.test(out)) {
 					throw new QuickCHRError("PROCESS_FAILED", `loadvm failed: ${out.trim()}`);
 				}
@@ -634,7 +636,7 @@ function createInstance(state: MachineState): ChrInstance {
 					throw new QuickCHRError("MACHINE_STOPPED", `Machine "${state.name}" must be running to delete a snapshot.`);
 				}
 
-				const out = await monitorCommand(state.machineDir, `delvm ${name}`);
+				const out = await monitorCommand(state.machineDir, `delvm ${name}`, undefined, state.portBase);
 				if (/^error[:\s]/i.test(out)) {
 					throw new QuickCHRError("PROCESS_FAILED", `delvm failed: ${out.trim()}`);
 				}
@@ -734,7 +736,7 @@ async function hardRebootMachine(
 	let method: "monitor" | "signal" = "monitor";
 
 	try {
-		await monitorCommand(state.machineDir, "quit", 4000);
+		await monitorCommand(state.machineDir, "quit", 4000, state.portBase);
 	} catch (e) {
 		method = "signal";
 		log.warn(`Device-mode: monitor quit failed, falling back to process terminate (${e instanceof Error ? e.message : String(e)})`);
@@ -784,6 +786,7 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 		ports: state.ports,
 		networks: resolvedNetworks,
 		background: true,
+		portBase: state.portBase,
 	};
 }
 
@@ -1255,6 +1258,7 @@ export class QuickCHR {
 			ports: state.ports,
 			networks: resolvedNetworks,
 			background: spawnInBackground,
+			portBase: state.portBase,
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
@@ -1431,7 +1435,7 @@ export class QuickCHR {
 		}
 
 		if (opts.user || opts.disableAdmin || opts.secureLogin === true) {
-			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log, machineState.machineDir);
+			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log, machineState.machineDir, machineState.portBase);
 			if (result.user) {
 				// Persist user info in state (password placeholder — real password in secret store)
 				const current = loadMachine(machineState.name);
@@ -1511,6 +1515,7 @@ export class QuickCHR {
 			ports: state.ports,
 			networks: resolvedNetworks,
 			background: spawnBackground,
+			portBase: state.portBase,
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);

@@ -9,7 +9,7 @@
 import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { connect } from "node:net";
-import type { Arch, QgaCommand } from "./types.ts";
+import type { Arch, ChannelTcpEndpoint, QgaCommand } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { qgaProbe, qgaRawCommand } from "./qga.ts";
 import { qgaKvmWarning } from "./platform.ts";
@@ -26,6 +26,23 @@ export function channelPath(machineDir: string, channel: "monitor" | "serial" | 
 	return join(machineDir, `${channel}.sock`);
 }
 
+/**
+ * Resolve the IPC connection options for a QEMU channel.
+ * On Windows with a portBase, returns a TCP endpoint (QEMU's Winsock bind() can't handle named pipes).
+ * Otherwise returns the socket path string (Unix socket or Windows named pipe fallback).
+ */
+export function channelEndpoint(
+	machineDir: string,
+	channel: "monitor" | "serial" | "qga",
+	portBase?: number,
+): string | ChannelTcpEndpoint {
+	if (process.platform === "win32" && portBase !== undefined) {
+		const OFFSETS: Record<string, number> = { monitor: 6, serial: 7, qga: 8 };
+		return { host: "127.0.0.1", port: portBase + (OFFSETS[channel] ?? 6) };
+	}
+	return channelPath(machineDir, channel);
+}
+
 /** Return true if the channel IPC endpoint can be checked via existsSync (Unix only). */
 export function channelFileExists(path: string): boolean {
 	if (process.platform === "win32") {
@@ -40,6 +57,7 @@ export async function monitorCommand(
 	machineDir: string,
 	command: string,
 	timeoutMs: number = 5000,
+	portBase?: number,
 ): Promise<string> {
 	const socketPath = channelPath(machineDir, "monitor");
 	if (!channelFileExists(socketPath)) {
@@ -48,6 +66,8 @@ export async function monitorCommand(
 			"Monitor socket not found — is the machine running in background mode?",
 		);
 	}
+
+	const endpoint = channelEndpoint(machineDir, "monitor", portBase);
 
 	return new Promise((resolve, reject) => {
 		const timeout = setTimeout(() => {
@@ -58,7 +78,9 @@ export async function monitorCommand(
 		let buffer = "";
 		let sentCommand = false;
 
-		const socket = connect({ path: socketPath });
+		const socket = typeof endpoint === "string"
+			? connect({ path: endpoint })
+			: connect(endpoint.port, endpoint.host);
 
 		socket.on("data", (data) => {
 			buffer += data.toString();
@@ -101,7 +123,7 @@ export async function monitorCommand(
 }
 
 /** Get a readable/writable stream pair for the serial console. */
-export function serialStreams(machineDir: string): {
+export function serialStreams(machineDir: string, portBase?: number): {
 	readable: ReadableStream<Uint8Array>;
 	writable: WritableStream<Uint8Array>;
 } {
@@ -113,7 +135,10 @@ export function serialStreams(machineDir: string): {
 		);
 	}
 
-	const socket = connect({ path: socketPath });
+	const endpoint = channelEndpoint(machineDir, "serial", portBase);
+	const socket = typeof endpoint === "string"
+		? connect({ path: endpoint })
+		: connect(endpoint.port, endpoint.host);
 
 	const readable = new ReadableStream<Uint8Array>({
 		start(controller) {
@@ -154,6 +179,7 @@ export async function qgaCommand(
 	command: QgaCommand,
 	args?: object,
 	timeoutMs: number = 10000,
+	portBase?: number,
 ): Promise<unknown> {
 	if (arch === "arm64") {
 		throw new QuickCHRError(
@@ -175,13 +201,15 @@ export async function qgaCommand(
 		);
 	}
 
-	return qgaRawCommand(socketPath, command, args as Record<string, unknown> | undefined, timeoutMs);
+	const endpoint = channelEndpoint(machineDir, "qga", portBase);
+	return qgaRawCommand(endpoint, command, args as Record<string, unknown> | undefined, timeoutMs);
 }
 
 /** Check whether QGA is available and responding for a machine. */
 export function isQgaReady(
 	machineDir: string,
 	arch: Arch,
+	portBase?: number,
 ): Promise<boolean> {
 	if (arch === "arm64") return Promise.resolve(false);
 
@@ -189,5 +217,6 @@ export function isQgaReady(
 	// On Unix, skip the connect attempt entirely if the socket file doesn't exist.
 	if (process.platform !== "win32" && !existsSync(socketPath)) return Promise.resolve(false);
 
-	return qgaProbe(socketPath, 5000);
+	const endpoint = channelEndpoint(machineDir, "qga", portBase);
+	return qgaProbe(endpoint, 5000);
 }

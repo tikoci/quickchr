@@ -66,14 +66,11 @@ export function createNamedSocket(
 }
 
 export function getNamedSocket(name: string): SocketEntry | undefined {
-	// Use try/catch instead of existsSync — on Windows, Bun's existsSync can
-	// return false for a file that was just written (caching bug). readFileSync
-	// is always authoritative and avoids the TOCTOU race.
-	try {
-		return JSON.parse(readFileSync(socketPath(name), "utf-8")) as SocketEntry;
-	} catch {
-		return undefined;
-	}
+	// Delegate to listNamedSockets() which uses readdirSync → readFileSync per file.
+	// Bun on Windows caches directory listings so a direct readFileSync immediately
+	// after writeFileSync can fail with ENOENT. listNamedSockets works because its
+	// readdirSync forces the cache to refresh before reading.
+	return listNamedSockets().find((e) => e.name === name);
 }
 
 export function listNamedSockets(): SocketEntry[] {

@@ -671,8 +671,8 @@ Options:
 		qgaFileRead,
 		qgaExec,
 	} = await import("../lib/qga.ts");
-	const { join } = await import("node:path");
-	const socketPath = join(machine.state.machineDir, "qga.sock");
+	const { channelEndpoint } = await import("../lib/channels.ts");
+	const socketPath = channelEndpoint(machine.state.machineDir, "qga", machine.state.portBase);
 
 	if (machine.state.arch === "arm64") {
 		console.error(`Error [QGA_UNSUPPORTED]: QEMU Guest Agent is not yet functional on ARM64 CHR.`);

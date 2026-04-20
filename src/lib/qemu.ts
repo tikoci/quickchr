@@ -6,7 +6,7 @@
  */
 
 import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync, truncateSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware } from "./platform.ts";
@@ -27,11 +27,13 @@ export interface QemuLaunchConfig {
 	/** Network interfaces with resolved QEMU args. */
 	networks: NetworkConfig[];
 	background: boolean;
+	/** Port block base for this machine (portBase+6=monitor, +7=serial, +8=qga on Windows TCP). */
+	portBase: number;
 }
 
 /** Build the full QEMU command-line arguments array. */
 export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]> {
-	const { arch, machineDir, bootDisk, extraDisks, mem, cpu, ports, networks, background } = config;
+	const { arch, machineDir, bootDisk, extraDisks, mem, cpu, ports, networks, background, portBase } = config;
 
 	const qemuBin = requireQemu(arch);
 	const accel = await detectAccel(arch);
@@ -118,7 +120,7 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 	args.push("-display", "none");
 
 	// Serial, monitor, QGA channels
-	buildChannelArgs(args, arch, machineDir, background);
+	buildChannelArgs(args, arch, machineDir, background, portBase);
 
 	return args;
 }
@@ -187,21 +189,33 @@ function buildChannelArgs(
 	arch: Arch,
 	machineDir: string,
 	background: boolean,
+	portBase: number,
 ): void {
-	// On Windows, QEMU uses named pipes for IPC (no AF_UNIX socket support in cloudbase build).
-	// Both QEMU and Node.js net.connect() recognize the \\.\pipe\ prefix as named pipes.
-	const machineName = basename(machineDir);
 	const isWin = process.platform === "win32";
-	const monitorSock = isWin ? `\\\\.\\pipe\\quickchr-${machineName}-monitor` : join(machineDir, "monitor.sock");
-	const serialSock = isWin ? `\\\\.\\pipe\\quickchr-${machineName}-serial` : join(machineDir, "serial.sock");
-	const qgaSock = isWin ? `\\\\.\\pipe\\quickchr-${machineName}-qga` : join(machineDir, "qga.sock");
+
+	let monitorSock: string;
+	let serialSock: string;
+	let qgaSock: string;
+
+	if (isWin) {
+		// QEMU on Windows: chardev socket bind() cannot handle \\.\pipe\ paths
+		// on all builds. Use TCP localhost instead; the port block reserves +6/+7/+8
+		// for monitor/serial/qga IPC.
+		monitorSock = `host=127.0.0.1,port=${portBase + 6}`;
+		serialSock = `host=127.0.0.1,port=${portBase + 7}`;
+		qgaSock = `host=127.0.0.1,port=${portBase + 8}`;
+	} else {
+		monitorSock = `path=${join(machineDir, "monitor.sock")}`;
+		serialSock = `path=${join(machineDir, "serial.sock")}`;
+		qgaSock = `path=${join(machineDir, "qga.sock")}`;
+	}
 
 	if (background) {
 		// Background: all channels on sockets/pipes
 		args.push(
-			"-chardev", `socket,id=monitor0,path=${monitorSock},server=on,wait=off`,
+			"-chardev", `socket,id=monitor0,${monitorSock},server=on,wait=off`,
 			"-mon", "chardev=monitor0,mode=readline",
-			"-chardev", `socket,id=serial0,path=${serialSock},server=on,wait=off`,
+			"-chardev", `socket,id=serial0,${serialSock},server=on,wait=off`,
 			"-serial", "chardev:serial0",
 		);
 	} else {
@@ -211,7 +225,7 @@ function buildChannelArgs(
 			"-chardev", "stdio,id=serial0,mux=on,signal=off",
 			"-mon", "chardev=serial0,mode=readline",
 			"-serial", "chardev:serial0",
-			"-chardev", `socket,id=monitor0,path=${monitorSock},server=on,wait=off`,
+			"-chardev", `socket,id=monitor0,${monitorSock},server=on,wait=off`,
 			"-mon", "chardev=monitor0,mode=readline",
 		);
 	}
@@ -220,7 +234,7 @@ function buildChannelArgs(
 	if (arch === "x86") {
 		args.push(
 			"-device", "virtio-serial-pci,id=virtio-serial-qga",
-			"-chardev", `socket,id=qga0,path=${qgaSock},server=on,wait=off`,
+			"-chardev", `socket,id=qga0,${qgaSock},server=on,wait=off`,
 			"-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0,id=qga-port0",
 		);
 	}

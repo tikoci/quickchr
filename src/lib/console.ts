@@ -19,7 +19,7 @@
 
 import { connect, type Socket } from "node:net";
 import { QuickCHRError } from "./types.ts";
-import { channelPath, channelFileExists } from "./channels.ts";
+import { channelEndpoint, channelFileExists, channelPath } from "./channels.ts";
 
 /** Default timeout for console operations. */
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -60,7 +60,7 @@ interface ConsoleSessionState {
 /**
  * Connect to the serial console socket and start buffer accumulation.
  */
-function openSession(machineDir: string): ConsoleSessionState {
+function openSession(machineDir: string, portBase?: number): ConsoleSessionState {
 	const socketPath = channelPath(machineDir, "serial");
 	if (!channelFileExists(socketPath)) {
 		throw new QuickCHRError(
@@ -69,7 +69,10 @@ function openSession(machineDir: string): ConsoleSessionState {
 		);
 	}
 
-	const socket = connect({ path: socketPath });
+	const endpoint = channelEndpoint(machineDir, "serial", portBase);
+	const socket = typeof endpoint === "string"
+		? connect({ path: endpoint })
+		: connect(endpoint.port, endpoint.host);
 	const state: ConsoleSessionState = {
 		socket,
 		buffer: "",
@@ -331,8 +334,9 @@ export async function consoleExec(
 	user: string = "admin",
 	password: string = "",
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+	portBase?: number,
 ): Promise<{ output: string }> {
-	const session = openSession(machineDir);
+	const session = openSession(machineDir, portBase);
 
 	try {
 		// Wait for socket to connect
@@ -433,10 +437,11 @@ export async function consoleExec(
 export async function isConsoleReady(
 	machineDir: string,
 	timeoutMs: number = 5000,
+	portBase?: number,
 ): Promise<"ready" | "login" | false> {
 	let session: ConsoleSessionState | undefined;
 	try {
-		session = openSession(machineDir);
+		session = openSession(machineDir, portBase);
 
 		await new Promise<void>((resolve, reject) => {
 			session?.socket.once("connect", resolve);

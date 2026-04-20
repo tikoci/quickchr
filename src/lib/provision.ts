@@ -228,6 +228,7 @@ async function consoleProvision(
 	effectiveUser: { name: string; password: string } | null,
 	shouldDisableAdmin: boolean,
 	logger?: ProgressLogger,
+	portBase?: number,
 ): Promise<ProvisionResult> {
 	const log = logger ?? createLogger();
 
@@ -240,6 +241,7 @@ async function consoleProvision(
 			"admin",
 			"",
 			30_000,
+			portBase,
 		);
 		saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
 		log.debug(`User "${effectiveUser.name}" created via console`);
@@ -251,7 +253,7 @@ async function consoleProvision(
 		// disabling your own account while the current session is authenticated as that user.
 		const disableUser = effectiveUser?.name ?? "admin";
 		const disablePass = effectiveUser?.password ?? "";
-		await consoleExec(machineDir, "/user set [find name=admin] disabled=yes", disableUser, disablePass, 30_000);
+		await consoleExec(machineDir, "/user set [find name=admin] disabled=yes", disableUser, disablePass, 30_000, portBase);
 		log.debug("Admin disabled via console");
 	}
 
@@ -268,6 +270,7 @@ export async function installSshKey(
 	username: string,
 	machineName: string,
 	machineDir: string,
+	portBase?: number,
 ): Promise<void> {
 	const sshDir = join(machineDir, "ssh");
 	mkdirSync(sshDir, { recursive: true });
@@ -292,6 +295,7 @@ export async function installSshKey(
 		"admin",
 		"",
 		30_000,
+		portBase,
 	);
 
 	// Verify the key appears in the REST listing.
@@ -340,6 +344,7 @@ export async function provision(
 	secureLogin?: boolean,
 	logger?: ProgressLogger,
 	machineDir?: string,
+	portBase?: number,
 ): Promise<ProvisionResult> {
 	const log = logger ?? createLogger();
 
@@ -365,14 +370,14 @@ export async function provision(
 	} catch (e) {
 		if (machineDir) {
 			log.warn("REST API unavailable — falling back to serial console provisioning");
-			const result = await consoleProvision(machineDir, machineName, effectiveUser, !!shouldDisableAdmin, logger);
+			const result = await consoleProvision(machineDir, machineName, effectiveUser, !!shouldDisableAdmin, logger, portBase);
 			usedConsolePath = true;
 			// After console provisioning the machine is booted; REST comes up shortly.
 			// Attempt SSH key install for the managed quickchr user — non-fatal if REST is still unavailable.
 			if (secureLogin && !user && effectiveUser) {
 				try {
 					await waitForRest(httpPort, 30_000);
-					await installSshKey(httpPort, effectiveUser.name, machineName, machineDir);
+					await installSshKey(httpPort, effectiveUser.name, machineName, machineDir, portBase);
 				} catch (keyErr) {
 					log.warn(`SSH key install failed after console provisioning (SSH transport will fall back to password): ${keyErr}`);
 				}
@@ -394,7 +399,7 @@ export async function provision(
 			// (including the SSH key store) before we attempt key installation.
 			await Bun.sleep(1000);
 			try {
-				await installSshKey(httpPort, effectiveUser.name, machineName, machineDir);
+				await installSshKey(httpPort, effectiveUser.name, machineName, machineDir, portBase);
 			} catch (e) {
 				log.warn(`SSH key install failed (SSH transport will fall back to password): ${e}`);
 			}

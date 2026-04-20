@@ -1,11 +1,12 @@
 /**
- * Windows-only unit tests for QEMU channel IPC (named pipes).
+ * Windows-only unit tests for QEMU channel IPC (TCP localhost).
  * Skipped automatically on macOS and Linux.
  *
- * On Windows, QEMU uses named pipes instead of Unix domain sockets.
+ * On Windows, QEMU channels use TCP localhost instead of named pipes or Unix sockets
+ * because QEMU's Winsock bind() cannot handle \\.\pipe\ paths.
  * These tests verify that:
- * - buildQemuArgs produces \\.\pipe\quickchr-<name>-<channel> paths
- * - monitorCommand / serialStreams throw MACHINE_STOPPED when the pipe is absent
+ * - buildQemuArgs produces host=127.0.0.1,port=portBase+N TCP chardev args
+ * - monitorCommand / serialStreams throw MACHINE_STOPPED when the TCP port is not listening
  * - stopMachineByName does not crash on missing .sock files (there are none on Windows)
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -18,9 +19,8 @@ import type { PortMapping } from "../../src/lib/types.ts";
 
 const isWindows = process.platform === "win32";
 
-describe.skipIf(!isWindows)("Windows named pipe channel paths in buildQemuArgs", () => {
+describe.skipIf(!isWindows)("Windows TCP channel paths in buildQemuArgs", () => {
 const machineDir = join(tmpdir(), "quickchr-win-channels-test");
-const machineName = "quickchr-win-channels-test";
 
 function makeConfig(background: boolean): QemuLaunchConfig {
 const ports: Record<string, PortMapping> = {
@@ -34,6 +34,7 @@ bootDisk: { path: join(machineDir, "disk.img"), format: "raw" },
 mem: 512,
 cpu: 1,
 ports,
+portBase: 9100,
 background,
 networks: [{ specifier: "user", id: "net0" }],
 };
@@ -42,12 +43,12 @@ networks: [{ specifier: "user", id: "net0" }],
 beforeEach(() => mkdirSync(machineDir, { recursive: true }));
 afterEach(() => rmSync(machineDir, { recursive: true, force: true }));
 
-test("background mode: monitor chardev uses named pipe path", async () => {
+test("background mode: monitor chardev uses TCP localhost port", async () => {
 try {
 const args = await buildQemuArgs(makeConfig(true));
-const monitorArg = args.find((a) => a.includes("monitor0") && a.includes("path="));
+const monitorArg = args.find((a) => a.includes("monitor0") && a.includes("host=127.0.0.1"));
 expect(monitorArg).toBeDefined();
-expect(monitorArg).toContain(`\\\\.\\pipe\\quickchr-${machineName}-monitor`);
+expect(monitorArg).toContain("host=127.0.0.1,port=9106");
 } catch (e: unknown) {
 if (e && typeof e === "object" && "code" in e) {
 const code = (e as { code: string }).code;
@@ -57,12 +58,12 @@ throw e;
 }
 });
 
-test("background mode: serial chardev uses named pipe path", async () => {
+test("background mode: serial chardev uses TCP localhost port", async () => {
 try {
 const args = await buildQemuArgs(makeConfig(true));
-const serialArg = args.find((a) => a.includes("serial0") && a.includes("path="));
+const serialArg = args.find((a) => a.includes("serial0") && a.includes("host=127.0.0.1"));
 expect(serialArg).toBeDefined();
-expect(serialArg).toContain(`\\\\.\\pipe\\quickchr-${machineName}-serial`);
+expect(serialArg).toContain("host=127.0.0.1,port=9107");
 } catch (e: unknown) {
 if (e && typeof e === "object" && "code" in e) {
 const code = (e as { code: string }).code;
@@ -72,12 +73,12 @@ throw e;
 }
 });
 
-test("foreground mode: monitor chardev still uses named pipe", async () => {
+test("foreground mode: monitor chardev still uses TCP localhost port", async () => {
 try {
 const args = await buildQemuArgs(makeConfig(false));
-const monitorArg = args.find((a) => a.includes("monitor0") && a.includes("path="));
+const monitorArg = args.find((a) => a.includes("monitor0") && a.includes("host=127.0.0.1"));
 expect(monitorArg).toBeDefined();
-expect(monitorArg).toContain(`\\\\.\\pipe\\quickchr-${machineName}-monitor`);
+expect(monitorArg).toContain("host=127.0.0.1,port=9106");
 } catch (e: unknown) {
 if (e && typeof e === "object" && "code" in e) {
 const code = (e as { code: string }).code;
@@ -87,31 +88,39 @@ throw e;
 }
 });
 
-test("named pipe path format: double-backslash prefix and channel suffix", () => {
-const expected = `\\\\.\\pipe\\quickchr-${machineName}-monitor`;
-expect(expected.startsWith("\\\\.\\pipe\\")).toBe(true);
-expect(expected).toContain("-monitor");
+test("QGA chardev uses TCP localhost port (x86)", async () => {
+try {
+const args = await buildQemuArgs(makeConfig(true));
+const qgaArg = args.find((a) => a.includes("qga0") && a.includes("host=127.0.0.1"));
+expect(qgaArg).toBeDefined();
+expect(qgaArg).toContain("host=127.0.0.1,port=9108");
+} catch (e: unknown) {
+if (e && typeof e === "object" && "code" in e) {
+const code = (e as { code: string }).code;
+if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
+}
+throw e;
+}
 });
 });
 
-describe.skipIf(!isWindows)("Windows channel error paths (missing named pipe)", () => {
+describe.skipIf(!isWindows)("Windows channel error paths (TCP port not listening)", () => {
 const TMP = join(tmpdir(), "quickchr-win-channels-err-test");
 
 beforeEach(() => mkdirSync(TMP, { recursive: true }));
 afterEach(() => rmSync(TMP, { recursive: true, force: true }));
 
-test("monitorCommand throws MACHINE_STOPPED when named pipe does not exist", async () => {
+test("monitorCommand throws MACHINE_STOPPED when TCP port is not listening", async () => {
 // On Windows, channelFileExists() always returns true (pipes aren't filesystem entries).
-// net.connect() to a non-existent named pipe throws ENOENT -> MACHINE_STOPPED.
+// TCP connect to a non-listening port throws ECONNREFUSED -> MACHINE_STOPPED.
 await expect(monitorCommand(TMP, "info", 3000)).rejects.toMatchObject({
 code: "MACHINE_STOPPED",
 });
 });
 
-test("serialStreams returns streams without throwing when named pipe does not exist (deferred error)", () => {
-// On Windows, channelFileExists() always returns true — named pipes aren't
-// filesystem entries. serialStreams() creates and returns stream objects
-// without checking pipe existence; the MACHINE_STOPPED error surfaces async.
+test("serialStreams returns streams without throwing when TCP port is not listening (deferred error)", () => {
+// serialStreams() creates and returns stream objects without checking port availability;
+// the MACHINE_STOPPED error surfaces asynchronously when the streams are consumed.
 const result = serialStreams(TMP);
 expect(result).toHaveProperty("readable");
 expect(result).toHaveProperty("writable");
