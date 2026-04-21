@@ -69,6 +69,7 @@
 - [ ] Verify `quickchr completions --install` on bash and fish (zsh tested, bash/fish untested on real shells per `f7ca662`)
 - [ ] Verify `qemu-img` detection + `--boot-size` on Linux (Intel Mac tested, arm64 Linux needs KVM pass)
 - [ ] **Run full integration suite on Windows (QEMU for Windows)** — currently only unit tests run on `windows-latest`. Requires: install QEMU for Windows in CI, validate named-pipe channels under load, confirm `socket_vmnet`-equivalent network plumbing or document SLiRP-only mode. Track CHR boot timing on Windows + KVM-equivalent (WHPX) vs TCG.
+- [ ] **clean() second-boot timeout on arm64** — `clean() resets disk to factory defaults` integration test is skipped on arm64 because the second boot (after clean()) consistently times out at 480s. Same flow on x86 KVM completes in ~66s. Likely a firmware/vars or pflash state interaction with the freshly-cleaned disk on the QEMU `virt` machine. Investigate whether `clean()` should also reset UEFI vars on arm64, or whether `_launchExisting` needs different args after a clean.
 
 **Test coverage gaps:**
 
