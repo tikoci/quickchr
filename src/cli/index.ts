@@ -1012,7 +1012,7 @@ async function cmdSetup() {
 							placeholder: defaultName,
 							defaultValue: defaultName,
 							validate: (v) => {
-								if (!v.trim()) return "Snapshot name is required";
+								if (!v?.trim()) return "Snapshot name is required";
 								if (/\s/.test(v)) return "Use a name without spaces";
 							},
 						});
