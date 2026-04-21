@@ -47,7 +47,7 @@ export function restGet(
 				port: parsed.port,
 				path: parsed.pathname + parsed.search,
 				method: "GET",
-				headers: { Authorization: auth },
+				headers: { Authorization: auth, Connection: "close" },
 				agent: false,
 			},
 			(res) => {
@@ -101,6 +101,7 @@ export function restPost(
 					Authorization: auth,
 					"Content-Type": "application/json",
 					"Content-Length": bodyBuf.length,
+					Connection: "close",
 				},
 				agent: false,
 			},
@@ -156,6 +157,7 @@ export function restPatch(
 					Authorization: auth,
 					"Content-Type": "application/json",
 					"Content-Length": bodyBuf.length,
+					Connection: "close",
 				},
 				agent: false,
 			},
@@ -207,7 +209,7 @@ export function restRequest(
 			if (!done) { done = true; req.destroy(); reject(new Error(`restRequest timeout after ${timeoutMs}ms: ${method} ${url}`)); }
 		}, timeoutMs);
 
-		const headers: Record<string, string | number> = { Authorization: auth };
+		const headers: Record<string, string | number> = { Authorization: auth, Connection: "close" };
 		if (bodyBuf) {
 			headers["Content-Type"] = "application/json";
 			headers["Content-Length"] = bodyBuf.length;

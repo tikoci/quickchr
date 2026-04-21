@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll } from "bun:test";
+import { restGet } from "../../src/lib/rest.ts";
 
 /**
  * Integration test — start and stop a CHR.
@@ -171,9 +172,10 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			});
 
 			// Verify the custom user exists before clean
-			const before = await fetch(
+			const before = await restGet(
 				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				{ headers: { Authorization: `Basic ${btoa("cleanuser:CleanPass1")}` } },
+				`Basic ${btoa("cleanuser:CleanPass1")}`,
+				10_000,
 			);
 			expect(before.status).toBe(200);
 
@@ -189,16 +191,18 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 				await instance.waitForBoot(120_000);
 
 			// cleanuser must no longer exist — 401 expected
-			const afterClean = await fetch(
+			const afterClean = await restGet(
 				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				{ headers: { Authorization: `Basic ${btoa("cleanuser:CleanPass1")}` } },
+				`Basic ${btoa("cleanuser:CleanPass1")}`,
+				10_000,
 			);
 			expect(afterClean.status).toBe(401);
 
 			// Factory admin with empty password must work
-			const adminOk = await fetch(
+			const adminOk = await restGet(
 				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				{ headers: { Authorization: `Basic ${btoa("admin:")}` } },
+				`Basic ${btoa("admin:")}`,
+				10_000,
 			);
 			expect(adminOk.status).toBe(200);
 		} finally {
