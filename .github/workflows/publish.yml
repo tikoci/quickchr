@@ -1,12 +1,141 @@
 name: Publish
 
+# Triggered by: `bun run release` (pushes a vX.Y.Z tag) or manually via GitHub Actions UI.
+#
+# Pipeline:
+#   lint ──┐
+#   unit-tests ─┴→ integration-x86 → windows-unit-tests → publish
+#
+# Pre-release detection (from package.json version):
+#   odd  minor (0.1.x, 0.3.x) → npm tag "next"  (pre-release)
+#   even minor (0.2.x, 0.4.x) → npm tag "latest" (stable release)
+#
+# Dry-run mode: set dry-run=true when dispatching to run all checks without publishing.
+#
+# Required secrets:
+#   NPM_TOKEN — npm automation token with publish access to @tikoci/quickchr
+
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        type: boolean
+        description: "Dry run — run all checks but skip the npm publish step"
+        default: false
 
 jobs:
+  # ── Repo checks ─────────────────────────────────────────────────────────────
+  lint:
+    name: Repo Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+
+  # ── Unit tests ───────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun test test/unit/
+
+  # ── Integration tests — x86_64 ───────────────────────────────────────────────
+  integration-x86:
+    name: Integration (linux/x86_64)
+    needs: [lint, unit-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install QEMU + tools
+        run: |
+          set -eo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-x86 qemu-utils ipxe-qemu sshpass
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -w /dev/kvm ] 2>/dev/null; then
+            echo "KVM is available — hardware acceleration active"
+          else
+            echo "::notice::KVM not available — integration tests will use TCG (slower)"
+          fi
+
+      - name: Cache CHR images
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Run integration tests (sequential per-file)
+        run: |
+          set -eo pipefail
+          echo "::group::Integration test output"
+          : > /tmp/integration-output.txt
+          fail=0
+          for f in test/integration/*.test.ts; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a /tmp/integration-output.txt; then
+              fail=1
+            fi
+          done
+          echo "::endgroup::"
+          exit "$fail"
+        timeout-minutes: 50
+
+      - name: Write integration summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Tests — linux/x86_64"
+            echo '```'
+            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-integration-logs
+          path: |
+            /tmp/integration-output.txt
+            ~/.local/share/quickchr/machines/**/*.json
+            ~/.local/share/quickchr/machines/**/*.log
+          retention-days: 7
+
+  # ── Windows unit tests ───────────────────────────────────────────────────────
+  windows-unit-tests:
+    name: Unit Tests (windows-latest)
+    needs: [integration-x86]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun test test/unit/
+
+  # ── Publish to npm ───────────────────────────────────────────────────────────
   publish:
+    name: Publish to npm
+    needs: [windows-unit-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -18,37 +147,45 @@ jobs:
         with:
           registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
-      - run: bun run check
-      - run: bun test test/unit/
-      - name: Install QEMU + tools
+
+      - name: Determine version and npm tag
+        id: version
         run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            qemu-system-x86 qemu-utils ipxe-qemu sshpass
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm || true
-          if [ -w /dev/kvm ] 2>/dev/null; then
-            echo "KVM is available — hardware acceleration active"
+          VERSION=$(node -pe "require('./package.json').version")
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          if [ $((MINOR % 2)) -ne 0 ]; then
+            NPM_TAG="next"
+            echo "::notice::Pre-release $VERSION (odd minor $MINOR) → npm tag 'next'"
           else
-            echo "::notice::KVM not available — publish integration tests will use TCG"
+            NPM_TAG="latest"
+            echo "::notice::Stable release $VERSION (even minor $MINOR) → npm tag 'latest'"
           fi
-      - name: Run integration tests (sequential per-file)
+          echo "version=$VERSION"  >> "$GITHUB_OUTPUT"
+          echo "npm-tag=$NPM_TAG"  >> "$GITHUB_OUTPUT"
+          {
+            echo "## Publish"
+            echo "- Version: \`$VERSION\`"
+            echo "- npm tag: \`$NPM_TAG\`"
+            echo "- Dry run: ${{ inputs.dry-run || 'false' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate tag matches package.json version
+        if: github.ref_type == 'tag'
         run: |
-          set -eo pipefail
-          fail=0
-          for f in test/integration/*.test.ts; do
-            echo "::notice::Running $f"
-            if ! QUICKCHR_INTEGRATION=1 bun test "$f"; then
-              fail=1
-            fi
-          done
-          exit "$fail"
-        timeout-minutes: 50
+          PKG_VER="${{ steps.version.outputs.version }}"
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VER" != "$TAG_VER" ]; then
+            echo "::error::package.json version ($PKG_VER) does not match git tag ($TAG_VER)"
+            exit 1
+          fi
+
       - name: Publish to npm
-        run: bunx npm publish --access public --provenance
+        run: |
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            echo "Dry run — skipping publish (would publish ${{ steps.version.outputs.version }} with tag ${{ steps.version.outputs.npm-tag }})"
+            bunx npm pack --dry-run
+          else
+            bunx npm publish --access public --provenance --tag "${{ steps.version.outputs.npm-tag }}"
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

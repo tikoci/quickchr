@@ -1,0 +1,245 @@
+name: Extended Verification
+
+# Manual workflow for testing on platforms not covered by the main CI push pipeline.
+# Specifically designed for iterating on arm64/macOS failures without waiting for
+# the 15-25 min x86 gate.
+#
+# Use test-filter to run only specific integration test files for faster iteration:
+#   e.g. "exec.test.ts,anchor.test.ts"  →  only those two files run
+#   empty string (default)              →  all test/integration/*.test.ts files run
+#
+# Each platform job is independent — they can all run in parallel.
+#
+# arm64 known issues (tracked in BACKLOG.md):
+#   - clean() second-boot timeout skipped on arm64
+#   - node:http stale-response bug causes exec tests to be skipped
+
+on:
+  workflow_dispatch:
+    inputs:
+      arm64:
+        type: boolean
+        description: "Run integration tests on linux/aarch64 (ubuntu-24.04-arm, KVM if available)"
+        default: false
+      macos:
+        type: boolean
+        description: "Run integration tests on macOS (macos-15 arm64 + macos-13 x86, HVF if available)"
+        default: false
+      windows:
+        type: boolean
+        description: "Run Windows unit tests (integration tests are future work)"
+        default: false
+      test-filter:
+        type: string
+        description: "Comma-separated test file names (e.g. 'exec.test.ts,anchor.test.ts'). Empty = all files."
+        default: ""
+
+jobs:
+  # ── Linux arm64 (ubuntu-24.04-arm, KVM) ──────────────────────────────────────
+  integration-arm64:
+    name: Integration (linux/aarch64)
+    if: ${{ inputs.arm64 == true }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      # qemu-efi-aarch64 → UEFI firmware for virt machine
+      # ipxe-qemu       → efi-virtio.rom (required by virtio-net-pci)
+      - name: Install QEMU + tools
+        run: |
+          set -eo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu sshpass
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -w /dev/kvm ] 2>/dev/null; then
+            echo "KVM is available — hardware acceleration active"
+          else
+            echo "::notice::KVM not available — integration tests will use TCG (slower)"
+          fi
+
+      - name: Log platform
+        run: |
+          echo "### Platform: linux/aarch64" >> "$GITHUB_STEP_SUMMARY"
+          echo "- OS: $(uname -s) $(uname -m)" >> "$GITHUB_STEP_SUMMARY"
+          qemu-system-aarch64 --version 2>/dev/null | head -1 >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Cache CHR images
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Resolve test files
+        id: files
+        run: |
+          FILTER="${{ inputs.test-filter }}"
+          if [ -z "$FILTER" ]; then
+            echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          else
+            FILES=""
+            IFS=',' read -ra PARTS <<< "$FILTER"
+            for f in "${PARTS[@]}"; do
+              f="${f// /}"
+              if [ -f "test/integration/$f" ]; then
+                FILES="$FILES test/integration/$f"
+              else
+                echo "::warning::Skipping unknown test file: $f"
+              fi
+            done
+            echo "list=$FILES" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run integration tests (sequential per-file)
+        run: |
+          set -eo pipefail
+          echo "::group::Integration test output"
+          : > /tmp/integration-output.txt
+          fail=0
+          for f in ${{ steps.files.outputs.list }}; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a /tmp/integration-output.txt; then
+              fail=1
+            fi
+          done
+          echo "::endgroup::"
+          exit "$fail"
+        timeout-minutes: 50
+
+      - name: Write integration summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Tests — linux/aarch64"
+            echo '```'
+            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-linux-arm64
+          path: |
+            /tmp/integration-output.txt
+            ~/.local/share/quickchr/machines/**/*.json
+            ~/.local/share/quickchr/machines/**/*.log
+          retention-days: 7
+
+  # ── macOS (macos-15 arm64 + macos-13 x86, HVF) ───────────────────────────────
+  integration-macos:
+    name: Integration (${{ matrix.name }})
+    if: ${{ inputs.macos == true }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            name: macos/arm64
+            artifact: macos-arm64
+          - runner: macos-13
+            name: macos/x86_64
+            artifact: macos-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install QEMU + tools
+        run: brew install qemu sshpass
+
+      - name: Log platform
+        run: |
+          echo "### Platform: ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- OS: $(uname -s) $(uname -m)" >> "$GITHUB_STEP_SUMMARY"
+          qemu-system-x86_64 --version 2>/dev/null | head -1 >> "$GITHUB_STEP_SUMMARY" || true
+          qemu-system-aarch64 --version 2>/dev/null | head -1 >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Cache CHR images
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Resolve test files
+        id: files
+        run: |
+          FILTER="${{ inputs.test-filter }}"
+          if [ -z "$FILTER" ]; then
+            echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          else
+            FILES=""
+            IFS=',' read -ra PARTS <<< "$FILTER"
+            for f in "${PARTS[@]}"; do
+              f="${f// /}"
+              if [ -f "test/integration/$f" ]; then
+                FILES="$FILES test/integration/$f"
+              else
+                echo "::warning::Skipping unknown test file: $f"
+              fi
+            done
+            echo "list=$FILES" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run integration tests (sequential per-file)
+        run: |
+          set -eo pipefail
+          echo "::group::Integration test output"
+          : > /tmp/integration-output.txt
+          fail=0
+          for f in ${{ steps.files.outputs.list }}; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a /tmp/integration-output.txt; then
+              fail=1
+            fi
+          done
+          echo "::endgroup::"
+          exit "$fail"
+        timeout-minutes: 50
+
+      - name: Write integration summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Tests — ${{ matrix.name }}"
+            echo '```'
+            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-${{ matrix.artifact }}
+          path: |
+            /tmp/integration-output.txt
+            ~/.local/share/quickchr/machines/**/*.json
+            ~/.local/share/quickchr/machines/**/*.log
+          retention-days: 7
+
+  # ── Windows unit tests ────────────────────────────────────────────────────────
+  # Windows integration tests (QEMU for Windows) are future work tracked in BACKLOG.md.
+  windows-unit-tests:
+    name: Unit Tests (windows-latest)
+    if: ${{ inputs.windows == true }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun test test/unit/
