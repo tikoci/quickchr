@@ -23,7 +23,8 @@ jobs:
       - name: Install QEMU + tools
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends qemu-system-x86 sshpass
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-x86 qemu-utils ipxe-qemu sshpass
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -35,9 +36,18 @@ jobs:
           else
             echo "::notice::KVM not available — publish integration tests will use TCG"
           fi
-      - name: Run integration tests
-        run: QUICKCHR_INTEGRATION=1 bun test test/integration/
-        timeout-minutes: 30
+      - name: Run integration tests (sequential per-file)
+        run: |
+          set -eo pipefail
+          fail=0
+          for f in test/integration/*.test.ts; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f"; then
+              fail=1
+            fi
+          done
+          exit "$fail"
+        timeout-minutes: 50
       - name: Publish to npm
         run: bunx npm publish --access public --provenance
         env:

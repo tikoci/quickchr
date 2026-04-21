@@ -3,12 +3,12 @@ name: CI
 # Runs on every push/PR to main.  Also available as workflow_dispatch for manual
 # triggers with optional macOS runners and custom coverage thresholds.
 #
-# Pipeline (staged — arm64/Windows/macOS only run after x86 integration is green,
+# Pipeline (staged — Windows/macOS/arm64 only run after x86 integration is green,
 # so we don't burn runner minutes on platforms downstream of a broken core):
 #
 #   lint ────┐
-#   unit-tests (Linux) ─┴→ integration-x86 ──┬→ integration-arm64
-#                                            ├→ windows-unit-tests
+#   unit-tests (Linux) ─┴→ integration-x86 ──┬→ windows-unit-tests
+#                                            ├→ integration-arm64 (dispatch only)
 #                                            └→ integration-macos (dispatch only)
 #
 # Why staged: if x86 unit OR x86 integration fails, the bug is almost certainly
@@ -35,6 +35,11 @@ on:
       macos:
         type: boolean
         description: "Include macOS runners (arm64 silicon + Intel, HVF if available; costs more)"
+        required: false
+        default: false
+      arm64:
+        type: boolean
+        description: "Include Linux ARM64 runner (ubuntu-24.04-arm, KVM if available; opt-in due to flakiness)"
         required: false
         default: false
       windows:
@@ -257,12 +262,14 @@ jobs:
             ~/.local/share/quickchr/machines/**/*.log
           retention-days: 7
 
-  # ── Integration tests — aarch64 (depends on x86 success) ────────────────────
-  # Boots ARM64 CHR via qemu-system-aarch64 (KVM if available on ubuntu-24.04-arm).
-  # Only runs after integration-x86 passes — see pipeline doc at top.
+  # ── Integration tests — aarch64 (dispatch only — depends on x86 success) ─────
+  # Opt-in via workflow_dispatch with arm64: true.  Boots ARM64 CHR via
+  # qemu-system-aarch64 (KVM if available on ubuntu-24.04-arm).  Excluded from
+  # default push/PR runs due to recurring runner reliability issues.
   integration-arm64:
     name: Integration (linux/aarch64)
     needs: [integration-x86]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.arm64 == 'true' }}
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4

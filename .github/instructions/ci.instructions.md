@@ -11,8 +11,8 @@ applyTo: ".github/workflows/**"
 
 ```text
 lint (ubuntu-latest) ──┐
-unit-tests (ubuntu-latest) ─┴→ integration-x86 (ubuntu-latest) ─┬→ integration-arm64 (ubuntu-24.04-arm)
-                                                                ├→ windows-unit-tests (windows-latest)
+unit-tests (ubuntu-latest) ─┴→ integration-x86 (ubuntu-latest) ─┬→ windows-unit-tests (windows-latest)
+                                                                ├→ integration-arm64 (ubuntu-24.04-arm, dispatch only)
                                                                 └→ integration-macos (macos-15 + macos-13, dispatch only)
 ```
 
