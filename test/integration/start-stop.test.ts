@@ -62,7 +62,7 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 			}
 			await cleanupMachine("integration-test-1");
 		}
-	}, 180_000); // 3 minute timeout
+	}, 240_000); // 4 minute timeout — boot ceiling is 180s (KVM×1.5) + headroom
 });
 
 describe.skipIf(SKIP)("package installation", () => {
@@ -153,7 +153,7 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			// remove() deletes the machine, so cleanupMachine is a no-op here
 			await cleanupMachine("integration-remove-running");
 		}
-	}, 180_000);
+	}, 240_000);
 
 	// Skipped on arm64: after clean(), the second boot consistently times out at 480s
 	// on aarch64 (KVM). x86 completes the same flow in ~66s. Likely a firmware/vars
@@ -265,7 +265,7 @@ describe.skipIf(SKIP)("instance channels — serial console", () => {
 			}
 			await cleanupMachine("integration-serial-test");
 		}
-	}, 180_000);
+	}, 240_000);
 });
 
 describe.skipIf(SKIP)("instance-level package methods", () => {

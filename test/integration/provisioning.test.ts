@@ -145,7 +145,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-bg");
 		}
-	}, 180_000);
+	}, 240_000);
 
 	test("background mode: admin can be disabled after creating a replacement user", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -186,7 +186,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-disable");
 		}
-	}, 180_000);
+	}, 240_000);
 
 	test("provisioning fires before QEMU console handoff (background:true verifies shared provisioning path)", async () => {
 		// When background:false + provisioning: the library boots in background, provisions,
@@ -219,7 +219,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-fg");
 		}
-	}, 180_000);
+	}, 240_000);
 
 	test("default: quickchr managed account auto-created when no user specified", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -255,7 +255,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-managed");
 		}
-	}, 180_000);
+	}, 240_000);
 });
 
 describe.skipIf(SKIP)("console provisioning", () => {
@@ -346,7 +346,7 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-console");
 		}
-	}, 180_000);
+	}, 240_000);
 });
 
 describe.skipIf(SKIP)("provisioning corner cases", () => {
@@ -472,5 +472,5 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			}
 			await cleanupMachine("integration-ssh-key");
 		}
-	}, 180_000);
+	}, 240_000);
 });

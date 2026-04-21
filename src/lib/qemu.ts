@@ -62,9 +62,11 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 		args.push("-accel", accel);
 	}
 
-	// CPU model overrides for HVF-backed guests.
+	// Use -cpu host for hardware-backed acceleration (KVM / HVF) to expose
+	// the real host CPU features.  This eliminates CPUID mismatch warnings
+	// (e.g. SVM on nested-KVM CI runners) and improves guest performance.
 	if (arch === "x86") {
-		if (accel === "hvf") {
+		if (accel === "kvm" || accel === "hvf") {
 			args.push("-cpu", "host");
 		}
 	} else {

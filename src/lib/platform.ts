@@ -131,7 +131,9 @@ export function isCrossArchEmulation(guestArch: "x86" | "arm64"): boolean {
  * @param crossArch  True when host and guest architectures differ.
  */
 export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
-	if (accel === "kvm" || accel === "hvf") return 1.0;
+	// KVM/HVF on CI runners is often nested-KVM (VM-inside-VM) which can be
+	// variably slower than bare-metal.  Use 1.5× to handle worst-case runner load.
+	if (accel === "kvm" || accel === "hvf") return 1.5;
 	// TCG: cross-arch is 15× slower (x86-on-arm64 especially), same-arch is 4×.
 	return crossArch ? 15.0 : 4.0;
 }

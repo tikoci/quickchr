@@ -92,7 +92,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			}
 			await cleanupMachine("integration-dm-skip");
 		}
-	}, 180_000);
+	}, 240_000);
 
 	test("mode=basic with enable/disable feature flags is applied and verified", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
