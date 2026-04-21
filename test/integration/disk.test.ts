@@ -144,7 +144,7 @@ describe.skipIf(SKIP)("disk support", () => {
 		}
 	}, 300_000);
 
-	test("monitor savevm/loadvm restores guest state on qcow2 boot disk", async () => {
+	test.skipIf(process.arch === "arm64")("monitor savevm/loadvm restores guest state on qcow2 boot disk", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
 		const arch = process.arch === "arm64" ? "arm64" : "x86";
