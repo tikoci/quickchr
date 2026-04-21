@@ -29,6 +29,12 @@ export interface QemuLaunchConfig {
 	background: boolean;
 	/** Port block base for this machine (portBase+6=monitor, +7=serial, +8=qga on Windows TCP). */
 	portBase: number;
+	/**
+	 * Pre-detected QEMU accelerator (kvm/hvf/tcg).
+	 * If provided, skips the internal detectAccel() call so the same value
+	 * can be used for both QEMU args and boot timeout calculation.
+	 */
+	accel?: string;
 }
 
 /** Build the full QEMU command-line arguments array. */
@@ -36,7 +42,7 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 	const { arch, machineDir, bootDisk, extraDisks, mem, cpu, ports, networks, background, portBase } = config;
 
 	const qemuBin = requireQemu(arch);
-	const accel = await detectAccel(arch);
+	const accel = config.accel ?? await detectAccel(arch);
 	const args: string[] = [qemuBin];
 
 	// Machine type

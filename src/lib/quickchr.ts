@@ -1260,6 +1260,7 @@ export class QuickCHR {
 
 		// Build QEMU args and spawn
 		const platform = await detectPlatform();
+		const accel = await detectAccel(arch);
 		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
@@ -1275,6 +1276,7 @@ export class QuickCHR {
 			networks: resolvedNetworks,
 			background: spawnInBackground,
 			portBase: state.portBase,
+			accel,
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
@@ -1296,19 +1298,23 @@ export class QuickCHR {
 
 		const instance = createInstance(state);
 
-		const accel = await detectAccel(arch);
 		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages, accel) + (opts.timeoutExtra ?? 0);
 
 		// Always wait for boot in background mode — the JSDoc promises "REST-ready".
 		const booted = await instance.waitForBoot(bootTimeout);
 		if (!booted) {
+			let qemuLogTail = "";
+			try {
+				const logPath = join(machineDir, "qemu.log");
+				if (existsSync(logPath)) qemuLogTail = `\nqemu.log:\n${readFileSync(logPath, "utf-8").slice(-1200)}`;
+			} catch { /* ignore */ }
 			try { await instance.stop(); } catch { /* ignore */ }
 			try { await instance.remove(); } catch { /* ignore */ }
 			throw new QuickCHRError(
 				"BOOT_TIMEOUT",
-				`CHR did not respond within ${bootTimeout / 1000}s` +
+				`CHR did not respond within ${bootTimeout / 1000}s (accel=${accel})` +
 				(hasProvisioning ? " — provisioning could not run." : ".") +
-				` Machine "${name}" has been cleaned up automatically.`,
+				` Machine "${name}" has been cleaned up automatically.${qemuLogTail}`,
 			);
 		}
 
@@ -1517,6 +1523,7 @@ export class QuickCHR {
 		const spawnBackground = hasProvisioning ? true : background;
 
 		const platform = await detectPlatform();
+		const accel = await detectAccel(state.arch);
 		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
@@ -1532,6 +1539,7 @@ export class QuickCHR {
 			networks: resolvedNetworks,
 			background: spawnBackground,
 			portBase: state.portBase,
+			accel,
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
@@ -1554,17 +1562,21 @@ export class QuickCHR {
 		const instance = createInstance(state);
 
 		// Always wait for boot in background mode — start() promises "REST-ready".
-		const accel = await detectAccel(state.arch);
 		const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts?.installAllPackages, accel);
 		const booted = await instance.waitForBoot(bootTimeout);
 		if (!booted) {
+			let qemuLogTail = "";
+			try {
+				const logPath = join(state.machineDir, "qemu.log");
+				if (existsSync(logPath)) qemuLogTail = `\nqemu.log:\n${readFileSync(logPath, "utf-8").slice(-1200)}`;
+			} catch { /* ignore */ }
 			try { await instance.stop(); } catch { /* ignore */ }
 			try { await instance.remove(); } catch { /* ignore */ }
 			throw new QuickCHRError(
 				"BOOT_TIMEOUT",
-				`CHR did not respond within ${bootTimeout / 1000}s` +
+				`CHR did not respond within ${bootTimeout / 1000}s (accel=${accel})` +
 				(hasProvisioning ? " — provisioning could not run." : ".") +
-				` Machine "${state.name}" has been cleaned up automatically.`,
+				` Machine "${state.name}" has been cleaned up automatically.${qemuLogTail}`,
 			);
 		}
 
