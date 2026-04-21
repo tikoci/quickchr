@@ -211,7 +211,7 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			}
 			await cleanupMachine("integration-clean-test");
 		}
-	}, 360_000); // 6 min: two full boots
+	}, 540_000); // 9 min: two full boots + provisioning, slower on arm64
 });
 
 describe.skipIf(SKIP)("instance channels — serial console", () => {
