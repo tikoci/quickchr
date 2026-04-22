@@ -187,4 +187,35 @@ describe("ChrInstance API surface (dryRun)", () => {
 		if (!instance) return;
 		expect(typeof instance.installPackage).toBe("function");
 	});
+
+	test("dryRun instance exposes upload() and download()", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		expect(typeof instance.upload).toBe("function");
+		expect(typeof instance.download).toBe("function");
+	});
+
+	test("upload() on stopped machine throws MACHINE_STOPPED", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		expect(instance.state.status).toBe("stopped");
+		try {
+			await instance.upload("/etc/hosts");
+			expect.unreachable("expected upload() to throw");
+		} catch (e) {
+			expectErrorCode(e, "MACHINE_STOPPED");
+		}
+	});
+
+	test("download() on stopped machine throws MACHINE_STOPPED", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		expect(instance.state.status).toBe("stopped");
+		try {
+			await instance.download("/file/print", "/tmp/quickchr-should-not-exist");
+			expect.unreachable("expected download() to throw");
+		} catch (e) {
+			expectErrorCode(e, "MACHINE_STOPPED");
+		}
+	});
 });

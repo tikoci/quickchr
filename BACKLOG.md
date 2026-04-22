@@ -328,6 +328,12 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 ### LLM & Agent Friendliness
 
+**Validated patterns (keep investing):**
+
+- **`examples/` as the first place agents look.** Observed 2026-04-22: external Sonnet agent running under GitHub Copilot CLI, working on tikoci/donny, reached for `examples/vienk/vienk.test.ts` very early in its exploration — after reading the shared skill reference and package.json, it opened the examples directory before diving into `src/lib/`. It then used `vienk.test.ts` as its pattern anchor for writing new lab code. **Implication:** keep examples as runnable `.test.ts` files (not prose), keep them short and self-contained, and treat new examples as load-bearing agent-onboarding surface — each `examples/<name>/` closes a capability gap and becomes the template next agent copies. This validates the current direction; don't let examples rot.
+
+**Open work:**
+
 - [ ] Review CLI output and library API for LLM ergonomics — structured output options, clear error messages
 - [ ] Copilot skills and `.prompt.md` files — teach agents how to use quickchr. Update `~/.copilot/skills/routeros-qemu-chr/SKILL.md`
 - [ ] MCP server — expose quickchr API over MCP protocol. Lower priority than making CLI/library natively agent-friendly
@@ -340,7 +346,7 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 - [ ] Multi-version, multi-arch test runner using quickchr as engine. Simpler than other tikoci projects since quickchr doesn't rebuild per release
 
-### Library Consumer Friction (from restraml)
+### Library Consumer Friction (from restraml, and Copilot-CLI/dude 2026-04-22)
 
 <details>
 <summary>Completed library consumer improvements</summary>
@@ -353,6 +359,11 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 - [x] Instance-level package management (`availablePackages()`, `installPackage()`)
 
 </details>
+
+**Open library friction (active):**
+
+- [ ] **First-class file transfer on `ChrInstance`** — add `upload(localPath, remotePath?)` and `download(remotePath, localPath)`. Today the only SCP code is buried in `src/lib/packages.ts::uploadPackages()` (internal, push-only). Customer (tikoci/donny, Copilot-CLI + Sonnet, 2026-04-22) ran four separate greps across `quickchr.ts` / `index.ts` / `packages.ts` hunting for `scp|upload|sendFile|sftp|putFile` before concluding there was no public SCP method and planning to shell out manually. Factor the SCP helper out of `packages.ts`, reuse for both push and pull. Common cases: seed a `.db` before enabling `/dude`, push a `.rsc` for `:import`, pull `/log/` exports, pull `/file/print` artifacts. Update shared-skill reference (`routeros-skills/routeros-qemu-chr/references/quickchr-automation.md`) with a recipes section.
+- [ ] **`examples/README.md` — document three consumption patterns** — Same customer spent visible reasoning on how to reference `@tikoci/quickchr` from a sibling experiment directory (bun link vs workspace vs local path vs published npm). `examples/vienk` and `examples/matrica` exist but don't frame the *why* of their layout. Short `examples/README.md` naming the three supported patterns and when to use each would close this.
 
 ### Examples (Rootless Multi-CHR Topologies)
 
@@ -380,6 +391,7 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 - [ ] divi (2-CHR redundancy, VRRP+VXLAN) — Requires root. Makefile, bun:test, Python, README, chr-a.rsc, chr-b.rsc
 - [ ] solis (sequential version migration) — Makefile, bun:test, Python, README, rb5009-sample.rsc
 - [ ] trauks (/app container testing) — Makefile, bun:test, Python, README, github-workflow.yaml
+- [ ] dude (Dude package + custom `.db` load) — from tikoci/donny ask, 2026-04-22. Boot CHR, `installPackage("dude")`, `chr.upload(localDb, "/dude/dude.db")`, `exec("/dude/set enabled=yes data-directory=dude")`, assert `/dude/devices/print` matches seeded devices. Doubles as anchor test for new `upload()`/`download()` API and as reference for any `/dude/*` work. Prerequisite: upload/download API landed.
 
 ---
 

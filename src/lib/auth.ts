@@ -17,6 +17,11 @@ export interface ResolvedAuth {
 	user: string;
 }
 
+export interface ResolvedCreds {
+	user: string;
+	password: string;
+}
+
 /**
  * Resolve the best credentials for a machine.
  *
@@ -65,4 +70,20 @@ export function resolveAuth(
 		header: `Basic ${btoa("admin:")}`,
 		user: "admin",
 	};
+}
+
+/**
+ * Resolve raw username + password for a machine (same priority as {@link resolveAuth}).
+ * Used by transports that need the password in cleartext — SCP, SSH, SFTP.
+ */
+export function resolveCreds(
+	state: Pick<MachineState, "name" | "user" | "disableAdmin">,
+	user?: string,
+	password?: string,
+): ResolvedCreds {
+	if (user !== undefined) return { user, password: password ?? "" };
+	if (state.user) return { user: state.user.name, password: state.user.password };
+	const stored = getInstanceCredentials(state.name);
+	if (stored) return { user: stored.user, password: stored.password };
+	return { user: "admin", password: "" };
 }

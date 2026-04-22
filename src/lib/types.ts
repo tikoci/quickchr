@@ -343,6 +343,22 @@ export interface ChrInstance {
 	 *  @param logger   Optional progress logger for status/debug output. */
 	setDeviceMode(options: DeviceModeOptions, logger?: ProgressLogger): Promise<void>;
 
+	/** Copy a local file to the CHR via SCP.
+	 *  Machine must be running. `remotePath` defaults to `/<basename>` (RouterOS flash root).
+	 *  Uses the resolved instance credentials.
+	 *  @example
+	 *  await instance.upload("./dude.db", "/dude/dude.db");
+	 *  await instance.upload("./config.rsc"); // → /config.rsc
+	 */
+	upload(localPath: string, remotePath?: string): Promise<void>;
+
+	/** Copy a file from the CHR to the local filesystem via SCP.
+	 *  Machine must be running. Uses the resolved instance credentials.
+	 *  @example
+	 *  await instance.download("/dude/dude.db", "./dude-snapshot.db");
+	 */
+	download(remotePath: string, localPath: string): Promise<void>;
+
 	/** List extra packages available for this instance's version and arch.
 	 *  Downloads and caches the all_packages ZIP on the first call. */
 	availablePackages(): Promise<string[]>;

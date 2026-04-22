@@ -2,15 +2,15 @@
  * Extra package download and installation for CHR instances.
  */
 
-import { existsSync, readdirSync, unlinkSync, chmodSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join, basename } from "node:path";
-import { tmpdir } from "node:os";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { packagesDownloadUrl } from "./versions.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { restPost } from "./rest.ts";
+import { scpPush } from "./scp.ts";
 import { extractZip } from "./zip.ts";
 
 /** Download and extract the all-packages ZIP for a version/arch. Returns the extract dir. */
@@ -74,7 +74,7 @@ export function findPackageFile(
 	return match ? join(extractDir, match) : undefined;
 }
 
-/** Upload packages to a running CHR via SCP. */
+/** Upload packages to a running CHR via SCP. Uploads each file to flash root (`/<basename>`). */
 export async function uploadPackages(
 	packagePaths: string[],
 	sshPort: number,
@@ -82,58 +82,11 @@ export async function uploadPackages(
 	password: string = "",
 	logger?: ProgressLogger,
 ): Promise<void> {
-	// Use SSH_ASKPASS to supply the password without requiring sshpass.
-	// SSH_ASKPASS_REQUIRE=prefer (OpenSSH 8.4+) works even without a display.
-	// SSH_ASKPASS: a small helper program that prints the password when invoked.
-	// On Windows: .cmd script (OpenSSH Windows calls it as a process, not a shell).
-	// On Unix: .sh script with execute bit set via chmodSync.
-	const isWindows = process.platform === "win32";
-	const ext = isWindows ? ".cmd" : ".sh";
-	const askpassPath = join(tmpdir(), `quickchr-askpass-${process.pid}${ext}`);
-	if (isWindows) {
-		// Windows .cmd: OpenSSH reads stdout from the helper
-		await Bun.write(askpassPath, `@echo off\r\necho ${password.replace(/[&|<>^%]/g, "^$&")}\r\n`);
-	} else {
-		await Bun.write(askpassPath, `#!/bin/sh\nprintf '%s' '${password.replace(/'/g, "'\\''")}'`);
-		chmodSync(askpassPath, 0o755);
-	}
-
-	const scpEnv: Record<string, string> = {
-		...(process.env as Record<string, string>),
-		DISPLAY: "",
-		SSH_ASKPASS: askpassPath,
-		SSH_ASKPASS_REQUIRE: "prefer",
-	};
-
-	try {
-		const log = logger ?? createLogger();
-		for (const pkgPath of packagePaths) {
-			const filename = basename(pkgPath);
-			log.status(`Uploading: ${filename}`);
-
-			const scpArgs = [
-				"scp", "-P", String(sshPort),
-				"-o", "StrictHostKeyChecking=accept-new",
-				"-o", "UserKnownHostsFile=/dev/null",
-				pkgPath, `${user}@127.0.0.1:/`,
-			];
-
-			const result = Bun.spawnSync(scpArgs, {
-				stdout: "pipe",
-				stderr: "pipe",
-				env: scpEnv,
-			});
-
-			if (result.exitCode !== 0) {
-				const stderr = new TextDecoder().decode(result.stderr);
-				throw new QuickCHRError(
-					"PROCESS_FAILED",
-					`SCP upload failed for ${filename}: ${stderr}`,
-				);
-			}
-		}
-	} finally {
-		try { unlinkSync(askpassPath); } catch { /* ignore */ }
+	const log = logger ?? createLogger();
+	for (const pkgPath of packagePaths) {
+		const filename = basename(pkgPath);
+		log.status(`Uploading: ${filename}`);
+		await scpPush(pkgPath, undefined, { sshPort, user, password });
 	}
 }
 

@@ -15,7 +15,7 @@
  *
  * ## Key exports
  * - {@link QuickCHR} — Main class with static methods: `start()`, `add()`, `list()`, `get()`, `doctor()`
- * - {@link ChrInstance} — Runtime handle returned by `start()`: `stop()`, `remove()`, `rest()`, `exec()`, `snapshot`, etc.
+ * - {@link ChrInstance} — Runtime handle returned by `start()`: `stop()`, `remove()`, `rest()`, `exec()`, `upload()`, `download()`, `snapshot`, etc.
  * - {@link StartOptions} — All options for creating/starting a CHR instance
  * - {@link QuickCHRError} — Typed errors with codes like `MISSING_QEMU`, `TIMEOUT`, `EXEC_FAILED`
  *

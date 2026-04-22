@@ -49,7 +49,8 @@ import { monitorCommand, serialStreams, qgaCommand, channelEndpoint } from "./ch
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
-import { resolveAuth } from "./auth.ts";
+import { resolveAuth, resolveCreds } from "./auth.ts";
+import { scpPush, scpPull } from "./scp.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials } from "./credentials.ts";
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
@@ -512,6 +513,28 @@ function createInstance(state: MachineState): ChrInstance {
 			state.packages = [...new Set([...(state.packages ?? []), ...installed])];
 
 			return installed;
+		},
+
+		async upload(localPath: string, remotePath?: string): Promise<void> {
+			if (!isMachineRunning(state)) {
+				throw new QuickCHRError(
+					"MACHINE_STOPPED",
+					`Machine "${state.name}" must be running to upload files.`,
+				);
+			}
+			const creds = resolveCreds(state);
+			await scpPush(localPath, remotePath, { sshPort: ports.ssh, ...creds });
+		},
+
+		async download(remotePath: string, localPath: string): Promise<void> {
+			if (!isMachineRunning(state)) {
+				throw new QuickCHRError(
+					"MACHINE_STOPPED",
+					`Machine "${state.name}" must be running to download files.`,
+				);
+			}
+			const creds = resolveCreds(state);
+			await scpPull(remotePath, localPath, { sshPort: ports.ssh, ...creds });
 		},
 
 		async destroy(): Promise<void> {
