@@ -231,6 +231,7 @@ Coverage is 79.59% funcs / 67.86% lines (above thresholds). Remaining sub-70 can
 **Open CLI/UX work:**
 
 - [ ] `exec --json` / `--serialize=json|yaml|tsv|csv` — Re-add auto-wrap for `:serialize`. Canonical: `--serialize=`, `--json` as alias
+- [ ] **`--forward <name>:<host>:<guest>[/tcp|udp]` on `quickchr add`** — Surface `extraPorts` as a repeatable CLI flag. Today, forwarding a guest service (e.g. SMB/445, Dude/2210) requires constructing the full `extraPorts` array in code; there is no CLI equivalent. An external agent (2026-04-22 lab session) had to discover the `StartOptions.extraPorts` shape by grepping types.ts before knowing how to expose SMB. A `--forward smb:9145:445` flag would make one-off forwarding discoverable.
 - [ ] SSH transport for `exec` — `--via=ssh` (key provisioning done, transport itself not implemented). Depends on SSH key in machine dir
 - [ ] `--via=auto` smart routing — REST first → console fallback → QGA (x86) → SSH. Currently REST-only
 - [ ] `exec --lint` — Pre-validate via `/console/inspect request=completion`. Depends on lsp-routeros-ts extraction (~50 lines)
@@ -311,6 +312,9 @@ See `docs/networking.md` for platform internals (QEMU, socket_vmnet, TAP, Window
 - [ ] Linux CI — Rootless only (user + socket). No TAP unless self-hosted runners
 - [ ] Windows — Document TAP-Windows adapter install (OpenVPN TAP or wintun). No auto-config
 - [ ] `--emulate-device` hardware profiles — RB5009 (9 NICs), hAP ax3 (5 ports). Lookup table from rosetta device data
+- [ ] **`DEFAULT_PORT_BASE` conflict risk** — 9100 is registered as JetDirect/PDL (printers); common on developer LAN. Consider raising default to a less-congested range (19100, or 10000+). Low-severity but enough friction that an external agent noted it in 2026-04-22 lab session.
+- [ ] **`extraPorts` host-port collision detection** — `allocatePortBlock()` only avoids collisions between instance *base* ports; manually-specified `host:` in `extraPorts` bypasses all conflict checking. Example from lab session (2026-04-22): `extraPorts: [{name:"smb", host:9145, guest:445}]` lands in block 9140–9149 (5th instance's range). Fix: `buildPortMappings` should validate explicit `host:` against all live allocations (from `listMachines()`), just like `findAvailablePortBlock`. Also: auto-allocated extra slots at `portBase+6+i` overlap with Windows IPC channel offsets (monitor=+6, serial=+7, qga=+8), leaving only offset +9 before spilling into the next block. Either widen `PORTS_PER_BLOCK` or allocate extra ports from a separate pool above the service block.
+- [ ] **Named socket auto-create in API** — `networks: [{type:"socket", name:"foo"}]` currently requires a prior `quickchr networks sockets create foo` CLI step or the API throws. If the named socket doesn't exist at `start()` time, auto-create it (and document it as created by that machine, to be removed on `remove()`). Reduces friction for multi-CHR scripts that wire up their own topology without a separate CLI pre-step.
 
 **Rootless topologies (examples):**
 Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tunneling (VXLAN, PPPoE, GRE, IPSec, VRRP over shared/bridged) documented in MANUAL.md. Examples deferred to P6 below.
@@ -331,6 +335,8 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 **Validated patterns (keep investing):**
 
 - **`examples/` as the first place agents look.** Observed 2026-04-22: external Sonnet agent running under GitHub Copilot CLI, working on tikoci/donny, reached for `examples/vienk/vienk.test.ts` very early in its exploration — after reading the shared skill reference and package.json, it opened the examples directory before diving into `src/lib/`. It then used `vienk.test.ts` as its pattern anchor for writing new lab code. **Implication:** keep examples as runnable `.test.ts` files (not prose), keep them short and self-contained, and treat new examples as load-bearing agent-onboarding surface — each `examples/<name>/` closes a capability gap and becomes the template next agent copies. This validates the current direction; don't let examples rot.
+
+- **Agents reach for `StartOptions` via `extraPorts` for custom forwarding, but struggle with two things: (1) not knowing the guest port number (had to grep or guess `smb=445`, `dude=2210`), and (2) not knowing a safe host port that doesn't collide with another instance's block.** Observed 2026-04-22 tikoci/donny lab session. Agents can handle `extraPorts` once they find it; the friction is the two-step discovery (what type? what port?). Mitigations: well-known port registry + `--forward` CLI flag (see networking and CLI/UX open items).
 
 **Open work:**
 
@@ -363,6 +369,7 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 **Open library friction (active):**
 
 - [ ] **First-class file transfer on `ChrInstance`** — add `upload(localPath, remotePath?)` and `download(remotePath, localPath)`. Today the only SCP code is buried in `src/lib/packages.ts::uploadPackages()` (internal, push-only). Customer (tikoci/donny, Copilot-CLI + Sonnet, 2026-04-22) ran four separate greps across `quickchr.ts` / `index.ts` / `packages.ts` hunting for `scp|upload|sendFile|sftp|putFile` before concluding there was no public SCP method and planning to shell out manually. Factor the SCP helper out of `packages.ts`, reuse for both push and pull. Common cases: seed a `.db` before enabling `/dude`, push a `.rsc` for `:import`, pull `/log/` exports, pull `/file/print` artifacts. Update shared-skill reference (`routeros-skills/routeros-qemu-chr/references/quickchr-automation.md`) with a recipes section.
+- [ ] **Well-known guest service port registry** — Add a lookup table of common RouterOS/guest service ports (smb/445, dude/2210, ftp/21, http-alt/8080, winrm/5985, snmp/161-udp) so callers can write `extraPorts: [{name:"smb"}]` and get `guest:445, proto:"tcp"` auto-filled. Today the agent had to know `guest:445` to forward SMB. Combine with `--forward` CLI flag (see CLI/UX). Could be a `WELL_KNOWN_GUEST_PORTS` constant alongside `SERVICE_PORTS` in `types.ts`, or merged into a single extended map.
 - [ ] **`examples/README.md` — document three consumption patterns** — Same customer spent visible reasoning on how to reference `@tikoci/quickchr` from a sibling experiment directory (bun link vs workspace vs local path vs published npm). `examples/vienk` and `examples/matrica` exist but don't frame the *why* of their layout. Short `examples/README.md` naming the three supported patterns and when to use each would close this.
 
 ### Examples (Rootless Multi-CHR Topologies)

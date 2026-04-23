@@ -123,7 +123,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--name <s>` | auto | `host-arch-N` if omitted |
 | `--version <ver>` | latest in channel | e.g., `7.22.1` |
 | `--channel <ch>` | `stable` | `stable`, `long-term`, `testing`, `development` |
-| `--arch <a>` | host native | `arm64` or `x86` |
+| `--arch <a>` | host native | `arm64`, `x86`, or `auto` |
 | `--cpu <n>` | `1` | vCPU count |
 | `--mem <mb>` | `512` | RAM (cross-arch TCG bumps to `1024`) |
 | `--boot-disk-format <f>` | `qcow2` | `qcow2` or `raw` |

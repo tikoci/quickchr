@@ -38,7 +38,7 @@ bun run dev -- start --version=7.16.2 --name=debug-chr --cpu=2 --mem=512
 Common flags:
 - `--version=X.Y.Z` — pin a specific RouterOS version
 - `--channel=stable|long-term|testing` — use a channel
-- `--arch=x86|arm64` — override architecture
+- `--arch=x86|arm64|auto` — override architecture (`auto` = host native)
 - `--name=<name>` — name the machine
 - `--cpu=N` — vCPU count
 - `--mem=N` — RAM in MB

@@ -361,13 +361,14 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { createUser } = await import("../../src/lib/provision.ts");
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+		const machineName = "integration-prov-corner-invalid-group";
 
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
-				name: "integration-prov-corner",
+				name: machineName,
 			});
 
 			// "no-such-group" is not a built-in RouterOS user group.
@@ -382,7 +383,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }
 			}
-			await cleanupMachine("integration-prov-corner");
+			await cleanupMachine(machineName);
 		}
 	}, 300_000);
 
@@ -391,13 +392,14 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 		// in the "full" group, not the default read-only group.
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+		const machineName = "integration-prov-corner-default-group";
 
 		try {
 			instance = await QuickCHR.start({
 				channel: "stable",
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
-				name: "integration-prov-corner",
+				name: machineName,
 				user: { name: "groupcheck", password: "GroupPass1" },
 			});
 
@@ -423,7 +425,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }
 			}
-			await cleanupMachine("integration-prov-corner");
+			await cleanupMachine(machineName);
 		}
 	}, 300_000);
 });

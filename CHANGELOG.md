@@ -31,9 +31,12 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 - CI: Windows unit tests on `windows-latest`
 - CI: coverage enforcement (75% functions / 60% lines, warn-only)
 - Library API: `QuickCHR.start()`, `ChrInstance` with `stop/remove/rest/exec/qga/snapshot/serial`
+- `ChrInstance.upload()` / `.download()` — first-class SCP push/pull to a running CHR (uses instance credentials, no `sshpass` needed)
+- `StartOptions.arch` now accepts `"auto"` as an explicit synonym for omission — both resolve to `hostArchToChr()`
 
 ### Fixed
 
+- `arch: "auto"` silently falling through to arm64 (qemu-binary selector is a two-way switch). `resolveArch()` now normalizes `"auto"` and `undefined` to the host arch; agents no longer hit 480s TCG boot timeouts when they spell out the default.
 - Bun connection pool stale-response bugs (all CHR REST now uses `node:http` + `agent: false`)
 - Bun `req.destroy()` not emitting error event (timeout pattern with `done` flag)
 - License error classification: `"ERROR: ..."` in HTTP 200 body now throws immediately

@@ -199,8 +199,10 @@ export interface StartOptions {
 	version?: string;
 	/** Release channel to resolve latest version from. Default: "stable". */
 	channel?: Channel;
-	/** Guest architecture. Default: matches host (arm64 on Apple Silicon, x86 on Intel/AMD). */
-	arch?: Arch;
+	/** Guest architecture. Default: matches host (arm64 on Apple Silicon, x86 on Intel/AMD).
+	 *  Pass `"auto"` as an explicit synonym for the default — useful when an agent or
+	 *  caller wants to state the intent rather than omit the field. */
+	arch?: Arch | "auto";
 	/** Instance name. Auto-generated from version+arch if omitted. Must not start with "-". */
 	name?: string;
 	/** Number of virtual CPUs. Default: 1. */

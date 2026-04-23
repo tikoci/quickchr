@@ -713,6 +713,12 @@ function hostArchToChr(): Arch {
 	return "x86";
 }
 
+/** Resolve user-supplied arch (including the "auto" synonym) to a concrete Arch. */
+function resolveArch(input: Arch | "auto" | undefined): Arch {
+	if (input === undefined || input === "auto") return hostArchToChr();
+	return input;
+}
+
 async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
@@ -975,7 +981,7 @@ export class QuickCHR {
 			version = await resolveVersion(channel);
 		}
 
-		const arch: Arch = opts.arch ?? hostArchToChr();
+		const arch: Arch = resolveArch(opts.arch);
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
@@ -1117,7 +1123,7 @@ export class QuickCHR {
 		}
 
 		// Resolve architecture
-		const arch: Arch = opts.arch ?? hostArchToChr();
+		const arch: Arch = resolveArch(opts.arch);
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 
 		// Check prerequisites (skip for dry-run — no QEMU needed)

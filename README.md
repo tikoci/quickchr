@@ -150,7 +150,7 @@ quickchr doctor
 |------|-------------|---------|
 | `--version <ver>` | RouterOS version (e.g., 7.22.1) | Latest stable |
 | `--channel <ch>` | stable, long-term, testing, development | stable |
-| `--arch <arch>` | arm64 or x86 | Host native |
+| `--arch <arch>` | arm64, x86, or auto | Host native |
 | `--name <name>` | Instance name | Auto-generated |
 | `--cpu <n>` | vCPU count | 1 |
 | `--mem <mb>` | Memory in MB | 512 |

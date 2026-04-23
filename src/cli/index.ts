@@ -474,7 +474,7 @@ async function cmdAdd(argv: string[]) {
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
 		channel: flag(flags, "channel") as Channel | undefined,
-		arch: flag(flags, "arch") as Arch | undefined,
+		arch: flag(flags, "arch") as Arch | "auto" | undefined,
 		name: flag(flags, "name") ?? positional[0],
 		cpu: flag(flags, "cpu") ? Number(flag(flags, "cpu")) : undefined,
 		mem: flag(flags, "mem") ? Number(flag(flags, "mem")) : undefined,
@@ -1155,7 +1155,7 @@ async function cmdStart(argv: string[]) {
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
 		channel: flag(flags, "channel") as Channel | undefined,
-		arch: flag(flags, "arch") as Arch | undefined,
+		arch: flag(flags, "arch") as Arch | "auto" | undefined,
 		name: flag(flags, "name") ?? positional[0],
 		cpu: flag(flags, "cpu") ? Number(flag(flags, "cpu")) : undefined,
 		mem: flag(flags, "mem") ? Number(flag(flags, "mem")) : undefined,
@@ -2351,7 +2351,7 @@ Options:
   --name <name>         Instance name (required)
   --version <ver>       RouterOS version (e.g., 7.22.1)
   --channel <ch>        Channel: stable, long-term, testing, development
-  --arch <arch>         Architecture: arm64, x86 (default: host native)
+  --arch <arch>         Architecture: arm64, x86, auto (default: host native)
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
 	--boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
@@ -2424,7 +2424,7 @@ Options:
   --fg / --foreground   Run in foreground — serial console on stdio
   --version <ver>       RouterOS version (e.g., 7.22.1)
   --channel <ch>        Channel: stable, long-term, testing, development
-  --arch <arch>         Architecture: arm64, x86 (default: host native)
+  --arch <arch>         Architecture: arm64, x86, auto (default: host native)
   --name <name>         Instance name
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)

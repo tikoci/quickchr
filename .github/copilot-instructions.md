@@ -5,6 +5,15 @@
 quickchr is a TypeScript/Bun CLI + library to manage MikroTik CHR virtual machines via QEMU.
 Published as `@tikoci/quickchr` on npm.
 
+## Paired skill
+
+General CHR/QEMU knowledge (virtio rules, boot tracks, acceleration detection, UEFI pflash,
+boot-wait pitfalls) is consolidated in the **`routeros-qemu-chr`** skill at
+[tikoci/routeros-skills](https://github.com/tikoci/routeros-skills/tree/main/routeros-qemu-chr).
+quickchr is the reference implementation of that skill — when adding or changing QEMU behavior,
+cross-check `SKILL.md` and `references/quickchr-automation.md` so the documented rules stay
+aligned with what the library actually does.
+
 ## Runtime
 
 - **Bun** — not Node.js. Use `Bun.spawn()`, `Bun.write()`, `Bun.sleep()`, `bun test`, `bun:test`.
