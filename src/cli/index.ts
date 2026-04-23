@@ -5,6 +5,7 @@
 
 import type { StartOptions, Arch, Channel, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { parseNetworkSpecifier } from "../lib/network.ts";
+import { parseForwardSpec } from "../lib/forward-spec.ts";
 import {
 	MIN_PROVISION_VERSION,
 	PROVISIONING_BOOT_ONLY_SUMMARY,
@@ -180,6 +181,9 @@ async function main() {
 			case "networks":
 			case "net":
 				await cmdNetworks(args.slice(1));
+				break;
+			case "cache":
+				await cmdCache(args.slice(1));
 				break;
 			case "version":
 			case "--version":
@@ -489,6 +493,7 @@ async function cmdAdd(argv: string[]) {
 		bootDiskFormat: (flag(flags, "boot-disk-format") as StartOptions["bootDiskFormat"] | undefined) ?? "qcow2",
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
+		extraPorts: flagList(flags, "forward").map(parseForwardSpec),
 	};
 
 	const deviceModeValue = flag(flags, "device-mode");
@@ -1170,6 +1175,7 @@ async function cmdStart(argv: string[]) {
 		bootDiskFormat: (flag(flags, "boot-disk-format") as StartOptions["bootDiskFormat"] | undefined) ?? "qcow2",
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
+		extraPorts: flagList(flags, "forward").map(parseForwardSpec),
 		installDeps: flagBool(flags, "install-deps"),
 		dryRun: flagBool(flags, "dry-run"),
 		timeoutExtra: parseInt(flag(flags, "timeout-extra") ?? flag(flags, "T") ?? "0", 10) * 1000 || undefined,
@@ -2249,6 +2255,130 @@ async function cmdLogs(argv: string[]) {
 	}
 }
 
+async function cmdCache(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const sub = positional[0] ?? "list";
+
+	if (sub === "help" || sub === "--help" || sub === "-h") {
+		printCommandHelp("cache");
+		return;
+	}
+
+	const { listCacheEntries, pruneCache } = await import("../lib/cache.ts");
+
+	const parseDuration = (s: string): number => {
+		const m = s.match(/^(\d+(?:\.\d+)?)([smhdw])$/);
+		if (!m) throw new Error(`Invalid duration "${s}" (use Ns/Nm/Nh/Nd/Nw, e.g. 7d)`);
+		const n = Number.parseFloat(m[1] ?? "0");
+		const unit = m[2];
+		const mult: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+		return Math.floor(n * (mult[unit ?? ""] ?? 0));
+	};
+	const parseSize = (s: string): number => {
+		const m = s.match(/^(\d+(?:\.\d+)?)([KMGT]?)i?B?$/i);
+		if (!m) throw new Error(`Invalid size "${s}" (use NK/NM/NG/NT, e.g. 2G)`);
+		const n = Number.parseFloat(m[1] ?? "0");
+		const unit = (m[2] ?? "").toUpperCase();
+		const mult: Record<string, number> = { "": 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4 };
+		return Math.floor(n * (mult[unit] ?? 1));
+	};
+	const formatSize = (b: number): string => {
+		if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GiB`;
+		if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MiB`;
+		if (b >= 1024) return `${(b / 1024).toFixed(1)} KiB`;
+		return `${b} B`;
+	};
+	const formatAge = (ms: number): string => {
+		const s = Math.floor(ms / 1000);
+		if (s < 60) return `${s}s`;
+		if (s < 3600) return `${Math.floor(s / 60)}m`;
+		if (s < 86400) return `${Math.floor(s / 3600)}h`;
+		return `${Math.floor(s / 86400)}d`;
+	};
+
+	switch (sub) {
+		case "list":
+		case "ls": {
+			const entries = listCacheEntries();
+			if (flags.json === true) {
+				console.log(JSON.stringify(entries, null, 2));
+				return;
+			}
+			if (entries.length === 0) {
+				console.log("No cached images.");
+				return;
+			}
+			const now = Date.now();
+			const rows = entries.map((e) => ({
+				basename: e.basename,
+				version: e.version,
+				arch: e.arch,
+				size: formatSize(e.sizeBytes),
+				age: formatAge(now - e.mtimeMs),
+				inUse: e.inUse ? "yes" : "no",
+			}));
+			const widths = {
+				basename: Math.max(8, ...rows.map((r) => r.basename.length)),
+				version: Math.max(7, ...rows.map((r) => r.version.length)),
+				arch: Math.max(4, ...rows.map((r) => r.arch.length)),
+				size: Math.max(8, ...rows.map((r) => r.size.length)),
+				age: Math.max(3, ...rows.map((r) => r.age.length)),
+			};
+			const header = `${"BASENAME".padEnd(widths.basename)}  ${"VERSION".padEnd(widths.version)}  ${"ARCH".padEnd(widths.arch)}  ${"SIZE".padEnd(widths.size)}  ${"AGE".padEnd(widths.age)}  IN-USE`;
+			console.log(header);
+			for (const r of rows) {
+				console.log(
+					`${r.basename.padEnd(widths.basename)}  ${r.version.padEnd(widths.version)}  ${r.arch.padEnd(widths.arch)}  ${r.size.padEnd(widths.size)}  ${r.age.padEnd(widths.age)}  ${r.inUse}`,
+				);
+			}
+			const total = entries.reduce((s, e) => s + e.sizeBytes, 0);
+			console.log(`\nTotal: ${entries.length} image(s), ${formatSize(total)}`);
+			break;
+		}
+		case "prune": {
+			const opts: Parameters<typeof pruneCache>[0] = { dryRun: flags["dry-run"] === true };
+			if (typeof flags["older-than"] === "string") opts.olderThan = flags["older-than"];
+			if (typeof flags["max-age"] === "string") opts.maxAgeMs = parseDuration(flags["max-age"]);
+			if (typeof flags["max-size"] === "string") opts.maxSizeBytes = parseSize(flags["max-size"]);
+			if (opts.olderThan === undefined && opts.maxAgeMs === undefined && opts.maxSizeBytes === undefined) {
+				console.error("cache prune: provide at least one of --older-than, --max-age, --max-size");
+				process.exit(1);
+			}
+			const result = pruneCache(opts);
+			const verb = opts.dryRun ? "Would evict" : "Evicted";
+			if (result.evicted.length === 0) {
+				console.log("Nothing to evict.");
+			} else {
+				console.log(`${verb} ${result.evicted.length} image(s):`);
+				for (const e of result.evicted) {
+					const reason = result.reasons[e.basename] ?? "policy";
+					console.log(`  - ${e.basename} (${formatSize(e.sizeBytes)}) — ${reason}`);
+				}
+				console.log(`Freed: ${formatSize(result.freedBytes)}`);
+			}
+			break;
+		}
+		case "clear": {
+			if (flags.all !== true) {
+				console.error("cache clear: refuses without --all (deletes all non-in-use cached images)");
+				process.exit(1);
+			}
+			const result = pruneCache({ maxSizeBytes: 0, dryRun: flags["dry-run"] === true });
+			const verb = flags["dry-run"] === true ? "Would delete" : "Deleted";
+			console.log(`${verb} ${result.evicted.length} image(s), freed ${formatSize(result.freedBytes)}`);
+			if (result.kept.some((e) => e.inUse)) {
+				const inUse = result.kept.filter((e) => e.inUse);
+				console.log(`Kept ${inUse.length} in-use image(s):`);
+				for (const e of inUse) console.log(`  - ${e.basename}`);
+			}
+			break;
+		}
+		default:
+			console.error(`Unknown cache subcommand: ${sub}\nRun 'quickchr help cache' for usage.`);
+			process.exit(1);
+	}
+}
+
 async function cmdDoctor() {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { statusIcon, bold } = await import("./format.ts");
@@ -2261,6 +2391,27 @@ async function cmdDoctor() {
 	}
 
 	console.log();
+
+	// Best-effort: warn about cache entries older than current long-term.
+	try {
+		const { listCacheEntries } = await import("../lib/cache.ts");
+		const { resolveVersion, compareRouterOsVersion } = await import("../lib/versions.ts");
+		const entries = listCacheEntries();
+		if (entries.length > 0) {
+			const longTerm = await resolveVersion("long-term");
+			const stale = entries.filter((e) => {
+				if (e.version === "unknown" || e.inUse) return false;
+				try { return compareRouterOsVersion(e.version, longTerm) < 0; } catch { return false; }
+			});
+			if (stale.length > 0) {
+				console.log(`Note: ${stale.length} cached image(s) older than current long-term (${longTerm}):`);
+				for (const e of stale) console.log(`  - ${e.basename} (${e.version})`);
+				console.log("  Hint: 'quickchr cache prune --older-than " + longTerm + "' to evict them.");
+				console.log();
+			}
+		}
+	} catch { /* offline or no cache — silent */ }
+
 	if (result.ok) {
 		console.log("All checks passed.");
 	} else {
@@ -2316,6 +2467,7 @@ Commands:
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
   networks                Network discovery & socket management
+  cache [list|prune|clear] Manage cached CHR images
   completions             Manage shell completions (Tab completion)
   logs <name>             Tail the QEMU log for an instance
   doctor                  Check prerequisites
@@ -2358,6 +2510,11 @@ Options:
 	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
 	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install on first boot (repeatable)
+  --forward <spec>      Add an extra hostfwd port (repeatable). Spec:
+                        name[:host[:guest]][/proto]. Examples:
+                          --forward smb              (host auto, guest 445/tcp from registry)
+                          --forward winbox:9300      (host pinned, guest from registry)
+                          --forward myapp:9200:7777/udp  (fully explicit)
   --install-all-packages  Install all packages on first boot
   --add-user <u:p>      Create user on first boot (name:password)
   --disable-admin       Disable the default admin account on first boot
@@ -2432,6 +2589,9 @@ Options:
 	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
 	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install (repeatable)
+  --forward <spec>      Add an extra hostfwd port (repeatable). Spec:
+                        name[:host[:guest]][/proto]. Examples: smb,
+                        winbox:9300, myapp:9200:7777/udp.
   --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
   --no-secure-login     Keep admin with no password (skip managed account)
@@ -2616,6 +2776,24 @@ Credential resolution order (highest priority first):
 		case "networks":
 		case "net":
 			showNetworksHelp();
+			break;
+		case "cache":
+			console.log(`quickchr cache <list|prune|clear> [options]
+
+Manage cached CHR images in the data dir cache directory.
+
+Subcommands:
+  list [--json]                       List cached images (basename, version, arch, size, age, in-use).
+  prune [options]                     Evict cached images per policy. Never evicts in-use images.
+    --older-than <ver>                Evict images with version < <ver>.
+    --max-age <dur>                   Evict images older than duration (e.g. 7d, 24h).
+    --max-size <size>                 Evict oldest-version images until total size <= <size>.
+    --dry-run                         Show what would be evicted without deleting.
+  clear --all                         Delete all non-in-use cached images.
+
+Duration: <N>(s|m|h|d|w)   Size: <N>(K|M|G|T)[i][B] (case-insensitive, IEC binary).
+
+Default auto-prune cap: 2 GiB (applied after each successful start).`);
 			break;
 		default:
 			console.log(`No detailed help for '${command}'.`);

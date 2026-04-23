@@ -129,6 +129,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--boot-disk-format <f>` | `qcow2` | `qcow2` or `raw` |
 | `--boot-size <size>` | — | Resize boot disk; needs `qemu-img`; auto-converts to qcow2 |
 | `--add-disk <size>` | — | Extra blank qcow2 disk; repeatable |
+| `--forward <spec>` | — | Extra hostfwd port; repeatable. See §Custom port forwards. |
 | `--add-package <pkg>` | — | Provisioning, repeatable, ≥ 7.20.8 |
 | `--install-all-packages` | false | Provisioning, ≥ 7.20.8 |
 | `--add-user <user:pass>` | — | Provisioning, ≥ 7.20.8 |
@@ -867,6 +868,24 @@ them as additional virtio-blk-pci devices. RouterOS sees them as
 `ether2`/`disk2`/etc. depending on whether you've also added NICs.
 `quickchr disk <name>` shows the layout; with `qemu-img` it also reports
 virtual + actual sizes.
+
+### Custom port forwards
+
+`--forward <spec>` (repeatable on `add` and `start`) appends an extra
+QEMU SLiRP `hostfwd` mapping on top of the default RouterOS service
+ports (HTTP/HTTPS/SSH/API/API-SSL/WinBox). Spec grammar is
+`name[:host[:guest]][/proto]`. When `name` matches a key or alias in the
+built-in `WELL_KNOWN_GUEST_PORTS` registry (e.g. `smb`/`cifs`, `winbox`,
+`mqtt`, `http-alt`, `dns`, `snmp`, …), the `guest` port and `proto` are
+filled in for you; otherwise both must be supplied. Omitting `host` (or
+passing `0`) auto-allocates a free host port, mirroring the default
+service-port behaviour. Examples:
+
+```bash
+quickchr add my-chr --forward smb                  # host auto, guest 445/tcp
+quickchr add my-chr --forward winbox:9300          # host pinned, guest 8291/tcp
+quickchr add my-chr --forward myapp:9200:7777/udp  # fully explicit
+```
 
 ### `clean`
 

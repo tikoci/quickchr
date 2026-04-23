@@ -6,7 +6,6 @@ import * as platformMod from "../../src/lib/platform.ts";
 import {
 	createNamedSocket,
 	addSocketMember,
-	removeNamedSocket,
 	_resetSocketCache,
 } from "../../src/lib/socket-registry.ts";
 

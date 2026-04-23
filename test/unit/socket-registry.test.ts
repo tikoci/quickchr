@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	createNamedSocket,
@@ -153,14 +153,54 @@ describe("member management", () => {
 		expect(getNamedSocket("net3")?.members).toEqual(["chr-2"]);
 	});
 
-	test("removeSocketMember auto-deletes socket when last member removed", () => {
-		createNamedSocket("net4");
+	test("removeSocketMember auto-deletes socket when last member removed (autoCreated)", () => {
+		createNamedSocket("net4", { autoCreated: true });
 		addSocketMember("net4", "chr-1");
 		removeSocketMember("net4", "chr-1");
 		expect(getNamedSocket("net4")).toBeUndefined();
 	});
 
+	test("removeSocketMember preserves user-created socket when last member removed", () => {
+		createNamedSocket("user-net");
+		addSocketMember("user-net", "chr-1");
+		removeSocketMember("user-net", "chr-1");
+		const entry = getNamedSocket("user-net");
+		expect(entry).toBeDefined();
+		expect(entry?.members).toEqual([]);
+		expect(entry?.autoCreated).toBe(false);
+	});
+
+	test("removeSocketMember on shared auto-created socket only deletes after last member", () => {
+		createNamedSocket("shared", { autoCreated: true });
+		addSocketMember("shared", "chr-a");
+		addSocketMember("shared", "chr-b");
+		removeSocketMember("shared", "chr-a");
+		expect(getNamedSocket("shared")?.members).toEqual(["chr-b"]);
+		removeSocketMember("shared", "chr-b");
+		expect(getNamedSocket("shared")).toBeUndefined();
+	});
+
 	test("removeSocketMember is a no-op for non-existent socket", () => {
 		expect(() => removeSocketMember("ghost", "chr-1")).not.toThrow();
+	});
+});
+
+describe("backward compatibility", () => {
+	test("loads legacy JSON without autoCreated field as autoCreated:false", () => {
+		const dir = getSocketRegistryDir();
+		const legacy = {
+			name: "legacy",
+			mode: "mcast",
+			mcastGroup: "230.0.0.1",
+			port: 4000,
+			createdAt: "2024-01-01T00:00:00.000Z",
+			members: ["chr-old"],
+		};
+		writeFileSync(join(dir, "legacy.json"), JSON.stringify(legacy, null, "\t") + "\n");
+		_resetSocketCache();
+		const entry = getNamedSocket("legacy");
+		expect(entry).toBeDefined();
+		expect(entry?.autoCreated).toBe(false);
+		expect(entry?.members).toEqual(["chr-old"]);
 	});
 });

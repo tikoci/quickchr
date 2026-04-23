@@ -27,11 +27,12 @@ import {
 	assertProvisioningSupportedVersion,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString, hasUserModeNetwork } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts } from "./network.ts";
 import {
 	getUsedPortBases,
 	saveMachine,
 	loadMachine,
+	loadAllMachines,
 	removeMachine as removeState,
 	getMachineDir,
 	getMachinesDir,
@@ -43,6 +44,7 @@ import {
 	getDataDir,
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
+import { autoPruneIfOverCap } from "./cache.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint } from "./channels.ts";
@@ -167,7 +169,7 @@ function registerSocketMembers(state: MachineState): void {
 	for (const name of getSocketNamedNetworks(state)) {
 		try {
 			if (!getNamedSocket(name)) {
-				createNamedSocket(name);
+				createNamedSocket(name, { autoCreated: true });
 			}
 			addSocketMember(name, state.name);
 		} catch (e) {
@@ -1016,6 +1018,7 @@ export class QuickCHR {
 
 		const usedBases = getUsedPortBases();
 		const portBase = opts.portBase ?? await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts);
+		validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, loadAllMachines(), name);
 		const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
 
 		const machineDir = getMachineDir(name);
@@ -1180,6 +1183,14 @@ export class QuickCHR {
 				opts.excludePorts,
 				opts.extraPorts,
 			);
+
+		validateExplicitExtraPorts(
+			opts.extraPorts,
+			portBase,
+			opts.excludePorts,
+			loadAllMachines(),
+			name,
+		);
 
 		const ports = buildPortMappings(
 			portBase,
@@ -1612,6 +1623,10 @@ export class QuickCHR {
 		if (hasProvisioning && provisioningOpts) {
 			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig, logger);
 		}
+
+		try {
+			autoPruneIfOverCap({ logger: logger ? (msg) => logger.status(msg) : undefined, protectVersions: [state.version] });
+		} catch { /* never propagate */ }
 
 		return instance;
 		} finally {

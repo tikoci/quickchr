@@ -4,8 +4,30 @@ import {
 	buildPortMappings,
 	buildHostfwdString,
 	toChrPorts,
+	validateExplicitExtraPorts,
 } from "../../src/lib/network.ts";
-import { DEFAULT_PORT_BASE, PORTS_PER_BLOCK } from "../../src/lib/types.ts";
+import { DEFAULT_PORT_BASE, PORTS_PER_BLOCK, QuickCHRError, type MachineState } from "../../src/lib/types.ts";
+
+function fakeMachine(name: string, ports: Record<string, { name: string; host: number; guest: number; proto: "tcp" | "udp" }>): MachineState {
+	return {
+		name,
+		version: "7.20",
+		arch: "x86",
+		cpu: 1,
+		mem: 256,
+		networks: [{ specifier: "user", id: "net0" }],
+		ports,
+		packages: [],
+		portBase: ports.http?.host ?? 9100,
+		excludePorts: [],
+		extraPorts: [],
+		extraDisks: [],
+		bootDiskFormat: "raw",
+		createdAt: "2024-01-01T00:00:00Z",
+		status: "stopped",
+		machineDir: `/tmp/${name}`,
+	} as MachineState;
+}
 
 describe("allocatePortBlock", () => {
 	test("returns default base when no existing machines", () => {
@@ -65,5 +87,117 @@ describe("toChrPorts", () => {
 		expect(chr.http).toBe(9100);
 		expect(chr.ssh).toBe(9102);
 		expect(chr.apiSsl).toBe(9104);
+	});
+});
+
+describe("validateExplicitExtraPorts", () => {
+	const otherMachine = fakeMachine("chr-other", {
+		http: { name: "http", host: 9100, guest: 80, proto: "tcp" },
+		ssh: { name: "ssh", host: 9102, guest: 22, proto: "tcp" },
+	});
+
+	test("no-op for empty / undefined extras", () => {
+		expect(() => validateExplicitExtraPorts(undefined, 9200, [], [otherMachine])).not.toThrow();
+		expect(() => validateExplicitExtraPorts([], 9200, [], [otherMachine])).not.toThrow();
+	});
+
+	test("happy path: explicit host on free port passes", () => {
+		expect(() =>
+			validateExplicitExtraPorts(
+				[{ name: "smb", host: 4445, guest: 445, proto: "tcp" }],
+				9200,
+				[],
+				[otherMachine],
+			),
+		).not.toThrow();
+	});
+
+	test("auto-allocated extras (host=0) are skipped", () => {
+		expect(() =>
+			validateExplicitExtraPorts(
+				[{ name: "auto", host: 0, guest: 1234, proto: "tcp" }],
+				9100, // would collide with otherMachine's http if checked, but host=0 means auto
+				[],
+				[otherMachine],
+			),
+		).not.toThrow();
+	});
+
+	test("throws PORT_CONFLICT on collision with another machine's port", () => {
+		try {
+			validateExplicitExtraPorts(
+				[{ name: "smb", host: 9100, guest: 445, proto: "tcp" }],
+				9200,
+				[],
+				[otherMachine],
+			);
+			throw new Error("expected throw");
+		} catch (err) {
+			expect(err).toBeInstanceOf(QuickCHRError);
+			expect((err as QuickCHRError).code).toBe("PORT_CONFLICT");
+			expect((err as QuickCHRError).message).toContain("chr-other");
+			expect((err as QuickCHRError).message).toContain("9100");
+		}
+	});
+
+	test("throws PORT_CONFLICT when explicit host collides with own SERVICE_PORTS", () => {
+		// portBase=9200 → http=9200; explicit host=9200 collides with built-in http
+		try {
+			validateExplicitExtraPorts(
+				[{ name: "smb", host: 9200, guest: 445, proto: "tcp" }],
+				9200,
+				[],
+				[],
+			);
+			throw new Error("expected throw");
+		} catch (err) {
+			expect(err).toBeInstanceOf(QuickCHRError);
+			expect((err as QuickCHRError).code).toBe("PORT_CONFLICT");
+			expect((err as QuickCHRError).message).toContain("http");
+		}
+	});
+
+	test("excluded service ports do not trigger built-in collision", () => {
+		// http excluded → host 9200 is free for an extra
+		expect(() =>
+			validateExplicitExtraPorts(
+				[{ name: "smb", host: 9200, guest: 445, proto: "tcp" }],
+				9200,
+				["http"],
+				[],
+			),
+		).not.toThrow();
+	});
+
+	test("throws PORT_CONFLICT on duplicate hosts within same extras set", () => {
+		try {
+			validateExplicitExtraPorts(
+				[
+					{ name: "a", host: 5000, guest: 1, proto: "tcp" },
+					{ name: "b", host: 5000, guest: 2, proto: "tcp" },
+				],
+				9200,
+				[],
+				[],
+			);
+			throw new Error("expected throw");
+		} catch (err) {
+			expect(err).toBeInstanceOf(QuickCHRError);
+			expect((err as QuickCHRError).code).toBe("PORT_CONFLICT");
+			expect((err as QuickCHRError).message).toContain("5000");
+		}
+	});
+
+	test("self-exclusion: ownMachineName skips that machine's ports", () => {
+		// otherMachine owns 9100; pass ownMachineName="chr-other" → no conflict
+		expect(() =>
+			validateExplicitExtraPorts(
+				[{ name: "smb", host: 9100, guest: 445, proto: "tcp" }],
+				9200,
+				[],
+				[otherMachine],
+				"chr-other",
+			),
+		).not.toThrow();
 	});
 });

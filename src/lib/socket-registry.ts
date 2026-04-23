@@ -14,7 +14,10 @@ export interface SocketEntry {
 	mcastGroup?: string;
 	port: number;
 	createdAt: string;
+	/** Machines that currently reference this socket. */
 	members: string[];
+	/** Auto-created by `start()` (true) vs explicit user/CLI creation (false). */
+	autoCreated: boolean;
 }
 
 const DEFAULT_START_PORT = 4000;
@@ -41,6 +44,19 @@ function socketPath(name: string): string {
 	return join(getSocketRegistryDir(), `${name}.json`);
 }
 
+/** Normalize an entry loaded from disk: defaults missing fields for backward compat. */
+function normalizeEntry(raw: Partial<SocketEntry> & { name: string; mode: SocketEntry["mode"]; port: number; createdAt: string }): SocketEntry {
+	return {
+		name: raw.name,
+		mode: raw.mode,
+		mcastGroup: raw.mcastGroup,
+		port: raw.port,
+		createdAt: raw.createdAt,
+		members: Array.isArray(raw.members) ? [...raw.members] : [],
+		autoCreated: typeof raw.autoCreated === "boolean" ? raw.autoCreated : false,
+	};
+}
+
 function saveEntry(entry: SocketEntry): void {
 	writeFileSync(socketPath(entry.name), JSON.stringify(entry, null, "\t") + "\n");
 	_cache.set(entry.name, entry);
@@ -54,7 +70,7 @@ function allocatePort(existing: SocketEntry[]): number {
 
 export function createNamedSocket(
 	name: string,
-	opts?: { mode?: "mcast" | "listen-connect"; port?: number; mcastGroup?: string },
+	opts?: { mode?: "mcast" | "listen-connect"; port?: number; mcastGroup?: string; autoCreated?: boolean },
 ): SocketEntry {
 	if (_cache.has(name) || existsSync(socketPath(name))) {
 		throw new QuickCHRError("STATE_ERROR", `Named socket "${name}" already exists`);
@@ -71,6 +87,7 @@ export function createNamedSocket(
 		mcastGroup,
 		createdAt: new Date().toISOString(),
 		members: [],
+		autoCreated: opts?.autoCreated ?? false,
 	};
 
 	saveEntry(entry);
@@ -81,7 +98,8 @@ export function getNamedSocket(name: string): SocketEntry | undefined {
 	const cached = _cache.get(name);
 	if (cached) return cached;
 	try {
-		const entry = JSON.parse(readFileSync(socketPath(name), "utf-8")) as SocketEntry;
+		const raw = JSON.parse(readFileSync(socketPath(name), "utf-8"));
+		const entry = normalizeEntry(raw);
 		_cache.set(name, entry);
 		return entry;
 	} catch {
@@ -98,7 +116,8 @@ export function listNamedSockets(): SocketEntry[] {
 			const name = file.replace(/\.json$/, "");
 			if (!merged.has(name)) {
 				try {
-					const entry = JSON.parse(readFileSync(join(dir, file), "utf-8")) as SocketEntry;
+					const raw = JSON.parse(readFileSync(join(dir, file), "utf-8"));
+					const entry = normalizeEntry(raw);
 					merged.set(name, entry);
 					_cache.set(name, entry);
 				} catch {}
@@ -132,7 +151,7 @@ export function removeSocketMember(name: string, machineName: string): void {
 	const entry = getNamedSocket(name);
 	if (!entry) return;
 	entry.members = entry.members.filter((m) => m !== machineName);
-	if (entry.members.length === 0) {
+	if (entry.members.length === 0 && entry.autoCreated) {
 		removeNamedSocket(name);
 	} else {
 		saveEntry(entry);

@@ -119,6 +119,13 @@ export type { MikrotikCredentials, InstanceCredentials } from "./lib/credentials
 // Package utilities
 export { downloadPackages, listAvailablePackages, downloadAndListPackages, installPackages, installAllPackages } from "./lib/packages.ts";
 
+// Guest port registry
+export { WELL_KNOWN_GUEST_PORTS, lookupGuestPort } from "./lib/guest-ports.ts";
+export type { GuestPortDef } from "./lib/guest-ports.ts";
+
+// Forward spec parsing
+export { parseForwardSpec } from "./lib/forward-spec.ts";
+
 // Logging
 export { createLogger } from "./lib/log.ts";
 export type { ProgressLogger } from "./lib/log.ts";

@@ -8,6 +8,7 @@ import {
 	DEFAULT_PORT_BASE,
 	PORTS_PER_BLOCK,
 	type ChrPorts,
+	type MachineState,
 	type NetworkConfig,
 	type NetworkMode,
 	type NetworkSpecifier,
@@ -75,6 +76,78 @@ export function buildPortMappings(
 	}
 
 	return mappings;
+}
+
+/** Validate user-supplied `extraPorts` with explicit `host` values for collisions.
+ *
+ *  Rejects three classes of conflict:
+ *   1. Explicit host equals one of this machine's auto-allocated SERVICE_PORTS
+ *      slots (`portBase + offset`) for a non-excluded service.
+ *   2. Two explicit entries in the same `extraPorts` set request the same host.
+ *   3. Explicit host is already in use by another existing machine's port mapping.
+ *
+ *  Auto-allocated extras (host falsy/0) are not validated here — the live
+ *  `findAvailablePortBlock` probe handles those.
+ *
+ *  Pass `ownMachineName` to skip an existing machine's mappings (e.g. when
+ *  re-validating during a restart).
+ */
+export function validateExplicitExtraPorts(
+	extraPorts: PortMapping[] | undefined,
+	portBase: number,
+	excludePorts: ServiceName[] = [],
+	existingMachines: MachineState[] = [],
+	ownMachineName?: string,
+): void {
+	if (!extraPorts || extraPorts.length === 0) return;
+
+	const serviceHosts = new Map<number, string>();
+	for (const [name, spec] of Object.entries(SERVICE_PORTS)) {
+		if (excludePorts.includes(name as ServiceName)) continue;
+		serviceHosts.set(portBase + spec.offset, name);
+	}
+
+	const otherHosts = new Map<number, { machine: string; service: string }>();
+	for (const m of existingMachines) {
+		if (ownMachineName && m.name === ownMachineName) continue;
+		for (const mapping of Object.values(m.ports ?? {})) {
+			otherHosts.set(mapping.host, { machine: m.name, service: mapping.name });
+		}
+	}
+
+	const seenInExtras = new Map<number, string>();
+
+	for (let i = 0; i < extraPorts.length; i++) {
+			const extra = extraPorts[i];
+			if (!extra?.host) continue;
+
+		const label = extra.name || `custom-${i}`;
+
+		const svc = serviceHosts.get(extra.host);
+		if (svc) {
+			throw new QuickCHRError(
+				"PORT_CONFLICT",
+				`Explicit extra port "${label}" host=${extra.host} collides with built-in service "${svc}" (portBase=${portBase}). Pick a different host port or exclude the service.`,
+			);
+		}
+
+		const dup = seenInExtras.get(extra.host);
+		if (dup) {
+			throw new QuickCHRError(
+				"PORT_CONFLICT",
+				`Explicit extra ports "${dup}" and "${label}" both request host=${extra.host}.`,
+			);
+		}
+		seenInExtras.set(extra.host, label);
+
+		const other = otherHosts.get(extra.host);
+		if (other) {
+			throw new QuickCHRError(
+				"PORT_CONFLICT",
+				`Explicit extra port "${label}" host=${extra.host} is already allocated to machine "${other.machine}" (service "${other.service}").`,
+			);
+		}
+	}
 }
 
 /** Build QEMU hostfwd string from port mappings. */
