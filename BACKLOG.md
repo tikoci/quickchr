@@ -2,7 +2,7 @@
 
 > Open work and design questions live below. Completed items are collapsed — full notes are in git history, MANUAL.md, DESIGN.md, or `.github/instructions/*.md`.
 >
-> Open items are tagged [P1]–[P4]. Last review pass: 2026-04-23.
+> Open items are tagged [P1]–[P4]. Last review pass: 2026-04-24.
 
 ## Priority tags
 
@@ -85,7 +85,7 @@
 Coverage is 79.59% funcs / 67.86% lines (above thresholds). Remaining sub-70 candidates: `rest.ts` (41.76%), `packages.ts` (37.78%), `device-mode.ts` (61.36%), `platform.ts` (57.98%), `qemu.ts` (69.81%). Don't chase numbers; add tests when they prove correctness of uncovered paths.
 
 - [x] credentials.ts, license.ts, secrets.ts, completions.ts, images.ts (all above 73%)
-- [ ] [P1] **Cache retention policy** — Default: **size-based, 2 GB** (fits 4 channels × stable/testing/development/long-term plus extras). When cap exceeded, evict by RouterOS version order (oldest first). `doctor` warns about items older than current long-term. Add `quickchr cache` command with `--older-than` / `--max-age` / `--dry-run` flags for manual purge. Size cap is a user setting (see "User-settings framework"); disabling auto-cleanup must be supported for users with dedicated disk.
+- [x] [P1] **Cache retention policy** — Default: **size-based, 2 GB** (fits 4 channels × stable/testing/development/long-term plus extras). When cap exceeded, evict by RouterOS version order (oldest first). `doctor` warns about items older than current long-term. Add `quickchr cache` command with `--older-than` / `--max-age` / `--dry-run` flags for manual purge. Size cap is a user setting (see "User-settings framework"); disabling auto-cleanup must be supported for users with dedicated disk.
 
 ### Provisioning
 
@@ -132,7 +132,7 @@ Coverage is 79.59% funcs / 67.86% lines (above thresholds). Remaining sub-70 can
 ### Documentation
 
 - [ ] [P2] Draft MANUAL.md covering CLI, library API, provisioning, storage layout. Command tree diagram for CLI rationalization. Document `exec` design (`--via=auto|ssh|rest|qga|console`), `console`/`attach` as serial access.
-- [ ] [P1] **Document `--json` semantics on `exec`** — `exec --json` wraps the quickchr response as JSON, not structured RouterOS output. The RouterOS command result is still a string (print output, command return, etc.). To get JSON *from RouterOS*, the script must use `:put [:serialize to=json [<path>/<cmd>/print detail as-value]]` — a RouterOS scripting concern, not a quickchr one. Document the pattern in MANUAL.md and mention it in `exec --help` so agents don't assume `--json` structures the RouterOS result. See `~/GitHub/vscode-tikbook/src/routeros.ts:220` and `notebook.ts:298` for the cross-project `:serialize` auto-wrap idea — parsing commands to know whether they're wrappable is a larger task, not on the quickchr side.
+- [x] [P1] **Document `--json` semantics on `exec`** — `exec --json` wraps the quickchr response as JSON, not structured RouterOS output. The RouterOS command result is still a string (print output, command return, etc.). To get JSON *from RouterOS*, the script must use `:put [:serialize to=json [<path>/<cmd>/print detail as-value]]` — a RouterOS scripting concern, not a quickchr one. Document the pattern in MANUAL.md and mention it in `exec --help` so agents don't assume `--json` structures the RouterOS result. See `~/GitHub/vscode-tikbook/src/routeros.ts:220` and `notebook.ts:298` for the cross-project `:serialize` auto-wrap idea — parsing commands to know whether they're wrappable is a larger task, not on the quickchr side.
 
 <details>
 <summary>Completed test coverage work</summary>
@@ -227,7 +227,7 @@ Canonical location for `routeros-qemu-chr` is `~/GitHub/routeros-skills/routeros
 
 **Open CLI/UX work:**
 
-- [ ] [P1] **`--forward <name>:<host>:<guest>[/tcp|udp]` on `quickchr add`** — Surface `extraPorts` as a repeatable CLI flag. Today forwarding a guest service (SMB/445, Dude/2210) requires constructing the full `extraPorts` array in code. External agent (2026-04-22 tikoci/donny session) had to grep `types.ts` before knowing how to expose SMB. Pairs with the well-known guest-port registry (see library section).
+- [x] [P1] **`--forward <name>:<host>:<guest>[/tcp|udp]` on `quickchr add`** — Surface `extraPorts` as a repeatable CLI flag. Today forwarding a guest service (SMB/445, Dude/2210) requires constructing the full `extraPorts` array in code. External agent (2026-04-22 tikoci/donny session) had to grep `types.ts` before knowing how to expose SMB. Pairs with the well-known guest-port registry (see library section).
 - [ ] [P1] **User-settings framework (narrow scope)** — Framework for settings not tied to a specific machine: wizard defaults, cache size cap, default timeout scale, auth preferences (always-license-at-P1, never-license, etc.). **Out of scope:** post-provisioning machine-config mutations (that was the `set` confusion). Ship with ~5 concrete settings; grow only when a real user-facing choice appears. Don't build a general settings system first.
 - [ ] [P2] **`--via=auto` smart routing** — Order: **REST → SSH → QGA (if KVM) → console**. SSH second because it's well-tested on RouterOS and works when REST can't. QGA is least-tested and gated on KVM (RouterOS may require `/dev/kvm` — see QGA investigation below); arm64+KVM is untested on our hardware but believed to work. Depends on SSH transport landing first.
 - [ ] [P2] **SSH transport for `exec`** — `--via=ssh` (key provisioning done, transport not implemented). **Spike first:** compare `ssh2` npm package vs spawning system `ssh`. Check key-algorithm compatibility with RouterOS (does `ssh2` support the schemes RouterOS accepts? does system `ssh`?). Plan is to support both eventually (system `ssh` when user's keyring is already set up; `ssh2` for portability and avoiding per-distro variation). Pick the default after the spike.
@@ -249,11 +249,11 @@ Port assignment is a tangled knot. Two concerns bled together:
 
 All quickchr users are our own code right now, so API/CLI can be refactored; don't let backwards-compat bog down the redesign. Test cases exist to make the API better.
 
-- [ ] [P1] **Port research spike** — Inventory all ports RouterOS may use (stable services + containers + common guest needs: SMB/445, Dude/2210, FTP/21, SNMP/161-udp, WinRM/5985, HTTP-alt/8080). Cross-reference IANA well-known and registered ranges. Output: `WELL_KNOWN_GUEST_PORTS` table (in `types.ts` or `guest-ports.ts`) mapping name → guest port + protocol + notes. Feeds `--forward smb:9145` auto-fill and any `--emulate-device` work.
-- [ ] [P1] **`extraPorts` host-port collision detection** — `buildPortMappings` validates auto-allocated ports only; manual `host:` in `extraPorts` bypasses conflict checking against live allocations. Fix: validate explicit `host:` against `listMachines()` before claiming. Lands regardless of the broader scheme redesign — it's a correctness bug.
+- [x] [P1] **Port research spike** — Inventory all ports RouterOS may use (stable services + containers + common guest needs: SMB/445, Dude/2210, FTP/21, SNMP/161-udp, WinRM/5985, HTTP-alt/8080). Cross-reference IANA well-known and registered ranges. Output: `WELL_KNOWN_GUEST_PORTS` table (in `types.ts` or `guest-ports.ts`) mapping name → guest port + protocol + notes. Feeds `--forward smb:9145` auto-fill and any `--emulate-device` work.
+- [x] [P1] **`extraPorts` host-port collision detection** — `buildPortMappings` validates auto-allocated ports only; manual `host:` in `extraPorts` bypasses conflict checking against live allocations. Fix: validate explicit `host:` against `listMachines()` before claiming. Lands regardless of the broader scheme redesign — it's a correctness bug.
 - [ ] [P1] **[?] Port-base randomness** — Move off fixed 9100 start. Options: (a) random base in a clean range at machine-create time, persisted to state; (b) let API caller request a range; (c) both. (a) prevents "agents assume 9100"; (b) gives power users control. **Clarify:** v1 change with 9100 default removed, or v2 setting with 9100 as default? And what clean range — 19100+, 20000+, 30000+?
 - [ ] [P1] **[?] Rethink the fixed "service block" concept** — Current reserved 10-port blocks are likely overfit. Proposal: instances declare what they need; allocator grows the block to fit. Documented offsets (HTTP, HTTPS, SSH, API, API-SSL, WinBox, monitor, serial, QGA) stay for core services; extras live elsewhere. **Clarify:** dynamic variable-size blocks, or fixed core pool + separate extras pool above? Both avoid the Windows IPC collision; dynamic is more general but bigger change.
-- [ ] [P2] **Named socket auto-create in API** — `networks: [{type:"socket", name:"foo"}]` currently requires `quickchr networks sockets create foo` first. Auto-create in `start()` if missing; track ownership; clean up on `remove()`.
+- [x] [P2] **Named socket auto-create in API** — `networks: [{type:"socket", name:"foo"}]` currently requires `quickchr networks sockets create foo` first. Auto-create in `start()` if missing; track ownership; clean up on `remove()`.
 
 See `docs/networking.md` for platform internals. Priority: macOS (local) & Linux (CI) → Windows.
 
@@ -288,7 +288,7 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 - [ ] [P2] **Machine `inspect` (not `upgrade`)** — Ship `quickchr inspect <name>` (or `status --inspect`) that validates a running/stopped machine against its stored config: REST reachable with managed creds, installed packages match, RouterOS version matches, user accounts as expected. **Reports only — does not fix.** Re-provisioning after the initial provision has too many failure modes (version bumps change behavior, creds may be rotated, package deps may change). If inspect flags a mismatch, recreate. Larger tikoci story: lack of a shared RouterOS backup/restore library; don't introduce post-provisioning commands here until that exists.
 - [ ] [P2] **[?] Config schema rationalization** — Separate "desired config" (cpu, mem, packages, networks) from "runtime state" (pid, status, lastStartedAt). Safe edits: cpu, mem, name. **Needs a 20-line sketch** of the field split before implementation is actionable — which fields land in which bucket, what the migration does for existing `machine.json`. Priority/timing not confirmed.
-- [ ] [P2] **Pretty-format `machine.json`** — Current file is minified. Re-emit indented with newlines so it's readable during debugging. Staying JSON (not YAML) — easier for `jq`, and nobody should hand-edit these.
+- [x] **Pretty-format `machine.json`** — Already tab-indented in `state.ts:50` (`JSON.stringify(state, null, "\t")`).
 
 ---
 
@@ -327,9 +327,9 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 **Open library friction:**
 
-- [ ] [P1] **First-class file transfer on `ChrInstance`** — add `upload(localPath, remotePath?)` and `download(remotePath, localPath)`. Today the only SCP code is buried in `src/lib/packages.ts::uploadPackages()` (internal, push-only). Customer (tikoci/donny, 2026-04-22) ran four greps across `quickchr.ts` / `index.ts` / `packages.ts` looking for `scp|upload|sendFile|sftp|putFile` before concluding there was no public method. Factor the SCP helper out of `packages.ts`, reuse for push and pull. Common cases: seed `.db` before enabling `/dude`, push `.rsc` for `:import`, pull `/log/` exports, pull `/file/print` artifacts. Update `routeros-qemu-chr/references/quickchr-automation.md` with a recipes section. **Blocks the `dude` example.**
-- [ ] [P1] **Well-known guest service port registry** — Lookup table so callers can write `extraPorts: [{name:"smb"}]` and get `guest:445, proto:"tcp"` auto-filled. Pairs with `--forward`. Output of the port-research spike.
-- [ ] [P2] **`examples/README.md` — document three consumption patterns** — Same customer spent visible reasoning on how to reference `@tikoci/quickchr` from a sibling experiment dir (bun link vs workspace vs local path vs published npm). Short README naming the three supported patterns and when to use each.
+- [x] **First-class file transfer on `ChrInstance`** — `upload(localPath, remotePath?)` and `download(remotePath, localPath)` shipped (`src/lib/quickchr.ts:518-538`, SCP plumbing in `src/lib/scp.ts`, integration test `test/integration/file-transfer.test.ts`). Unblocks the `dude` example. Skill recipes update for `routeros-qemu-chr/references/quickchr-automation.md` is the remaining follow-up.
+- [x] [P1] **Well-known guest service port registry** — Lookup table so callers can write `extraPorts: [{name:"smb"}]` and get `guest:445, proto:"tcp"` auto-filled. Pairs with `--forward`. Output of the port-research spike.
+- [x] [P2] **`examples/README.md` — document three consumption patterns** — Same customer spent visible reasoning on how to reference `@tikoci/quickchr` from a sibling experiment dir (bun link vs workspace vs local path vs published npm). Short README naming the three supported patterns and when to use each.
 
 ### Examples (Rootless Multi-CHR Topologies)
 
@@ -356,7 +356,7 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 - [ ] [P4] solis (sequential version migration) — Makefile, bun:test, Python, README, rb5009-sample.rsc
 - [ ] [P4] trauks (/app container testing) — Makefile, bun:test, Python, README, github-workflow.yaml
 - [ ] [P4] divi (2-CHR redundancy, VRRP+VXLAN) — Requires root. Makefile, bun:test, Python, README, chr-a.rsc, chr-b.rsc
-- [ ] [P4] **dude** (Dude package + custom `.db` load, from tikoci/donny 2026-04-22) — **Blocked on `upload()`/`download()`**. Boot CHR, `installPackage("dude")`, `chr.upload(localDb, "/dude/dude.db")`, `exec("/dude/set enabled=yes data-directory=dude")`, assert `/dude/devices/print` matches seeded devices. Doubles as anchor test for the file-transfer API and reference for any `/dude/*` work.
+- [ ] [P4] **dude** (Dude package + custom `.db` load, from tikoci/donny 2026-04-22) — Now unblocked (`upload()`/`download()` shipped). Boot CHR, `installPackage("dude")`, `chr.upload(localDb, "/dude/dude.db")`, `exec("/dude/set enabled=yes data-directory=dude")`, assert `/dude/devices/print` matches seeded devices. Doubles as anchor test for the file-transfer API and reference for any `/dude/*` work.
 
 ### Snapshots + RouterOS config export
 
