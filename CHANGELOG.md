@@ -8,7 +8,7 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
-## [0.3.0] — 2025-05-08
+## [0.3.0] — 2026-04-23
 
 ### Added
 
