@@ -112,6 +112,16 @@ function hasProvisioningMutations(opts: {
 	);
 }
 
+/** Normalize convenience aliases on StartOptions:
+ *  - `noAuth: true` → `secureLogin: false` (only when secureLogin is not explicitly set).
+ *  Returns a shallow copy so the caller's input object is not mutated. */
+function normalizeStartOptions(opts: StartOptions): StartOptions {
+	if (opts.noAuth === true && opts.secureLogin === undefined) {
+		return { ...opts, secureLogin: false };
+	}
+	return opts;
+}
+
 function listProvisioningMutations(opts: {
 	installAllPackages?: boolean;
 	packages?: string[];
@@ -984,6 +994,7 @@ export class QuickCHR {
 	 *  and applied automatically on the first subsequent start(). Disk options (`bootSize`,
 	 *  `extraDisks`) are materialized immediately and require `qemu-img` on the host. */
 	static async add(opts: StartOptions = {}): Promise<MachineState> {
+		opts = normalizeStartOptions(opts);
 		if (opts.name?.startsWith("-")) {
 			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
 		}
@@ -1065,6 +1076,7 @@ export class QuickCHR {
 				deviceMode: opts.deviceMode,
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
+				secureLogin: opts.secureLogin,
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
@@ -1092,6 +1104,7 @@ export class QuickCHR {
 	 * apply when creating a new machine and require `qemu-img` on the host.
 	 */
 	static async start(opts: StartOptions = {}): Promise<ChrInstance> {
+		opts = normalizeStartOptions(opts);
 		// Validate name early (before any I/O) so callers get a fast, clear error
 		if (opts.name?.startsWith("-")) {
 			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
@@ -1110,6 +1123,9 @@ export class QuickCHR {
 		let version: string;
 		if (opts.version) {
 			if ((CHANNELS as string[]).includes(opts.version)) {
+				logger.warn(
+					`'${opts.version}' is a channel name, not a version — passed as 'version' but resolved as a channel. Use 'channel: "${opts.version}"' instead to make this explicit.`,
+				);
 				version = await resolveVersion(opts.version as Channel);
 			} else if (!isValidVersion(opts.version)) {
 				throw new QuickCHRError("INVALID_VERSION", `Invalid version: ${opts.version}`);
@@ -1229,6 +1245,7 @@ export class QuickCHR {
 				deviceMode: requestedDeviceMode,
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
+				secureLogin: opts.secureLogin,
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
@@ -1303,6 +1320,7 @@ export class QuickCHR {
 			deviceMode: requestedDeviceMode,
 			user: opts.user,
 			disableAdmin: opts.disableAdmin,
+			secureLogin: opts.secureLogin,
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
 			extraPorts: opts.extraPorts ?? [],

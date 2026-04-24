@@ -299,4 +299,59 @@ describe("ChrInstance API surface (dryRun)", () => {
 		expect(result).toBe(true);
 		expect(calls).toBe(3);
 	});
+
+	test("noAuth: true is normalized to secureLogin: false", async () => {
+		try {
+			const instance = await QuickCHR.start({
+				name: "test-noauth",
+				version: "7.22.1",
+				noAuth: true,
+				dryRun: true,
+			});
+			expect(instance.state.secureLogin).toBe(false);
+		} catch (e: unknown) {
+			const code = (e as { code?: string }).code;
+			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
+			throw e;
+		}
+	});
+
+	test("explicit secureLogin wins over noAuth", async () => {
+		try {
+			const instance = await QuickCHR.start({
+				name: "test-noauth-conflict",
+				version: "7.22.1",
+				noAuth: true,
+				secureLogin: true,
+				dryRun: true,
+			});
+			expect(instance.state.secureLogin).toBe(true);
+		} catch (e: unknown) {
+			const code = (e as { code?: string }).code;
+			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
+			throw e;
+		}
+	});
+
+	test("channel name passed as version is accepted (lenient) and resolves", async () => {
+		// "long-term" in the version field should resolve to a real version,
+		// not throw INVALID_VERSION. A warning is logged but not asserted here
+		// (createLogger is internal). Network reachability is required to
+		// actually resolve, so swallow network-class failures.
+		try {
+			const instance = await QuickCHR.start({
+				name: "test-channel-as-version",
+				version: "long-term",
+				dryRun: true,
+			});
+			expect(instance.state.version).toMatch(/^7\./);
+		} catch (e: unknown) {
+			const code = (e as { code?: string }).code;
+			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
+			// resolveVersion needs network; allow that to skip
+			const msg = e instanceof Error ? e.message : String(e);
+			if (/fetch|network|ENOTFOUND|EAI_AGAIN|ECONNREFUSED/i.test(msg)) return;
+			throw e;
+		}
+	});
 });

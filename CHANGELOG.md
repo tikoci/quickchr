@@ -8,6 +8,34 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Added
+
+- `StartOptions.noAuth` — convenience alias for `secureLogin: false`. Skip the
+  managed `quickchr` user provisioning and leave admin password-less. Self-
+  documenting alternative for callers who found `secureLogin: false` cryptic.
+  When both are set, an explicit `secureLogin` value wins.
+- `MachineState.secureLogin` is now persisted (was silently dropped in
+  `start()` and add() state construction). Pre-0.3.1 machines are unaffected
+  — the field is optional and defaults to undefined on read.
+- `ChrInstance.exec()` JSDoc — documents the single-command-per-call rule
+  (`/rest/execute` runs the input as one statement; multi-line `\n` strings
+  may execute only the first line) and the soft-error pattern (RouterOS may
+  return HTTP 200 with an error string in `output`, e.g. `/dude/agent/add`).
+- `MANUAL.md` — new "ChrInstance at a glance" table grouping every method
+  by purpose (identity, capture, lifecycle, comms, provisioning, files,
+  snapshots, diagnostics). The reference block also now lists `portBase`,
+  `captureInterface`, `tzspGatewayIp`, `waitFor()`, `upload()`, `download()`
+  which had been added without a docs update.
+
+### Changed
+
+- `QuickCHR.start()` / `QuickCHR.add()` now warn (via the progress logger)
+  when a channel name (`"stable"`, `"long-term"`, `"testing"`, `"development"`)
+  is passed in the `version` field. Behavior is unchanged — the value still
+  resolves as a channel — but the warning steers callers toward the
+  self-documenting `channel:` field. JSDoc on `StartOptions.version` updated
+  to call out the lenient acceptance.
+
 ## [0.3.0] — 2026-04-23
 
 ### Added

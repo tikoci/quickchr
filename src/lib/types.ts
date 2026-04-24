@@ -195,7 +195,10 @@ export interface MachineState extends MachineConfig {
  * requires SCP upload + reboot cycle, typically 60–120s extra on native acceleration).
  */
 export interface StartOptions {
-	/** RouterOS version to use (e.g. "7.22.1"). Mutually exclusive with `channel`. */
+	/** RouterOS version to use (e.g. "7.22.1"). Mutually exclusive with `channel`.
+	 *  As a convenience, a channel name (e.g. "long-term") is also accepted here and
+	 *  resolves the same as `channel: "long-term"` — but this emits a warning, since
+	 *  `channel` is the self-documenting field for that case. */
 	version?: string;
 	/** Release channel to resolve latest version from. Default: "stable". */
 	channel?: Channel;
@@ -228,6 +231,11 @@ export interface StartOptions {
 	 *  Enabling the managed login path is quickchr provisioning, so it is validated/tested
 	 *  on RouterOS 7.20.8+ only. */
 	secureLogin?: boolean;
+	/** Convenience alias: `noAuth: true` is equivalent to `secureLogin: false` —
+	 *  skip the managed `quickchr` user provisioning, leave admin password-less.
+	 *  Self-documenting alternative for callers who find `secureLogin: false` cryptic.
+	 *  When both are set, an explicit `secureLogin` value wins. */
+	noAuth?: boolean;
 	/** Starting port number for this instance's port block. Auto-allocated if omitted. */
 	portBase?: number;
 	/** Services to exclude from port mappings (e.g. ["winbox", "api-ssl"]). */
@@ -370,7 +378,19 @@ export interface ChrInstance {
 	qga(command: QgaCommand, args?: object): Promise<unknown>;
 
 	rest(path: string, opts?: RequestInit): Promise<unknown>;
-	/** Run a RouterOS CLI command against the instance. */
+	/** Run a RouterOS CLI command against the instance.
+	 *
+	 *  **Single command per call.** RouterOS `/rest/execute` runs the input as one
+	 *  script statement; a multi-line `command` string with `\n`-separated commands
+	 *  may execute only the first line and silently ignore the rest depending on
+	 *  RouterOS version. To run several commands, call `exec()` multiple times, or
+	 *  wrap them in an explicit RouterOS script: `:do { /cmd1; /cmd2 }`.
+	 *
+	 *  **Soft errors.** Some RouterOS commands return HTTP 200 with an error
+	 *  string in `output` (e.g. `/dude/agent/add` may resolve OK with
+	 *  `"doAdd Agent not implemented"`). `exec()` does not parse output for these
+	 *  patterns — inspect `result.output` if you need to assert success.
+	 */
 	exec(command: string, opts?: ExecOptions): Promise<ExecResult>;
 	/** Apply or renew a CHR trial license.
 	 *  quickchr validates this provisioning flow on RouterOS 7.20.8+ only. */

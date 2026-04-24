@@ -391,6 +391,19 @@ handle. `list()` is `get()` for everything in `machines/`.
 
 ### `ChrInstance`
 
+**At a glance** — every method on a running instance:
+
+| Group | Member | Purpose |
+|---|---|---|
+| Identity | `name`, `state`, `ports`, `restUrl`, `sshPort`, `portBase` | Static metadata persisted in `machine.json` |
+| Capture | `captureInterface`, `tzspGatewayIp` | Platform-correct values for TZSP capture (`tshark -i …`) and RouterOS streaming target |
+| Lifecycle | `waitForBoot()`, `waitFor(fn, ms?)`, `stop()`, `remove()`, `clean()`, `destroy()` | Boot readiness, custom polling, teardown |
+| Comms | `rest()`, `exec()`, `monitor()`, `serial()`, `qga()` | REST, RouterOS CLI, QEMU monitor, serial console, QGA (x86 only) |
+| Provisioning | `license()`, `setDeviceMode()`, `availablePackages()`, `installPackage()` | Post-boot configuration |
+| Files | `upload()`, `download()` | SCP transfer to/from the CHR |
+| Snapshots | `snapshot.{list,save,load,delete}()` | qcow2 savevm/loadvm |
+| Diagnostics | `queryLoad()`, `subprocessEnv()` | Live CPU/mem sample, env vars for child processes |
+
 ```ts
 interface ChrInstance {
   name: string;
@@ -398,8 +411,12 @@ interface ChrInstance {
   ports: ChrPorts;            // {http, https, ssh, api, apiSsl, winbox, ...}
   restUrl: string;            // http://127.0.0.1:{ports.http}
   sshPort: number;
+  portBase: number;           // start of this instance's reserved port block
+  captureInterface: string;   // "lo0" on macOS, "any" on Linux — for TZSP capture
+  tzspGatewayIp: string;      // "10.0.2.2" — QEMU slirp host gateway
 
   waitForBoot(timeoutMs?: number): Promise<boolean>;
+  waitFor(condition: () => Promise<boolean>, timeoutMs?: number): Promise<boolean>;
   stop(): Promise<void>;
   remove(): Promise<void>;
   clean(): Promise<void>;
@@ -416,6 +433,9 @@ interface ChrInstance {
   setDeviceMode(opts: DeviceModeOptions, log?: ProgressLogger): Promise<void>;
   availablePackages(): Promise<string[]>;
   installPackage(pkgs: string | string[]): Promise<string[]>;
+
+  upload(localPath: string, remotePath?: string): Promise<void>;
+  download(remotePath: string, localPath: string): Promise<void>;
 
   snapshot: {
     list(): Promise<SnapshotInfo[]>;
