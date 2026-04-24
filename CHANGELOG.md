@@ -8,9 +8,26 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.3.0] — 2025-05-08
+
 ### Added
 
-- Interactive setup wizard (`quickchr setup`) with main-menu loop
+- `ChrInstance.waitFor(condition, timeoutMs?)` — polling helper that calls an
+  async condition every 2 s, swallows errors, and resolves `true` when the
+  condition passes or `false` on timeout. Replaces ad-hoc polling loops in lab
+  scripts.
+- `ChrInstance.captureInterface` — `"lo0"` on macOS, `"any"` on Linux; the
+  correct `-i` value for `tshark` when capturing TZSP in QEMU user-mode
+  networking. Previously callers had to hardcode the platform-specific value.
+- `ChrInstance.tzspGatewayIp` — always `"10.0.2.2"` (QEMU slirp host gateway);
+  the correct target for RouterOS `/tool/sniffer` streaming and RouterOS
+  routing-server addresses to reach the host.
+- `ChrInstance.portBase` — convenience alias for `state.portBase`, exposing the
+  instance's collision-free port block base without requiring callers to access
+  `state` internals.
+
+## [0.2.0]
+
 - Shell completions for bash, zsh, and fish (`quickchr completions`)
 - Snapshot support: save, load, delete, list (`quickchr snapshot`)
 - Disk management: `--boot-size`, `--add-disk`, `quickchr disk`
