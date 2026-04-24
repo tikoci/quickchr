@@ -235,4 +235,68 @@ describe("ChrInstance API surface (dryRun)", () => {
 		const expected = process.arch === "arm64" ? "arm64" : "x86";
 		expect(instance.state.arch).toBe(expected);
 	});
+
+	test("dryRun instance exposes portBase as a top-level number property", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		expect(typeof instance.portBase).toBe("number");
+		expect(instance.portBase).toBeGreaterThan(0);
+		expect(instance.portBase).toBe(instance.state.portBase);
+	});
+
+	test("dryRun instance exposes captureInterface as lo0 on macOS or any on Linux", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		const expected = process.platform === "darwin" ? "lo0" : "any";
+		expect(instance.captureInterface).toBe(expected);
+	});
+
+	test("dryRun instance exposes tzspGatewayIp as QEMU user-mode gateway", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		expect(instance.tzspGatewayIp).toBe("10.0.2.2");
+	});
+
+	test("waitFor resolves true when condition passes immediately", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		let calls = 0;
+		const result = await instance.waitFor(async () => { calls++; return true; }, 5000);
+		expect(result).toBe(true);
+		expect(calls).toBe(1);
+	});
+
+	test("waitFor resolves true after a few retries", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		let calls = 0;
+		const result = await instance.waitFor(async () => {
+			calls++;
+			return calls >= 3;
+		}, 10_000);
+		expect(result).toBe(true);
+		expect(calls).toBe(3);
+	});
+
+	test("waitFor returns false on timeout", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		const start = Date.now();
+		const result = await instance.waitFor(async () => false, 100);
+		expect(result).toBe(false);
+		expect(Date.now() - start).toBeGreaterThanOrEqual(100);
+	});
+
+	test("waitFor swallows errors from condition and keeps polling", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		let calls = 0;
+		const result = await instance.waitFor(async () => {
+			calls++;
+			if (calls < 3) throw new Error("not ready yet");
+			return true;
+		}, 10_000);
+		expect(result).toBe(true);
+		expect(calls).toBe(3);
+	});
 });

@@ -221,12 +221,28 @@ function createInstance(state: MachineState): ChrInstance {
 		ports,
 		restUrl,
 		sshPort: ports.ssh,
+		portBase: state.portBase,
+		captureInterface: process.platform === "darwin" ? "lo0" : "any",
+		tzspGatewayIp: "10.0.2.2",
 
 		async waitForBoot(timeoutMs?: number): Promise<boolean> {
 			// Use resolved credentials so waitForBoot can validate the response body
 			// on authenticated machines (post-provisioning, post-install reboots).
 			const auth = resolveAuth(state);
 			return waitForBoot(ports.http, timeoutMs, auth.header);
+		},
+
+		async waitFor(condition: () => Promise<boolean>, timeoutMs = 30_000): Promise<boolean> {
+			const deadline = Date.now() + timeoutMs;
+			while (Date.now() < deadline) {
+				try {
+					if (await condition()) return true;
+				} catch { /* swallow — condition may throw before the state is ready */ }
+				const remaining = deadline - Date.now();
+				if (remaining <= 0) break;
+				await Bun.sleep(Math.min(2000, remaining));
+			}
+			return false;
 		},
 
 		async stop(): Promise<void> {

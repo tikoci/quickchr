@@ -306,12 +306,51 @@ export interface ChrInstance {
 	ports: ChrPorts;
 	restUrl: string;
 	sshPort: number;
+	/** Port block base for this instance. Useful for picking L2 socket ports
+	 *  that won't collide with this instance's management ports.
+	 *  Each block occupies `PORTS_PER_BLOCK` (10) consecutive ports starting here.
+	 *  @example
+	 *  // Pick a socket port outside any running instance's block:
+	 *  const socketPort = Math.max(...instances.map(i => i.portBase)) + PORTS_PER_BLOCK;
+	 */
+	portBase: number;
+	/** Platform-appropriate network interface for capturing TZSP traffic from this instance.
+	 *  `"lo0"` on macOS — QEMU user-mode (slirp) routes guest UDP through the host loopback.
+	 *  `"any"` on Linux — TZSP arrives on whichever interface the host routes it to.
+	 *  Pass directly to tshark: `tshark -i ${instance.captureInterface} -f "udp port 37008"`
+	 *  Only meaningful when the instance has a user-mode (`"user"`) network interface. */
+	captureInterface: string;
+	/** QEMU user-mode networking gateway IP — the host's address as seen from inside the VM.
+	 *  Use this as the RouterOS `/tool/sniffer` streaming-server target so TZSP traffic
+	 *  reaches the host. Always `"10.0.2.2"` for QEMU slirp user-mode networking.
+	 *  @example
+	 *  await instance.exec(`/tool/sniffer/set streaming-server=${instance.tzspGatewayIp}:37008`);
+	 */
+	tzspGatewayIp: string;
 
 	/** Check or wait for REST API readiness.
 	 *  After `QuickCHR.start()` with provisioning options (installAllPackages, license, etc.),
 	 *  the returned instance is already REST-reachable — this returns immediately.
 	 *  Call this only when starting without provisioning, or as a safety check after a manual stop/restart. */
 	waitForBoot(timeoutMs?: number): Promise<boolean>;
+	/** Poll a condition until it returns true or the timeout elapses.
+	 *  Retries every 2 s, swallowing errors from the condition function.
+	 *  Returns `true` when the condition passes, `false` on timeout.
+	 *
+	 *  Useful for waiting on RouterOS state that isn't reflected in the boot readiness
+	 *  check — e.g. waiting for a package to become active, a daemon to enable, or a
+	 *  background script to complete.
+	 *
+	 *  @param condition  Async predicate: return `true` when the desired state is reached.
+	 *  @param timeoutMs  Maximum wait in milliseconds (default: 30 000).
+	 *  @example
+	 *  // Wait for the Dude daemon to report enabled=yes
+	 *  const ready = await instance.waitFor(async () => {
+	 *    const r = await instance.exec("/dude/print");
+	 *    return r.output.includes("enabled: yes");
+	 *  }, 30_000);
+	 */
+	waitFor(condition: () => Promise<boolean>, timeoutMs?: number): Promise<boolean>;
 	stop(): Promise<void>;
 	remove(): Promise<void>;
 	clean(): Promise<void>;
