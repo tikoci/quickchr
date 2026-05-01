@@ -129,7 +129,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--boot-disk-format <f>` | `qcow2` | `qcow2` or `raw` |
 | `--boot-size <size>` | — | Resize boot disk; needs `qemu-img`; auto-converts to qcow2 |
 | `--add-disk <size>` | — | Extra blank qcow2 disk; repeatable |
-| `--forward <spec>` | — | Extra hostfwd port; repeatable. See §Custom port forwards. |
+| `--forward <spec>` | — | Extra hostfwd port or built-in service host-port pin; repeatable. See §Custom port forwards. |
 | `--add-package <pkg>` | — | Provisioning, repeatable, ≥ 7.20.8 |
 | `--install-all-packages` | false | Provisioning, ≥ 7.20.8 |
 | `--add-user <user:pass>` | — | Provisioning, ≥ 7.20.8 |
@@ -722,6 +722,9 @@ machines and TCP-probes for a free block.
 Defaults map the first six offsets. `--no-winbox`, `--no-api-ssl`, and
 `excludePorts: ["…"]` skip individual mappings. `extraPorts:
 [{name,host,guest,proto}]` adds custom forwards in offsets 6–9.
+If an extra mapping reuses a built-in service name such as `winbox`, it
+pins/replaces that service's host port rather than creating a second
+`ports.winbox` entry.
 
 If port `9100` is in use, the next instance gets `9110`, etc. Manual
 override via `--port-base`.
@@ -889,23 +892,33 @@ them as additional virtio-blk-pci devices. RouterOS sees them as
 `quickchr disk <name>` shows the layout; with `qemu-img` it also reports
 virtual + actual sizes.
 
-### Custom port forwards
+### Custom port forwards and service port pinning
 
-`--forward <spec>` (repeatable on `add` and `start`) appends an extra
-QEMU SLiRP `hostfwd` mapping on top of the default RouterOS service
-ports (HTTP/HTTPS/SSH/API/API-SSL/WinBox). Spec grammar is
-`name[:host[:guest]][/proto]`. When `name` matches a key or alias in the
-built-in `WELL_KNOWN_GUEST_PORTS` registry (e.g. `smb`/`cifs`, `winbox`,
-`mqtt`, `http-alt`, `dns`, `snmp`, …), the `guest` port and `proto` are
-filled in for you; otherwise both must be supplied. Omitting `host` (or
-passing `0`) auto-allocates a free host port, mirroring the default
-service-port behaviour. Examples:
+`--forward <spec>` (repeatable on `add` and `start`) adds a QEMU SLiRP
+`hostfwd` mapping. Spec grammar is `name[:host[:guest]][/proto]`.
+When `name` matches a key or alias in the built-in
+`WELL_KNOWN_GUEST_PORTS` registry (e.g. `smb`/`cifs`, `winbox`, `mqtt`,
+`http-alt`, `dns`, `snmp`, …), the `guest` port and `proto` are filled
+in for you; otherwise both must be supplied. Omitting `host` (or passing
+`0`) auto-allocates a free host port, mirroring the default service-port
+behaviour.
+
+Reusing a built-in service name pins that service's host port. This is
+useful for legacy clients that assume a fixed local port. For example,
+the Windows Dude client's reliable Wine command-line login path connects
+to `127.0.0.1:8291`, so a fresh lab machine can be created with WinBox
+pinned directly to that host port:
 
 ```bash
 quickchr add my-chr --forward smb                  # host auto, guest 445/tcp
+quickchr add dude-lab --forward winbox:8291        # host 8291, guest 8291/tcp
 quickchr add my-chr --forward winbox:9300          # host pinned, guest 8291/tcp
 quickchr add my-chr --forward myapp:9200:7777/udp  # fully explicit
 ```
+
+Port maps are part of `machine.json`. Once a machine exists, `quickchr
+start <name>` uses the stored mapping; create a new machine (or edit the
+state deliberately) if a built-in service needs a different host port.
 
 ### `clean`
 

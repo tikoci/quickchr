@@ -2,7 +2,7 @@
 
 > Open work and design questions live below. Completed items are collapsed — full notes are in git history, MANUAL.md, DESIGN.md, or `.github/instructions/*.md`.
 >
-> Open items are tagged [P1]–[P4]. Last review pass: 2026-04-24.
+> Open items are tagged [P1]–[P4]. Last review pass: 2026-04-30.
 
 ## Priority tags
 
@@ -302,10 +302,14 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 - **Agents reach for `StartOptions.extraPorts` for custom forwarding but hit two frictions:** (1) not knowing the guest port number (had to grep or guess `smb=445`, `dude=2210`), and (2) not knowing a safe host port. Mitigations: well-known port registry + `--forward` CLI flag (see above).
 
+- **External clients with fixed local-port assumptions need recipes, not just generic port docs.** Observed 2026-04-30/05-01 in `tikoci/donny` dude-winbox validation: the Wine-hosted Dude client reliably connected only via `127.0.0.1:8291`, while quickchr had mapped WinBox to the allocated host port (`9105`). The agent built a useful loopback proxy (`8291 -> 9105`) instead of realizing a fresh quickchr machine could pin WinBox with `--forward winbox:8291` (or a compatible `portBase`). The current surface works, but the discoverability gap is real: service-port pinning must be called out in examples and agent-facing docs.
+
 **Open work:**
 
+- [ ] [P1] **Make built-in service port pinning first-class** — Decide whether the current `--forward winbox:<host>` same-name overwrite is the intended API or should be replaced/augmented with an explicit service override (`--port winbox=<host>`, `servicePorts`, etc.). If keeping the current shape, add tests that lock in overwrite semantics, improve `quickchr help start/add`, and show the Dude/WinBox `8291` recipe in README, MANUAL, examples, and the paired skill. If changing it, emit a clear deprecation/error for ambiguous same-name `extraPorts` rather than relying on object-key overwrite.
+- [ ] [P2] **Machine connection descriptor for agents** — Provide a stable machine-readable CLI surface for ports, URLs, auth, status, and suggested commands (e.g. `quickchr env <name>` or `quickchr inspect <name> --json`). Donny helpers read `machine.json` directly and had to learn old/new port shapes plus `status !== running` handling. A descriptor should make "get actual WinBox/REST/SSH target, verify running, export env for subprocesses" a one-command path without state-file spelunking. Library has `subprocessEnv()`; CLI parity is the gap.
 - [ ] [P2] Review CLI output and library API for LLM ergonomics — structured output options, clear error messages.
-- [ ] [P2] Copilot skills and `.prompt.md` files — teach agents how to use quickchr. Update `~/GitHub/routeros-skills/routeros-qemu-chr/SKILL.md` in-place (see Paired skill maintenance).
+- [ ] [P2] Copilot skills and `.prompt.md` files — teach agents how to use quickchr. Update `~/GitHub/routeros-skills/routeros-qemu-chr/SKILL.md` in-place (see Paired skill maintenance). Include port pinning (`--forward winbox:8291`), `portBase`, `captureInterface`, `tzspGatewayIp`, `waitFor()`, and the "check status before using stored ports" rule.
 
 ### VS Code Integration
 
