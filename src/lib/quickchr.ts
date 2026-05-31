@@ -13,6 +13,7 @@ import type {
 	ExecResult,
 	LicenseInput,
 	LicenseLevel,
+	MachineDescriptor,
 	MachineState,
 	QgaCommand,
 	SnapshotInfo,
@@ -53,7 +54,7 @@ import { provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
 import { resolveAuth, resolveCreds } from "./auth.ts";
 import { scpPush, scpPull } from "./scp.ts";
-import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials } from "./credentials.ts";
+import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec } from "./console.ts";
@@ -224,6 +225,63 @@ async function resolveLicenseInput(input: LicenseInput): Promise<LicenseOptions 
 function createInstance(state: MachineState): ChrInstance {
 	const ports = toChrPorts(state.ports);
 	const restUrl = `http://127.0.0.1:${ports.http}`;
+	const buildEnv = (): Record<string, string> => {
+		const creds = resolveCreds(state);
+		const rawCreds = `${creds.user}:${creds.password}`;
+		const restBase = `${restUrl}/rest`;
+		return {
+			QUICKCHR_NAME: state.name,
+			QUICKCHR_REST_URL: restUrl,
+			QUICKCHR_REST_BASE: restBase,
+			QUICKCHR_SSH_PORT: String(ports.ssh),
+			QUICKCHR_AUTH: rawCreds,
+			// Legacy compat keys used by restraml and similar consumers.
+			URLBASE: restBase,
+			BASICAUTH: rawCreds,
+		};
+	};
+	const buildDescriptor = (): MachineDescriptor => {
+		if (state.status !== "running") {
+			throw new QuickCHRError(
+				"MACHINE_STOPPED",
+				`Machine "${state.name}" must be running to inspect its connection environment (current status: ${state.status}).`,
+			);
+		}
+		const auth = resolveAuth(state);
+		const env = buildEnv();
+		const basic = env.QUICKCHR_AUTH ?? `${auth.user}:`;
+		return {
+			name: state.name,
+			status: "running",
+			version: state.version,
+			arch: state.arch,
+			cpu: state.cpu,
+			mem: state.mem,
+			pid: state.pid ?? null,
+			ports,
+			portMappings: state.ports,
+			urls: {
+				http: restUrl,
+				rest: `${restUrl}/rest`,
+				restBase: `${restUrl}/rest`,
+				https: ports.https ? `https://127.0.0.1:${ports.https}` : undefined,
+				ssh: ports.ssh ? `ssh://${auth.user}@127.0.0.1:${ports.ssh}` : undefined,
+				api: ports.api ? `tcp://127.0.0.1:${ports.api}` : undefined,
+				apiSsl: ports.apiSsl ? `tls://127.0.0.1:${ports.apiSsl}` : undefined,
+				winbox: ports.winbox ? `tcp://127.0.0.1:${ports.winbox}` : undefined,
+			},
+			auth: {
+				user: auth.user,
+				password: basic.slice(auth.user.length + 1),
+				basic,
+				header: auth.header,
+			},
+			env,
+			machineDir: state.machineDir,
+			createdAt: state.createdAt,
+			lastStartedAt: state.lastStartedAt ?? null,
+		};
+	};
 
 	return {
 		name: state.name,
@@ -571,22 +629,11 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async subprocessEnv(): Promise<Record<string, string>> {
-			const auth = resolveAuth(state);
-			// auth.header is "Basic <base64>" — extract the raw user:pass.
-			const rawCreds = auth.header.startsWith("Basic ")
-				? Buffer.from(auth.header.slice(6), "base64").toString()
-				: `${auth.user}:`;
-			const restBase = `${restUrl}/rest`;
-			return {
-				QUICKCHR_NAME: state.name,
-				QUICKCHR_REST_URL: restUrl,
-				QUICKCHR_REST_BASE: restBase,
-				QUICKCHR_SSH_PORT: String(ports.ssh),
-				QUICKCHR_AUTH: rawCreds,
-				// Legacy compat keys used by restraml and similar consumers.
-				URLBASE: restBase,
-				BASICAUTH: rawCreds,
-			};
+			return buildEnv();
+		},
+
+		async descriptor(): Promise<MachineDescriptor> {
+			return buildDescriptor();
 		},
 
 		async queryLoad(): Promise<ChrLoadSample | null> {
@@ -1536,7 +1583,7 @@ export class QuickCHR {
 				// Persist user info in state (password placeholder — real password in secret store)
 				const current = loadMachine(machineState.name);
 				if (current) {
-					current.user = { name: result.user.name, password: "(stored in secrets)" };
+					current.user = { name: result.user.name, password: STORED_IN_SECRETS_PASSWORD };
 					saveMachine(current);
 				}
 				machineState.user = { name: result.user.name, password: result.user.password };

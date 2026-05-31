@@ -152,6 +152,12 @@ async function main() {
 			case "get":
 				await cmdGet(args.slice(1));
 				break;
+			case "inspect":
+				await cmdInspect(args.slice(1));
+				break;
+			case "env":
+				await cmdEnv(args.slice(1));
+				break;
 			case "license":
 				console.error("Note: 'quickchr license' is deprecated. Use 'quickchr set <name> --license' instead.");
 				await cmdLicense(args.slice(1));
@@ -1432,6 +1438,50 @@ async function cmdList(argv: string[] = []) {
 	console.log(table(headers, rows));
 }
 
+function shellQuoteEnv(value: string): string {
+	if (/^[A-Za-z0-9_./:@+-]*$/.test(value)) return value;
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+async function getRunningDescriptor(name: string) {
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { machineNotFoundMessage } = await import("./format.ts");
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+	return instance.descriptor();
+}
+
+async function cmdInspect(argv: string[] = []) {
+	const { positional } = parseFlags(argv);
+	const name = positional[0];
+	if (!name) {
+		console.error("Usage: quickchr inspect <name> [--json]");
+		process.exit(1);
+	}
+	const descriptor = await getRunningDescriptor(name);
+	console.log(JSON.stringify(descriptor, null, 2));
+}
+
+async function cmdEnv(argv: string[] = []) {
+	const { flags, positional } = parseFlags(argv);
+	const name = positional[0];
+	const asJson = flagBool(flags, "json");
+	if (!name) {
+		console.error("Usage: quickchr env <name> [--json]");
+		process.exit(1);
+	}
+	const descriptor = await getRunningDescriptor(name);
+	if (asJson) {
+		console.log(JSON.stringify(descriptor.env, null, 2));
+		return;
+	}
+	for (const [key, value] of Object.entries(descriptor.env)) {
+		console.log(`${key}=${shellQuoteEnv(value)}`);
+	}
+}
 
 async function cmdGet(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
@@ -2457,6 +2507,8 @@ Commands:
   stop [<name>|--all]     Stop instance(s) — print list if no name
   list [<name>] [--json]  List all instances, or detail for one
   status                  Alias for list
+  inspect <name> [--json] Print running machine descriptor as JSON
+  env <name> [--json]     Print subprocess environment for a running machine
   console <name>          Attach to serial console of a running instance
   exec <name> <command>   Run a RouterOS CLI command on a running instance
   remove [<name>|--all]   Remove instance(s) and disk
@@ -2636,6 +2688,23 @@ List all CHR instances or show detailed info for one.
   --json      Output JSON (array of all machines, or object for one).
 
 'quickchr status' is an alias for this command.`);
+			break;
+		case "inspect":
+			console.log(`quickchr inspect <name> [--json]
+
+Print a stable JSON descriptor for a running CHR instance: ports, URLs,
+credentials, status, and subprocess env vars.
+
+  <name>      Name of a running CHR instance.
+  --json      Accepted for parity; output is always JSON.`);
+			break;
+		case "env":
+			console.log(`quickchr env <name> [--json]
+
+Print environment variables for subprocesses that connect to a running CHR.
+
+  <name>      Name of a running CHR instance.
+  --json      Output the env map as JSON instead of KEY=value lines.`);
 			break;
 		case "doctor":
 			console.log(`quickchr doctor

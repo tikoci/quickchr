@@ -6,6 +6,7 @@ import {
 	toChrPorts,
 	validateExplicitExtraPorts,
 } from "../../src/lib/network.ts";
+import { parseForwardSpec } from "../../src/lib/forward-spec.ts";
 import { DEFAULT_PORT_BASE, PORTS_PER_BLOCK, QuickCHRError, type MachineState } from "../../src/lib/types.ts";
 
 function fakeMachine(name: string, ports: Record<string, { name: string; host: number; guest: number; proto: "tcp" | "udp" }>): MachineState {
@@ -64,6 +65,44 @@ describe("buildPortMappings", () => {
 			{ name: "custom", host: 0, guest: 9999, proto: "tcp" },
 		]);
 		expect(ports.custom).toEqual({ name: "custom", host: 9106, guest: 9999, proto: "tcp" });
+	});
+
+	test("same-name extra port replaces the built-in mapping", () => {
+		const ports = buildPortMappings(9100, [], [
+			{ name: "winbox", host: 8291, guest: 8291, proto: "tcp" },
+		]);
+		const hostfwd = buildHostfwdString(ports);
+
+		expect(ports.winbox).toEqual({ name: "winbox", host: 8291, guest: 8291, proto: "tcp" });
+		expect(toChrPorts(ports).winbox).toBe(8291);
+		expect(hostfwd).toContain("hostfwd=tcp::8291-:8291");
+		expect(hostfwd).not.toContain("hostfwd=tcp::9105-:8291");
+	});
+
+	test("parsed --forward winbox:8291 drives the same replacement behavior", () => {
+		const ports = buildPortMappings(9100, [], [parseForwardSpec("winbox:8291")]);
+
+		expect(ports.winbox).toEqual({ name: "winbox", host: 8291, guest: 8291, proto: "tcp" });
+	});
+
+	test("last extra port wins when names repeat", () => {
+		const ports = buildPortMappings(9100, [], [
+			{ name: "smb", host: 9145, guest: 445, proto: "tcp" },
+			{ name: "smb", host: 9445, guest: 445, proto: "tcp" },
+		]);
+
+		expect(ports.smb).toEqual({ name: "smb", host: 9445, guest: 445, proto: "tcp" });
+		expect(Object.values(ports).some((p) => p.host === 9145 && p.guest === 445)).toBe(false);
+	});
+
+	test("supports custom Dude/WinBox-style guest 8291 mapping", () => {
+		const ports = buildPortMappings(9100, [], [
+			{ name: "dude-winbox", host: 9291, guest: 8291, proto: "tcp" },
+		]);
+		const hostfwd = buildHostfwdString(ports);
+
+		expect(ports["dude-winbox"]).toEqual({ name: "dude-winbox", host: 9291, guest: 8291, proto: "tcp" });
+		expect(hostfwd).toContain("hostfwd=tcp::9291-:8291");
 	});
 });
 

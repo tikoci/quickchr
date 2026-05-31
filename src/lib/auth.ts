@@ -8,7 +8,7 @@
  */
 
 import type { MachineState } from "./types.ts";
-import { getInstanceCredentials } from "./credentials.ts";
+import { getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
 
 export interface ResolvedAuth {
 	/** HTTP Basic Authorization header value. */
@@ -48,9 +48,16 @@ export function resolveAuth(
 		};
 	}
 
-	// state.user is the canonical provisioned user written to machine.json.
-	// Check this first — no I/O, no keychain, no blocking.
 	if (state.user) {
+		if (state.user.password === STORED_IN_SECRETS_PASSWORD) {
+			const stored = getInstanceCredentials(state.name);
+			if (stored) {
+				return {
+					header: `Basic ${btoa(`${stored.user}:${stored.password}`)}`,
+					user: stored.user,
+				};
+			}
+		}
 		return {
 			header: `Basic ${btoa(`${state.user.name}:${state.user.password}`)}`,
 			user: state.user.name,
@@ -82,7 +89,13 @@ export function resolveCreds(
 	password?: string,
 ): ResolvedCreds {
 	if (user !== undefined) return { user, password: password ?? "" };
-	if (state.user) return { user: state.user.name, password: state.user.password };
+	if (state.user) {
+		if (state.user.password === STORED_IN_SECRETS_PASSWORD) {
+			const stored = getInstanceCredentials(state.name);
+			if (stored) return { user: stored.user, password: stored.password };
+		}
+		return { user: state.user.name, password: state.user.password };
+	}
 	const stored = getInstanceCredentials(state.name);
 	if (stored) return { user: stored.user, password: stored.password };
 	return { user: "admin", password: "" };

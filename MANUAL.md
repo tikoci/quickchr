@@ -211,6 +211,27 @@ machine-readable output.
 Live REST query. Hits the running CHR and returns the requested group
 (or all if no group specified). Requires the machine to be running.
 
+#### `inspect <name> [--json]`
+
+Stable machine-readable connection descriptor for a **running** CHR. The
+descriptor includes status, ports, original port mappings, URLs, auth, env
+vars, and the machine directory. `--json` is accepted for symmetry with other
+read commands; output is always JSON.
+
+Stopped machines fail with `MACHINE_STOPPED` instead of returning stale
+connection details. Use `quickchr start <name>` first.
+
+#### `env <name> [--json]`
+
+Print the subprocess environment for a **running** CHR. By default it emits
+shell-ready `KEY=value` lines; with `--json` it emits just the env map as
+JSON. This is CLI parity with `ChrInstance.subprocessEnv()`.
+
+The env map includes credentials (`QUICKCHR_AUTH`, `BASICAUTH`) so subprocesses
+can connect without reading quickchr's secret store. Treat `quickchr env` and
+`quickchr inspect` output like password material: avoid commits, public issue
+comments, and unredacted CI logs.
+
 #### `disk [name]`
 
 Shows stored disk layout. With `qemu-img` installed, also reports
@@ -351,10 +372,10 @@ Print or install shell completions. With no arg, detects current shell.
 | `MIKROTIK_WEB_ACCOUNT`, `MIKROTIK_WEB_PASSWORD` | License credentials fallback |
 | `NO_COLOR` | Disable ANSI styling |
 
-`--json` is honored on `list`, `status`, `get`, `snapshot`, and a few
-others — check `quickchr help <command>`. Errors are caught at the top
-level and exit `1` with a `[code] message` line plus the install hint
-when present.
+`--json` is honored on `list`, `status`, `get`, `env`, `snapshot`, and a
+few others; `inspect` is always JSON and accepts `--json` for parity. Check
+`quickchr help <command>`. Errors are caught at the top level and exit `1`
+with a `[code] message` line plus the install hint when present.
 
 ---
 
@@ -402,7 +423,7 @@ handle. `list()` is `get()` for everything in `machines/`.
 | Provisioning | `license()`, `setDeviceMode()`, `availablePackages()`, `installPackage()` | Post-boot configuration |
 | Files | `upload()`, `download()` | SCP transfer to/from the CHR |
 | Snapshots | `snapshot.{list,save,load,delete}()` | qcow2 savevm/loadvm |
-| Diagnostics | `queryLoad()`, `subprocessEnv()` | Live CPU/mem sample, env vars for child processes |
+| Diagnostics | `queryLoad()`, `subprocessEnv()`, `descriptor()` | Live CPU/mem sample, env vars/descriptor for child processes |
 
 ```ts
 interface ChrInstance {
@@ -446,6 +467,7 @@ interface ChrInstance {
 
   queryLoad(): Promise<ChrLoadSample | null>;
   subprocessEnv(): Promise<Record<string, string>>;
+  descriptor(): Promise<MachineDescriptor>;
 }
 ```
 
@@ -457,6 +479,16 @@ transiently resets connections post-boot/reboot). HTTP errors and
 `QUICKCHR_REST_URL`, `QUICKCHR_REST_BASE`, `QUICKCHR_SSH_PORT`,
 `QUICKCHR_AUTH`, plus legacy `URLBASE`/`BASICAUTH`) so child processes
 can hit the CHR without re-resolving auth.
+
+`descriptor()` returns the stable JSON shape used by `quickchr inspect`:
+machine identity, status, ports, port mappings, URLs, auth, env, and
+timestamps. It is intentionally **running-only** and throws
+`MACHINE_STOPPED` for stopped machines.
+
+Both `subprocessEnv()` and `descriptor()` expose auth material by design
+(`QUICKCHR_AUTH`, `BASICAUTH`, `auth.password`, `auth.basic`,
+`auth.header`). Treat their output as credentials and redact before
+logging or attaching to bug reports.
 
 ### `StartOptions` (selected)
 
@@ -825,9 +857,13 @@ QUICKCHR_REST_URL   http://127.0.0.1:{ports.http}
 QUICKCHR_REST_BASE  same plus /rest
 QUICKCHR_SSH_PORT   ports.ssh
 QUICKCHR_AUTH       user:password
-URLBASE             legacy alias for QUICKCHR_REST_URL
-BASICAUTH           legacy header value
+URLBASE             legacy alias for QUICKCHR_REST_BASE
+BASICAUTH           legacy user:password value
 ```
+
+These values are connection secrets. `QUICKCHR_AUTH` and `BASICAUTH` contain
+`user:password` credentials; `quickchr inspect` additionally exposes the
+derived Basic auth header. Do not commit or publicly log these values.
 
 ---
 

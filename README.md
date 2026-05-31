@@ -93,6 +93,11 @@ quickchr list
 # Detailed status for one instance
 quickchr status my-chr
 
+# Stable connection descriptor/env for a running instance
+quickchr inspect my-chr
+quickchr env my-chr
+quickchr env my-chr --json
+
 # Stop an instance
 quickchr stop my-chr
 
@@ -157,6 +162,7 @@ quickchr doctor
 | `--boot-disk-format <f>` | Boot disk format: qcow2\|raw | qcow2 |
 | `--boot-size <size>` | Resize boot disk (e.g., 512M, 2G). Requires `qemu-img`. | |
 | `--add-disk <size>` | Attach an extra blank qcow2 disk. Repeatable. Requires `qemu-img`. | |
+| `--forward <spec>` | Add or pin a QEMU SLiRP hostfwd mapping. Repeatable. | |
 | `--bg` / `--background` | Run in background (default) | true |
 | `--fg` / `--foreground` | Run in foreground — serial console on stdio | |
 | `--add-package <pkg>` | Extra package to install (repeatable) | |
@@ -260,6 +266,39 @@ Each instance gets a block of 10 ports. With the default base of 9100, the first
 | +6–+9 | Reserved (spare) | 9106–9109 |
 
 The second instance gets 9110–9119, and so on.
+
+### Custom Port Forwards and Fixed WinBox
+
+Use `--forward <spec>` on `add` or create-and-start `start` commands to add
+extra QEMU SLiRP `hostfwd` mappings. The shorthand uses the built-in service
+registry when it knows the guest port:
+
+```bash
+quickchr add lab --forward smb                  # auto host port → guest 445/tcp
+quickchr add dude-lab --forward winbox:8291     # host 8291 → guest WinBox 8291/tcp
+quickchr add app-lab --forward myapp:9200:7777/udp
+```
+
+Reusing a built-in service name such as `winbox` pins/replaces that service's
+host port for the machine. Existing machines keep the mapping stored in
+`machine.json`; recreate the machine to change fixed service ports cleanly.
+
+### Machine Descriptors and Subprocess Environments
+
+`quickchr inspect <name> [--json]` emits a stable JSON descriptor for a
+**running** machine: status, ports, URLs, auth, env vars, and the machine
+directory. `--json` is accepted for parity; inspect output is always JSON.
+
+`quickchr env <name> [--json]` prints the same subprocess environment as
+`ChrInstance.subprocessEnv()`: shell `KEY=value` lines by default, or a JSON
+map with `--json`.
+
+> **Credential caveat:** descriptor/env output includes connection secrets
+> (`auth.password`, `auth.basic`, `auth.header`, `QUICKCHR_AUTH`, `BASICAUTH`)
+> so child processes can connect without reading quickchr's secret store. Treat
+> it like a password: do not commit it, paste it into public issues, or leave it
+> in CI logs. Stopped machines fail with `MACHINE_STOPPED`; start the machine
+> before requesting a descriptor or env map.
 
 ### Library Usage
 

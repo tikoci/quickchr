@@ -2,7 +2,7 @@
 
 > Open work and design questions live below. Completed items are collapsed — full notes are in git history, MANUAL.md, DESIGN.md, or `.github/instructions/*.md`.
 >
-> Open items are tagged [P1]–[P4]. Last review pass: 2026-05-30.
+> Open items are tagged [P1]–[P4]. Last review pass: 2026-05-31.
 
 ## Priority tags
 
@@ -92,15 +92,9 @@ Each lists a concrete **done-when** so an agent knows when to stop.
 
 **`[implement]` — clear shape, an agent can land code + tests:**
 
-- **`quickchr env <name>` / `inspect --json` machine descriptor** [P2] — CLI parity for the
-  existing `subprocessEnv()` library helper: stable machine-readable ports/URLs/auth/status.
-  *Done-when:* command emits JSON, refuses cleanly when `status !== running`, unit-tested.
 - **Centralize error-message + logging surface** [P4] — single `code → format` source so
   strings stop drifting across CLI/wizard/library. *Done-when:* one module owns the strings,
   call sites import it, a unit test asserts every `ErrorCode` has a format entry.
-- **`--forward` / service-port-pinning lock-in tests** [P1] — `--forward` shipped; the
-  overwrite semantics for same-name `extraPorts` are untested. *Done-when:* unit tests pin
-  the documented behavior and the Dude/WinBox `8291` recipe is in README + MANUAL + skill.
 - **Wizard storage preflight** [P2] — disk-free / `qemu-img` / socket_vmnet / port-block
   checks before start, wired into the same error-handling tests as the CLI path.
 - **Integration evidence/report hook for centrs** [P2] — centrs currently wraps
@@ -111,10 +105,11 @@ Each lists a concrete **done-when** so an agent knows when to stop.
 
 **`[test]` — coverage for already-shipped code (mechanical, low-risk subagent work):**
 
-- **Lift the sub-70% modules** — as of the 2026-05-30 review, `rest.ts` (41.76%), `packages.ts` (37.78%),
-  `device-mode.ts` (61.36%), `platform.ts` (57.98%), `qemu.ts` (69.81%). Add unit tests that
+- **Lift the sub-70% modules** — as of the 2026-05-30 review, `qemu.ts` (69.81%) remained
+  the next candidate after focused `rest.ts`, `packages.ts`, `device-mode.ts`, and `platform.ts`
+  coverage was added. Add unit tests that
   prove *correctness of uncovered paths* (use the `createServer` mock pattern from
-  `license.test.ts` for `rest.ts`/`device-mode.ts`). *Done-when:* each module's uncovered
+  `license.test.ts` for REST-shaped modules). *Done-when:* each module's uncovered
   branches that encode real behavior have a test; don't chase the percentage for its own sake.
 - **Cross-platform validation passes** [P3] — Linux-host bundle workflow; `completions
   --install` on bash + fish; `qemu-img` + `--boot-size` on Linux. *Done-when:* each runs
@@ -193,6 +188,8 @@ Coverage is 79.59% funcs / 67.86% lines (above thresholds). Remaining sub-70 can
 - [x] ether1 DHCP ordering experiment (SLiRP hostfwd requires 10.0.2.15, user-first correct, lab: `test/lab/slirp-hostfwd/`)
 - [x] HTTP consolidation (`rest.ts` module, node:http + agent:false, all 13 fetch() CHR calls replaced)
 - [x] `start()` always waits for boot
+- [x] `--forward` / service-port-pinning lock-in tests for existing behavior: `--forward winbox:8291`, same-name `extraPorts` replacement, duplicate last-wins semantics, and custom 8291 hostfwd. Production forwarding behavior unchanged.
+- [x] Running-machine connection descriptor/env surface: `ChrInstance.descriptor()`, `quickchr inspect <name> [--json]`, and `quickchr env <name> [--json]`; stopped machines fail with `MACHINE_STOPPED`.
 
 </details>
 
@@ -220,6 +217,7 @@ Coverage is 79.59% funcs / 67.86% lines (above thresholds). Remaining sub-70 can
 - [x] Device-mode feature flags, exec (REST/QGA/console), SSH key provisioning
 - [x] Anchor test (`test/integration/anchor.test.ts`) — 34 field-presence assertions across 6 endpoints
 - [x] Windows unit tests (paths, channels, spawn) run in CI on every push/PR
+- [x] Focused coverage-only unit tests for `rest.ts`, `device-mode.ts`, `packages.ts`, and `platform.ts`. Production behavior unchanged.
 
 </details>
 
@@ -300,6 +298,7 @@ Canonical location for `routeros-qemu-chr` is `~/GitHub/routeros-skills/routeros
 - [x] Shell completions (bash/zsh/fish, context-aware, `quickchr completions --install`)
 - [x] `networks` command (list user/socket/shared/bridged, `--json`)
 - [x] `qga` command (ping/info/osinfo/hostname/time/file-read/file-write/exec, x86 only)
+- [x] `inspect` / `env` connection descriptor commands (`--json`, running-only, secret-bearing output caveat)
 
 </details>
 
@@ -364,7 +363,7 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 ## Open — Machine Config & State
 
-- [ ] [P2] **Machine `inspect` (not `upgrade`)** — Ship `quickchr inspect <name>` (or `status --inspect`) that validates a running/stopped machine against its stored config: REST reachable with managed creds, installed packages match, RouterOS version matches, user accounts as expected. **Reports only — does not fix.** Re-provisioning after the initial provision has too many failure modes (version bumps change behavior, creds may be rotated, package deps may change). If inspect flags a mismatch, recreate. Larger tikoci story: lack of a shared RouterOS backup/restore library; don't introduce post-provisioning commands here until that exists.
+- [ ] [P2] **Machine config audit/verify (not the connection descriptor)** — Ship a report command (name TBD now that `quickchr inspect` is the descriptor surface) that validates a running/stopped machine against its stored config: REST reachable with managed creds, installed packages match, RouterOS version matches, user accounts as expected. **Reports only — does not fix.** Re-provisioning after the initial provision has too many failure modes (version bumps change behavior, creds may be rotated, package deps may change). If the audit flags a mismatch, recreate. Larger tikoci story: lack of a shared RouterOS backup/restore library; don't introduce post-provisioning commands here until that exists.
 - [ ] [P2] **[?] Config schema rationalization** — Separate "desired config" (cpu, mem, packages, networks) from "runtime state" (pid, status, lastStartedAt). Safe edits: cpu, mem, name. **Needs a 20-line sketch** of the field split before implementation is actionable — which fields land in which bucket, what the migration does for existing `machine.json`. Priority/timing not confirmed.
 - [x] **Pretty-format `machine.json`** — Already tab-indented in `state.ts:50` (`JSON.stringify(state, null, "\t")`).
 
@@ -380,12 +379,12 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 - **Agents reach for `StartOptions.extraPorts` for custom forwarding but hit two frictions:** (1) not knowing the guest port number (had to grep or guess `smb=445`, `dude=2210`), and (2) not knowing a safe host port. Mitigations: well-known port registry + `--forward` CLI flag (see above).
 
-- **External clients with fixed local-port assumptions need recipes, not just generic port docs.** Observed 2026-04-30/05-01 in `tikoci/donny` dude-winbox validation: the Wine-hosted Dude client reliably connected only via `127.0.0.1:8291`, while quickchr had mapped WinBox to the allocated host port (`9105`). The agent built a useful loopback proxy (`8291 -> 9105`) instead of realizing a fresh quickchr machine could pin WinBox with `--forward winbox:8291` (or a compatible `portBase`). The current surface works, but the discoverability gap is real: service-port pinning must be called out in examples and agent-facing docs.
+- **External clients with fixed local-port assumptions need recipes, not just generic port docs.** Observed 2026-04-30/05-01 in `tikoci/donny` dude-winbox validation: the Wine-hosted Dude client reliably connected only via `127.0.0.1:8291`, while quickchr had mapped WinBox to the allocated host port (`9105`). The agent built a useful loopback proxy (`8291 -> 9105`) instead of realizing a fresh quickchr machine could pin WinBox with `--forward winbox:8291` (or a compatible `portBase`). The current behavior is now locked by tests and documented in README/MANUAL; the remaining gap is paired-skill/examples discoverability.
+- **Machine connection descriptors for agents shipped.** `ChrInstance.descriptor()`, `quickchr inspect`, and `quickchr env` provide the stable running-machine ports/URLs/auth/status/env surface that donny/centrs-style harnesses should use instead of reading `machine.json` directly. Descriptor/env output is intentionally credential-bearing.
 
 **Open work:**
 
-- [ ] [P1] **Make built-in service port pinning first-class** — Decide whether the current `--forward winbox:<host>` same-name overwrite is the intended API or should be replaced/augmented with an explicit service override (`--port winbox=<host>`, `servicePorts`, etc.). If keeping the current shape, add tests that lock in overwrite semantics, improve `quickchr help start/add`, and show the Dude/WinBox `8291` recipe in README, MANUAL, examples, and the paired skill. If changing it, emit a clear deprecation/error for ambiguous same-name `extraPorts` rather than relying on object-key overwrite.
-- [ ] [P2] **Machine connection descriptor for agents** — Provide a stable machine-readable CLI surface for ports, URLs, auth, status, and suggested commands (e.g. `quickchr env <name>` or `quickchr inspect <name> --json`). Donny helpers read `machine.json` directly and had to learn old/new port shapes plus `status !== running` handling. A descriptor should make "get actual WinBox/REST/SSH target, verify running, export env for subprocesses" a one-command path without state-file spelunking. Library has `subprocessEnv()`; CLI parity is the gap.
+- [ ] [P4] **Service-port pinning API polish / paired-skill follow-up** — Existing `--forward winbox:<host>` same-name replacement is documented and unit-tested; production behavior is unchanged. Remaining question: keep this as the intended API or add an explicit service override (`--port winbox=<host>`, `servicePorts`, etc.). If keeping it, update examples and the paired `routeros-qemu-chr` skill; if changing it, emit a clear deprecation/error for ambiguous same-name `extraPorts`.
 - [ ] [P2] Review CLI output and library API for LLM ergonomics — structured output options, clear error messages.
 - [ ] [P2] Copilot skills and `.prompt.md` files — teach agents how to use quickchr. Update `~/GitHub/routeros-skills/routeros-qemu-chr/SKILL.md` in-place (see Paired skill maintenance). Include port pinning (`--forward winbox:8291`), `portBase`, `captureInterface`, `tzspGatewayIp`, `waitFor()`, and the "check status before using stored ports" rule.
 
@@ -541,7 +540,7 @@ Not rejected — deferred until prerequisites land or the need sharpens.
 - **Packaging (Homebrew/Deb)** — Lower priority than core functionality.
 - **Service management (launchd/systemd)** — Optional promotion for long-running instances, not a requirement.
 - **Machine templates** — CLI flags are templates, API objects can be reused, wizard always prompts. No separate template system.
-- **`quickchr upgrade <name>`** — Replaced by `quickchr inspect` (reports mismatch; user recreates). Avoid post-provisioning mutations.
+- **`quickchr upgrade <name>`** — Replaced by a future config audit/verify report (reports mismatch; user recreates). Avoid post-provisioning mutations.
 - **`--no-ansi` flag** — ANSI is fine in text output; `grep`/`jq` handle it. The underlying discipline (separate presentation from content) is addressed by "Centralize error-message surface".
 - **`machine.json` → `machine.yaml`** — Staying JSON; pretty-printing addresses readability. YAML adds complexity for `jq` users without a matching benefit.
 - **Separate multi-version/multi-arch test matrix runner** — Current CI matrix + `examples/matrica` cover this.

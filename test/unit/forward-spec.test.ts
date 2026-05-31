@@ -42,6 +42,15 @@ describe("parseForwardSpec", () => {
 		});
 	});
 
+	test("WinBox pinning recipe maps host 8291 to guest 8291", () => {
+		expect(parseForwardSpec("winbox:8291")).toEqual({
+			name: "winbox",
+			host: 8291,
+			guest: 8291,
+			proto: "tcp",
+		});
+	});
+
 	test("fully explicit spec name:host:guest/proto", () => {
 		expect(parseForwardSpec("foo:9200:7777/udp")).toEqual({
 			name: "foo",

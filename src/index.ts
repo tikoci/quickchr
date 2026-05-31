@@ -44,6 +44,7 @@ export type {
 	LicenseLevel,
 	LicenseOptions,
 	MachineConfig,
+	MachineDescriptor,
 	MachineState,
 	NetworkConfig,
 	NetworkMode,

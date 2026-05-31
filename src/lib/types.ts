@@ -290,6 +290,38 @@ export interface ChrPorts {
 	[key: string]: number;
 }
 
+export interface MachineDescriptor {
+	name: string;
+	status: "running";
+	version: string;
+	arch: Arch;
+	cpu: number;
+	mem: number;
+	pid: number | null;
+	ports: ChrPorts;
+	portMappings: Record<string, PortMapping>;
+	urls: {
+		http: string;
+		rest: string;
+		restBase: string;
+		https?: string;
+		ssh?: string;
+		api?: string;
+		apiSsl?: string;
+		winbox?: string;
+	};
+	auth: {
+		user: string;
+		password: string;
+		basic: string;
+		header: string;
+	};
+	env: Record<string, string>;
+	machineDir: string;
+	createdAt: string;
+	lastStartedAt: string | null;
+}
+
 /** Return value of ChrInstance.queryLoad(). */
 export interface ChrLoadSample {
 	/** Host CPU percent across all virtual CPUs (0–100 × vCPU count). */
@@ -437,6 +469,8 @@ export interface ChrInstance {
 	 *  Bun.spawn(["bun", "my-script.ts"], { env: { ...process.env, ...await chr.subprocessEnv() } })
 	 */
 	subprocessEnv(): Promise<Record<string, string>>;
+	/** Build a stable machine-readable connection descriptor for a running instance. */
+	descriptor(): Promise<MachineDescriptor>;
 
 	/** Sample QEMU guest load from the monitor. Returns null when the monitor is
 	 *  unavailable (machine stopped or running in foreground mode). */

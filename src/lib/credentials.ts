@@ -26,6 +26,8 @@ export interface InstanceCredentials {
 	password: string;
 }
 
+export const STORED_IN_SECRETS_PASSWORD = "(stored in secrets)";
+
 const WEB_SERVICE = "com.quickchr.mikrotik-web";
 const INSTANCE_SERVICE = "com.quickchr.instance";
 

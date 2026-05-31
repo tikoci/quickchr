@@ -36,6 +36,8 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
 6. **Class-based API** — `QuickCHR` is a class with static methods for clean namespacing. `ChrInstance` is an interface implemented as a plain object with closures.
 
+7. **Running-only connection descriptors** — `ChrInstance.descriptor()`, `quickchr inspect`, and `quickchr env` are live connection handoff surfaces, not stale state readers. They intentionally fail with `MACHINE_STOPPED` when the VM is not running, because ports/auth/status are only safe to consume when the machine is active. Descriptor/env output includes auth material by design for subprocess handoff; callers must treat it as credential-bearing output.
+
 ## Port Layout
 
 | Offset | Service    | Guest Port |

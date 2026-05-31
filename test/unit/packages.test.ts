@@ -3,21 +3,28 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { listAvailablePackages, findPackageFile, downloadPackages } from "../../src/lib/packages.ts";
+import { zipSync } from "fflate";
+import { listAvailablePackages, findPackageFile, downloadPackages, downloadAndListPackages } from "../../src/lib/packages.ts";
+
+const TMP = join(import.meta.dir, ".tmp-packages-test");
+let testDirId = 0;
+
+function freshDir(prefix: string): string {
+	return join(TMP, `${prefix}-${++testDirId}`);
+}
 
 describe("listAvailablePackages", () => {
 	let dir: string;
 
 	beforeEach(() => {
-		dir = join(tmpdir(), `quickchr-test-${Date.now()}`);
+		dir = freshDir("list");
 		mkdirSync(dir, { recursive: true });
 	});
 
 	afterEach(() => {
-		rmSync(dir, { recursive: true, force: true });
+		rmSync(TMP, { recursive: true, force: true });
 	});
 
 	test("parses arm64 .npk filenames to package names", () => {
@@ -63,7 +70,7 @@ describe("listAvailablePackages", () => {
 	});
 
 	test("returns empty array for missing directory", () => {
-		const names = listAvailablePackages(join(tmpdir(), "does-not-exist-999"));
+		const names = listAvailablePackages(join(TMP, "does-not-exist-999"));
 		expect(names).toEqual([]);
 	});
 
@@ -95,18 +102,26 @@ describe("listAvailablePackages", () => {
 		const names = listAvailablePackages(dir);
 		expect(names).toEqual(["container", "dude"]);
 	});
+
+	test("ignores .npk files without a RouterOS version delimiter", () => {
+		writeFileSync(join(dir, "container-latest-arm64.npk"), "");
+		writeFileSync(join(dir, "routeros-7.22.1-arm64.npk"), "");
+
+		const names = listAvailablePackages(dir);
+		expect(names).toEqual(["routeros"]);
+	});
 });
 
 describe("findPackageFile", () => {
 	let dir: string;
 
 	beforeEach(() => {
-		dir = join(tmpdir(), `quickchr-find-${Date.now()}`);
+		dir = freshDir("find");
 		mkdirSync(dir, { recursive: true });
 	});
 
 	afterEach(() => {
-		rmSync(dir, { recursive: true, force: true });
+		rmSync(TMP, { recursive: true, force: true });
 	});
 
 	test("finds exact package by name", () => {
@@ -146,7 +161,13 @@ describe("findPackageFile", () => {
 	});
 
 	test("returns undefined for missing directory", () => {
-		expect(findPackageFile(join(tmpdir(), "no-such-dir-999"), "iot")).toBeUndefined();
+		expect(findPackageFile(join(TMP, "no-such-dir-999"), "iot")).toBeUndefined();
+	});
+
+	test("finds x86 package files without an architecture suffix", () => {
+		writeFileSync(join(dir, "wireless-7.22.1.npk"), "");
+
+		expect(findPackageFile(dir, "wireless")).toBe(join(dir, "wireless-7.22.1.npk"));
 	});
 });
 
@@ -161,12 +182,12 @@ describe("downloadPackages", () => {
 	const originalFetch = globalThis.fetch;
 
 	beforeEach(() => {
-		cacheDir = join(tmpdir(), `quickchr-pkgs-${Date.now()}`);
+		cacheDir = freshDir("download");
 		mkdirSync(cacheDir, { recursive: true });
 	});
 
 	afterEach(() => {
-		rmSync(cacheDir, { recursive: true, force: true });
+		rmSync(TMP, { recursive: true, force: true });
 		globalThis.fetch = originalFetch;
 	});
 
@@ -191,7 +212,47 @@ describe("downloadPackages", () => {
 		);
 		await expect(downloadPackages("7.22.1", "x86", cacheDir)).rejects.toMatchObject({
 			code: "DOWNLOAD_FAILED",
+			message: expect.stringContaining(
+				"https://download.mikrotik.com/routeros/7.22.1/all_packages-x86-7.22.1.zip",
+			),
 		});
+	});
+
+	test("downloads from the arch-specific packages URL and extracts ZIP contents", async () => {
+		const zipData = zipSync({
+			"container-7.23beta5-arm64.npk": new TextEncoder().encode("container package"),
+			"nested/readme.txt": new TextEncoder().encode("ignored for package listing"),
+		});
+		let requestedUrl: string | undefined;
+		globalThis.fetch = makeMockFetch((url) => {
+			requestedUrl = String(url);
+			return Promise.resolve(new Response(zipData, { status: 200 }));
+		});
+
+		const extractDir = await downloadPackages("7.23beta5", "arm64", cacheDir);
+
+		expect(requestedUrl).toBe(
+			"https://download.mikrotik.com/routeros/7.23beta5/all_packages-arm64-7.23beta5.zip",
+		);
+		expect(extractDir).toBe(join(cacheDir, "packages-arm64-7.23beta5"));
+		const extractedPackage = join(extractDir, "container-7.23beta5-arm64.npk");
+		expect(existsSync(extractedPackage)).toBe(true);
+		expect(readFileSync(extractedPackage, "utf-8")).toBe("container package");
+	});
+
+	test("uses a cached ZIP without fetching when extraction is still needed", async () => {
+		const zipPath = join(cacheDir, "all_packages-x86-7.22.1.zip");
+		const zipData = zipSync({
+			"dude-7.22.1.npk": new TextEncoder().encode("dude package"),
+		});
+		writeFileSync(zipPath, zipData);
+		globalThis.fetch = makeMockFetch(() => {
+			throw new Error("fetch should not be called when the package ZIP is cached");
+		});
+
+		const extractDir = await downloadPackages("7.22.1", "x86", cacheDir);
+
+		expect(readFileSync(join(extractDir, "dude-7.22.1.npk"), "utf-8")).toBe("dude package");
 	});
 
 	test("throws PROCESS_FAILED when zip extraction fails (corrupt zip)", async () => {
@@ -203,5 +264,43 @@ describe("downloadPackages", () => {
 			code: "PROCESS_FAILED",
 			message: expect.stringContaining("ZIP extraction failed"),
 		});
+	});
+});
+
+describe("downloadAndListPackages", () => {
+	let cacheDir: string;
+	const originalFetch = globalThis.fetch;
+	const originalQuickchrDataDir = process.env.QUICKCHR_DATA_DIR;
+
+	beforeEach(() => {
+		cacheDir = freshDir("download-list");
+		mkdirSync(cacheDir, { recursive: true });
+		process.env.QUICKCHR_DATA_DIR = cacheDir;
+	});
+
+	afterEach(() => {
+		rmSync(TMP, { recursive: true, force: true });
+		globalThis.fetch = originalFetch;
+		if (originalQuickchrDataDir === undefined) {
+			delete process.env.QUICKCHR_DATA_DIR;
+		} else {
+			process.env.QUICKCHR_DATA_DIR = originalQuickchrDataDir;
+		}
+	});
+
+	test("downloads, extracts, filters package filenames, and returns sorted names", async () => {
+		const zipData = zipSync({
+			"zerotier-7.22.1.npk": new TextEncoder().encode("zerotier"),
+			"container-7.22.1.npk": new TextEncoder().encode("container"),
+			"README.txt": new TextEncoder().encode("not an npk"),
+			"not-versioned.npk": new TextEncoder().encode("not a RouterOS package"),
+		});
+		globalThis.fetch = makeMockFetch(() =>
+			Promise.resolve(new Response(zipData, { status: 200 })),
+		);
+
+		const names = await downloadAndListPackages("7.22.1", "x86");
+
+		expect(names).toEqual(["container", "zerotier"]);
 	});
 });
