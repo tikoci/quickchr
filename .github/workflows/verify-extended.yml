@@ -12,7 +12,7 @@ name: Extended Verification
 #
 # arm64 known issues (tracked in BACKLOG.md):
 #   - clean() second-boot timeout skipped on arm64
-#   - node:http stale-response bug causes exec tests to be skipped
+#   - arm64 REST stale-response bug causes exec tests to be skipped
 
 on:
   workflow_dispatch:

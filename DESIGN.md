@@ -19,7 +19,7 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 ```
 
 - **CLI** — git-style subcommands + interactive wizard. Thin layer over the library.
-- **Library** — `QuickCHR` class with static methods: `start()`, `list()`, `get()`, `doctor()`. Returns `ChrInstance` handles with `stop()`, `remove()`, `rest()`, `monitor()`, etc.
+- **Library** — `QuickCHR` class with static methods: `start()`, `add()`, `list()`, `get()`, `doctor()`. Returns `ChrInstance` handles with `stop()`, `remove()`, `rest()`, `exec()`, `monitor()`, etc.
 - **Modules** — Pure functions for QEMU arg building, image download, port allocation, state persistence.
 
 ### Key Design Decisions
@@ -87,36 +87,40 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
 ## CI System
 
-**Workflow**: `.github/workflows/ci.yml`
+**Workflows**: `.github/workflows/{ci,verify-extended,publish}.yml`. Full artifact map and
+failure-diagnosis guide live in `.github/instructions/ci.instructions.md` — this section is
+the high-level rationale only.
 
-Three jobs — lint and unit-tests run in parallel; integration is gated on both:
+**`ci.yml`** — core quality gate on every push/PR to `main`:
 
-```
-lint                    unit-tests                windows-unit-tests
-Biome + tsc --noEmit    bun test test/unit/       bun test test/unit/
-                        --coverage                (windows-latest, always)
-        ↘               ↙
-        integration (matrix)
-          linux/x86_64  (always)
-          linux/aarch64 (always)
-          macos/arm64   (workflow_dispatch: macos=true)
-          macos/x86_64  (workflow_dispatch: macos=true)
+```text
+lint (ubuntu)  ──┐
+unit-tests (ubuntu, --coverage) ──┴→ integration-x86 (ubuntu) → windows-unit-tests (windows-latest)
 ```
 
-**Integration matrix**: Each runner boots a CHR matching its native arch.  `detectAccel()`
-selects KVM/HVF/TCG automatically — no per-runner overrides needed.
+`lint` and `unit-tests` run in parallel. `integration-x86` boots an x86 CHR (KVM if
+available, else TCG) and gates on both. `windows-unit-tests` runs last — if the core is
+broken, Windows runner minutes add no signal. Only x86 integration runs on every push;
+cross-arch and macOS are too slow/fragile for the per-push gate.
 
-**Coverage**: `bun test test/unit/ --coverage` output is parsed and compared against
-thresholds (default 75% functions, 60% lines).  Failures emit `::warning::` annotations
-but do NOT block merges (`continue-on-error: true`).  Thresholds are overridable via
-dispatch inputs `min-funcs` / `min-lines`.
+**`verify-extended.yml`** — `workflow_dispatch` only. Independent jobs (no cross-`needs:`)
+for the platforms kept out of the per-push gate: linux/aarch64, macOS (arm64 + x86), and
+Windows. Dispatch inputs `arm64` / `macos` / `windows` select platforms; `test-filter`
+narrows to specific test files for fast iteration. Each runner boots a CHR matching its
+native arch — `detectAccel()` selects KVM/HVF/TCG automatically, no per-runner overrides.
 
-**Artifacts** (details in `.github/instructions/ci.instructions.md`):
+**`publish.yml`** — triggers on `v*` tags (or dispatch). Runs lint + unit + x86 integration +
+windows-unit before `npm publish` (`--tag next` for odd/pre-release minors, `--tag latest`
+for even/stable). See "Release Process" in `ci.instructions.md`.
+
+**Coverage**: `unit-tests` parses `bun test --coverage` output and compares against thresholds
+(default 75% functions, 60% lines). Failures emit `::warning::` annotations but do NOT block
+merges (`continue-on-error: true`). Thresholds are overridable via dispatch inputs
+`min-funcs` / `min-lines`.
+
+**Artifacts**:
 - `coverage-report` — full per-file coverage table (14 days)
 - `integration-logs-{platform}` — bun test output + machine.json + qemu.log (7 days)
-
-**Publish workflow** (`.github/workflows/publish.yml`): triggers on `v*` tags;
-runs lint + typecheck + unit tests before npm publish.
 
 ## Design Principles
 

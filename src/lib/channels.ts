@@ -1,7 +1,9 @@
 /**
  * Communication channels — QEMU monitor, serial console, QGA (QEMU Guest Agent).
  *
- * Uses Unix domain sockets stored in the machine directory.
+ * Uses Unix domain sockets stored in the machine directory on POSIX. On Windows,
+ * launched machines use TCP localhost endpoints derived from portBase; named pipes
+ * remain only as the no-portBase fallback path.
  * QGA protocol implementation lives in qga.ts — this module provides
  * the high-level qgaCommand() wrapper with arch guards and path resolution.
  */

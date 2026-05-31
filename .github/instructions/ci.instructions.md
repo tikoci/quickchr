@@ -62,7 +62,7 @@ Triggered by `bun run release` (creates and pushes a `vX.Y.Z` tag) or via GitHub
 The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Windows-only tests (`describe.skipIf(process.platform !== "win32")`) in:
 
 - `test/unit/windows-paths.test.ts` — `getDataDir()` (`LOCALAPPDATA`/`USERPROFILE`), `getMachinesDir()`, `getCacheDir()`, `findCommandOnPath()` uses `where.exe`, `detectPackageManager()` returns `"winget"`
-- `test/unit/windows-channels.test.ts` — `buildQemuArgs` produces `\\.\pipe\...` named pipe paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` for missing pipe; `stopMachineByName` handles no `.sock` files
+- `test/unit/windows-channels.test.ts` — on Windows, `buildQemuArgs` produces TCP-localhost chardev paths (`host=127.0.0.1,port=portBase+N`: monitor +6, serial +7, qga +8), because QEMU's Winsock `bind()` cannot handle `\\.\pipe\` paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` when the TCP port is not listening; `stopMachineByName` handles no `.sock` files
 - `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`
 
 **Windows integration tests** (QEMU for Windows) are future work — not in CI yet.  

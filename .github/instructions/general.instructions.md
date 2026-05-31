@@ -20,7 +20,8 @@ applyTo: "src/**"
 
 - Throw `QuickCHRError(code, message, installHint?)` from library code.
 - CLI layer catches errors and prints user-friendly messages.
-- Error codes: `MISSING_QEMU`, `MISSING_FIRMWARE`, `PORT_CONFLICT`, `DOWNLOAD_FAILED`, `TIMEOUT`, `STATE_ERROR`, `INVALID_VERSION`, `SPAWN_FAILED`.
+- The canonical list of codes is the `ErrorCode` union in `src/lib/types.ts` — keep that as the single source of truth. Commonly thrown: `MISSING_QEMU`, `MISSING_FIRMWARE`, `PORT_CONFLICT`, `DOWNLOAD_FAILED`, `BOOT_TIMEOUT`, `QGA_TIMEOUT`, `QGA_UNSUPPORTED`, `MACHINE_STOPPED`, `MACHINE_RUNNING`, `INVALID_VERSION`, `EXEC_FAILED`, `SPAWN_FAILED`, `STATE_ERROR`.
+- There is no bare `TIMEOUT` code — boot waits throw `BOOT_TIMEOUT`, QGA waits throw `QGA_TIMEOUT`.
 
 ## Key API Patterns
 

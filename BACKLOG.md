@@ -2,7 +2,7 @@
 
 > Open work and design questions live below. Completed items are collapsed — full notes are in git history, MANUAL.md, DESIGN.md, or `.github/instructions/*.md`.
 >
-> Open items are tagged [P1]–[P4]. Last review pass: 2026-04-30.
+> Open items are tagged [P1]–[P4]. Last review pass: 2026-05-30.
 
 ## Priority tags
 
@@ -35,7 +35,7 @@
 <details>
 <summary>CI & Publish</summary>
 
-- [x] CI matrix (linux x86/arm64, macOS dispatch), coverage 79.59% funcs / 67.86% lines (above thresholds)
+- [x] Core x86 CI + extended platform dispatch, coverage 79.59% funcs / 67.86% lines (above thresholds)
 - [x] Artifacts (coverage-report 14d, integration-logs 7d), `publish.yml` gating
 
 </details>
@@ -52,6 +52,84 @@
 ---
 
 ## Open Work
+
+### Robustness & Testing — Agent-Ready Work (curated 2026-05-30)
+
+This is an **index into the items below**, not new work. It groups the highest-leverage
+robustness/testing items by whether an autonomous agent (`/fleet` or a subagent) can take
+them, and what shape that work has. `[research]` = produces a repro/report/grounding doc;
+`[implement]` = clear enough to land code + tests; `[test]` = add coverage to existing code.
+Each lists a concrete **done-when** so an agent knows when to stop.
+
+**`[research]` — self-contained investigations (good `/fleet` / subagent tasks):**
+
+- **arm64 REST "POST returns prior GET" repro** [P3] — Build a *minimal* repro outside
+  quickchr (plain Bun + a real CHR on `linux/aarch64`) hitting the same endpoints. Determine
+  whether the fault is RouterOS arm64 REST, request pipelining, or the Bun runtime.
+  *Done-when:* a runnable repro script + a written verdict (one of: RouterOS / quickchr /
+  Bun) with evidence; if Bun, an upstream issue link. Un-skips the 2 arm64 `exec.test.ts` tests.
+- **arm64 `clean()` second-boot timeout spike** [P3] — Does `clean()` need to reset UEFI
+  vars on arm64, or does `_launchExisting` need different args after a clean? *Done-when:*
+  root cause identified with a qemu.log showing the stall, plus a proposed fix (≤1 page).
+  Un-skips the arm64 `clean()` integration test.
+- **x86 QGA-under-HVF hypothesis test** [P3] — Confirm whether RouterOS restricts QGA
+  activation to `/dev/kvm` (guest never opens the virtio-serial port under HVF). Compare
+  KVM vs HVF on the same RouterOS version. *Done-when:* `docs/qga-x86-macos-qemu10-investigation.md`
+  updated with a KVM-vs-HVF result and a verdict on whether any local workaround exists.
+- **Error-diagnostics labs** [P2] — Induce the 3–5 highest-signal error codes (`MISSING_QEMU`,
+  `PORT_CONFLICT`, `DOWNLOAD_FAILED`, `BOOT_TIMEOUT`, `SPAWN_FAILED`) and capture current
+  output. *Done-when:* a `test/lab/errors/REPORT.md` with the real message/exit shape per code
+  — the grounding the "LLM-actionable error diagnostics" item is blocked on.
+- **`exec()` soft-error corpus** [P2] — Collect 5–10 real RouterOS HTTP-200-with-error-string
+  outputs (e.g. `/dude/agent/add`). *Done-when:* a documented corpus so a future
+  `throwOnCliError` / `isRouterOSError()` regex is grounded, not guessed.
+- **REST timeout contract reconciliation (centrs ↔ quickchr)** [P2] — centrs records a
+  RouterOS REST 60s ceiling for `via=rest-api`, while quickchr has lab rules for blocking
+  endpoints (`device-mode/update`, `license/renew`) and uses longer host-side safety timers.
+  *Done-when:* one lab report maps the effective RouterOS/HTTP behavior for normal REST,
+  `/rest/execute`, `/console/inspect`, `license/renew`, and `device-mode/update`; update
+  `.github/instructions/routeros-rest.instructions.md` and any code timeouts from evidence.
+
+**`[implement]` — clear shape, an agent can land code + tests:**
+
+- **`quickchr env <name>` / `inspect --json` machine descriptor** [P2] — CLI parity for the
+  existing `subprocessEnv()` library helper: stable machine-readable ports/URLs/auth/status.
+  *Done-when:* command emits JSON, refuses cleanly when `status !== running`, unit-tested.
+- **Centralize error-message + logging surface** [P4] — single `code → format` source so
+  strings stop drifting across CLI/wizard/library. *Done-when:* one module owns the strings,
+  call sites import it, a unit test asserts every `ErrorCode` has a format entry.
+- **`--forward` / service-port-pinning lock-in tests** [P1] — `--forward` shipped; the
+  overwrite semantics for same-name `extraPorts` are untested. *Done-when:* unit tests pin
+  the documented behavior and the Dude/WinBox `8291` recipe is in README + MANUAL + skill.
+- **Wizard storage preflight** [P2] — disk-free / `qemu-img` / socket_vmnet / port-block
+  checks before start, wired into the same error-handling tests as the CLI path.
+- **Integration evidence/report hook for centrs** [P2] — centrs currently wraps
+  `QuickCHR.start()` and `subprocessEnv()` in `test/integration/chr.ts`, then writes its own
+  JSONL/GitHub summary record. *Done-when:* quickchr exposes a stable run-summary helper or
+  CLI JSON shape with machine name, requested version/channel, actual RouterOS version/board,
+  ports, and redacted auth so centrs and future consumers stop hand-rolling evidence records.
+
+**`[test]` — coverage for already-shipped code (mechanical, low-risk subagent work):**
+
+- **Lift the sub-70% modules** — as of the 2026-05-30 review, `rest.ts` (41.76%), `packages.ts` (37.78%),
+  `device-mode.ts` (61.36%), `platform.ts` (57.98%), `qemu.ts` (69.81%). Add unit tests that
+  prove *correctness of uncovered paths* (use the `createServer` mock pattern from
+  `license.test.ts` for `rest.ts`/`device-mode.ts`). *Done-when:* each module's uncovered
+  branches that encode real behavior have a test; don't chase the percentage for its own sake.
+- **Cross-platform validation passes** [P3] — Linux-host bundle workflow; `completions
+  --install` on bash + fish; `qemu-img` + `--boot-size` on Linux. *Done-when:* each runs
+  green on the target host and the result is noted in the relevant item below.
+- **centrs L2 lab feasibility** [P3] — centrs needs mac-telnet validation on an L2 segment;
+  its current `startIntegrationChr()` uses user-mode SLiRP/hostfwd, which cannot carry L2
+  broadcast/MAC-Telnet. *Done-when:* a quickchr + centrs spike proves one repeatable host
+  topology (Linux TAP/socket or macOS socket_vmnet/vmnet) and documents what native helper
+  is still needed for raw-L2 frame I/O.
+
+> **Needs a human decision before an agent starts** (do not auto-implement): the two `[?]`
+> port-allocation items (port-base randomness, fixed service-block redesign) and `[?]` config
+> schema rationalization. They change the persisted state/port contract; an agent can write
+> the design sketch but the direction call is the maintainer's. Recommended defaults are noted
+> inline at each item.
 
 ### Pre-GitHub Push (ship readiness)
 
@@ -120,12 +198,12 @@ Coverage is 79.59% funcs / 67.86% lines (above thresholds). Remaining sub-70 can
 
 **Open robustness items:**
 
-- [ ] [P2] **LLM-actionable error diagnostics** — structured `{code, message, hint, diagnostics?}` payloads with 50-char context. **Blocker:** not enough saved error-case tests to know what each code's `hint`/`diagnostics` should say. Before shaping the payload, build labs for the 3–5 highest-signal codes (`MISSING_QEMU`, `PORT_CONFLICT`, `DOWNLOAD_FAILED`, `TIMEOUT`, `SPAWN_FAILED`) by inducing each in CI (qemu removed from PATH, port already bound, etc.) and capturing current output. Shape the struct around what's observed, not what's imagined.
+- [ ] [P2] **LLM-actionable error diagnostics** — structured `{code, message, hint, diagnostics?}` payloads with 50-char context. **Blocker:** not enough saved error-case tests to know what each code's `hint`/`diagnostics` should say. Before shaping the payload, build labs for the 3–5 highest-signal codes (`MISSING_QEMU`, `PORT_CONFLICT`, `DOWNLOAD_FAILED`, `BOOT_TIMEOUT`, `SPAWN_FAILED`) by inducing each in CI (qemu removed from PATH, port already bound, etc.) and capturing current output. Shape the struct around what's observed, not what's imagined. (Canonical code list: `ErrorCode` in `src/lib/types.ts`.)
 - [ ] [P2] **Wizard remediation map** — per-failure-code "Why" + "Try this" suggestions. Prereq: persist a session-log (or at least the last run) per machine so remediation references observed output, not training-data guesses.
 - [ ] [P2] **Wizard storage preflight** — start with disk free, `qemu-img` present, socket_vmnet alive (if shared/bridged selected), port block free. Wire into code-review + error-handling tests so wizard failures get the same treatment as CLI failures.
 - [ ] [P2] Wizard post-start credential access info when managed login used (explain `exec`, `get <machine> creds`, API method for bridged VMs)
 - [ ] [P3] Boot-wait progress UX — `waitForBootWithProgress` added; per-probe logging (HTTP attempt, REST init, timeout budget) not yet implemented
-- [ ] [P3] Windows named-pipe reliability — monitor/serial/QGA channels untested under load. Consider TCP port fallback (monitor = portBase + 7) if pipes unreliable
+- [ ] [P3] Windows channel reliability — monitor/serial/QGA now use **TCP localhost** (`channels.ts`: monitor=portBase+6, serial=+7, qga=+8) because QEMU's Winsock `bind()` can't handle `\\.\pipe\` paths; named pipes remain only as a non-portBase fallback. Unit-tested in `windows-channels.test.ts`; **untested under load and on a real Windows host**. Two follow-ups: (1) confirm the +6/+7/+8 IPC offsets never collide with user `extraPorts` in the same block (ties into the port-allocation redesign below — extras must avoid +6..+8 on Windows); (2) load-test the TCP channels once a Windows integration runner exists.
 - [ ] [P3] `/system/shutdown` exec returns HTTP 400 — handle gracefully. Test locally first: enable RouterOS debug logging, capture HTTP via `/tool/sniffer` or `tshark`, understand shutdown sequence.
 - [ ] [P4] **Centralize error-message and logging surface** — error strings are duplicated across CLI, wizard, and library and drift independently. Extract a single source (code → format). Same underlying discipline as the dropped `--no-ansi` flag: separate presentation from content so a wording change lands in one place.
 
@@ -343,6 +421,34 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 - [x] [P4] **Rename or alias `secureLogin: false`** — `StartOptions.noAuth: true` shipped as a backward-compat alias (2026-04-23). Normalized at the top of `start()`/`add()`; explicit `secureLogin` wins. Also fixed a latent bug where `secureLogin` was silently dropped from `MachineState`.
 - [x] [P3] **Validate `version` vs `channel` mix-up** — Soft-warn shipped (2026-04-23): `start()`/`add()` log via the progress logger when `version` matches a known `Channel` literal. Behavior unchanged (lenient acceptance preserved); JSDoc on `StartOptions.version` calls out the convenience.
 - [x] [P4] **Discoverability — `upload()`/`download()`/`rest()` already exist** — `MANUAL.md §4 ChrInstance` now opens with a grouped "at a glance" table and the reference block lists every property + method including the new 0.3.0 additions.
+
+**New friction surfaced from tikoci/centrs integration harness review (2026-05-30):**
+
+centrs already depends on quickchr as its CHR-backed integration harness
+(`~/Lab/centrs/test/integration/chr.ts`): it dynamically imports
+`@tikoci/quickchr`, calls `QuickCHR.start({version|channel})`, and passes
+`chr.subprocessEnv()` to protocol tests. There is no immediate provisioning code to vendor
+wholesale, but centrs has reusable RouterOS protocol layers and sharp test-harness needs.
+
+- [ ] [P2] **Machine evidence descriptor for downstream harnesses** — centrs writes its own
+  JSONL/GitHub summary record with suite, protocol, requested RouterOS version/channel,
+  actual RouterOS version/board, and quickchr machine name. Fold this into the machine
+  descriptor work above (`quickchr env` / `inspect --json` / `doctor --export`) so centrs,
+  donny, and future harnesses use one stable redacted shape instead of reading `machine.json`
+  or duplicating summary code.
+- [ ] [P2] **REST timeout contract audit** — centrs records a 60s REST ceiling for normal
+  REST execution; quickchr has special handling for RouterOS blocking endpoints. Reconcile
+  the two with lab evidence before changing code. If the ceiling is real for normal REST,
+  quickchr should reject or clamp user-visible REST timeouts above 60s except for documented
+  fire-and-forget/blocking endpoint flows.
+- [ ] [P3] **Protocol adapter reuse spike** — centrs has a REST/native-api adapter seam plus
+  native API login/tagged multiplexing code. Before implementing quickchr's SSH/native-api
+  adjacent execution paths, compare centrs' adapter/error mapping with quickchr's `rest.ts`
+  and `exec.ts`; either vendor/link a shared package or document why quickchr remains separate.
+- [ ] [P3] **L2-capable harness mode for centrs mac-telnet** — quickchr supports L2-capable QEMU
+  netdevs (socket/TAP/vmnet), but centrs' current harness uses SLiRP/hostfwd and cannot
+  validate MAC-Telnet broadcast/default-routing behavior. Spike a rootless/rootful topology
+  and document the remaining native-helper requirement for raw L2 frame I/O.
 
 ### Examples (Rootless Multi-CHR Topologies)
 

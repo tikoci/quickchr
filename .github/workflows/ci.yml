@@ -245,7 +245,7 @@ jobs:
 
 
   # ── Windows unit tests (depends on x86 integration success) ─────────────────
-  # Runs Windows-only tests (named pipes, Job Object detach, LOCALAPPDATA paths).
+  # Runs Windows-only tests (TCP-localhost channels, Job Object detach, LOCALAPPDATA paths).
   # Platform-skipped tests (skipIf(platform !== "win32")) execute only here; they
   # are skipped on Linux/macOS.  Integration tests on Windows (QEMU for Windows)
   # are tracked in BACKLOG.md as future work.

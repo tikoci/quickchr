@@ -70,6 +70,19 @@ Returns array with `.section` indices (one per sample period, typically 1/s).
 activate once mode** (it blocks like no parameter). This differs from `as-string` which is
 purely presence-based (even `"false"` enables it).
 
+## REST Timeout Ceiling
+
+Cross-project note from `tikoci/centrs`: normal RouterOS REST execution is treated there as
+having a 60-second hard ceiling, and `via=rest-api` rejects larger user timeouts. quickchr has
+separate lab-grounded handling for blocking endpoints below (`device-mode/update`,
+`license/renew`), including host-side safety timers that may exceed 60s because they are
+controlling a power-cycle or a bounded RouterOS wait.
+
+Do not copy the blocking-endpoint timers to normal REST calls. Treat 60s as a working
+assumption inherited from centrs for ordinary REST requests, but do not add a quickchr clamp
+until the REST-timeout reconciliation lab in `BACKLOG.md` confirms the rule and documents
+any endpoint-specific exceptions.
+
 ## device-mode/update — The Oddball
 
 `/system/device-mode/update` is unique in RouterOS:
