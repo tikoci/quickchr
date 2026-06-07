@@ -38,6 +38,14 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
 7. **Running-only connection descriptors** — `ChrInstance.descriptor()`, `quickchr inspect`, and `quickchr env` are live connection handoff surfaces, not stale state readers. They intentionally fail with `MACHINE_STOPPED` when the VM is not running, because ports/auth/status are only safe to consume when the machine is active. Descriptor/env output includes auth material by design for subprocess handoff; callers must treat it as credential-bearing output.
 
+8. **Boot respawn-once on hardware accel** — When `QuickCHR.start()` boots a fresh machine in background mode and `waitForBoot` exhausts its budget under `kvm`/`hvf`, it stops the QEMU process, clears its `server=on` socket files, and respawns **once** before raising `BOOT_TIMEOUT` (see `start()` in `src/lib/quickchr.ts`, gated on `accel`). This targets an observed CI flake: on GitHub's nested-KVM runner a single boot among many occasionally never reaches REST while siblings boot in ~30-45s — a *wedged* process that a longer timeout would not rescue, only a fresh one. Gated to hardware accel because TCG boots are legitimately long and doubling buys nothing.
+
+   ⚠️ **Watch-item / scope caveat.** The root cause is **unconfirmed** — the respawn is a pragmatic mitigation that keeps CI green, not a proven diagnosis; the trigger could be something else (runner CPU-steal, a SLiRP stall, image-specific timing). Two deliberate limits to revisit if it recurs:
+   - **Not applied to `_launchExisting`** (the restart-existing-machine path) — that path also spawns + `waitForBoot`s but has never been observed to flake. Extend the same respawn there only with evidence.
+   - **Timeout factor left at 1.5×** (`accelTimeoutFactor`, `src/lib/platform.ts`) rather than inflated further — the respawn is the recovery mechanism, not a bigger ceiling.
+
+   How to tell it's firing: grep CI `qemu.log`/run logs for `respawning QEMU once`. A frequent occurrence, or a `BOOT_TIMEOUT` that *survives* the respawn (or appears on the `_launchExisting` path), is the signal to stop treating it as a flake and find the real cause. Tracked in `BACKLOG.md` (boot-respawn watch-item).
+
 ## Port Layout
 
 | Offset | Service    | Guest Port |

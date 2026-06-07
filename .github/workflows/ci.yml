@@ -48,7 +48,7 @@ jobs:
     name: Repo Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - name: Run repo checks
@@ -60,7 +60,7 @@ jobs:
     name: Unit Tests & Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
 
@@ -110,7 +110,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-report
           path: /tmp/coverage-report.txt
@@ -153,7 +153,7 @@ jobs:
     needs: [lint, unit-tests]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
 
       # ipxe-qemu provides efi-virtio.rom (PXE boot ROM for virtio-net-pci).
@@ -192,7 +192,7 @@ jobs:
           uname -a
 
       - name: Cache CHR images
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/quickchr/cache
           key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
@@ -234,7 +234,7 @@ jobs:
 
       - name: Upload integration logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: integration-logs-linux-x64
           path: |
@@ -257,7 +257,7 @@ jobs:
     needs: [integration-x86]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - name: Run unit tests (includes Windows-specific tests)

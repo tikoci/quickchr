@@ -32,7 +32,7 @@ jobs:
     name: Repo Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run check
@@ -42,7 +42,7 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun test test/unit/
@@ -53,7 +53,7 @@ jobs:
     needs: [lint, unit-tests]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
 
       - name: Install QEMU + tools
@@ -76,7 +76,7 @@ jobs:
           fi
 
       - name: Cache CHR images
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/quickchr/cache
           key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
@@ -112,7 +112,7 @@ jobs:
 
       - name: Upload integration logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: publish-integration-logs
           path: |
@@ -127,7 +127,7 @@ jobs:
     needs: [integration-x86]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun test test/unit/
@@ -141,9 +141,9 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           registry-url: https://registry.npmjs.org
       - run: bun install --frozen-lockfile
