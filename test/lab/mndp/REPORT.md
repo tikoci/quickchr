@@ -14,6 +14,7 @@ RouterOS CHR 7.23.1 (stable). Dates: 2026-06-06.
 | `mndp-probe.ts` | host joins QEMU `socket-mcast` group, listens + injects refresh | ❌ 0 frames from QEMU |
 | `neighbor-test.ts` | two CHRs on one `socket-mcast` group, check `/ip/neighbor` | ❌ both empty (no mutual discovery) |
 | `socket-connect-probe.ts` | host TCP server, CHR `socket-connect`, listen + inject | ✅ 6 MNDP parsed |
+| `stream-unix-probe.ts` | host AF_UNIX server, CHR `-netdev stream` (unix), detect framing | ✅ 4 MNDP parsed — **length-prefixed** |
 
 Run any with `bun run test/lab/mndp/<script>.ts` (boots a real CHR; `KEEP=1`
 leaves it running for inspection).
@@ -54,7 +55,30 @@ reply. No multicast, loopback-only, no LAN leak, no `SO_REUSEPORT` dependency.
 Promoted to the asserting example: `examples/mndp/mndp.test.ts` (cross-checks
 L2-discovered values against the REST API).
 
-### 3. Incidental observations
+### 3. `-netdev stream` over AF_UNIX works on macOS — but is **length-prefixed**
+
+`-netdev stream` (QEMU 7.2+) with `addr.type=unix` was floated as a cleaner host-capture
+transport than the legacy TCP `socket` netdev: a filesystem socket instead of a loopback TCP
+port, and (per a reading of QEMU's docs) possibly *unframed*. The probe boots a user-only CHR
+through the normal quickchr path, then stops it and relaunches the same disk with the `user`
+NIC (ether1) plus a launch-time `-netdev stream,id=net1,server=off,addr.type=unix,addr.path=…`
+NIC (ether2); the host listens on the unix socket first and QEMU connects to it.
+
+**Result:** it works — QEMU connected and streamed ether2 frames (**21 frames, 4 MNDP parsed**:
+`identity`, `version` `7.23.1`, `board` `CHR`, `ifname` `ether2`, cross-checked against REST).
+But the byte stream is **length-prefixed with the same 4-byte big-endian header as the legacy
+`socket` netdev** — the first bytes were `00 00 00 6e` (length 110) followed by a `33:33:…`
+IPv6-multicast Ethernet frame. The probe auto-detects framing (it does not assume one), and it
+classified the stream as `length-prefixed`.
+
+So the **"no length-prefix parsing" hope is wrong for `-netdev stream`**: parsing is identical to
+`socket-connect`. The only genuine advantage over `socket-connect` is dropping the loopback TCP
+port in favor of a filesystem path. The genuinely *unframed* transport would be `-netdev dgram`
+(SOCK_DGRAM — one datagram per frame), which is a different, costlier-to-wire netdev and was
+**not** validated here. Tracked in `BACKLOG.md` ("`-netdev stream` + AF_UNIX as a port-free
+host-capture transport").
+
+### 4. Incidental observations
 
 - ether1 (`user`) and ether2 (`socket-*`) both come up `RUNNING`; MNDP is emitted
   on ether2 with `discover-interface-list=all` (default `discover-interval=30s`),

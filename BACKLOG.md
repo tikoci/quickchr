@@ -368,6 +368,22 @@ See `docs/networking.md` for platform internals. Priority: macOS (local) & Linux
   point-to-point); its only gain is raw vs length-prefixed frames — not worth a new public
   specifier. If a rootless multi-VM macOS segment is ever needed, design a small frame-relay
   hub, not a per-link netdev.
+- [ ] [P3] **`-netdev stream` + AF_UNIX as a port-free host-capture transport** — Floated as a
+  cleaner alternative to `socket-connect` (no loopback TCP port; a filesystem socket instead) and
+  hoped to also drop the length-prefix parsing. **Validated on macOS 2026-06-06**
+  (`test/lab/mndp/stream-unix-probe.ts`, see REPORT.md): `-netdev stream,server=off,addr.type=unix,
+  addr.path=…` (QEMU 7.2+) *works* on macOS — QEMU connects to a host AF_UNIX listener and streams
+  guest ether2 frames (21 frames / 4 MNDP parsed, cross-checked vs REST, RouterOS 7.23.1, QEMU 11).
+  **But it is still length-prefixed** — the same 4-byte big-endian length header as the legacy
+  `-netdev socket` (first bytes `00 00 00 6e` = 110-byte frame). So the "no length-prefix parsing"
+  hope is **wrong for `stream`**; its only real win over `socket-connect` is dropping the TCP port
+  in favor of a path. The genuinely unframed option is **`-netdev dgram`** (SOCK_DGRAM, one
+  datagram = one frame) — *not* validated here, and costlier to wire (paired `local`/`remote` unix
+  paths, connectionless). **Verdict:** not worth a new public specifier now — same conclusion as the
+  `udp=`/`localaddr` rejection above (no parsing simplification, no new capability over
+  `socket-connect`). Revisit only if filesystem-path addressing (no port allocation) becomes
+  valuable — e.g. capturing from many concurrent CHRs without consuming loopback ports — and at that
+  point evaluate `dgram` for the unframed path.
 - [ ] [P2] **sudo handling** — At CLI: error with a clear "sudo needed for vmnet/TAP" message; point to socket_vmnet / TAP pre-setup via brew services or systemd/launchd. In wizard: may prompt for sudo if a human explicitly chose a bridge network that requires it. **Do not re-exec `sudo quickchr start`** — agents often can't sudo, and wrapping CLI in sudo is invasive. Document the pre-setup paths so hosts are configured once and subsequent calls don't need root.
 - [ ] [P3] **Windows — ship networking, not just docs** — Target: local parity with socket_vmnet UX via TAP-Windows adapter (OpenVPN TAP or wintun). **First step:** validate user-mode networking works today on Windows locally (not tested). Then add TAP driver detection + docs. Integration tests on `windows-latest` follow.
 - [ ] [P3] macOS vmnet-bridged filter — Only physical interfaces (Multipass bug: virtual/bridge → errors)
