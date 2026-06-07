@@ -119,6 +119,12 @@ Each lists a concrete **done-when** so an agent knows when to stop.
   broadcast/MAC-Telnet. *Done-when:* a quickchr + centrs spike proves one repeatable host
   topology (Linux TAP/socket or macOS socket_vmnet/vmnet) and documents what native helper
   is still needed for raw-L2 frame I/O.
+  **Partly answered (2026-06-06, MNDP spike):** the repeatable rootless host topology is
+  `socket-connect` (host runs a TCP server, CHR connects, QEMU streams length-prefixed L2
+  frames over loopback). **No native helper is needed** for raw-L2 frame I/O on macOS — the
+  earlier assumption was wrong. Verified end-to-end for MNDP receive *and* L2 injection
+  (refresh) on Intel Mac/QEMU 11. See `docs/mndp.md`, `examples/mndp/`, `test/lab/mndp/REPORT.md`.
+  Remaining for centrs: apply the same `socket-connect` topology to MAC-Telnet's request/reply.
 
 > **Needs a human decision before an agent starts** (do not auto-implement): the two `[?]`
 > port-allocation items (port-base randomness, fixed service-block redesign) and `[?]` config
@@ -348,6 +354,20 @@ See `docs/networking.md` for platform internals. Priority: macOS (local) & Linux
 
 **Open networking:**
 
+- [ ] [P3] **`socket-mcast` broken on macOS (QEMU `SO_REUSEADDR`-only)** — Discovered 2026-06-06
+  (`test/lab/mndp/REPORT.md`): QEMU's `socket,mcast=` netdev sets only `SO_REUSEADDR`; macOS/BSD
+  require `SO_REUSEPORT` on all sockets sharing a multicast port, so mcast delivers nothing
+  between local sockets on macOS — two CHRs on one group don't discover each other, and host
+  capture gets zero frames. Works on Linux/CI. Documented in `docs/networking.md` and
+  `docs/mndp.md`; `socket-connect` is the macOS-safe substitute for **point-to-point** and
+  **host capture**. **Action:** `networks` command / wizard should warn when `socket-mcast` is
+  selected on darwin. *Considered and rejected (2026-06-06):* adding a `udp=`/`localaddr`
+  socket netdev — it's point-to-point, so it neither fixes the real gap (a **rootless multi-VM
+  shared L2 segment on macOS**, which needs a userspace hub/relay or `socket_vmnet`) nor adds a
+  capability over `socket-connect` (which already does cross-platform host capture and macOS
+  point-to-point); its only gain is raw vs length-prefixed frames — not worth a new public
+  specifier. If a rootless multi-VM macOS segment is ever needed, design a small frame-relay
+  hub, not a per-link netdev.
 - [ ] [P2] **sudo handling** — At CLI: error with a clear "sudo needed for vmnet/TAP" message; point to socket_vmnet / TAP pre-setup via brew services or systemd/launchd. In wizard: may prompt for sudo if a human explicitly chose a bridge network that requires it. **Do not re-exec `sudo quickchr start`** — agents often can't sudo, and wrapping CLI in sudo is invasive. Document the pre-setup paths so hosts are configured once and subsequent calls don't need root.
 - [ ] [P3] **Windows — ship networking, not just docs** — Target: local parity with socket_vmnet UX via TAP-Windows adapter (OpenVPN TAP or wintun). **First step:** validate user-mode networking works today on Windows locally (not tested). Then add TAP driver detection + docs. Integration tests on `windows-latest` follow.
 - [ ] [P3] macOS vmnet-bridged filter — Only physical interfaces (Multipass bug: virtual/bridge → errors)
@@ -448,6 +468,13 @@ wholesale, but centrs has reusable RouterOS protocol layers and sharp test-harne
   netdevs (socket/TAP/vmnet), but centrs' current harness uses SLiRP/hostfwd and cannot
   validate MAC-Telnet broadcast/default-routing behavior. Spike a rootless/rootful topology
   and document the remaining native-helper requirement for raw L2 frame I/O.
+  **MNDP precursor shipped (2026-06-06):** `socket-connect` (host TCP server + CHR
+  `socket-connect` NIC) carries raw L2 frames to/from the host on macOS with no native
+  helper — verified for MNDP receive and L2 injection. MAC-Telnet (UDP/20561) is the same
+  technique run bidirectionally; the `examples/mndp/` refresh-injection write-back is the
+  injection primitive it needs. **No raw-socket/native helper required.** Remaining: build
+  the MAC-Telnet request/handshake on top (centrs side). Reference: `docs/mndp.md`,
+  `test/lab/mndp/REPORT.md`.
 
 ### Examples (Rootless Multi-CHR Topologies)
 

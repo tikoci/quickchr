@@ -55,7 +55,23 @@ Multicast variant (any number of VMs, no listen/connect asymmetry):
 
 **Traits:** Pure L2 between VMs, no host-side interface, completely rootless, CI-friendly. No DHCP (RouterOS must use static IPs or you run a DHCP server on one VM). Each pair of VMs needs a unique port or mcast group.
 
+> **⚠ mcast is broken on macOS.** QEMU's mcast netdev sets only `SO_REUSEADDR`, but
+> macOS/BSD require `SO_REUSEPORT` on every socket sharing a multicast port. So
+> `socket,mcast=` delivers nothing between local sockets on macOS — two CHRs on the
+> same group don't even discover each other, and a host listener gets no frames.
+> It works on **Linux** (and CI). Verified in [`../test/lab/mndp/REPORT.md`](../test/lab/mndp/REPORT.md).
+> The TCP `listen`/`connect` variant has no such limitation — prefer it on macOS.
+
 **quickchr today:** `socket::<name>` specifier uses a port registry in `~/.local/share/quickchr/networks/<name>.json` to auto-assign and track ports. Named sockets avoid the listen/connect ordering problem.
+
+### Host-side L2 capture (MNDP, MAC-Telnet)
+
+The TCP `socket` netdev is also the rootless, cross-platform way for the **host**
+(not just another VM) to see the guest's Layer-2 frames: run a TCP server on the
+host, give the CHR a `socket-connect` NIC pointing at it, and QEMU streams every
+guest frame (length-prefixed) to the host. This is how a caller receives RouterOS
+MNDP broadcasts. Full recipe and verified findings: [`mndp.md`](./mndp.md);
+runnable example: [`../examples/mndp/`](../examples/mndp/).
 
 ---
 

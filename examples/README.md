@@ -84,6 +84,7 @@ The examples here are **Bun tests** (`bun:test`). Run them with:
 ```sh
 QUICKCHR_INTEGRATION=1 bun test examples/vienk/vienk.test.ts
 QUICKCHR_INTEGRATION=1 bun test examples/matrica/matrica.test.ts
+QUICKCHR_INTEGRATION=1 bun test examples/mndp/mndp.test.ts
 ```
 
 Or via the package script:
@@ -94,6 +95,9 @@ bun run test:examples
 
 - [`vienk/`](./vienk/) — minimal quickstart: one CHR, boot, query REST, remove.
 - [`matrica/`](./matrica/) — multi-CHR parallel matrix across RouterOS channels.
+- [`mndp/`](./mndp/) — receive RouterOS MNDP neighbor-discovery broadcasts on the
+  host via a `socket-connect` L2 NIC (rootless, cross-platform). See also
+  [`../docs/mndp.md`](../docs/mndp.md).
 
 ### In-repo import vs external consumer import
 

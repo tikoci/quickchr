@@ -150,6 +150,23 @@ The `default-route-distance=2` ensures the shared route is backup — SLiRP ethe
 
 **TCG hazard:** SLiRP half-open connections (TCP connect succeeds, data never flows) burn the full per-probe HTTP timeout in `waitForBoot`. Under cross-arch TCG where TCP round-trips are slow, this compounds badly. Lab: `test/lab/slirp-hostfwd/`.
 
+#### Host-Side L2 Capture (MNDP, MAC-Telnet)
+
+A caller can receive the guest's raw Layer-2 frames — RouterOS MNDP (UDP/5678
+broadcast) being the first use case — without root or a native helper, using the
+TCP `socket` netdev: the host runs a TCP server, the CHR gets a `socket-connect`
+NIC, and QEMU streams every guest frame to the host length-prefixed (4-byte BE
+length + raw Ethernet). Loopback-only, cross-platform. Writing a frame back over
+the same connection injects L2 into the guest (the MAC-Telnet primitive). Recipe:
+`docs/mndp.md`; example: `examples/mndp/`.
+
+**Discovered constraint (2026-06-06):** the `socket-mcast` netdev — the documented
+multi-VM L2 path — is **broken on macOS**. QEMU's mcast socket sets only
+`SO_REUSEADDR`, while macOS/BSD need `SO_REUSEPORT` on every socket sharing a
+multicast port; two CHRs on one group don't discover each other and host capture
+gets nothing. mcast still works on Linux/CI. Prefer `socket-connect` for host
+capture on any platform. Evidence: `test/lab/mndp/REPORT.md`.
+
 ### Platform Priority
 
 macOS → Linux → Windows. Mac and Linux share most code paths with minor `#ifdef`-style branches. Windows is tracked but lower priority — larger RouterOS admin audience there, but fewer recipes and harder to test. Windows CI runner planned after the existing macOS/Linux matrix is stable.
