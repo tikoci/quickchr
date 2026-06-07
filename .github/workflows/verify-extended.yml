@@ -23,7 +23,7 @@ on:
         default: false
       macos:
         type: boolean
-        description: "Run integration tests on macOS (macos-15 arm64 + macos-13 x86, HVF if available)"
+        description: "Run integration tests on macOS (macos-15 arm64 + macos-15-intel x86, HVF if available)"
         default: false
       windows:
         type: boolean
@@ -137,7 +137,9 @@ jobs:
             ~/.local/share/quickchr/machines/**/*.log
           retention-days: 7
 
-  # ── macOS (macos-15 arm64 + macos-13 x86, HVF) ───────────────────────────────
+  # ── macOS (macos-15 arm64 + macos-15-intel x86, HVF) ─────────────────────────
+  # Intel macOS: macos-13 was retired 2025-12-04; macos-15-intel is GitHub's
+  # last x86_64 macOS image (standard/free on public repos, supported to ~Fall 2027).
   integration-macos:
     name: Integration (${{ matrix.name }})
     if: ${{ inputs.macos == true }}
@@ -148,7 +150,7 @@ jobs:
           - runner: macos-15
             name: macos/arm64
             artifact: macos-arm64
-          - runner: macos-13
+          - runner: macos-15-intel
             name: macos/x86_64
             artifact: macos-x64
     runs-on: ${{ matrix.runner }}

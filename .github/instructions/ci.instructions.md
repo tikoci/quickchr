@@ -73,7 +73,7 @@ To run locally on Windows: `bun test test/unit/`
 | Input | Type | Default | Purpose |
 |-------|------|---------|---------|
 | `arm64` | boolean | false | Run integration tests on linux/aarch64 (ubuntu-24.04-arm) |
-| `macos` | boolean | false | Run integration tests on macOS (macos-15 arm64 + macos-13 x86) |
+| `macos` | boolean | false | Run integration tests on macOS (macos-15 arm64 + macos-15-intel x86) |
 | `windows` | boolean | false | Run Windows unit tests |
 | `test-filter` | string | "" | Comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"` runs only those files; empty = all |
 
@@ -88,7 +88,7 @@ Each runner boots a CHR matching its **native architecture** — `detectAccel()`
 | ubuntu-latest (x64) | x64 | x86 | qemu-system-x86_64 | KVM (or TCG) |
 | ubuntu-24.04-arm | arm64 | arm64 | qemu-system-aarch64 | KVM (or TCG) |
 | macos-15 (M-series) | arm64 | arm64 | qemu-system-aarch64 | HVF (if available) |
-| macos-13 (Intel) | x64 | x86 | qemu-system-x86_64 | HVF (if available) |
+| macos-15-intel (Intel) | x64 | x86 | qemu-system-x86_64 | HVF (if available) |
 
 **x86 cross-arch on aarch64 is NOT tested** — TCG I/O port emulation makes it impractical.
 aarch64 on x86_64 TCG is significantly slower than native but works.
