@@ -2,13 +2,15 @@
 	"version": "0.2",
 	"language": "en",
 	"enabled": true,
+	"enableGlobDot": true,
 	"ignorePaths": [
 		"node_modules",
 		".git",
 		"bun.lock",
 		"cspell.json",
 		"coverage",
-		"dist"
+		"dist",
+		".claude/**"
 	],
 	"useGitignore": true,
 	"minWordLength": 3,

@@ -31,6 +31,7 @@ bigsnap
 binfmt
 biome
 ble
+blockquotes
 bodyless
 bootptab
 borderless
@@ -46,6 +47,7 @@ calltime
 catppuccin
 centrs
 chardev
+choco
 cifs
 cleanuser
 cli
@@ -74,6 +76,7 @@ devtmpfs
 dgram
 dnf
 donny
+dotenv
 downscript
 dport
 dsls
@@ -85,13 +88,16 @@ econnreset
 ecx
 edk
 efi
+endgroup
 env
 esac
+eslintcache
 ethertype
 ethertypes
 failable
 fflate
 fguser
+figcaption
 fmt
 fpath
 fsfreeze
@@ -101,6 +107,7 @@ getuid
 googleable
 gre
 groupcheck
+gsub
 haxm
 hdr
 hostfs
@@ -124,9 +131,11 @@ ifup
 ihl
 initialise
 insmod
+inttest
 ipc
 ipxe
 irm
+kbd
 keypair
 kmgt
 kmod
@@ -172,6 +181,7 @@ nic
 nlevel
 noauth
 nographic
+noninteractive
 nopasswd
 npk
 nsec
@@ -193,11 +203,15 @@ pipefail
 pkgs
 pnet
 postrouting
+powerdown
 poweroff
 pptp
 prereq
 proplist
 provpass
+pxe
+pyc
+pycache
 qcow
 qemu
 qga
@@ -251,6 +265,8 @@ svm
 syscalls
 sysfs
 tcg
+tcpdump
+tgz
 tib
 tikbook
 tikoci
@@ -277,6 +293,7 @@ usr
 utm
 validname
 vcs
+venv
 ver
 veth
 vienk
@@ -287,6 +304,7 @@ virtconsole
 virtfs
 virtio
 virtserialport
+virtualenv
 vmnet
 vrrp
 vxlan
