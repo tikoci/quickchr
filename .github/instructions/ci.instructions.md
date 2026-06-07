@@ -65,7 +65,14 @@ The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Win
 - `test/unit/windows-channels.test.ts` — on Windows, `buildQemuArgs` produces TCP-localhost chardev paths (`host=127.0.0.1,port=portBase+N`: monitor +6, serial +7, qga +8), because QEMU's Winsock `bind()` cannot handle `\\.\pipe\` paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` when the TCP port is not listening; `stopMachineByName` handles no `.sock` files
 - `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`
 
-**Windows integration tests** (QEMU for Windows) are future work — not in CI yet.  
+**Windows integration tests** run via the `windows-integration` dispatch input in
+Extended Verification — **experimental, informational, non-gating** (`continue-on-error: true`).
+QEMU is installed with `choco install qemu` and runs under TCG (no HVF/WHPX on GitHub
+Windows runners). Expected failures: `sshpass` and `socat` don't exist on Windows, so
+scp-based and named-socket paths fail; TCG boots are slow (90-min job timeout). Start
+narrow with `test-filter` (e.g. `start-stop.test.ts`) before the full suite. Purpose: get
+real data on the Windows path (TCP channels, SLiRP networking, CHR boot) to unblock the
+local-first plan in `BACKLOG.md`.
 To run locally on Windows: `bun test test/unit/`
 
 ## Extended Verification — Dispatch Inputs
@@ -75,6 +82,7 @@ To run locally on Windows: `bun test test/unit/`
 | `arm64` | boolean | false | Run integration tests on linux/aarch64 (ubuntu-24.04-arm) |
 | `macos` | boolean | false | Run integration tests on macOS (macos-15 arm64 + macos-15-intel x86) |
 | `windows` | boolean | false | Run Windows unit tests |
+| `windows-integration` | boolean | false | Run Windows integration tests (TCG-only, experimental/informational, non-gating) |
 | `test-filter` | string | "" | Comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"` runs only those files; empty = all |
 
 **`test-filter` for agent iteration**: when debugging a specific arm64 failure, set `arm64: true` and `test-filter: "exec.test.ts"` to skip the 40-minute full suite and get results in ~5 minutes.
@@ -89,6 +97,7 @@ Each runner boots a CHR matching its **native architecture** — `detectAccel()`
 | ubuntu-24.04-arm | arm64 | arm64 | qemu-system-aarch64 | KVM (or TCG) |
 | macos-15 (M-series) | arm64 | arm64 | qemu-system-aarch64 | HVF (if available) |
 | macos-15-intel (Intel) | x64 | x86 | qemu-system-x86_64 | HVF (if available) |
+| windows-latest (x64) | x64 | x86 | qemu-system-x86_64 | TCG (no WHPX on runner) |
 
 **x86 cross-arch on aarch64 is NOT tested** — TCG I/O port emulation makes it impractical.
 aarch64 on x86_64 TCG is significantly slower than native but works.

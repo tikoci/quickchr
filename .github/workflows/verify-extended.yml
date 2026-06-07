@@ -27,7 +27,11 @@ on:
         default: false
       windows:
         type: boolean
-        description: "Run Windows unit tests (integration tests are future work)"
+        description: "Run Windows unit tests"
+        default: false
+      windows-integration:
+        type: boolean
+        description: "Run Windows integration tests (windows-latest, TCG-only — EXPERIMENTAL, informational, non-gating)"
         default: false
       test-filter:
         type: string
@@ -235,7 +239,6 @@ jobs:
           retention-days: 7
 
   # ── Windows unit tests ────────────────────────────────────────────────────────
-  # Windows integration tests (QEMU for Windows) are future work tracked in BACKLOG.md.
   windows-unit-tests:
     name: Unit Tests (windows-latest)
     if: ${{ inputs.windows == true }}
@@ -245,3 +248,102 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun test test/unit/
+
+  # ── Windows integration (windows-latest, TCG) ────────────────────────────────
+  # EXPERIMENTAL / informational only — `continue-on-error` so it never gates a
+  # publish. Purpose: get real data on the Windows end-to-end path (TCP channels,
+  # SLiRP networking, CHR boot under TCG) to unblock the local-first plan in
+  # BACKLOG.md. Known expected failures: no `sshpass`/`socat` on Windows (scp +
+  # named-socket paths), and TCG boots are slow — start narrow with `test-filter`
+  # (e.g. `start-stop.test.ts`) before running the full suite.
+  integration-windows:
+    name: Integration (windows/x86_64)
+    if: ${{ inputs.windows-integration == true }}
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+
+      # No HVF/WHPX on GitHub Windows runners → QEMU falls back to TCG.
+      - name: Install QEMU
+        shell: pwsh
+        run: |
+          choco install qemu -y --no-progress
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\qemu"
+
+      - name: Log platform
+        run: |
+          echo "### Platform: windows/x86_64 (TCG)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- OS: $(uname -s) $(uname -m)" >> "$GITHUB_STEP_SUMMARY"
+          qemu-system-x86_64 --version 2>/dev/null | head -1 >> "$GITHUB_STEP_SUMMARY" || true
+          echo "- Note: experimental/informational, sshpass+socat absent on Windows" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cache CHR images
+        uses: actions/cache@v5
+        with:
+          path: ~/AppData/Local/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Resolve test files
+        id: files
+        run: |
+          FILTER="${{ inputs.test-filter }}"
+          if [ -z "$FILTER" ]; then
+            echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          else
+            FILES=""
+            IFS=',' read -ra PARTS <<< "$FILTER"
+            for f in "${PARTS[@]}"; do
+              f="${f// /}"
+              if [ -f "test/integration/$f" ]; then
+                FILES="$FILES test/integration/$f"
+              else
+                echo "::warning::Skipping unknown test file: $f"
+              fi
+            done
+            echo "list=$FILES" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run integration tests (sequential per-file)
+        run: |
+          set -eo pipefail
+          echo "::group::Integration test output"
+          : > integration-output.txt
+          fail=0
+          for f in ${{ steps.files.outputs.list }}; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a integration-output.txt; then
+              fail=1
+            fi
+          done
+          echo "::endgroup::"
+          exit "$fail"
+        timeout-minutes: 90
+
+      - name: Write integration summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Tests — windows/x86_64 (TCG, informational)"
+            echo '```'
+            tail -80 integration-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: integration-logs-windows-x64
+          path: |
+            integration-output.txt
+            ~/AppData/Local/quickchr/machines/**/*.json
+            ~/AppData/Local/quickchr/machines/**/*.log
+          retention-days: 7
