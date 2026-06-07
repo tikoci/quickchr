@@ -75,6 +75,6 @@ describe.skipIf(SKIP)("ChrInstance upload/download round-trip", () => {
 				await instance.stop();
 			}
 		}
-	}, 240_000); // 4-minute ceiling — matches start-stop.test.ts boot budget
+	}, 360_000); // 6-min ceiling — matches start-stop.test.ts boot budget (allows one start() boot respawn)
 });
 

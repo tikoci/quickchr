@@ -7,6 +7,7 @@ import {
 	spawnQemu,
 	stopQemu,
 	stopMachineByName,
+	cleanupQemuSockets,
 	waitForBoot,
 	type QemuLaunchConfig,
 } from "../../src/lib/qemu.ts";
@@ -690,4 +691,32 @@ describe("waitForBoot", () => {
 		const result = await waitForBoot(9198, 50);
 		expect(result).toBe(false);
 	}, 10_000);
+});
+
+describe("cleanupQemuSockets", () => {
+	const dir = join("/tmp", `quickchr-sockets-test-${process.pid}`);
+
+	beforeEach(() => { mkdirSync(dir, { recursive: true }); });
+	afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+	test("removes monitor/serial/qga socket files left by a killed QEMU", () => {
+		// A SIGKILLed QEMU leaves its server=on sockets behind; the respawn in
+		// start() must clear them or the new process fails to bind.
+		for (const s of ["monitor.sock", "serial.sock", "qga.sock"]) {
+			writeFileSync(join(dir, s), "");
+		}
+		// An unrelated file in the same dir must be preserved.
+		writeFileSync(join(dir, "qemu.log"), "keep");
+
+		cleanupQemuSockets(dir);
+
+		expect(existsSync(join(dir, "monitor.sock"))).toBe(false);
+		expect(existsSync(join(dir, "serial.sock"))).toBe(false);
+		expect(existsSync(join(dir, "qga.sock"))).toBe(false);
+		expect(existsSync(join(dir, "qemu.log"))).toBe(true);
+	});
+
+	test("is a no-op when sockets are absent (does not throw)", () => {
+		expect(() => cleanupQemuSockets(dir)).not.toThrow();
+	});
 });

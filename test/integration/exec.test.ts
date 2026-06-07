@@ -85,7 +85,7 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 				);
 			}
 		}
-	}, 240_000);
+	}, 360_000);
 
 	afterAll(async () => {
 		if (instance) {

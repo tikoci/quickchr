@@ -29,6 +29,7 @@
 - [x] Foreground/background modes, package provisioning (sshpass), arch-specific packages, `--all` flags
 - [x] Interactive selectors removed (replaced by shell completions), boot timeout scaling, port probing
 - [x] Dynamic package list via `all_packages.zip`, integration test coverage (provisioning, packages)
+- [x] `start()` respawns QEMU once on a wedged nested-KVM/HVF boot (BOOT_TIMEOUT recovery) — a single stuck boot among many on CI runners no longer fails the run; gated to hardware accel (TCG boots are legitimately long). `cleanupQemuSockets` helper, anchor tests, integration ceilings 240s→360s
 
 </details>
 

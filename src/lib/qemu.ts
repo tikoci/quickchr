@@ -437,23 +437,23 @@ export async function stopQemu(pid: number): Promise<boolean> {
 	return true;
 }
 
+/** Remove the listening unix-socket files QEMU binds (monitor/serial/qga).
+ *  A SIGKILLed QEMU leaves these behind; a respawn with `server=on` then fails
+ *  to bind ("Address already in use"). Call before re-spawning into the same dir. */
+export function cleanupQemuSockets(machineDir: string): void {
+	for (const sock of ["monitor.sock", "serial.sock", "qga.sock"]) {
+		const path = join(machineDir, sock);
+		try {
+			if (existsSync(path)) unlinkSync(path);
+		} catch { /* ignore */ }
+	}
+}
+
 /** Stop a machine by name. */
 export async function stopMachineByName(_name: string, state: MachineState): Promise<boolean> {
 	if (!state.pid) return false;
 	const stopped = await stopQemu(state.pid);
-
-	// Clean up socket files
-	const machineDir = state.machineDir;
-	for (const sock of ["monitor.sock", "serial.sock", "qga.sock"]) {
-		const path = join(machineDir, sock);
-		try {
-			if (existsSync(path)) {
-				const { unlinkSync } = await import("node:fs");
-				unlinkSync(path);
-			}
-		} catch { /* ignore */ }
-	}
-
+	cleanupQemuSockets(state.machineDir);
 	return stopped;
 }
 

@@ -46,7 +46,7 @@ import {
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint } from "./channels.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
@@ -1402,7 +1402,7 @@ export class QuickCHR {
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const wrapper = extractWrapper(resolvedNetworks);
-		const { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper);
+		let { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper);
 
 		// Foreground (no provisioning): spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
@@ -1422,7 +1422,26 @@ export class QuickCHR {
 		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages, accel) + (opts.timeoutExtra ?? 0);
 
 		// Always wait for boot in background mode — the JSDoc promises "REST-ready".
-		const booted = await instance.waitForBoot(bootTimeout);
+		let booted = await instance.waitForBoot(bootTimeout);
+
+		// Hardware-accelerated runners (nested-KVM on CI, HVF on virtualized macOS
+		// runners) occasionally produce a single QEMU process that boots but never
+		// reaches REST, while sibling boots on the same host succeed in ~30-45s. The
+		// process is wedged, not merely slow — so a fresh respawn recovers reliably
+		// where a longer timeout would only stretch the failure. Retry once, gated to
+		// hardware accel (TCG boots are legitimately long; doubling buys nothing there).
+		if (!booted && (accel === "kvm" || accel === "hvf")) {
+			logger.warn(
+				`CHR "${name}" did not reach REST within ${bootTimeout / 1000}s (accel=${accel}) — respawning QEMU once.`,
+			);
+			try { await stopQemu(pid); } catch { /* ignore */ }
+			cleanupQemuSockets(machineDir);
+			({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper));
+			state.pid = pid;
+			saveMachine(state);
+			booted = await instance.waitForBoot(bootTimeout);
+		}
+
 		if (!booted) {
 			let qemuLogTail = "";
 			try {
