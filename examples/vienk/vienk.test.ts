@@ -40,7 +40,7 @@ describe.skipIf(SKIP)("vienk — single CHR smoke test", () => {
 		async () => {
 			instance = await QuickCHR.start({
 				name: "vienk",
-				version: "stable",
+				channel: "stable",
 				arch: CHR_ARCH,
 				background: true,
 				secureLogin: false,

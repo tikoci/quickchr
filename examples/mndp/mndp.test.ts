@@ -144,7 +144,7 @@ describe.skipIf(SKIP)("mndp — receive CHR neighbor-discovery broadcasts on the
 			// 2. Boot CHR: ether1 = user (REST/mgmt), ether2 = socket-connect to the host.
 			instance = await QuickCHR.start({
 				name: "mndp-example",
-				version: "stable",
+				channel: "stable",
 				arch: CHR_ARCH,
 				background: true,
 				secureLogin: false,
