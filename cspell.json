@@ -1,0 +1,63 @@
+{
+	"version": "0.2",
+	"language": "en",
+	"enabled": true,
+	"ignorePaths": [
+		"node_modules",
+		".git",
+		"bun.lock",
+		"cspell.json",
+		"coverage",
+		"dist"
+	],
+	"useGitignore": true,
+	"minWordLength": 3,
+	"flagWords": ["hte", "teh"],
+	"ignoreWords": [
+		"behaviour",
+		"centralises",
+		"divi",
+		"findme",
+		"hlm",
+		"ikoci",
+		"ish",
+		"kvmkvmkvm",
+		"licences",
+		"lukqg",
+		"mhello",
+		"mmm",
+		"mult",
+		"myapp",
+		"myimage",
+		"mykey",
+		"mylink",
+		"mymachine",
+		"mypass",
+		"myregistry",
+		"myuser",
+		"nmatrica",
+		"normalise",
+		"normalises",
+		"nzerotier",
+		"pdl",
+		"retu",
+		"stabilises",
+		"tcgtcgtcgtcg",
+		"testuser",
+		"trauks",
+		"tris",
+		"unrecognised",
+		"vzd",
+		"wws",
+		"zxn"
+	],
+	"dictionaryDefinitions": [
+		{
+			"name": "project-words",
+			"path": "./project-words.txt",
+			"addWords": true
+		}
+	],
+	"dictionaries": ["project-words"],
+	"words": []
+}
