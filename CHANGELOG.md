@@ -8,6 +8,12 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-07
+
+First stable release on the `latest` track since 0.2.0 — rolls up the 0.3.x
+pre-release line (`waitFor`, `captureInterface`, `tzspGatewayIp`, `portBase`)
+plus the changes below.
+
 ### Added
 
 - `StartOptions.noAuth` — convenience alias for `secureLogin: false`. Skip the
