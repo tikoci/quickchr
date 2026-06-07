@@ -65,7 +65,7 @@ The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Win
 - `test/unit/windows-channels.test.ts` — on Windows, `buildQemuArgs` produces TCP-localhost chardev paths (`host=127.0.0.1,port=portBase+N`: monitor +6, serial +7, qga +8), because QEMU's Winsock `bind()` cannot handle `\\.\pipe\` paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` when the TCP port is not listening; `stopMachineByName` handles no `.sock` files
 - `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`
 
-**Windows integration tests** run via the `windows-integration` dispatch input in
+**Windows integration tests** run via the `windows-x86` dispatch input in
 Extended Verification — **experimental, informational, non-gating** (`continue-on-error: true`).
 QEMU is installed with `choco install qemu` and runs under TCG (no HVF/WHPX on GitHub
 Windows runners). Expected failures: `sshpass` and `socat` don't exist on Windows, so
@@ -77,15 +77,17 @@ To run locally on Windows: `bun test test/unit/`
 
 ## Extended Verification — Dispatch Inputs
 
-| Input | Type | Default | Purpose |
-|-------|------|---------|---------|
-| `arm64` | boolean | false | Run integration tests on linux/aarch64 (ubuntu-24.04-arm) |
-| `macos` | boolean | false | Run integration tests on macOS (macos-15 arm64 + macos-15-intel x86) |
-| `windows` | boolean | false | Run Windows unit tests |
-| `windows-integration` | boolean | false | Run Windows integration tests (TCG-only, experimental/informational, non-gating) |
-| `test-filter` | string | "" | Comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"` runs only those files; empty = all |
+Each input maps 1:1 to a platform integration job — enable any combination. (Windows **unit** tests aren't here; they run on every push in the main CI pipeline.)
 
-**`test-filter` for agent iteration**: when debugging a specific arm64 failure, set `arm64: true` and `test-filter: "exec.test.ts"` to skip the 40-minute full suite and get results in ~5 minutes.
+| Input | Type | Default | Job | Runner |
+|-------|------|---------|-----|--------|
+| `linux-arm64` | boolean | false | `integration-linux-arm64` | ubuntu-24.04-arm |
+| `macos-arm64` | boolean | false | `integration-macos-arm64` | macos-15 |
+| `macos-x86` | boolean | false | `integration-macos-x86` | macos-15-intel |
+| `windows-x86` | boolean | false | `integration-windows-x86` (TCG, experimental/informational, non-gating) | windows-latest |
+| `test-filter` | string | "" | (all jobs) Comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all | — |
+
+**`test-filter` for agent iteration**: when debugging a specific arm64 failure, set `linux-arm64: true` and `test-filter: "exec.test.ts"` to skip the 40-minute full suite and get results in ~5 minutes.
 
 ## Integration Test Architecture Mapping
 
