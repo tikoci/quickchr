@@ -7,6 +7,7 @@ import { join, basename } from "node:path";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { chrDownloadUrl, chrImageBasename } from "./versions.ts";
+import { fetchResilient } from "./net.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { extractZip } from "./zip.ts";
@@ -46,7 +47,7 @@ export async function downloadImage(
 
 	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
 		try {
-			const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+			const response = await fetchResilient(url, { signal: AbortSignal.timeout(120_000) });
 			// Non-retriable: client errors except 408 (request timeout) and 429
 			// (rate limited), which can be transient on CDNs.
 			if (response.status >= 400 && response.status < 500

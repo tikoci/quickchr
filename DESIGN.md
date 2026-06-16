@@ -46,6 +46,14 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
    How to tell it's firing: grep CI `qemu.log`/run logs for `respawning QEMU once`. A frequent occurrence, or a `BOOT_TIMEOUT` that *survives* the respawn (or appears on the `_launchExisting` path), is the signal to stop treating it as a flake and find the real cause. Tracked in `BACKLOG.md` (boot-respawn watch-item).
 
+9. **Resilient downloads via public DNS** — All fetches to MikroTik's `upgrade`/`download` hosts go through `fetchResilient()` (`src/lib/net.ts`), never bare `fetch()`. The real failure mode, confirmed by an on-runner probe (2026-06-16), is that **GitHub-hosted runners' system resolver returns `ESERVFAIL` for `*.mikrotik.com`** — slowly (2–26 s) — via *both* `getaddrinfo` and c-ares-over-`resolv.conf`. So a plain `fetch` either times out resolving or (when the stub hands back only the unreachable AAAA) fails with Bun's `errno: 0` `ConnectionRefused` / `FailedToOpenSocket`. A **direct query to a public resolver (1.1.1.1 / 8.8.8.8) answers in ~10 ms**, and the hosts have a reachable IPv4. The earlier "IPv6 happy-eyeballs" theory was a red herring — the primary fault is DNS resolution at the runner's stub, not IPv6 egress.
+
+   Measured on the CI runner: `lookup({family:4})` → `ESERVFAIL` ~9 s; `lookup({all})` → `ESERVFAIL`/`ETIMEOUT` 22–26 s; `resolve4` (resolv.conf) → `ESERVFAIL` 2–22 s; `Resolver([1.1.1.1,8.8.8.8]).resolve4` → **OK ~10 ms**.
+
+   `fetchResilient` resolves the A record by querying public DNS **directly** (a `dns.Resolver` with `setServers([1.1.1.1, 8.8.8.8, 1.0.0.1])`, bounded by a 3 s timeout so a blocked resolver doesn't stall), then connects to the IPv4 literal preserving the `Host` header and TLS SNI so certificate validation still passes. It falls back to a normal `fetch` (system resolver, dual-stack) only when public DNS is unavailable — e.g. a network that blocks public resolvers — so it stays correct off CI. HTTP responses and aborts/timeouts pass through unchanged, never retried. `dns.resolve4`/`getaddrinfo` are deliberately **not** used for the primary path because they inherit the runner's broken stub.
+
+   ⚠️ **Sister-project routing.** A download/version-resolve failure that only appears on CI (slow `ESERVFAIL`, or `errno: 0` from `resolveVersion`) is a **quickchr** concern, not the consuming project's — do not paper over it downstream with `/etc/hosts` pins or IPv6 toggles in the sister repo's workflow. The historical `getent ahostsv4` `/etc/hosts` workaround was both in the wrong layer and non-functional (it hit the same broken stub resolver, returning empty). Covered by `test/unit/net.test.ts`.
+
 ## Port Layout
 
 | Offset | Service    | Guest Port |

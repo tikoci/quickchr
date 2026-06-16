@@ -2,11 +2,25 @@
  * Unit tests for package listing functionality.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { promises as dns } from "node:dns";
 import { zipSync } from "fflate";
 import { listAvailablePackages, findPackageFile, downloadPackages, downloadAndListPackages } from "../../src/lib/packages.ts";
+
+// Keep these tests network-free: fail the public-DNS A-record lookup so
+// fetchResilient takes its fallback (a normal fetch on the original URL), which
+// is what the mocked globalThis.fetch below stands in for. IPv4-direct fetching
+// is covered in net.test.ts.
+beforeEach(() => {
+	spyOn(dns.Resolver.prototype, "resolve4").mockRejectedValue(
+		Object.assign(new Error("test: DNS disabled"), { code: "ESERVFAIL" }),
+	);
+});
+afterEach(() => {
+	mock.restore();
+});
 
 const TMP = join(import.meta.dir, ".tmp-packages-test");
 let testDirId = 0;

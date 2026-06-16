@@ -348,9 +348,17 @@ describe("ChrInstance API surface (dryRun)", () => {
 		} catch (e: unknown) {
 			const code = (e as { code?: string }).code;
 			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
-			// resolveVersion needs network; allow that to skip
+			// resolveVersion needs network; allow that to skip. Match both the
+			// node-style codes and Bun's connection-failure messages/codes
+			// ("Unable to connect", ConnectionRefused, FailedToOpenSocket).
 			const msg = e instanceof Error ? e.message : String(e);
-			if (/fetch|network|ENOTFOUND|EAI_AGAIN|ECONNREFUSED/i.test(msg)) return;
+			if (
+				/fetch|network|unable to connect|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ConnectionRefused|FailedToOpenSocket/i.test(
+					msg,
+				)
+			) {
+				return;
+			}
 			throw e;
 		}
 	});

@@ -7,6 +7,7 @@ import { join, basename } from "node:path";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { packagesDownloadUrl } from "./versions.ts";
+import { fetchResilient } from "./net.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { restPost } from "./rest.ts";
@@ -38,7 +39,7 @@ export async function downloadPackages(
 	if (!existsSync(zipPath)) {
 		const log = logger ?? createLogger();
 		log.status(`Downloading packages for ${version} (${arch})...`);
-		const response = await fetch(url);
+		const response = await fetchResilient(url);
 		if (!response.ok) {
 			throw new QuickCHRError(
 				"DOWNLOAD_FAILED",
