@@ -38,6 +38,7 @@
 
 - [x] Core x86 CI + extended platform dispatch, coverage 79.59% funcs / 67.86% lines (above thresholds)
 - [x] Artifacts (coverage-report 14d, integration-logs 7d), `publish.yml` gating
+- [x] Resilient downloads via public DNS — `fetchResilient()` (`src/lib/net.ts`) wraps all `upgrade`/`download.mikrotik.com` fetches (versions, images, packages). Root cause (on-runner probe): GitHub-hosted runners' system resolver returns `ESERVFAIL` (slowly, 2–26 s) for `*.mikrotik.com` via both getaddrinfo and c-ares-over-resolv.conf; a direct query to public DNS (1.1.1.1/8.8.8.8) answers in ~10 ms. Fix: resolve the A record via a `dns.Resolver` with public servers, connect to the IPv4 literal with `Host` + TLS SNI preserved, fall back to a normal fetch when public DNS is blocked. Fixes CI `resolveVersion` failures so consuming projects (e.g. centrs) need no `/etc/hosts` workaround. The "IPv6 happy-eyeballs" theory was a red herring. See DESIGN.md decision #9; `test/unit/net.test.ts`
 
 </details>
 

@@ -1,4 +1,5 @@
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from "bun:test";
+import { promises as dns } from "node:dns";
 import {
 	isValidVersion,
 	chrDownloadUrl,
@@ -12,6 +13,18 @@ import {
 	assertProvisioningSupportedVersion,
 	parseVersionParts,
 } from "../../src/lib/versions.ts";
+
+// Network-free: fail the public-DNS A-record lookup so fetchResilient uses its
+// fallback (a normal fetch on the original URL), which the mocked globalThis.fetch
+// stands in for. IPv4-direct fetching is covered in net.test.ts.
+beforeEach(() => {
+	spyOn(dns.Resolver.prototype, "resolve4").mockRejectedValue(
+		Object.assign(new Error("test: DNS disabled"), { code: "ESERVFAIL" }),
+	);
+});
+afterEach(() => {
+	mock.restore();
+});
 
 describe("isValidVersion", () => {
 	test("accepts standard versions", () => {

@@ -4,6 +4,7 @@
 
 import type { Arch, Channel } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
+import { fetchResilient } from "./net.ts";
 
 const UPGRADE_BASE = "https://upgrade.mikrotik.com/routeros/NEWESTa7";
 const DOWNLOAD_BASE = "https://download.mikrotik.com/routeros";
@@ -68,7 +69,7 @@ export function provisioningSupportHint(minimumVersion = MIN_PROVISION_VERSION):
 export async function resolveVersion(channel: Channel): Promise<string> {
 	const url = `${UPGRADE_BASE}.${channel}`;
 
-	const response = await fetch(url);
+	const response = await fetchResilient(url);
 	if (!response.ok) {
 		throw new QuickCHRError(
 			"DOWNLOAD_FAILED",

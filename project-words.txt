@@ -16,6 +16,7 @@ aavmf
 accels
 addrs
 aehd
+ahostsv
 amm
 apk
 apkindex
@@ -90,10 +91,13 @@ edk
 efi
 endgroup
 env
+errno
 esac
+eservfail
 eslintcache
 ethertype
 ethertypes
+etimeout
 failable
 fflate
 fguser
@@ -103,6 +107,8 @@ fpath
 fsfreeze
 funcs
 gbps
+getaddrinfo
+getent
 getuid
 googleable
 gre
@@ -218,6 +224,7 @@ qga
 qmp
 quickchr
 readback
+resolv
 respawn
 respawning
 respawns
@@ -251,6 +258,7 @@ smp
 snapafter
 snapbefore
 snapname
+sni
 snmp
 socat
 sshfs

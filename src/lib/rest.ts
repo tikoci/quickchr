@@ -10,8 +10,8 @@
  * because Bun's node:http req.destroy() does not reliably emit the
  * "error" event, which would leave the Promise pending forever.
  *
- * External URLs (mikrotik.com, upgrade server) use fetch() — no pool
- * issue there. This module is ONLY for CHR REST calls (127.0.0.1).
+ * External URLs (mikrotik.com, upgrade server) use fetchResilient() (net.ts) —
+ * no pool issue there. This module is ONLY for CHR REST calls (127.0.0.1).
  */
 
 import { request as nodeRequest } from "node:http";

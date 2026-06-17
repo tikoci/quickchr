@@ -1,6 +1,7 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { promises as dns } from "node:dns";
 import { zipSync } from "fflate";
 import { listCachedImages, downloadImage, extractImage, ensureCachedImage, copyImageToMachine } from "../../src/lib/images.ts";
 
@@ -8,10 +9,17 @@ const TMP = join(import.meta.dir, ".tmp-images-test");
 
 beforeEach(() => {
 	mkdirSync(TMP, { recursive: true });
+	// Network-free: fail the public-DNS A-record lookup so fetchResilient uses
+	// its fallback (a normal fetch on the original URL), which the mocked
+	// globalThis.fetch stands in for. IPv4-direct fetching is covered in net.test.ts.
+	spyOn(dns.Resolver.prototype, "resolve4").mockRejectedValue(
+		Object.assign(new Error("test: DNS disabled"), { code: "ESERVFAIL" }),
+	);
 });
 
 afterEach(() => {
 	rmSync(TMP, { recursive: true, force: true });
+	mock.restore();
 });
 
 describe("listCachedImages", () => {
