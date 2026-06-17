@@ -8,6 +8,21 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-06-17
+
+### Fixed
+
+- Downloads now resolve MikroTik's `upgrade`/`download` hosts via public DNS
+  and connect over IPv4, so `resolveVersion()` and image/package downloads work
+  on GitHub-hosted CI runners. Those runners' system resolver returns
+  `ESERVFAIL` (slowly, 2–26 s) for `*.mikrotik.com` via both `getaddrinfo` and
+  c-ares-over-`resolv.conf`, which made a plain `fetch` time out or fail with
+  `errno: 0` before any CHR booted. New `fetchResilient()` (`src/lib/net.ts`)
+  queries `1.1.1.1`/`8.8.8.8` directly (3 s timeout), connects to the IPv4
+  literal with `Host` + TLS SNI preserved, and falls back to a normal `fetch`
+  when public DNS is blocked. Consuming projects (e.g. centrs) need no
+  `/etc/hosts` workaround. See DESIGN.md decision #9.
+
 ## [0.4.0] — 2026-06-07
 
 First stable release on the `latest` track since 0.2.0 — rolls up the 0.3.x
