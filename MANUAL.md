@@ -887,12 +887,18 @@ funnel through the same transport selector.
 `exec` does NOT have a `--json` flag. Use the RouterOS-native trick:
 
 ```bash
-quickchr exec my-chr ":put [:serialize to=json [/ip/address/print]]"
+quickchr exec my-chr ":put [:serialize to=json [/ip/address/print detail as-value]]"
 ```
 
-`:serialize` accepts `json`, `yaml`, `dsv`, `tsv`, `csv`. Wrap any CLI
-command in it to get structured output. The exec result body is the
-literal stdout — no quickchr processing.
+`:serialize` accepts `json` and `dsv` to output structure data from an array. The exec result body is the
+literal stdout — no quickchr processing.  
+
+| Command         | Syntax     | Description          | Example                |
+|:--|:--|:--|:--|
+| **serialize**   | `:serialize [<value>] to=[arg]` | Serialize specified value/array to JSON or dsv (delimiter separated values) format.  **`value`** specifies which values to process.  **`to`** specifies the format - *json, dsv*  **`delimiter`** sets the "separator".  **`order`** specifies the order for variables.  **`options`** specifies additional options*:* json.pretty  - makes the JSON output more visually appealing;json.no-string-conversion - prevents implicit conversions from console string type to json number type;dsv.wrap-strings - wraps string values inside quotation marks;dsv.ignore-size - if array values have different sizes, e.g. <code>a=(1,2);b=(3,4);c=(5,6,7)</code>, this option will work around <code>array size mismatch</code> error and set "empty" values in those slots.dsv.remap - merges array of dictionaries into a single dictionary (useful when working with "<code>print as-value</code>") **file-name** enables the option to generate command's output into a file (available for download in the "/files" section). | `:put [:serialize value=a,b,c to=json]``["a","b","c"]``:local test {a=(1,2,3);b=(4,5,6);c=(7,"text",9)}; :put [ :serialize to=dsv delimiter=";" value=$test order=("c","a","b") ]``c;a;b``7;1;4``text;2;5``9;3;6``:global var ({ "string"="1234"; "number"=1234 });:put [ :serialize to=json value=$var ]``{"number":1234,"string":1234.000000}``:put [ :serialize to=json value=$var options=json.no-string-conversion  ]``{"number":1234,"string":"1234"}``:put [:serialize to=dsv options=dsv.remap delimiter="#" [/ip/address/print as-value]]``.id#address#comment#interface#network``*1#192.168.88.1/24#defconf#bridge#192.168.88.0``*2#192.168.69.190/24##ether1#192.168.69.0`|
+
+_Source: <https://manual.mikrotik.com/docs/developer-guides/scripting/index.md>
+> Note: `:serialize` expects an array, so a `/print` _without_ `as-value` arg with return nothing when `:serialize`-ized using `to=json` or `to=dsv`.
 
 ### Authentication
 
