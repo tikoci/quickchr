@@ -4,12 +4,18 @@ applyTo: "src/lib/*.ts,test/**"
 
 # Bun HTTP — Known Bugs and Workarounds
 
-## Rule: CHR REST → rest.ts, External URLs → fetch()
+## Rule: CHR REST → rest.ts, External URLs → fetchResilient()
 
 All HTTP requests to a CHR RouterOS instance MUST go through `src/lib/rest.ts`.
-External URLs (MikroTik download servers, upgrade checks) use `fetch()` directly.
+External URLs (MikroTik download servers, upgrade checks) go through
+`fetchResilient()` (`src/lib/net.ts`), not bare `fetch()`. `fetchResilient` is a
+normal `fetch` with one failback: on a connection-class error it retries by
+resolving the A record via public DNS and connecting over the IPv4 literal (Host
++ TLS SNI preserved) — resilience to a misconfigured/transient resolver. See
+DESIGN.md decision #9.
 
-**No exceptions.** Do not use `fetch()` or inline `node:http` for CHR REST calls.
+**No exceptions.** Do not use bare `fetch()` for external download/upgrade URLs,
+and do not use `fetch()` or inline `node:http` for CHR REST calls.
 
 Import pattern:
 ```typescript
@@ -65,11 +71,13 @@ Code that uses `rest.ts` (node:http internally) cannot be tested with `globalThi
 - **For CHR REST code**: Use `node:http`'s `createServer` to spin up a real mock server on port 0.
   See `test/unit/license.test.ts` `startMockServer` for the pattern.
 - **For external URL code** (versions.ts, images.ts, packages.ts): `globalThis.fetch` mocking
-  is correct because those modules use `fetch()` directly.
+  is correct because `fetchResilient()` calls `fetch()` for its primary path. To exercise the
+  failback, also spy `dns.Resolver.prototype.resolve4` and make the first `fetch` throw a
+  connection-class error (see `test/unit/net.test.ts`).
 
-## Remaining fetch() in Codebase (Correct)
+## External-URL fetches go through fetchResilient() (Correct)
 
-These files use `fetch()` for **external URLs** — this is correct and intentional:
+These files reach external URLs via `fetchResilient()` (`src/lib/net.ts`) — intentional:
 - `versions.ts` — MikroTik upgrade server
 - `packages.ts` — package ZIP downloads
 - `images.ts` — CHR image downloads
