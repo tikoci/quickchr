@@ -104,7 +104,7 @@ async function resolveIpv4(host: string): Promise<string | undefined> {
  * Fetch `url` but connect to an explicit IPv4 `address`, keeping HTTP and TLS
  * pointed at the original host: the `Host` header and TLS SNI (`serverName`) are
  * set to the URL's hostname so virtual-hosting routing and certificate
- * validation still pass against the IP literal. The failback's transport.
+ * validation still pass against the IP literal. The failback transport.
  */
 async function fetchOverIpv4(
 	url: string,
