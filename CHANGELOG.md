@@ -8,6 +8,33 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Added
+
+- Public version/channel API for CI consumers (issue #3). The package entry
+  (`@tikoci/quickchr`) now re-exports `resolveVersion`, `resolveAllVersions`,
+  `parseVersionParts`, `compareRouterOsVersion`, `isValidVersion`,
+  `isProvisioningSupportedVersion`, `CHANNELS`, and the `Channel` type — no more
+  blocked deep `src/lib/...` imports.
+- Recency-aware channel API: `resolveChannelStatuses()` / `classifyChannels()`
+  classify each channel by `maturity` (`released` | `prerelease`) and
+  `aheadOfStable`; `resolveActiveChannels()` / `selectActiveChannels()` return the
+  channels currently worth booting — every released channel plus any pre-release at
+  or ahead of a reference channel (default `stable`). The pure `classifyChannels` /
+  `selectActiveChannels` take a `Record<Channel, string>` for network-free use.
+  This answers "what's worth booting," never "what must pass" — gate policy stays
+  with the consumer.
+- `quickchr version --json` emits a `{ channel: version }` object (offline → `{}`).
+- `quickchr doctor --json` emits `{ ok, checks, staleImages }`; exit code still
+  reflects `ok`.
+
+### Fixed
+
+- `compareRouterOsVersion` now orders RouterOS pre-release suffixes:
+  `7.24beta2` < `7.24rc1` < `7.24` < `7.24.1` (previously the `beta`/`rc` suffix was
+  stripped, so those compared **equal**). **Behavior change** for callers that
+  compared pre-release versions; release-vs-release comparisons (cache-prune,
+  doctor stale-image check) are unaffected.
+
 ## [0.4.1] — 2026-06-17
 
 ### Fixed

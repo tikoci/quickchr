@@ -3,7 +3,7 @@
  */
 
 import type { Arch, Channel } from "./types.ts";
-import { QuickCHRError } from "./types.ts";
+import { CHANNELS, QuickCHRError } from "./types.ts";
 import { fetchResilient } from "./net.ts";
 
 const UPGRADE_BASE = "https://upgrade.mikrotik.com/routeros/NEWESTa7";
@@ -92,9 +92,8 @@ export async function resolveVersion(channel: Channel): Promise<string> {
 
 /** Fetch latest versions for all channels in parallel. */
 export async function resolveAllVersions(): Promise<Record<Channel, string>> {
-	const channels: Channel[] = ["stable", "long-term", "testing", "development"];
 	const results = await Promise.all(
-		channels.map(async (ch) => [ch, await resolveVersion(ch)] as const),
+		CHANNELS.map(async (ch) => [ch, await resolveVersion(ch)] as const),
 	);
 	return Object.fromEntries(results) as Record<Channel, string>;
 }
@@ -104,27 +103,58 @@ export function isValidVersion(version: string): boolean {
 	return /^\d+\.\d+(\.\d+)?(beta\d+|rc\d+)?$/.test(version);
 }
 
-/** Parse a RouterOS version into numeric parts. beta/rc suffixes are ignored for ordering. */
-export function parseVersionParts(version: string): [number, number, number] {
-	const match = version.match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:beta\d+|rc\d+)?$/);
+/**
+ * RouterOS pre-release ordering rank. For a given X.Y, a beta is older than an rc,
+ * which is older than the final release: beta < rc < release.
+ */
+const STAGE_RANK = { beta: 0, rc: 1, release: 2 } as const;
+
+interface ParsedVersion {
+	major: number;
+	minor: number;
+	patch: number;
+	/** Maturity rank within X.Y: beta=0 < rc=1 < release=2. */
+	stage: (typeof STAGE_RANK)[keyof typeof STAGE_RANK];
+	/** The N in betaN/rcN (0 for release builds). */
+	stageNum: number;
+}
+
+/** Parse a RouterOS version into numeric parts plus pre-release stage. */
+function parseVersion(version: string): ParsedVersion {
+	const match = version.match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:(beta|rc)(\d+))?$/);
 	if (!match) {
 		throw new QuickCHRError("INVALID_VERSION", `Invalid version: ${version}`);
 	}
 
-	const major = Number.parseInt(match[1] ?? "0", 10);
-	const minor = Number.parseInt(match[2] ?? "0", 10);
-	const patch = Number.parseInt(match[3] ?? "0", 10);
+	const stageName = match[4] as "beta" | "rc" | undefined;
+	return {
+		major: Number.parseInt(match[1] ?? "0", 10),
+		minor: Number.parseInt(match[2] ?? "0", 10),
+		patch: Number.parseInt(match[3] ?? "0", 10),
+		stage: stageName ? STAGE_RANK[stageName] : STAGE_RANK.release,
+		stageNum: match[5] ? Number.parseInt(match[5], 10) : 0,
+	};
+}
+
+/** Parse a RouterOS version into numeric parts. beta/rc suffixes are ignored. */
+export function parseVersionParts(version: string): [number, number, number] {
+	const { major, minor, patch } = parseVersion(version);
 	return [major, minor, patch];
 }
 
-/** Compare two RouterOS versions semantically. */
+/**
+ * Compare two RouterOS versions semantically, including pre-release suffixes:
+ * `7.24beta2` < `7.24rc1` < `7.24` < `7.24.1`. Returns <0, 0, or >0.
+ */
 export function compareRouterOsVersion(left: string, right: string): number {
-	const [leftMajor, leftMinor, leftPatch] = parseVersionParts(left);
-	const [rightMajor, rightMinor, rightPatch] = parseVersionParts(right);
+	const a = parseVersion(left);
+	const b = parseVersion(right);
 
-	if (leftMajor !== rightMajor) return leftMajor - rightMajor;
-	if (leftMinor !== rightMinor) return leftMinor - rightMinor;
-	return leftPatch - rightPatch;
+	if (a.major !== b.major) return a.major - b.major;
+	if (a.minor !== b.minor) return a.minor - b.minor;
+	if (a.patch !== b.patch) return a.patch - b.patch;
+	if (a.stage !== b.stage) return a.stage - b.stage;
+	return a.stageNum - b.stageNum;
 }
 
 /** True if RouterOS version is supported for quickchr provisioning mutations. */
@@ -179,4 +209,66 @@ export function generateMachineName(
 		n++;
 	}
 	return `${base}-${n}`;
+}
+
+// --- Channel recency ---
+
+/** Channels that ship as finished releases vs. moving pre-release builds. */
+const RELEASED_CHANNELS: readonly Channel[] = ["stable", "long-term"];
+
+export type ChannelMaturity = "released" | "prerelease";
+
+/** Classify a channel as a finished release line or a pre-release line. */
+export function channelMaturity(channel: Channel): ChannelMaturity {
+	return RELEASED_CHANNELS.includes(channel) ? "released" : "prerelease";
+}
+
+export interface ChannelStatus {
+	channel: Channel;
+	/** Resolved version for the channel, e.g. "7.24beta2". */
+	version: string;
+	maturity: ChannelMaturity;
+	/** True if this channel's version is at or ahead of the current stable release. */
+	aheadOfStable: boolean;
+}
+
+/**
+ * Classify each channel by current recency (pure — no network).
+ * `aheadOfStable` is always measured against the `stable` version in `versions`.
+ */
+export function classifyChannels(versions: Record<Channel, string>): ChannelStatus[] {
+	const stableVersion = versions.stable;
+	return CHANNELS.map((channel) => ({
+		channel,
+		version: versions[channel],
+		maturity: channelMaturity(channel),
+		aheadOfStable: compareRouterOsVersion(versions[channel], stableVersion) >= 0,
+	}));
+}
+
+/**
+ * Select the channels currently worth booting (pure — no network): every released
+ * channel unconditionally, plus any pre-release channel at or ahead of the reference
+ * channel's version (default reference: `stable`). This answers "what's worth booting,"
+ * never "what must pass" — gate policy stays with the consumer.
+ */
+export function selectActiveChannels(
+	versions: Record<Channel, string>,
+	opts: { aheadOf?: Channel } = {},
+): Channel[] {
+	const referenceVersion = versions[opts.aheadOf ?? "stable"];
+	return CHANNELS.filter((channel) => {
+		if (channelMaturity(channel) === "released") return true;
+		return compareRouterOsVersion(versions[channel], referenceVersion) >= 0;
+	});
+}
+
+/** Fetch all channel versions and classify each by current recency. */
+export async function resolveChannelStatuses(): Promise<ChannelStatus[]> {
+	return classifyChannels(await resolveAllVersions());
+}
+
+/** Fetch all channel versions and return the channels currently worth booting. */
+export async function resolveActiveChannels(opts: { aheadOf?: Channel } = {}): Promise<Channel[]> {
+	return selectActiveChannels(await resolveAllVersions(), opts);
 }

@@ -130,3 +130,20 @@ export { parseForwardSpec } from "./lib/forward-spec.ts";
 // Logging
 export { createLogger } from "./lib/log.ts";
 export type { ProgressLogger } from "./lib/log.ts";
+
+// Version & channel utilities
+export { CHANNELS } from "./lib/types.ts";
+export {
+	resolveVersion,
+	resolveAllVersions,
+	isValidVersion,
+	parseVersionParts,
+	compareRouterOsVersion,
+	isProvisioningSupportedVersion,
+	channelMaturity,
+	classifyChannels,
+	selectActiveChannels,
+	resolveChannelStatuses,
+	resolveActiveChannels,
+} from "./lib/versions.ts";
+export type { ChannelMaturity, ChannelStatus } from "./lib/versions.ts";
