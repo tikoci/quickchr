@@ -96,7 +96,12 @@ state. Exit code is `0` when no checks return `error` (warnings are OK).
 
 ```bash
 quickchr doctor              # human-readable
+quickchr doctor --json       # { ok, checks, staleImages } for CI
 ```
+
+The `--json` form emits `{ ok, checks, staleImages }`, where `checks` is an
+array of `{ label, status, detail }` and `staleImages` lists cached images older
+than the current long-term release. The exit code still reflects `ok`.
 
 ![quickchr doctor output](./images/doctor-demo.gif)
 
@@ -249,9 +254,20 @@ Tail the per-machine `qemu.log`. `--follow` streams new output;
 named L2 sockets; `networks sockets create <name>` reserves a port for a
 new tunnel.
 
-#### `version`
+#### `version [--json]`
 
-Print quickchr version (matches `package.json`).
+Print quickchr version (matches `package.json`) plus the latest RouterOS
+version per channel. `--json` emits just the channel map for CI consumers:
+
+```bash
+quickchr version --json
+# {"stable":"7.23.1","long-term":"7.21.4","testing":"7.23rc4","development":"7.24beta2"}
+```
+
+Offline, `--json` emits `{}`. For the "which channels are worth booting right
+now" smarts (recency-aware active channels), import `resolveActiveChannels` /
+`resolveChannelStatuses` from the library — see *Version & channel helpers* under
+the Library API reference.
 
 ### Interaction
 
@@ -531,8 +547,45 @@ SnapshotInfo, ChrLoadSample, ErrorCode, plus QGA result types).
 
 The barrel also re-exports utility functions from `auth.ts`, `disk.ts`,
 `exec.ts`, `qga.ts`, `console.ts`, `license.ts`, `credentials.ts`,
-`packages.ts`, `network.ts`, `log.ts`. Use them when the high-level
-class doesn't fit (typically not needed).
+`packages.ts`, `network.ts`, `log.ts`, `versions.ts`. Use them when the
+high-level class doesn't fit (typically not needed).
+
+### Version & channel helpers
+
+For tools that pick which CHRs to boot (e.g. CI matrices), the barrel exports
+the RouterOS version facts and a recency classifier:
+
+```ts
+import {
+  resolveAllVersions, compareRouterOsVersion,
+  resolveChannelStatuses, resolveActiveChannels,
+  classifyChannels, selectActiveChannels, channelMaturity,
+  CHANNELS, type Channel, type ChannelStatus,
+} from "@tikoci/quickchr";
+
+await resolveAllVersions();
+// { stable: "7.23.1", "long-term": "7.21.4", testing: "7.23rc4", development: "7.24beta2" }
+
+compareRouterOsVersion("7.24beta2", "7.24rc1"); // < 0  (beta < rc < release < patch)
+
+await resolveActiveChannels();
+// ["stable", "long-term", "development"]  — released channels always, plus any
+// pre-release at or ahead of stable (here testing 7.23rc4 is behind 7.23.1, excluded)
+```
+
+`resolveChannelStatuses()` returns `ChannelStatus[]`
+(`{ channel, version, maturity, aheadOfStable }`); `resolveActiveChannels({ aheadOf })`
+lets you measure pre-release recency against a channel other than `stable`. The pure
+`classifyChannels(versions)` / `selectActiveChannels(versions, opts)` take a
+`Record<Channel, string>` so you can classify without a network round-trip.
+
+These answer **"what's worth booting,"** never "what must pass" — keep merge-gating
+policy in the consumer.
+
+The entry also re-exports the lower-level version helpers for pre-flight checks:
+`resolveVersion`, `parseVersionParts`, `isValidVersion`, and
+`isProvisioningSupportedVersion` (validate a version against the provisioning floor
+before calling `start()`).
 
 ---
 

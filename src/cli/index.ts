@@ -179,7 +179,7 @@ async function main() {
 				await cmdCompletions(args.slice(1));
 				break;
 			case "doctor":
-				await cmdDoctor();
+				await cmdDoctor(args.slice(1));
 				break;
 			case "logs":
 				await cmdLogs(args.slice(1));
@@ -194,7 +194,7 @@ async function main() {
 			case "version":
 			case "--version":
 			case "-v":
-				await cmdVersion();
+				await cmdVersion(args.slice(1));
 				break;
 			case "help":
 			case "--help":
@@ -2429,38 +2429,37 @@ async function cmdCache(argv: string[]) {
 	}
 }
 
-async function cmdDoctor() {
+async function cmdDoctor(argv: string[] = []) {
+	const { flags } = parseFlags(argv);
+	const asJson = flagBool(flags, "json");
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, bold } = await import("./format.ts");
 
 	const result = await QuickCHR.doctor();
 
+	if (asJson) {
+		// Best-effort: cache entries older than current long-term (offline → empty).
+		const staleImages = await findStaleCacheImages();
+		console.log(JSON.stringify({ ok: result.ok, checks: result.checks, staleImages }, null, 2));
+		if (!result.ok) process.exit(1);
+		return;
+	}
+
+	const { statusIcon, bold } = await import("./format.ts");
 	console.log(bold("quickchr doctor\n"));
 	for (const check of result.checks) {
 		console.log(`${statusIcon(check.status)} ${check.label}: ${check.detail}`);
 	}
-
 	console.log();
 
-	// Best-effort: warn about cache entries older than current long-term.
-	try {
-		const { listCacheEntries } = await import("../lib/cache.ts");
-		const { resolveVersion, compareRouterOsVersion } = await import("../lib/versions.ts");
-		const entries = listCacheEntries();
-		if (entries.length > 0) {
-			const longTerm = await resolveVersion("long-term");
-			const stale = entries.filter((e) => {
-				if (e.version === "unknown" || e.inUse) return false;
-				try { return compareRouterOsVersion(e.version, longTerm) < 0; } catch { return false; }
-			});
-			if (stale.length > 0) {
-				console.log(`Note: ${stale.length} cached image(s) older than current long-term (${longTerm}):`);
-				for (const e of stale) console.log(`  - ${e.basename} (${e.version})`);
-				console.log("  Hint: 'quickchr cache prune --older-than " + longTerm + "' to evict them.");
-				console.log();
-			}
-		}
-	} catch { /* offline or no cache — silent */ }
+	// Best-effort, after the checks print so the network lookup never delays them.
+	const staleImages = await findStaleCacheImages();
+	if (staleImages.length > 0) {
+		const longTerm = staleImages[0]?.olderThan;
+		console.log(`Note: ${staleImages.length} cached image(s) older than current long-term (${longTerm}):`);
+		for (const e of staleImages) console.log(`  - ${e.basename} (${e.version})`);
+		console.log("  Hint: 'quickchr cache prune --older-than " + longTerm + "' to evict them.");
+		console.log();
+	}
 
 	if (result.ok) {
 		console.log("All checks passed.");
@@ -2470,12 +2469,50 @@ async function cmdDoctor() {
 	}
 }
 
-async function cmdVersion() {
+interface StaleCacheImage {
+	basename: string;
+	version: string;
+	/** The current long-term version this image is older than. */
+	olderThan: string;
+}
+
+/** Cached images older than the current long-term release. Empty when offline or no cache. */
+async function findStaleCacheImages(): Promise<StaleCacheImage[]> {
+	try {
+		const { listCacheEntries } = await import("../lib/cache.ts");
+		const { resolveVersion, compareRouterOsVersion } = await import("../lib/versions.ts");
+		const entries = listCacheEntries();
+		if (entries.length === 0) return [];
+		const longTerm = await resolveVersion("long-term");
+		return entries
+			.filter((e) => {
+				if (e.version === "unknown" || e.inUse) return false;
+				try { return compareRouterOsVersion(e.version, longTerm) < 0; } catch { return false; }
+			})
+			.map((e) => ({ basename: e.basename, version: e.version, olderThan: longTerm }));
+	} catch {
+		return []; // offline or no cache
+	}
+}
+
+async function cmdVersion(argv: string[] = []) {
+	const { flags } = parseFlags(argv);
+	const asJson = flagBool(flags, "json");
+	const { resolveAllVersions } = await import("../lib/versions.ts");
+
+	if (asJson) {
+		// Stable machine-readable contract: { channel: version }. Offline → {}.
+		let versions: Record<string, string> = {};
+		try {
+			versions = await resolveAllVersions();
+		} catch { /* offline — emit empty object */ }
+		console.log(JSON.stringify(versions));
+		return;
+	}
+
 	const pkg = await import("../../package.json");
 	console.log(`quickchr ${pkg.version}`);
-
 	try {
-		const { resolveAllVersions } = await import("../lib/versions.ts");
 		const versions = await resolveAllVersions();
 		console.log("\nLatest RouterOS versions:");
 		for (const [channel, version] of Object.entries(versions)) {
@@ -2522,8 +2559,8 @@ Commands:
   cache [list|prune|clear] Manage cached CHR images
   completions             Manage shell completions (Tab completion)
   logs <name>             Tail the QEMU log for an instance
-  doctor                  Check prerequisites
-  version                 Show version info
+  doctor [--json]         Check prerequisites
+  version [--json]        Show version info
   help [command]          Show help
 
 Environment:
@@ -2707,11 +2744,14 @@ Print environment variables for subprocesses that connect to a running CHR.
   --json      Output the env map as JSON instead of KEY=value lines.`);
 			break;
 		case "doctor":
-			console.log(`quickchr doctor
+			console.log(`quickchr doctor [--json]
 
 Check system prerequisites: QEMU binaries, firmware, acceleration,
 sshpass (for package upload), qemu-img (for disk operations), data directories,
-and cached images. Also reports the current shell and completion install status.`);
+and cached images. Also reports the current shell and completion install status.
+
+Options:
+  --json      Emit { ok, checks, staleImages } as JSON. Exit code still reflects ok.`);
 			break;
 		case "logs":
 			console.log(`quickchr logs <name> [options]
@@ -2841,6 +2881,16 @@ Credential resolution order (highest priority first):
   <name>      Remove an instance (stops if running, deletes disk and state).
               Omit to see a list of instances.
   --all       Remove all instances.`);
+			break;
+		case "version":
+			console.log(`quickchr version [--json]
+
+Show the quickchr version and the latest RouterOS version per channel.
+
+Options:
+  --json      Emit the latest RouterOS versions as a { channel: version } object
+              (stable, long-term, testing, development). Offline emits {}.
+              Omits the quickchr version line — query package.json for that.`);
 			break;
 		case "networks":
 		case "net":

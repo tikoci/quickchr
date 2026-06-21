@@ -7,7 +7,8 @@ import type { ProgressLogger } from "./log.ts";
 // --- Version & Architecture ---
 
 export type Channel = "stable" | "long-term" | "testing" | "development";
-export const CHANNELS: Channel[] = ["stable", "long-term", "testing", "development"];
+/** Canonical channel order. Frozen so neither library code nor consumers can mutate it. */
+export const CHANNELS: readonly Channel[] = Object.freeze(["stable", "long-term", "testing", "development"] as Channel[]);
 
 export type Arch = "arm64" | "x86";
 export const ARCHES: Arch[] = ["arm64", "x86"];

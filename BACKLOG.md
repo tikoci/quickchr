@@ -497,6 +497,30 @@ wholesale, but centrs has reusable RouterOS protocol layers and sharp test-harne
   the MAC-Telnet request/handshake on top (centrs side). Reference: `docs/mndp.md`,
   `test/lab/mndp/REPORT.md`.
 
+**Recency-aware channel/version API for CI consumers (issue #3, 2026-06-21):**
+
+- [x] **Public version exports + recency API** — `src/index.ts` now re-exports the version
+  helpers (`resolveVersion`, `resolveAllVersions`, `parseVersionParts`,
+  `compareRouterOsVersion`, `isValidVersion`, `isProvisioningSupportedVersion`, `CHANNELS`,
+  `Channel`) so consumers stop being blocked by the `.`-only `exports` map. Added the
+  recency classifier: `resolveChannelStatuses`/`classifyChannels` (`ChannelStatus` =
+  `{channel, version, maturity, aheadOfStable}`) and `resolveActiveChannels`/
+  `selectActiveChannels` (released channels always + pre-release at/ahead of a reference,
+  default `stable`). Pure variants take a `Record<Channel,string>` for network-free tests.
+  Quickchr owns version facts + recency; merge-gating policy stays in the consumer (centrs).
+- [x] **Suffix-aware comparator (bug fix)** — `compareRouterOsVersion` now orders
+  `betaN < rcN < release < patch` (was stripping the suffix → `7.24beta2 == 7.24rc1 == 7.24`).
+  Release-vs-release consumers (cache-prune, doctor stale-image) unaffected. Updated the
+  anchor test that encoded the old equality.
+- [x] **`version --json` / `doctor --json`** — `version --json` emits a `{channel: version}`
+  map (offline → `{}`); `doctor --json` emits `{ok, checks, staleImages}` (exit still
+  reflects `ok`).
+- [ ] [P3] **`--json` for `networks` and `disk`** — follow-up from the issue #3 "other
+  `--json` gaps" audit. `networks interfaces`/`sockets` and `disk` expose structured data
+  (`getDiskInfo` → `DiskInfo`, socket registry, detected interfaces) but only print human
+  tables. Add `--json` mirroring the `list`/`inspect`/`cache list`/`doctor` pattern when a
+  consumer needs it. `cache prune`/`clear` could also emit evicted-entry JSON (minor).
+
 ### Examples (Rootless Multi-CHR Topologies)
 
 **Design principles:**

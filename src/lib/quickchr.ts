@@ -1169,7 +1169,7 @@ export class QuickCHR {
 		// Resolve version
 		let version: string;
 		if (opts.version) {
-			if ((CHANNELS as string[]).includes(opts.version)) {
+			if ((CHANNELS as readonly string[]).includes(opts.version)) {
 				logger.warn(
 					`'${opts.version}' is a channel name, not a version — passed as 'version' but resolved as a channel. Use 'channel: "${opts.version}"' instead to make this explicit.`,
 				);

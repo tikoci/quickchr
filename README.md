@@ -331,6 +331,25 @@ console.log(chr.state.bootDiskFormat); // "qcow2"
 console.log(chr.state.extraDisks);     // ["512M", "2G"]
 ```
 
+### Version & channel API
+
+Pick which CHRs are worth booting (handy for CI matrices) without scraping CLI text:
+
+```typescript
+import { resolveActiveChannels, resolveAllVersions } from "@tikoci/quickchr";
+
+await resolveAllVersions();
+// { stable: "7.23.1", "long-term": "7.21.4", testing: "7.23rc4", development: "7.24beta2" }
+
+await resolveActiveChannels();
+// ["stable", "long-term", "development"]
+//   released channels always, plus any pre-release at/ahead of stable
+```
+
+`compareRouterOsVersion` orders pre-release suffixes (`7.24beta2` < `7.24rc1` <
+`7.24` < `7.24.1`). The same map is available from the CLI via
+`quickchr version --json`. See [MANUAL.md](./MANUAL.md) → *Version & channel helpers*.
+
 ### Use in Tests
 
 ```typescript
