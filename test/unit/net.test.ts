@@ -29,16 +29,21 @@ describe("isConnectionFailure", () => {
 		expect(isConnectionFailure({ code: "FailedToOpenSocket", errno: 0 })).toBe(true);
 		expect(isConnectionFailure({ code: "ECONNREFUSED" })).toBe(true);
 		expect(isConnectionFailure({ cause: { code: "ENETUNREACH" } })).toBe(true);
-		expect(isConnectionFailure(new TypeError("Unable to connect"))).toBe(true);
+		// A TypeError counts only with Bun's `errno: 0` connect-failure marker.
+		expect(isConnectionFailure(Object.assign(new TypeError("Unable to connect"), { errno: 0 }))).toBe(
+			true,
+		);
 	});
 
-	test("false for aborts/timeouts and non-error values", () => {
+	test("false for aborts, plain TypeErrors, and non-error values", () => {
 		const abort = new Error("The operation timed out.");
 		abort.name = "AbortError";
 		expect(isConnectionFailure(abort)).toBe(false);
 		expect(isConnectionFailure(null)).toBe(false);
 		expect(isConnectionFailure("nope")).toBe(false);
 		expect(isConnectionFailure(new RangeError("bad arg"))).toBe(false);
+		// A bare TypeError without the errno marker is a real bug, not a connect failure.
+		expect(isConnectionFailure(new TypeError("x is not a function"))).toBe(false);
 	});
 });
 
@@ -48,7 +53,7 @@ describe("fetchResilient", () => {
 	});
 
 	test("uses a plain fetch on the system resolver as the primary path", async () => {
-		const resolveSpy = spyOn(dns.Resolver.prototype, "resolve4");
+		const resolveSpy = mockResolve4({ reject: new Error("resolve4 must not be called") });
 		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
 			input: string | URL | Request,
 		) => {
@@ -63,7 +68,7 @@ describe("fetchResilient", () => {
 	});
 
 	test("returns the HTTP response as-is (no fallback) on a 5xx", async () => {
-		const resolveSpy = spyOn(dns.Resolver.prototype, "resolve4");
+		const resolveSpy = mockResolve4({ reject: new Error("resolve4 must not be called") });
 		const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response("nope", { status: 503 }),
 		);
@@ -106,7 +111,7 @@ describe("fetchResilient", () => {
 	});
 
 	test("rethrows non-connection errors (e.g. timeouts) without a fallback", async () => {
-		const resolveSpy = spyOn(dns.Resolver.prototype, "resolve4");
+		const resolveSpy = mockResolve4({ reject: new Error("resolve4 must not be called") });
 		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => {
 			const e = new Error("The operation timed out.");
 			e.name = "AbortError";
@@ -114,6 +119,16 @@ describe("fetchResilient", () => {
 		}) as unknown as typeof fetch);
 		await expect(fetchResilient("https://h.example/x")).rejects.toThrow("The operation timed out.");
 		expect(fetchSpy).toHaveBeenCalledTimes(1); // normal attempt only; no public-DNS retry
+		expect(resolveSpy).toHaveBeenCalledTimes(0);
+	});
+
+	test("does not retry on a plain TypeError lacking the errno-0 connect marker", async () => {
+		const resolveSpy = mockResolve4({ reject: new Error("resolve4 must not be called") });
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => {
+			throw new TypeError("x is not a function"); // a real bug, not a connect failure
+		}) as unknown as typeof fetch);
+		await expect(fetchResilient("https://h.example/x")).rejects.toThrow("x is not a function");
+		expect(fetchSpy).toHaveBeenCalledTimes(1); // surfaced immediately; no public-DNS retry
 		expect(resolveSpy).toHaveBeenCalledTimes(0);
 	});
 });

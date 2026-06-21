@@ -20,7 +20,9 @@
  * validation still passes.
  *
  * Only connection-class failures trigger the fallback; HTTP responses (incl.
- * 5xx) and aborts/timeouts pass through unchanged and are never retried.
+ * 5xx) and aborts (`AbortError`, e.g. from `AbortSignal.timeout`) pass through
+ * unchanged and are never retried. (A low-level connect `ETIMEDOUT` is a
+ * connection-class failure and *is* retried — see `isConnectionFailure`.)
  */
 
 import { promises as dns } from "node:dns";
@@ -32,13 +34,14 @@ const DNS_TIMEOUT_MS = 3000;
  * True for the connection-class failures raised when a socket cannot be opened
  * (e.g. IPv4 blocked on an IPv6-only network, or Bun's `errno: 0`
  * ConnectionRefused / FailedToOpenSocket against an unreachable address), plus
- * the standard connect errors. Excludes aborts/timeouts and HTTP-level outcomes
- * (those carry a Response and never throw here). Used to decide whether to fall
- * back from the IPv4 attempt to a normal dual-stack fetch.
+ * the standard connect errors. Excludes `AbortError` (aborts/`AbortSignal`
+ * timeouts) and HTTP-level outcomes (those carry a Response and never throw
+ * here). Used to decide whether to fall back from the normal fetch to the
+ * public-DNS IPv4 attempt.
  */
 export function isConnectionFailure(err: unknown): boolean {
 	if (!err || typeof err !== "object") return false;
-	const e = err as { name?: string; code?: string; cause?: { code?: string } };
+	const e = err as { name?: string; code?: string; errno?: number; cause?: { code?: string } };
 	if (e.name === "AbortError") return false;
 	const code = e.code ?? e.cause?.code;
 	if (
@@ -53,10 +56,12 @@ export function isConnectionFailure(err: unknown): boolean {
 	) {
 		return true;
 	}
-	// Bun wraps low-level connect failures as a bare TypeError ("Unable to
-	// connect…"). Treat those as retriable too; a wrong guess only costs one
-	// normal fetch, which then surfaces the real error if it also fails.
-	return e.name === "TypeError";
+	// Bun has also surfaced low-level connect failures as a `TypeError` carrying
+	// `errno: 0` (its connect-failure marker; the typed `code`s above catch the
+	// current form — Bun 1.3 throws an `Error` with `code: "ConnectionRefused"`,
+	// confirmed by probe). Gate on that marker so an unrelated `TypeError` (a real
+	// bug) surfaces immediately instead of triggering a pointless DNS retry.
+	return e.name === "TypeError" && e.errno === 0;
 }
 
 /** Rewrite a URL to target an explicit IPv4 literal, preserving port/path/query. */
@@ -121,8 +126,8 @@ export async function fetchResilient(url: string, init?: BunFetchRequestInit): P
 		return await fetch(url, init);
 	} catch (err) {
 		// Only a connection-class failure (e.g. a broken/slow stub resolver, or an
-		// unreachable AAAA) is worth the public-DNS workaround. Aborts/timeouts and
-		// everything else propagate unchanged.
+		// unreachable AAAA) is worth the public-DNS workaround. Aborts (AbortError)
+		// and everything else propagate unchanged.
 		if (!isConnectionFailure(err)) throw err;
 		const address = await resolveIpv4(new URL(url).hostname);
 		// Public DNS can't help (unreachable / no answer) — surface the original failure.
