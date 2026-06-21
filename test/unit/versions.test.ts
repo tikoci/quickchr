@@ -18,6 +18,7 @@ import {
 	resolveActiveChannels,
 	resolveChannelStatuses,
 } from "../../src/lib/versions.ts";
+import { CHANNELS } from "../../src/lib/types.ts";
 import type { Channel } from "../../src/lib/types.ts";
 
 // Network-free: fail the public-DNS A-record lookup so fetchResilient uses its
@@ -171,6 +172,11 @@ describe("channel recency classification", () => {
 		testing: "7.22.5",
 		development: "7.24beta2",
 	};
+
+	test("CHANNELS is frozen so consumers can't mutate library behavior", () => {
+		expect(Object.isFrozen(CHANNELS)).toBe(true);
+		expect(() => (CHANNELS as Channel[]).push("stable")).toThrow();
+	});
 
 	test("channelMaturity partitions released vs pre-release", () => {
 		expect(channelMaturity("stable")).toBe("released");

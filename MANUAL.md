@@ -582,6 +582,11 @@ lets you measure pre-release recency against a channel other than `stable`. The 
 These answer **"what's worth booting,"** never "what must pass" — keep merge-gating
 policy in the consumer.
 
+The entry also re-exports the lower-level version helpers for pre-flight checks:
+`resolveVersion`, `parseVersionParts`, `isValidVersion`, and
+`isProvisioningSupportedVersion` (validate a version against the provisioning floor
+before calling `start()`).
+
 ---
 
 ## 5. Provisioning pipeline
