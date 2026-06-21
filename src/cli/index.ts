@@ -2436,10 +2436,9 @@ async function cmdDoctor(argv: string[] = []) {
 
 	const result = await QuickCHR.doctor();
 
-	// Best-effort: cache entries older than current long-term (offline → empty).
-	const staleImages = await findStaleCacheImages();
-
 	if (asJson) {
+		// Best-effort: cache entries older than current long-term (offline → empty).
+		const staleImages = await findStaleCacheImages();
 		console.log(JSON.stringify({ ok: result.ok, checks: result.checks, staleImages }, null, 2));
 		if (!result.ok) process.exit(1);
 		return;
@@ -2452,6 +2451,8 @@ async function cmdDoctor(argv: string[] = []) {
 	}
 	console.log();
 
+	// Best-effort, after the checks print so the network lookup never delays them.
+	const staleImages = await findStaleCacheImages();
 	if (staleImages.length > 0) {
 		const longTerm = staleImages[0]?.olderThan;
 		console.log(`Note: ${staleImages.length} cached image(s) older than current long-term (${longTerm}):`);

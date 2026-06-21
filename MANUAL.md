@@ -266,7 +266,8 @@ quickchr version --json
 
 Offline, `--json` emits `{}`. For the "which channels are worth booting right
 now" smarts (recency-aware active channels), import `resolveActiveChannels` /
-`resolveChannelStatuses` from the library — see §[Library API].
+`resolveChannelStatuses` from the library — see *Version & channel helpers* under
+the Library API reference.
 
 ### Interaction
 
