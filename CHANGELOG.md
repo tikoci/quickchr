@@ -8,6 +8,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-06-21
+
 ### Added
 
 - Public version/channel API for CI consumers (issue #3). The package entry
