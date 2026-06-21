@@ -70,6 +70,7 @@ csi
 cword
 datagram
 datagrams
+defconf
 delvm
 demux
 desynced
