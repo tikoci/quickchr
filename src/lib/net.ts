@@ -1,22 +1,26 @@
 /**
  * Resilient HTTP fetch for MikroTik's download hosts.
  *
- * On GitHub-hosted CI runners the system DNS resolver returns `ESERVFAIL`
- * (slowly — 2 to 26 s) for `upgrade.mikrotik.com` / `download.mikrotik.com` via
- * both `getaddrinfo` and c-ares-over-resolv.conf, so a plain `fetch` either
- * times out or (when the stub hands back only the unreachable AAAA) fails with
- * Bun's `errno: 0` ConnectionRefused / FailedToOpenSocket. A direct query to a
- * public resolver answers in ~10 ms, and the hosts are dual-stack with a
- * reachable IPv4. quickchr is expected to run unattended in CI, so it resolves
- * these hosts itself rather than trusting the runner's broken resolver.
+ * Primary path: a plain `fetch` on the system resolver. This is tried first,
+ * even at a small latency cost when it fails. It is dual-stack (happy eyeballs)
+ * and on par with curl/most tools, and it honors local DNS configuration —
+ * `/etc/hosts` pins, VPN/split-horizon DNS, mirror redirects, IPv6-only egress —
+ * which a forced public-DNS+IPv4 path would silently override and could itself
+ * turn into a fresh failure mode. So we stay "normal" unless the normal path
+ * actually breaks.
  *
- * Strategy: resolve the A record by querying a public DNS server directly
- * (bypassing the host's resolv.conf), then connect to the IPv4 literal,
- * preserving the `Host` header and TLS SNI so certificate validation still
- * passes. Fall back to a normal `fetch` (system resolver, dual-stack) when the
- * public-DNS path is unavailable — e.g. a network that blocks public resolvers
- * — so this stays correct off CI. HTTP responses and aborts/timeouts pass
- * through unchanged; they are never retried.
+ * Fallback: some environments (notably GitHub-hosted CI runners, observed
+ * 2026-06) have a broken/slow stub resolver that returns `ESERVFAIL` — slowly,
+ * 2 to 26 s — for `upgrade.mikrotik.com` / `download.mikrotik.com`, or hands back
+ * only an unreachable AAAA, surfacing as Bun's `errno: 0` ConnectionRefused /
+ * FailedToOpenSocket. When the normal fetch fails *that* way (a connection-class
+ * error), we retry by resolving the A record against a public DNS server
+ * directly (~10 ms), bypassing the host's resolv.conf, and connecting to the
+ * IPv4 literal with the `Host` header and TLS SNI preserved so certificate
+ * validation still passes.
+ *
+ * Only connection-class failures trigger the fallback; HTTP responses (incl.
+ * 5xx) and aborts/timeouts pass through unchanged and are never retried.
  */
 
 import { promises as dns } from "node:dns";
@@ -64,10 +68,11 @@ export function toIpv4Url(url: string, address: string): string {
 
 /**
  * Resolve a host's A record via public DNS servers directly, bypassing the
- * host's resolv.conf (which is broken for these names on CI runners). Returns
- * undefined — never throws — when public DNS is unreachable or has no answer,
- * so the caller can fall back to a normal fetch. Bounded by DNS_TIMEOUT_MS so a
- * blocked resolver does not stall the request.
+ * host's resolv.conf. Used only as the fallback path, after a normal fetch has
+ * already failed with a connection-class error (e.g. a broken stub resolver on
+ * CI runners). Returns undefined — never throws — when public DNS is unreachable
+ * or has no answer, so the caller can surface the original failure. Bounded by
+ * DNS_TIMEOUT_MS so a blocked resolver does not stall the request.
  */
 async function resolveIpv4(host: string): Promise<string | undefined> {
 	const resolver = new dns.Resolver();
@@ -104,20 +109,24 @@ async function fetchOverIpv4(
 }
 
 /**
- * `fetch()` that resolves dual-stack hosts via public DNS and connects over
- * IPv4, so it survives a broken/slow system resolver (e.g. GitHub-hosted CI
- * runners). Falls back to a normal `fetch` when public DNS is unavailable.
- * Behaves like `fetch` for HTTP responses and aborts.
+ * `fetch()` that tries the system resolver first (a normal dual-stack fetch)
+ * and, only when that fails with a connection-class error, falls back to
+ * resolving via public DNS and connecting over the IPv4 literal — so it survives
+ * a broken/slow system resolver (e.g. GitHub-hosted CI runners) without
+ * overriding local DNS in the common case. Behaves like `fetch` for HTTP
+ * responses and aborts.
  */
 export async function fetchResilient(url: string, init?: BunFetchRequestInit): Promise<Response> {
-	const address = await resolveIpv4(new URL(url).hostname);
-	if (address) {
-		try {
-			return await fetchOverIpv4(url, address, init);
-		} catch (err) {
-			if (!isConnectionFailure(err)) throw err;
-			// IPv4 unreachable (e.g. IPv6-only egress) — fall through to a normal fetch.
-		}
+	try {
+		return await fetch(url, init);
+	} catch (err) {
+		// Only a connection-class failure (e.g. a broken/slow stub resolver, or an
+		// unreachable AAAA) is worth the public-DNS workaround. Aborts/timeouts and
+		// everything else propagate unchanged.
+		if (!isConnectionFailure(err)) throw err;
+		const address = await resolveIpv4(new URL(url).hostname);
+		// Public DNS can't help (unreachable / no answer) — surface the original failure.
+		if (address === undefined) throw err;
+		return fetchOverIpv4(url, address, init);
 	}
-	return fetch(url, init);
 }
