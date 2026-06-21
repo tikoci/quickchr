@@ -92,11 +92,14 @@ describe("fetchResilient", () => {
 			}
 			expect(String(input)).toBe("https://159.148.147.251/x"); // IPv4 fallback (rewritten)
 			expect(new Headers(init?.headers).get("Host")).toBe("upgrade.mikrotik.com");
+			// serverName must pin to the real host even when the caller passes a conflicting one.
 			expect(init?.tls?.serverName).toBe("upgrade.mikrotik.com");
 			return new Response("recovered", { status: 200 });
 		}) as unknown as typeof fetch);
 
-		const res = await fetchResilient("https://upgrade.mikrotik.com/x");
+		const res = await fetchResilient("https://upgrade.mikrotik.com/x", {
+			tls: { serverName: "attacker.example" },
+		});
 		expect(await res.text()).toBe("recovered");
 		expect(fetchSpy).toHaveBeenCalledTimes(2);
 	});

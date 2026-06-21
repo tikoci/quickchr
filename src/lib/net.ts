@@ -2,8 +2,10 @@
  * Resilient HTTP fetch for MikroTik's download hosts.
  *
  * Primary path: a plain `fetch` on the system resolver. This is tried first,
- * even at a small latency cost when it fails. It is dual-stack (happy eyeballs)
- * and on par with curl/most tools, and it honors local DNS configuration —
+ * accepting the latency cost when it fails — usually small, but up to the
+ * resolver's own failure time (the broken CI stub below took 2–26 s). It is
+ * dual-stack (happy eyeballs) and on par with curl/most tools, and it honors
+ * local DNS configuration —
  * `/etc/hosts` pins, VPN/split-horizon DNS, mirror redirects, IPv6-only egress —
  * which a forced public-DNS+IPv4 path would silently override and could itself
  * turn into a fresh failure mode. So we stay "normal" unless the normal path
@@ -115,7 +117,9 @@ async function fetchOverIpv4(
 	return fetch(toIpv4Url(url, address), {
 		...init,
 		headers,
-		tls: { serverName: host, ...init?.tls },
+		// serverName last: it must pin to the real host for cert validation against
+		// the IP literal — a caller-provided init.tls.serverName must not override it.
+		tls: { ...init?.tls, serverName: host },
 	});
 }
 
