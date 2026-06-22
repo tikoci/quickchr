@@ -27,7 +27,7 @@ on:
         default: false
       macos-x86:
         type: boolean
-        description: "Integration — macos/x86_64 (macos-15-intel, TCG — best-effort, no HVF on hosted runners, may time out; non-gating)"
+        description: "Integration — macos/x86_64 (macos-15-intel, TCG — best-effort, non-gating; defaults to a smoke subset, set test-filter to run more)"
         default: false
       windows-x86:
         type: boolean
@@ -233,9 +233,11 @@ jobs:
   # Intel macOS: macos-13 was retired 2025-12-04; macos-15-intel is GitHub's last
   # x86_64 macOS image (standard/free on public repos, supported to ~Fall 2027).
   # Best-effort / non-gating: hosted macOS runners expose no HVF, so x86 CHR boots
-  # under TCG and the full suite can starve the runner for CPU/memory (observed:
-  # "runner lost communication" near the 60-min mark). `continue-on-error` keeps a
-  # TCG timeout from turning the dispatch red; the job-level timeout is a clean backstop.
+  # under TCG and the *full* suite starves the runner for CPU/memory (observed:
+  # "runner lost communication" near the 60-min mark, before any cleanup runs). So
+  # this job defaults to a smoke subset (see "Resolve test files") that completes
+  # under TCG; an explicit test-filter input overrides it. `continue-on-error` plus
+  # the job-level timeout keep any TCG stall from turning the dispatch red.
   integration-macos-x86:
     name: Integration (macos/x86_64)
     if: ${{ inputs.macos-x86 == true }}
@@ -267,22 +269,28 @@ jobs:
       - name: Resolve test files
         id: files
         run: |
+          # macos-x86 is TCG-only (no HVF on hosted Intel runners), so the full
+          # integration suite starves the runner before it finishes (~64 min →
+          # "lost communication"). Default to a curated smoke subset that completes
+          # under TCG and still exercises the core boot + REST path. An explicit
+          # test-filter input overrides this for a full or targeted run.
+          SMOKE="anchor.test.ts"
           FILTER="${{ inputs.test-filter }}"
           if [ -z "$FILTER" ]; then
-            echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
-          else
-            FILES=""
-            IFS=',' read -ra PARTS <<< "$FILTER"
-            for f in "${PARTS[@]}"; do
-              f="${f// /}"
-              if [ -f "test/integration/$f" ]; then
-                FILES="$FILES test/integration/$f"
-              else
-                echo "::warning::Skipping unknown test file: $f"
-              fi
-            done
-            echo "list=$FILES" >> "$GITHUB_OUTPUT"
+            echo "::notice::macos-x86 smoke default: $SMOKE (override via the test-filter input)"
+            FILTER="$SMOKE"
           fi
+          FILES=""
+          IFS=',' read -ra PARTS <<< "$FILTER"
+          for f in "${PARTS[@]}"; do
+            f="${f// /}"
+            if [ -f "test/integration/$f" ]; then
+              FILES="$FILES test/integration/$f"
+            else
+              echo "::warning::Skipping unknown test file: $f"
+            fi
+          done
+          echo "list=$FILES" >> "$GITHUB_OUTPUT"
 
       - name: Run integration tests (sequential per-file)
         run: |
@@ -308,7 +316,10 @@ jobs:
           done
           echo "::endgroup::"
           exit "$fail"
-        timeout-minutes: 50
+        # Smoke subset needs far less than the full suite; a tight ceiling kills a
+        # hung TCG boot before the runner is badly starved (one QEMU, not many), so
+        # the cleanup/upload steps below can actually run.
+        timeout-minutes: 30
 
       - name: Kill QEMU processes
         if: always()
