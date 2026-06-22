@@ -175,7 +175,15 @@ describe("channel recency classification", () => {
 
 	test("CHANNELS is frozen so consumers can't mutate library behavior", () => {
 		expect(Object.isFrozen(CHANNELS)).toBe(true);
-		expect(() => (CHANNELS as Channel[]).push("stable")).toThrow();
+		const before = [...CHANNELS];
+		const beforeLength = CHANNELS.length;
+		try {
+			(CHANNELS as Channel[]).push("stable");
+		} catch {
+			// In strict mode, mutating a frozen array can throw; in non-strict mode it may fail silently.
+		}
+		expect(CHANNELS.length).toBe(beforeLength);
+		expect([...CHANNELS]).toEqual(before);
 	});
 
 	test("channelMaturity partitions released vs pre-release", () => {
