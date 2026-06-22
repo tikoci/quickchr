@@ -243,6 +243,11 @@ describe("resolveVersion", () => {
 		await expect(resolveVersion("stable")).rejects.toMatchObject({ code: "INVALID_VERSION" });
 	});
 
+	test("throws INVALID_VERSION when body is empty", async () => {
+		globalThis.fetch = makeMockFetch(() => Promise.resolve(new Response("")));
+		await expect(resolveVersion("stable")).rejects.toMatchObject({ code: "INVALID_VERSION" });
+	});
+
 	test("returns version string from valid response", async () => {
 		globalThis.fetch = makeMockFetch(() =>
 			Promise.resolve(new Response("7.22.1 1774276515")),
