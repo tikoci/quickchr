@@ -117,8 +117,11 @@ describe("buildQemuArgs", () => {
 	test("includes hostfwd for user networking", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ networks: [{ specifier: "user", id: "net0" }] }));
-			const netdevArg = args.find((a) => a.startsWith("user,id=net0"));
+			const netdevIdx = args.indexOf("-netdev");
+			expect(netdevIdx).toBeGreaterThan(-1);
+			const netdevArg = args[netdevIdx + 1];
 			expect(netdevArg).toBeDefined();
+			expect(netdevArg).toContain("user,id=net0");
 			expect(netdevArg).toContain("hostfwd=tcp::9100-:80");
 			expect(netdevArg).toContain("hostfwd=tcp::9102-:22");
 		} catch (e: unknown) {
