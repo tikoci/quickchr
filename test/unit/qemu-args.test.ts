@@ -40,9 +40,22 @@ describe("buildQemuArgs", () => {
 	test("arm64 uses virt machine type", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ arch: "arm64" }));
-			expect(args).toContain("-M");
+			const machineFlags = args.filter((a) => a === "-M");
+			expect(machineFlags.length).toBe(1);
 			const machineIdx = args.indexOf("-M");
+			expect(machineIdx).toBeGreaterThanOrEqual(0);
 			expect(args[machineIdx + 1]).toBe("virt");
+
+			const memIdx = args.indexOf("-m");
+			expect(memIdx).toBeGreaterThanOrEqual(0);
+			expect(args[memIdx + 1]).toBe("512");
+
+			const smpIdx = args.indexOf("-smp");
+			expect(smpIdx).toBeGreaterThanOrEqual(0);
+			expect(args[smpIdx + 1]).toBe("1");
+
+			expect(args).toContain("-drive");
+			expect(args).toContain("-nographic");
 		} catch (e: unknown) {
 			// Skip if QEMU not installed or arm64 firmware not found
 			if (e && typeof e === "object" && "code" in e) {
