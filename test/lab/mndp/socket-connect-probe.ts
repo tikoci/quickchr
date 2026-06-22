@@ -53,9 +53,10 @@ function parseMndp(buf: Buffer): Record<string, string | number> {
 	}
 	return f;
 }
-// length-prefixed (QEMU stream framing) refresh frame the host can write back
+// Length-prefixed (QEMU stream framing) MAC-Telnet minimal refresh packet the host can write back.
+// Note: the UDP/5678 framing here is transport; the 4-byte body is a MAC-Telnet refresh trigger, not an MNDP TLV payload.
 function buildRefreshStreamFrame(): Buffer {
-	const payload = Buffer.from([0, 0, 0, 0]);
+	const payload = Buffer.from([0, 0, 0, 0]); // Minimal MAC-Telnet refresh payload.
 	const udpLen = 8 + payload.length;
 	const udp = Buffer.alloc(udpLen);
 	udp.writeUInt16BE(MNDP_PORT, 0); udp.writeUInt16BE(MNDP_PORT, 2); udp.writeUInt16BE(udpLen, 4);
