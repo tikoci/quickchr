@@ -105,7 +105,7 @@ describe("fetchResilient", () => {
 	});
 
 	test("surfaces the original connection failure when public DNS has no answer", async () => {
-		mockResolve4({ reject: Object.assign(new Error("queryA ESERVFAIL"), { code: "ESERVFAIL" }) });
+		mockResolve4({ reject: Object.assign(new Error("DNS query failed: ESERVFAIL"), { code: "ESERVFAIL" }) });
 		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => {
 			throw Object.assign(new Error("Unable to connect"), { code: "ECONNREFUSED" });
 		}) as unknown as typeof fetch);
