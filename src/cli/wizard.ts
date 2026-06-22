@@ -304,7 +304,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	} = await import("../lib/versions.ts");
 	let resolvedVersion = version ?? await resolveVersion(channel ?? "long-term");
 	version = resolvedVersion;
-	let provisioningSupported = isProvisioningSupportedVersion(resolvedVersion);
+	const provisioningSupported = isProvisioningSupportedVersion(resolvedVersion);
 
 	let installAllPackages = false;
 	let packages: string[] = [];
@@ -346,7 +346,6 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 			channel = "long-term";
 			resolvedVersion = await resolveVersion(channel);
 			version = resolvedVersion;
-			provisioningSupported = true;
 			wantProvision = await askProvisionChoice();
 		}
 	}

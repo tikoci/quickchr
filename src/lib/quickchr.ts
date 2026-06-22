@@ -1777,7 +1777,7 @@ export class QuickCHR {
 					detail: ver ?? "found (version unknown)",
 				});
 			} catch (_e) {
-				const hint = getQemuInstallHint() ?? "Install QEMU";
+				const hint = getQemuInstallHint();
 				checks.push({
 					label: qemuName,
 					status: arch === hostArchToChr() ? "error" : "warn",
