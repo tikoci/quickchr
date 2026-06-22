@@ -21,9 +21,12 @@ import {
 import { CHANNELS } from "../../src/lib/types.ts";
 import type { Channel } from "../../src/lib/types.ts";
 
-// Network-free: fail the public-DNS A-record lookup so fetchResilient uses its
-// fallback (a normal fetch on the original URL), which the mocked globalThis.fetch
-// stands in for. IPv4-direct fetching is covered in net.test.ts.
+// Keep these tests fully network-free by forcing fetchResilient off its
+// DNS-to-IPv4-direct path: fetchResilient first calls dns.Resolver.resolve4(),
+// so we mock resolve4 to fail with ESERVFAIL. That failure is the trigger for
+// fetchResilient to use its fallback path (regular fetch on the original URL),
+// which is what our mocked globalThis.fetch is intended to exercise here.
+// IPv4-direct behavior itself is covered separately in net.test.ts.
 beforeEach(() => {
 	spyOn(dns.Resolver.prototype, "resolve4").mockRejectedValue(
 		Object.assign(new Error("test: DNS disabled"), { code: "ESERVFAIL" }),
@@ -218,6 +221,9 @@ describe("channel recency classification", () => {
 
 // --- Mock-fetch helpers ---
 
+// In this codebase/runtime, `fetch` is typed with an extra `preconnect` method.
+// Our tests only need regular fetch behavior, so we provide a no-op `preconnect`
+// to keep the mock structurally compatible with `typeof fetch`.
 function makeMockFetch(fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) {
 	return Object.assign(fn, { preconnect: (_url: string | URL) => {} }) as typeof fetch;
 }
@@ -265,6 +271,10 @@ describe("resolveAllVersions", () => {
 	});
 
 	test("returns versions keyed by channel from mocked server", async () => {
+		// Keys are MikroTik "newest-version" URL filename fragments. Production requests
+		// resolveVersion/resolveAllVersions hit endpoints containing `NEWESTa7.<channel>`,
+		// and this mock matches by `url.includes(key)`, so keys intentionally include the
+		// full fragment rather than only channel names.
 		const channelMap: Record<string, string> = {
 			"NEWESTa7.stable": "7.22.1",
 			"NEWESTa7.long-term": "7.20.3",
