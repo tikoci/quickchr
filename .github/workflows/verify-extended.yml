@@ -287,6 +287,16 @@ jobs:
       - name: Run integration tests (sequential per-file)
         run: |
           set -eo pipefail
+          # Kill any orphaned QEMU processes when this step exits (timeout, error, or
+          # cancellation). Without this, unref()'d TCG QEMU processes keep consuming
+          # 100% CPU after the step is killed, starving the runner until it loses
+          # communication with GitHub and the cleanup steps never run.
+          _cleanup_qemu() {
+            pkill -TERM qemu-system-x86_64 2>/dev/null || true
+            sleep 3
+            pkill -KILL qemu-system-x86_64 2>/dev/null || true
+          }
+          trap _cleanup_qemu EXIT INT TERM
           echo "::group::Integration test output"
           : > /tmp/integration-output.txt
           fail=0
@@ -299,6 +309,14 @@ jobs:
           echo "::endgroup::"
           exit "$fail"
         timeout-minutes: 50
+
+      - name: Kill QEMU processes
+        if: always()
+        run: |
+          pkill -TERM qemu-system-x86_64 2>/dev/null || true
+          sleep 3
+          pkill -KILL qemu-system-x86_64 2>/dev/null || true
+          true
 
       - name: Write integration summary
         if: always()
