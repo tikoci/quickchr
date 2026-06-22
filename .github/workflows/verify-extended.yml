@@ -235,7 +235,7 @@ jobs:
   # Best-effort / non-gating: hosted macOS runners expose no HVF, so x86 CHR boots
   # under TCG and the full suite can starve the runner for CPU/memory (observed:
   # "runner lost communication" near the 60-min mark). `continue-on-error` keeps a
-  # TCG timeout from reding the dispatch; the job-level timeout is a clean backstop.
+  # TCG timeout from turning the dispatch red; the job-level timeout is a clean backstop.
   integration-macos-x86:
     name: Integration (macos/x86_64)
     if: ${{ inputs.macos-x86 == true }}
