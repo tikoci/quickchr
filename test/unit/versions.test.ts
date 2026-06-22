@@ -236,6 +236,11 @@ describe("resolveVersion", () => {
 		await expect(resolveVersion("stable")).rejects.toMatchObject({ code: "DOWNLOAD_FAILED" });
 	});
 
+	test("throws DOWNLOAD_FAILED on fetch/network failure", async () => {
+		globalThis.fetch = makeMockFetch(() => Promise.reject(new Error("network failure")));
+		await expect(resolveVersion("stable")).rejects.toMatchObject({ code: "DOWNLOAD_FAILED" });
+	});
+
 	test("throws INVALID_VERSION when body is not a version string", async () => {
 		globalThis.fetch = makeMockFetch(() =>
 			Promise.resolve(new Response("not-a-version-at-all 12345")),
