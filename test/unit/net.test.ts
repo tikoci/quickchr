@@ -105,6 +105,9 @@ describe("fetchResilient", () => {
 	});
 
 	test("surfaces the original connection failure when public DNS has no answer", async () => {
+		// Message mirrors Node's real dns.resolve4 rejection ("queryA ESERVFAIL <host>");
+		// only `code` drives fetchResilient's branch, but the realistic text keeps the
+		// mock faithful to what production actually sees.
 		mockResolve4({ reject: Object.assign(new Error("queryA ESERVFAIL"), { code: "ESERVFAIL" }) });
 		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => {
 			throw Object.assign(new Error("Unable to connect"), { code: "ECONNREFUSED" });
