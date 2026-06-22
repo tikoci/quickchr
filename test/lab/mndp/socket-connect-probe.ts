@@ -29,6 +29,7 @@ function ethToUdpPayload(frame: Buffer, wantDstPort: number): Buffer | null {
 	if (udp + 8 > frame.length) return null;
 	if (frame.readUInt16BE(udp + 2) !== wantDstPort) return null;
 	const udpLen = frame.readUInt16BE(udp + 4);
+	if (udpLen < 8) return null;
 	return frame.subarray(udp + 8, Math.min(udp + udpLen, frame.length));
 }
 function srcMac(f: Buffer) { return [...f.subarray(6, 12)].map((b) => b.toString(16).padStart(2, "0")).join(":"); }
