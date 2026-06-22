@@ -215,15 +215,18 @@ describe("buildQemuArgs — acceleration", () => {
 		try {
 			// On arm64 hosts, x86 QEMU must use tcg. On x86 hosts, arm64 uses tcg.
 			// Test both arch combos and assert the invariant when tcg is selected.
+			let sawTcg = false;
 			for (const arch of ["arm64", "x86"] as const) {
 				const args = await buildQemuArgs(makeConfig({ arch }));
 				const accelIdx = args.indexOf("-accel");
 				expect(accelIdx).toBeGreaterThan(-1);
 				const accelValue = args[accelIdx + 1] ?? "";
 				if (accelValue.startsWith("tcg")) {
+					sawTcg = true;
 					expect(accelValue).toContain("tb-size=256");
 				}
 			}
+			expect(sawTcg).toBe(true);
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e &&
 				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
