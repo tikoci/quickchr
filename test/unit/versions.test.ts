@@ -21,9 +21,12 @@ import {
 import { CHANNELS } from "../../src/lib/types.ts";
 import type { Channel } from "../../src/lib/types.ts";
 
-// Network-free: fail the public-DNS A-record lookup so fetchResilient uses its
-// fallback (a normal fetch on the original URL), which the mocked globalThis.fetch
-// stands in for. IPv4-direct fetching is covered in net.test.ts.
+// Keep these tests fully network-free by forcing fetchResilient off its
+// DNS-to-IPv4-direct path: fetchResilient first calls dns.Resolver.resolve4(),
+// so we mock resolve4 to fail with ESERVFAIL. That failure is the trigger for
+// fetchResilient to use its fallback path (regular fetch on the original URL),
+// which is what our mocked globalThis.fetch is intended to exercise here.
+// IPv4-direct behavior itself is covered separately in net.test.ts.
 beforeEach(() => {
 	spyOn(dns.Resolver.prototype, "resolve4").mockRejectedValue(
 		Object.assign(new Error("test: DNS disabled"), { code: "ESERVFAIL" }),
