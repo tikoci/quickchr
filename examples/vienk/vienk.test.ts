@@ -32,7 +32,11 @@ describe.skipIf(SKIP)("vienk — single CHR smoke test", () => {
 			throw new Error("CHR instance was not initialized by the bootstrap test.");
 		}
 
-		const ready = await instance.waitForBoot(5_000);
+		// waitForBoot needs two consecutive good reads with a 2 s sleep between them,
+		// and each read can take up to 3 s — so a sub-~8 s budget can falsely report
+		// "not ready" on an instance that is in fact up. The bootstrap test already
+		// waited the full boot, so this is just a cheap re-confirmation; give it room.
+		const ready = await instance.waitForBoot(30_000);
 		if (!ready) {
 			throw new Error("CHR instance is not ready.");
 		}
