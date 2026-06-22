@@ -27,6 +27,23 @@ const CHR_ARCH = process.arch === "arm64" ? ("arm64" as const) : ("x86" as const
 describe.skipIf(SKIP)("vienk — single CHR smoke test", () => {
 	let instance: ChrInstance | undefined;
 
+	const requireReadyInstance = async (): Promise<ChrInstance> => {
+		if (!instance) {
+			throw new Error("CHR instance was not initialized by the bootstrap test.");
+		}
+
+		// waitForBoot needs two consecutive good reads with a 2 s sleep between them,
+		// and each read can take up to 3 s — so a sub-~8 s budget can falsely report
+		// "not ready" on an instance that is in fact up. The bootstrap test already
+		// waited the full boot, so this is just a cheap re-confirmation; give it room.
+		const ready = await instance.waitForBoot(30_000);
+		if (!ready) {
+			throw new Error("CHR instance is not ready.");
+		}
+
+		return instance;
+	};
+
 	afterAll(async () => {
 		try {
 			await instance?.remove();
@@ -64,15 +81,15 @@ describe.skipIf(SKIP)("vienk — single CHR smoke test", () => {
 	);
 
 	test("system identity is readable", async () => {
-		expect(instance).toBeDefined();
-		const id = await instance!.rest("/system/identity") as Record<string, string>;
+		const runningInstance = await requireReadyInstance();
+		const id = await runningInstance.rest("/system/identity") as Record<string, string>;
 		expect(id.name).toBeDefined();
 		expect(typeof id.name).toBe("string");
 	});
 
 	test("interface list has at least one ethernet", async () => {
-		expect(instance).toBeDefined();
-		const ifaces = await instance!.rest("/interface?type=ether") as unknown[];
+		const runningInstance = await requireReadyInstance();
+		const ifaces = await runningInstance.rest("/interface?type=ether") as unknown[];
 		expect(Array.isArray(ifaces)).toBe(true);
 		expect(ifaces.length).toBeGreaterThan(0);
 	});
