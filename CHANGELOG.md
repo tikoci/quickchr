@@ -8,6 +8,31 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+Internal CI/test/hardening only — no change to the published `src` package, so no
+version bump.
+
+### Changed
+
+- **Extended Verification CI** — the Windows integration-log upload now writes the test
+  log under `$HOME` (same drive as `~/AppData/Local/quickchr/machines`) so
+  `upload-artifact` stops failing on the cross-drive least-common-ancestor (`C:` state dir
+  vs `D:` workspace). The macOS-x86 job is now `continue-on-error` with a job-level timeout
+  and relabeled best-effort/non-gating: hosted macOS runners have no HVF, so x86 CHR boots
+  under TCG and the full suite can starve the runner — a timeout no longer reds the dispatch.
+- Tightened `qemu-args` anchor assertions (single `-M`, `-m`/`-smp` values, `-drive` +
+  headless `-display none`, indexed `-netdev`/`-drive` lookup, TCG-branch coverage) and added
+  an empty-body `resolveVersion` → `INVALID_VERSION` case. Folds in the sound parts of the
+  closed AI-findings PRs (#6/#8/#9).
+
+### Security
+
+- All workflows now declare least-privilege `permissions: contents: read`
+  (`ci.yml`, `publish.yml`, `verify-extended.yml`); the publish job keeps its per-job
+  `id-token: write`. Clears the CodeQL `actions/missing-workflow-permissions` findings.
+- The `test/lab/mndp/*` probes no longer pass network-derived data (`srcMac(frame)`) as a
+  `console.log` format string (CodeQL `js/tainted-format-string`), and `ethToUdpPayload` now
+  guards `udpLen >= 8`.
+
 ## [0.4.2] — 2026-06-21
 
 ### Added

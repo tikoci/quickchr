@@ -48,6 +48,7 @@ function ethToUdpPayload(frame: Buffer, wantDstPort: number): Buffer | null {
 	if (udp + 8 > frame.length) return null;
 	if (frame.readUInt16BE(udp + 2) !== wantDstPort) return null;
 	const udpLen = frame.readUInt16BE(udp + 4);
+	if (udpLen < 8) return null;
 	return frame.subarray(udp + 8, Math.min(udp + udpLen, frame.length));
 }
 function srcMac(f: Buffer) { return [...f.subarray(6, 12)].map((b) => b.toString(16).padStart(2, "0")).join(":"); }
@@ -212,7 +213,7 @@ async function main() {
 		const fields = parseMndp(udp);
 		if (Object.keys(fields).length > 0) {
 			stats.mndp++;
-			console.log(`  [${new Date().toISOString().slice(11, 23)}] MNDP from ${srcMac(frame)}:`, fields);
+			console.log("  [%s] MNDP from %s:", new Date().toISOString().slice(11, 23), srcMac(frame), fields);
 			// Inject a refresh back in the detected framing to prove write-back works.
 			if (conn && stats.mndp === 1) injectRefresh(conn, framing);
 		}

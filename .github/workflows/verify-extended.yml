@@ -27,7 +27,7 @@ on:
         default: false
       macos-x86:
         type: boolean
-        description: "Integration — macos/x86_64 (macos-15-intel, HVF if available)"
+        description: "Integration — macos/x86_64 (macos-15-intel, TCG — best-effort, no HVF on hosted runners, may time out; non-gating)"
         default: false
       windows-x86:
         type: boolean
@@ -37,6 +37,10 @@ on:
         type: string
         description: "Comma-separated test file names (e.g. 'exec.test.ts,anchor.test.ts'). Empty = all files."
         default: ""
+
+# Least-privilege default for all jobs (read-only; jobs only run tests + upload artifacts).
+permissions:
+  contents: read
 
 jobs:
   # ── linux/aarch64 (ubuntu-24.04-arm, KVM) ────────────────────────────────────
@@ -225,13 +229,19 @@ jobs:
             ~/.local/share/quickchr/machines/**/*.log
           retention-days: 7
 
-  # ── macos/x86_64 (macos-15-intel, HVF) ───────────────────────────────────────
+  # ── macos/x86_64 (macos-15-intel, TCG) ───────────────────────────────────────
   # Intel macOS: macos-13 was retired 2025-12-04; macos-15-intel is GitHub's last
   # x86_64 macOS image (standard/free on public repos, supported to ~Fall 2027).
+  # Best-effort / non-gating: hosted macOS runners expose no HVF, so x86 CHR boots
+  # under TCG and the full suite can starve the runner for CPU/memory (observed:
+  # "runner lost communication" near the 60-min mark). `continue-on-error` keeps a
+  # TCG timeout from reding the dispatch; the job-level timeout is a clean backstop.
   integration-macos-x86:
     name: Integration (macos/x86_64)
     if: ${{ inputs.macos-x86 == true }}
     runs-on: macos-15-intel
+    continue-on-error: true
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -377,11 +387,15 @@ jobs:
         run: |
           set -eo pipefail
           echo "::group::Integration test output"
-          : > integration-output.txt
+          # Write the log under $HOME (the C: user profile) so it shares a drive
+          # with the machine state dir (~/AppData/Local). upload-artifact computes a
+          # least-common-ancestor across all paths; a workspace-relative path lives on
+          # D:\ and has no common ancestor with C:\…\AppData → the upload errors.
+          : > "$HOME/integration-output.txt"
           fail=0
           for f in ${{ steps.files.outputs.list }}; do
             echo "::notice::Running $f"
-            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a integration-output.txt; then
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a "$HOME/integration-output.txt"; then
               fail=1
             fi
           done
@@ -395,7 +409,7 @@ jobs:
           {
             echo "## Integration Tests — windows/x86_64 (TCG, informational)"
             echo '```'
-            tail -80 integration-output.txt 2>/dev/null || echo "(no output captured)"
+            tail -80 "$HOME/integration-output.txt" 2>/dev/null || echo "(no output captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -405,7 +419,7 @@ jobs:
         with:
           name: integration-logs-windows-x64
           path: |
-            integration-output.txt
+            ~/integration-output.txt
             ~/AppData/Local/quickchr/machines/**/*.json
             ~/AppData/Local/quickchr/machines/**/*.log
           retention-days: 7
