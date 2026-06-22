@@ -40,9 +40,25 @@ describe("buildQemuArgs", () => {
 	test("arm64 uses virt machine type", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ arch: "arm64" }));
-			expect(args).toContain("-M");
+			const machineFlags = args.filter((a) => a === "-M");
+			expect(machineFlags.length).toBe(1);
 			const machineIdx = args.indexOf("-M");
+			expect(machineIdx).toBeGreaterThanOrEqual(0);
 			expect(args[machineIdx + 1]).toBe("virt");
+
+			const memIdx = args.indexOf("-m");
+			expect(memIdx).toBeGreaterThanOrEqual(0);
+			expect(args[memIdx + 1]).toBe("512");
+
+			const smpIdx = args.indexOf("-smp");
+			expect(smpIdx).toBeGreaterThanOrEqual(0);
+			expect(args[smpIdx + 1]).toBe("1");
+
+			expect(args).toContain("-drive");
+			// quickchr runs headless via `-display none` (not `-nographic`).
+			const displayIdx = args.indexOf("-display");
+			expect(displayIdx).toBeGreaterThanOrEqual(0);
+			expect(args[displayIdx + 1]).toBe("none");
 		} catch (e: unknown) {
 			// Skip if QEMU not installed or arm64 firmware not found
 			if (e && typeof e === "object" && "code" in e) {
@@ -75,7 +91,13 @@ describe("buildQemuArgs", () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ arch: "arm64" }));
 			// Must NOT have if=virtio for arm64
-			const driveArgs = args.filter((a) => a.includes("disk.img"));
+			const driveArgs: string[] = [];
+			for (let i = 0; i < args.length - 1; i++) {
+				const next = args[i + 1];
+				if (args[i] === "-drive" && next !== undefined) {
+					driveArgs.push(next);
+				}
+			}
 			for (const d of driveArgs) {
 				expect(d).not.toContain("if=virtio");
 			}
@@ -117,8 +139,11 @@ describe("buildQemuArgs", () => {
 	test("includes hostfwd for user networking", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ networks: [{ specifier: "user", id: "net0" }] }));
-			const netdevArg = args.find((a) => a.startsWith("user,id=net0"));
+			const netdevIdx = args.indexOf("-netdev");
+			expect(netdevIdx).toBeGreaterThan(-1);
+			const netdevArg = args[netdevIdx + 1];
 			expect(netdevArg).toBeDefined();
+			expect(netdevArg).toContain("user,id=net0");
 			expect(netdevArg).toContain("hostfwd=tcp::9100-:80");
 			expect(netdevArg).toContain("hostfwd=tcp::9102-:22");
 		} catch (e: unknown) {
@@ -215,15 +240,20 @@ describe("buildQemuArgs — acceleration", () => {
 		try {
 			// On arm64 hosts, x86 QEMU must use tcg. On x86 hosts, arm64 uses tcg.
 			// Test both arch combos and assert the invariant when tcg is selected.
+			let sawTcg = false;
 			for (const arch of ["arm64", "x86"] as const) {
 				const args = await buildQemuArgs(makeConfig({ arch }));
 				const accelIdx = args.indexOf("-accel");
 				expect(accelIdx).toBeGreaterThan(-1);
 				const accelValue = args[accelIdx + 1] ?? "";
 				if (accelValue.startsWith("tcg")) {
+					sawTcg = true;
 					expect(accelValue).toContain("tb-size=256");
 				}
 			}
+			// On any single-arch host the foreign arch falls back to TCG, so the
+			// tb-size invariant above must have been exercised at least once.
+			expect(sawTcg).toBe(true);
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e &&
 				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {

@@ -42,6 +42,10 @@ env:
   COVERAGE_MIN_FUNCS: ${{ github.event.inputs.min-funcs || '75' }}
   COVERAGE_MIN_LINES: ${{ github.event.inputs.min-lines || '60' }}
 
+# Least-privilege default for all jobs; elevate per-job only where a job needs more.
+permissions:
+  contents: read
+
 jobs:
   # ── Repo checks ─────────────────────────────────────────────────────────────
   lint:

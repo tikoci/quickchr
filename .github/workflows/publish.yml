@@ -26,6 +26,10 @@ on:
         description: "Dry run — run all checks but skip the npm publish step"
         default: false
 
+# Least-privilege default for all jobs; the publish job elevates to id-token: write per-job.
+permissions:
+  contents: read
+
 jobs:
   # ── Repo checks ─────────────────────────────────────────────────────────────
   lint:
