@@ -75,7 +75,12 @@ describe("buildQemuArgs", () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ arch: "arm64" }));
 			// Must NOT have if=virtio for arm64
-			const driveArgs = args.filter((a) => a.includes("disk.img"));
+			const driveArgs: string[] = [];
+			for (let i = 0; i < args.length - 1; i++) {
+				if (args[i] === "-drive") {
+					driveArgs.push(args[i + 1]);
+				}
+			}
 			for (const d of driveArgs) {
 				expect(d).not.toContain("if=virtio");
 			}
