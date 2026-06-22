@@ -265,6 +265,10 @@ describe("resolveAllVersions", () => {
 	});
 
 	test("returns versions keyed by channel from mocked server", async () => {
+		// Keys are MikroTik "newest-version" URL filename fragments. Production requests
+		// resolveVersion/resolveAllVersions hit endpoints containing `NEWESTa7.<channel>`,
+		// and this mock matches by `url.includes(key)`, so keys intentionally include the
+		// full fragment rather than only channel names.
 		const channelMap: Record<string, string> = {
 			"NEWESTa7.stable": "7.22.1",
 			"NEWESTa7.long-term": "7.20.3",
