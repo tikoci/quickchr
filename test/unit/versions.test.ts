@@ -218,6 +218,9 @@ describe("channel recency classification", () => {
 
 // --- Mock-fetch helpers ---
 
+// In this codebase/runtime, `fetch` is typed with an extra `preconnect` method.
+// Our tests only need regular fetch behavior, so we provide a no-op `preconnect`
+// to keep the mock structurally compatible with `typeof fetch`.
 function makeMockFetch(fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) {
 	return Object.assign(fn, { preconnect: (_url: string | URL) => {} }) as typeof fetch;
 }
