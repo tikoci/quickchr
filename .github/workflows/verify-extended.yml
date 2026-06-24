@@ -113,8 +113,12 @@ jobs:
 
       - name: Resolve test files
         id: files
+        # test-filter is passed via env (not expanded into the script) to avoid
+        # workflow template injection — same pattern as routeros-target above.
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
         run: |
-          FILTER="${{ inputs.test-filter }}"
+          FILTER="$TEST_FILTER"
           if [ -z "$FILTER" ]; then
             echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
           else
@@ -128,6 +132,12 @@ jobs:
                 echo "::warning::Skipping unknown test file: $f"
               fi
             done
+            # Fail fast if the filter matched nothing — otherwise the run step's
+            # loop iterates zero times and the job exits 0 (false green).
+            if [ -z "${FILES// /}" ]; then
+              echo "::error::test-filter '$FILTER' matched no known files in test/integration/"
+              exit 1
+            fi
             echo "list=$FILES" >> "$GITHUB_OUTPUT"
           fi
 
@@ -248,8 +258,12 @@ jobs:
 
       - name: Resolve test files
         id: files
+        # test-filter is passed via env (not expanded into the script) to avoid
+        # workflow template injection — same pattern as routeros-target above.
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
         run: |
-          FILTER="${{ inputs.test-filter }}"
+          FILTER="$TEST_FILTER"
           if [ -z "$FILTER" ]; then
             echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
           else
@@ -263,6 +277,12 @@ jobs:
                 echo "::warning::Skipping unknown test file: $f"
               fi
             done
+            # Fail fast if the filter matched nothing — otherwise the run step's
+            # loop iterates zero times and the job exits 0 (false green).
+            if [ -z "${FILES// /}" ]; then
+              echo "::error::test-filter '$FILTER' matched no known files in test/integration/"
+              exit 1
+            fi
             echo "list=$FILES" >> "$GITHUB_OUTPUT"
           fi
 
@@ -374,8 +394,12 @@ jobs:
 
       - name: Resolve test files
         id: files
+        # test-filter is passed via env (not expanded into the script) to avoid
+        # workflow template injection — same pattern as routeros-target above.
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
         run: |
-          FILTER="${{ inputs.test-filter }}"
+          FILTER="$TEST_FILTER"
           if [ -z "$FILTER" ]; then
             echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
           else
@@ -389,6 +413,12 @@ jobs:
                 echo "::warning::Skipping unknown test file: $f"
               fi
             done
+            # Fail fast if the filter matched nothing — otherwise the run step's
+            # loop iterates zero times and the job exits 0 (false green).
+            if [ -z "${FILES// /}" ]; then
+              echo "::error::test-filter '$FILTER' matched no known files in test/integration/"
+              exit 1
+            fi
             echo "list=$FILES" >> "$GITHUB_OUTPUT"
           fi
 
@@ -470,6 +500,10 @@ jobs:
 
       - name: Resolve test files
         id: files
+        # test-filter is passed via env (not expanded into the script) to avoid
+        # workflow template injection — same pattern as routeros-target above.
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
         run: |
           # macos-x86 is TCG-only (no HVF on hosted Intel runners), so the full
           # integration suite starves the runner before it finishes (~64 min →
@@ -477,7 +511,7 @@ jobs:
           # under TCG and still exercises the core boot + REST path. An explicit
           # test-filter input overrides this for a full or targeted run.
           SMOKE="anchor.test.ts"
-          FILTER="${{ inputs.test-filter }}"
+          FILTER="$TEST_FILTER"
           if [ -z "$FILTER" ]; then
             echo "::notice::macos-x86 smoke default: $SMOKE (override via the test-filter input)"
             FILTER="$SMOKE"
@@ -492,6 +526,12 @@ jobs:
               echo "::warning::Skipping unknown test file: $f"
             fi
           done
+          # Fail fast if the filter matched nothing — otherwise the run step's
+          # loop iterates zero times and the job exits 0 (false green).
+          if [ -z "${FILES// /}" ]; then
+            echo "::error::test-filter '$FILTER' matched no known files in test/integration/"
+            exit 1
+          fi
           echo "list=$FILES" >> "$GITHUB_OUTPUT"
 
       - name: Run integration tests (sequential per-file)
@@ -598,8 +638,12 @@ jobs:
 
       - name: Resolve test files
         id: files
+        # test-filter is passed via env (not expanded into the script) to avoid
+        # workflow template injection — same pattern as routeros-target above.
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
         run: |
-          FILTER="${{ inputs.test-filter }}"
+          FILTER="$TEST_FILTER"
           if [ -z "$FILTER" ]; then
             echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
           else
@@ -613,6 +657,12 @@ jobs:
                 echo "::warning::Skipping unknown test file: $f"
               fi
             done
+            # Fail fast if the filter matched nothing — otherwise the run step's
+            # loop iterates zero times and the job exits 0 (false green).
+            if [ -z "${FILES// /}" ]; then
+              echo "::error::test-filter '$FILTER' matched no known files in test/integration/"
+              exit 1
+            fi
             echo "list=$FILES" >> "$GITHUB_OUTPUT"
           fi
 
