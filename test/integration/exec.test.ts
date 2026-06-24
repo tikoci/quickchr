@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
+import { imageTarget } from "./image-target.ts";
 
 /**
  * Integration test — exec() against a real CHR instance.
@@ -56,7 +57,7 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 		await cleanupMachine(MACHINE);
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		instance = await QuickCHR.start({
-			channel: "stable",
+			...imageTarget(),
 			background: true,
 			name: MACHINE,
 		});
@@ -293,7 +294,7 @@ describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
 		await cleanupMachine(MACHINE);
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		instance = await QuickCHR.start({
-			channel: "stable",
+			...imageTarget(),
 			background: true,
 			name: MACHINE,
 			secureLogin: true,

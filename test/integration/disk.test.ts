@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { imageTarget } from "./image-target.ts";
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 
@@ -97,7 +98,7 @@ describe.skipIf(SKIP)("disk support", () => {
 
 		try {
 			const added = await QuickCHR.add({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				name: "integration-disk-add-start",
 				bootSize: "192M",
@@ -153,7 +154,7 @@ describe.skipIf(SKIP)("disk support", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-snapshot-savevm",

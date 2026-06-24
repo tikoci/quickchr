@@ -35,6 +35,22 @@ QUICKCHR_INTEGRATION=1 bun test test/integration/  # Integration (needs QEMU)
 bun test                                         # All tests
 ```
 
+### Targeting a RouterOS release
+
+Integration tests boot `stable` by default. Set `QUICKCHR_TEST_TARGET` to point CHR boots
+at another release — a channel (`stable`/`long-term`/`testing`/`development`) or a pinned
+version (`7.22.1`, `7.24beta2`). This is the same knob the `verify-extended.yml`
+`routeros-target` dispatch input exports; tests read it via `test/integration/image-target.ts`.
+
+```bash
+QUICKCHR_TEST_TARGET=long-term QUICKCHR_INTEGRATION=1 bun test test/integration/
+QUICKCHR_TEST_TARGET=7.24beta2 QUICKCHR_INTEGRATION=1 bun test test/integration/start-stop.test.ts
+```
+
+Unset/empty → `stable` (unchanged behavior). Version-pinned tests (provisioning's
+`7.20.7`/`7.20.8`, library-api's `7.22.1`) ignore the override. An *old* pinned target will
+fail version-gated provisioning/device-mode tests by design.
+
 ## Integration Test Requirements
 
 **Run integration tests before every `git commit` or PR.** They exist specifically because

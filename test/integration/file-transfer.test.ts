@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { imageTarget } from "./image-target.ts";
 
 /**
  * Integration test — ChrInstance.upload() / .download() round-trip.
@@ -51,7 +52,7 @@ describe.skipIf(SKIP)("ChrInstance upload/download round-trip", () => {
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				background: true,
 				name: MACHINE,
 			});

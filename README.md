@@ -377,6 +377,7 @@ afterAll(async () => {
 | `MIKROTIK_WEB_ACCOUNT` | MikroTik.com account email (for license renewal) |
 | `MIKROTIK_WEB_PASSWORD` | MikroTik.com password (for license renewal) |
 | `QUICKCHR_INTEGRATION` | Set to `1` to run integration tests |
+| `QUICKCHR_TEST_TARGET` | Integration tests only: RouterOS channel (`stable`/`long-term`/`testing`/`development`) or pinned version (e.g. `7.22.1`) to boot. Empty = `stable`. The Extended Verification workflow sets this from its `routeros-target` input to test a release across platforms |
 
 ## Documentation
 
