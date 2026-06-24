@@ -9,6 +9,13 @@
  * triggers the stale-response bug on arm64. It tries the sequence with and
  * without a delay, and with a socket-close wait, to isolate the root cause.
  *
+ * POST payload MUST match the production exec contract (src/lib/exec.ts:54):
+ *   POST /rest/execute  { script: "<cli>", "as-string": true }  → { ret: "<out>" }
+ * The first run (2026-06-24, RouterOS 7.23.1 arm64, Bun 1.3.14) used a wrong
+ * `{ ".command": ... }` body and got HTTP 400 for every POST — a repro bug, not
+ * a product signal. That run still showed the *stale-response never reproduced*
+ * (Scenario A: POST returned its own 400, not the GET's body; Scenario D: 0/10).
+ *
  * Results are written to test/lab/arm64-rest-ordering/REPORT.md.
  */
 
@@ -166,14 +173,14 @@ describe.skipIf(SKIP)("arm64 REST ordering repro", () => {
 	});
 
 	test("Baseline: POST alone returns correct body", async () => {
-		const post = await rawPost(`${baseUrl}/rest/execute`, auth, { ".command": ":put standalone-post-ok" });
+		const post = await rawPost(`${baseUrl}/rest/execute`, auth, { script: ":put standalone-post-ok", "as-string": true });
 		log(`\n## Baseline POST alone\nStatus: ${post.status}\nBody: ${post.body.trim()}`);
 		expect(post.body.trim()).toContain("standalone-post-ok");
 	}, 30_000);
 
 	test("Scenario A: GET immediately followed by POST (no wait)", async () => {
 		const get = await rawGet(`${baseUrl}/rest/user/ssh-keys`, auth);
-		const post = await rawPost(`${baseUrl}/rest/execute`, auth, { ".command": ":put scenario-a-ok" });
+		const post = await rawPost(`${baseUrl}/rest/execute`, auth, { script: ":put scenario-a-ok", "as-string": true });
 
 		const postHasSentinel = post.body.includes("scenario-a-ok");
 		const postIsStaleGetBody = post.body === get.body;
@@ -193,7 +200,7 @@ describe.skipIf(SKIP)("arm64 REST ordering repro", () => {
 	test("Scenario B: GET + 100 ms delay + POST", async () => {
 		await rawGet(`${baseUrl}/rest/user/ssh-keys`, auth);
 		await Bun.sleep(100);
-		const post = await rawPost(`${baseUrl}/rest/execute`, auth, { ".command": ":put scenario-b-ok" });
+		const post = await rawPost(`${baseUrl}/rest/execute`, auth, { script: ":put scenario-b-ok", "as-string": true });
 
 		const postHasSentinel = post.body.includes("scenario-b-ok");
 		log(`\n## Scenario B: GET + 100ms delay + POST`);
@@ -205,7 +212,7 @@ describe.skipIf(SKIP)("arm64 REST ordering repro", () => {
 
 	test("Scenario C: GET with socket-close wait + POST", async () => {
 		const get = await rawGetWithSocketClose(`${baseUrl}/rest/user/ssh-keys`, auth);
-		const post = await rawPost(`${baseUrl}/rest/execute`, auth, { ".command": ":put scenario-c-ok" });
+		const post = await rawPost(`${baseUrl}/rest/execute`, auth, { script: ":put scenario-c-ok", "as-string": true });
 
 		const postHasSentinel = post.body.includes("scenario-c-ok");
 		log(`\n## Scenario C: GET (socket-close wait) + POST`);
@@ -220,7 +227,7 @@ describe.skipIf(SKIP)("arm64 REST ordering repro", () => {
 		let bugCount = 0;
 		for (let i = 0; i < 10; i++) {
 			const get = await rawGet(`${baseUrl}/rest/user/ssh-keys`, auth);
-			const post = await rawPost(`${baseUrl}/rest/execute`, auth, { ".command": `:put scenario-d-${i}` });
+			const post = await rawPost(`${baseUrl}/rest/execute`, auth, { script: `:put scenario-d-${i}`, "as-string": true });
 			if (post.body === get.body) bugCount++;
 		}
 		log(`\n## Scenario D: 10× GET→POST (no wait)`);
