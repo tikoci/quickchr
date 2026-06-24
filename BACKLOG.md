@@ -66,17 +66,15 @@ Each lists a concrete **done-when** so an agent knows when to stop.
 
 **`[research]` — self-contained investigations (good `/fleet` / subagent tasks):**
 
-- **arm64 REST "POST returns prior GET" — could not reproduce** [P3] — Lab repro
+- **arm64 REST "POST returns prior GET" — could not reproduce; CLOSED** [done] — Lab repro
   (`test/lab/arm64-rest-ordering/repro.test.ts`) on RouterOS 7.23.1 / Bun 1.3.14 / arm64 KVM
   did **not** reproduce the stale-response: the POST returned its own response, never the
-  prior GET's body (Scenario A `POST===GET: false`; Scenario D 0/10). The original report
-  predates a Bun bump, so it was likely an already-fixed Bun issue. First run also caught a
-  *repro bug* — POSTed `{".command":...}` (HTTP 400) instead of the real exec contract
-  `{script, "as-string":true}` (exec.ts:54); fixed. Action taken: un-skipped the 2 arm64
-  `exec.test.ts` tests to validate production code on arm64 CI. *Open decision:* `restGet()`'s
-  socket-close wait is now an **unvalidated** defensive change — if the un-skipped exec tests
-  pass, run a control without it and remove it if unneeded (per "no defensive code for
-  unreproducible failures").
+  prior GET's body (Scenario A `POST===GET: false`; Scenario D 0/10). Likely an already-fixed
+  Bun issue (report predates a Bun bump). First run also caught a *repro bug* — POSTed
+  `{".command":...}` (HTTP 400) instead of the real exec contract `{script, "as-string":true}`
+  (exec.ts:54); fixed. Un-skipped the 2 arm64 `exec.test.ts` tests — **both pass on arm64 CI**
+  (run 28111921441). The speculative `restGet()` socket-close wait was **removed** — Scenario A
+  passes with a plain (no-wait) GET→POST, so the wait was unneeded defensive code.
 - **arm64 `clean()` second-boot timeout** [P3] — **Fixed + confirmed on CI.** Root cause:
   `clean()` deleted `efi-vars.fd`, forcing UEFI to do a full device scan (~480s) on next boot.
   EFI vars only store boot order (not OS state), so deletion was wrong. Removed the delete from
@@ -169,7 +167,7 @@ Each lists a concrete **done-when** so an agent knows when to stop.
 - [ ] [P3] **Windows QGA channel (+8) — unvalidated, KVM-gated not a Windows bug** — `exec.test.ts` internally skips QGA on Windows ("QGA not available on win32/x64 within 30s… requires KVM"), same as macOS/HVF. The +8 TCP-localhost channel plumbing is therefore never exercised end-to-end on CI. Either validate it on a nested-KVM Windows host/self-hosted runner, or accept it stays unit-test-only until then. Track that `+6..+8` IPC offsets don't collide with user `extraPorts` (ties into the port-allocation redesign below).
 - [ ] [P3] **Windows named-socket (socat) networking — no integration coverage** — `socat` is absent on Windows and no integration test exercises the named-socket path, so it's still unvalidated there. Decide: document SLiRP/user-mode + port-forward as the supported Windows networking mode (which CI now shows works via `forward-cli`), or add a socat-equivalent. Ties into the "ship Windows networking" item below.
 - [x] [P3] **arm64 `clean()` second-boot timeout** — **Fixed + confirmed on CI** (run 28109632411: clean() test ~106s, was 480s timeout). Root cause: `clean()` deleted `efi-vars.fd`, forcing UEFI on the `virt` machine to do a full device scan on the next boot. EFI vars only store boot order (Boot0000 → first virtio-blk-pci disk), not OS state. Removed the deletion from `clean()`; disk image re-copy is sufficient for factory reset. Skip removed from the arm64 integration test.
-- [ ] [P3] **arm64 REST bug: POST returns prior GET's body — could not reproduce** — The 2026-06-24 lab repro (`test/lab/arm64-rest-ordering/repro.test.ts`) on RouterOS 7.23.1 / Bun 1.3.14 did NOT reproduce the stale-response (POST always returned its own body; Scenario D 0/10). Likely an already-fixed Bun issue (report predates a Bun bump). Un-skipped the 2 arm64 `exec.test.ts` tests to validate production on arm64 CI. **Open:** `restGet()` socket-close wait is now unvalidated defensive code — if the exec tests pass, run a control without it and remove if unneeded.
+- [x] [P3] **arm64 REST bug: POST returns prior GET's body — could not reproduce; CLOSED** — The 2026-06-24 lab repro (`test/lab/arm64-rest-ordering/repro.test.ts`) on RouterOS 7.23.1 / Bun 1.3.14 did NOT reproduce the stale-response (POST always returned its own body; Scenario D 0/10). Likely an already-fixed Bun issue. Un-skipped the 2 arm64 `exec.test.ts` tests — both pass on arm64 CI (run 28111921441). Removed the speculative `restGet()` socket-close wait (Scenario A passes with a plain no-wait GET→POST, so it was unneeded).
 - [ ] [P3] **Boot respawn-once — watch-item, root cause unconfirmed** — `QuickCHR.start()` now respawns QEMU once on a wedged nested-KVM/HVF boot (DESIGN.md decision #8, `d62ee86`). This made CI green, but the trigger is **not diagnosed** — it could be runner CPU-steal, a SLiRP stall, or image timing rather than a true QEMU wedge. Deliberately scoped: **not** applied to `_launchExisting` (restart path), and `accelTimeoutFactor` left at 1.5× (no further ceiling inflation). **Watch for:** the `respawning QEMU once` line in CI `qemu.log`/run logs. If it fires often, or `BOOT_TIMEOUT` survives the respawn, or it shows up on the `_launchExisting` path → stop treating as flake; build a repro (serial-log a stuck boot to distinguish wedged vs slow) and decide between extending respawn to `_launchExisting`, raising the factor, or a real fix. Until then, leave the asymmetry as-is.
 
 **Test coverage gaps:**

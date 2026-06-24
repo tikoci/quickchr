@@ -308,8 +308,8 @@ describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
 	// Previously skipped on arm64 for a suspected "POST returns prior GET body"
 	// stale-response bug. The 2026-06-24 lab repro (test/lab/arm64-rest-ordering/)
 	// could not reproduce it on RouterOS 7.23.1 / Bun 1.3.14 — the POST returned its
-	// own response, never the prior GET's body (Scenario A + D 0/10). Un-skipped to
-	// validate against production code (restGet socket-close wait, exec.ts) on arm64 CI.
+	// own response, never the prior GET's body (Scenario A + D 0/10). Both tests pass
+	// on arm64 CI with plain restGet/restPost, so the skip is removed for good.
 	test("exec as managed quickchr user succeeds", async () => {
 		expect(instance).toBeDefined();
 		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
