@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { imageTarget } from "./image-target.ts";
 
 /**
  * Integration tests — user provisioning and admin management.
@@ -125,7 +126,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-bg",
@@ -153,7 +154,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-disable",
@@ -198,7 +199,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-fg",
@@ -228,7 +229,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-managed",
@@ -274,7 +275,7 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			// secureLogin:false → hasProvisioning=false → start() returns before boot;
 			// we must explicitly wait for REST before using the console.
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-prov-console",
@@ -365,7 +366,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: machineName,
@@ -396,7 +397,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: machineName,
@@ -441,7 +442,7 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: "integration-ssh-key",

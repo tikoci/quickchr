@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll } from "bun:test";
+import { imageTarget } from "./image-target.ts";
 
 /**
  * Integration tests for license and package install functionality.
@@ -42,7 +43,7 @@ describe.skipIf(SKIP)("license — getLicenseInfo on fresh CHR", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-license-test",
@@ -84,7 +85,7 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		try {
 			try {
 				instance = await QuickCHR.start({
-					channel: "stable",
+					...imageTarget(),
 					arch,
 					background: true,
 					name: "integration-license-renew",
@@ -125,7 +126,7 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		try {
 			// Start WITHOUT license option
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-license-renew",

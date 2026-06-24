@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll } from "bun:test";
+import { imageTarget } from "./image-target.ts";
 
 /**
  * Integration tests — device-mode provisioning.
@@ -39,7 +40,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			// start() will: boot CHR, fire device-mode update, hard power-cycle,
 			// restart, verify mode=rose, then return.
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-dm-rose",
@@ -70,7 +71,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		try {
 			// With skip, no hard reboot should happen — the CHR boots once and returns.
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-dm-skip",
@@ -112,7 +113,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-dm-features",
@@ -157,7 +158,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		try {
 			// Boot without device-mode provisioning to get a plain running instance
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-dm-setmode",

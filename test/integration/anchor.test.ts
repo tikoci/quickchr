@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { request as nodeRequest } from "node:http";
 import { accelTimeoutFactor, detectAccel, isCrossArchEmulation } from "../../src/lib/platform.ts";
+import { imageTarget } from "./image-target.ts";
 
 /**
  * Fresh-connection GET using node:http with agent:false.
@@ -72,7 +73,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			await cleanupMachine(MACHINE_NAME);
 
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
 				background: true,
 				name: MACHINE_NAME,

@@ -26,15 +26,20 @@ Lint and unit-tests run **in parallel**. `integration-x86` waits for both via `n
 ### Publish pipeline (publish.yml)
 
 ```text
-lint ──┐
-unit-tests ─┴→ integration-x86 → windows-unit-tests → publish
+lint ──┐      ┌ integration-x86 ──┐
+unit-tests ─┴─┴ integration-arm64 ┴→ windows-unit-tests → publish
 ```
+
+`integration-x86` (ubuntu-latest) and `integration-arm64` (ubuntu-24.04-arm) run **in
+parallel**, both gating `windows-unit-tests → publish` — a release cannot publish unless
+the full integration suite passes on **both** linux/x86_64 and linux/aarch64 (arm64 gate
+added 2026-06-24, #15/#16). Both publish against the default (stable) image.
 
 Triggered by `bun run release` (creates and pushes a `vX.Y.Z` tag) or via GitHub Actions UI (`workflow_dispatch`). The publish step runs `npm publish --tag next` for pre-releases (odd minor) and `--tag latest` for stable releases (even minor).
 
 ### Extended Verification (verify-extended.yml)
 
-`workflow_dispatch` only — never runs on push/PR. All jobs are independent (no `needs:` between platforms). Use `test-filter` to run only specific test files for faster iteration.
+`workflow_dispatch` only — never runs on push/PR. All jobs are independent (no `needs:` between platforms). Use `test-filter` to run only specific test files for faster iteration, and `routeros-target` to boot a specific RouterOS channel/version across the selected platforms (see below). Unlike `ci.yml`/`publish.yml` (which always boot the default/stable), this is how arm64/macOS/Windows — and, via the selectable `linux-x86` job, x86 — get exercised against long-term/testing/development or a pinned version.
 
 ## Release Process
 
@@ -81,13 +86,23 @@ Each input maps 1:1 to a platform integration job — enable any combination. (W
 
 | Input | Type | Default | Job | Runner |
 |-------|------|---------|-----|--------|
+| `linux-x86` | boolean | false | `integration-linux-x86` | ubuntu-latest |
 | `linux-arm64` | boolean | false | `integration-linux-arm64` | ubuntu-24.04-arm |
 | `macos-arm64` | boolean | false | `integration-macos-arm64` | macos-15 |
-| `macos-x86` | boolean | false | `integration-macos-x86` | macos-15-intel |
+| `macos-x86` | boolean | false | `integration-macos-x86` (TCG, best-effort/non-gating; defaults to `anchor.test.ts` smoke subset unless `test-filter` set) | macos-15-intel |
 | `windows-x86` | boolean | false | `integration-windows-x86` (TCG, experimental/informational, non-gating) | windows-latest |
 | `test-filter` | string | "" | (all jobs) Comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all | — |
+| `routeros-target` | string | "" | (all jobs) RouterOS channel (`stable`/`long-term`/`testing`/`development`) **or** a pinned version (`7.22.1`, `7.24beta2`); empty = stable | — |
 
 **`test-filter` for agent iteration**: when debugging a specific arm64 failure, set `linux-arm64: true` and `test-filter: "exec.test.ts"` to skip the 40-minute full suite and get results in ~5 minutes.
+
+**`routeros-target`** is exported to each job as `QUICKCHR_TEST_TARGET` and consumed by
+integration tests via `test/integration/image-target.ts`: a channel name resolves to
+`{ channel }`, anything else to `{ version }`, empty/unset → `stable` (so push CI, publish,
+and local runs are unchanged). Tests that deliberately pin a version (provisioning's
+`7.20.7`/`7.20.8`, library-api's `7.22.1`) ignore the override. Pinning an *old* target makes
+the version-gated provisioning/device-mode tests fail — expected, since channels all clear
+the 7.20.8 provisioning baseline.
 
 ## Integration Test Architecture Mapping
 
@@ -103,6 +118,9 @@ Each runner boots a CHR matching its **native architecture** — `detectAccel()`
 
 **x86 cross-arch on aarch64 is NOT tested** — TCG I/O port emulation makes it impractical.
 aarch64 on x86_64 TCG is significantly slower than native but works.
+
+Each runner boots the `routeros-target` (default `stable`) for its native arch — the
+target selects the RouterOS *release*, never the *architecture*.
 
 ## arm64 Known Issues (tracked in BACKLOG.md)
 
@@ -122,7 +140,10 @@ These are tracked for future investigation. They do not block x86 publishing.
   never blocks merges.  To silence temporarily: dispatch with `min-funcs=0 min-lines=0`.
 
 ### Integration test failures
-- **Artifact**: `integration-logs-{linux-x64|linux-arm64|macos-arm64|macos-x64|publish-integration}` (7-day retention)
+- **Artifact** (7-day retention) — one per job:
+  - `ci.yml`: `integration-logs-linux-x64`
+  - `verify-extended.yml`: `integration-logs-{linux-x86|linux-arm64|macos-arm64|macos-x64|windows-x64}`
+  - `publish.yml`: `publish-integration-logs-{x86|arm64}`
   - `integration-output.txt` — full `bun test` output including error messages
   - `machines/**/*.json` — `machine.json` with last-known state, ports, config
   - `machines/**/*.log` — `qemu.log` with QEMU stdout/stderr (boot messages, panics)
@@ -194,6 +215,10 @@ bun test test/unit/ --coverage
 # What integration job runs:
 QUICKCHR_INTEGRATION=1 bun test test/integration/
 
+# Same, but boot a specific RouterOS target (channel or pinned version) —
+# mirrors the verify-extended.yml `routeros-target` dispatch input:
+QUICKCHR_TEST_TARGET=long-term QUICKCHR_INTEGRATION=1 bun test test/integration/
+
 # Release (creates tag + triggers publish):
 bun run release
 ```
@@ -213,8 +238,8 @@ cache needs to be invalidated (e.g. corrupted image from a partial download).
    - Experimental/fragile platforms → `verify-extended.yml`
 2. Install the right apt/brew packages directly in the job's `Install QEMU + tools` step.
    Required Linux apt packages by platform:
-   - **x86_64**: `qemu-system-x86 ipxe-qemu sshpass`
-   - **aarch64**: `qemu-system-arm qemu-efi-aarch64 ipxe-qemu sshpass`
+   - **x86_64**: `qemu-system-x86 qemu-utils ipxe-qemu sshpass`
+   - **aarch64**: `qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu sshpass`
    - **`ipxe-qemu` is mandatory** on every Linux runner — it provides `efi-virtio.rom`
      which `virtio-net-pci` needs. Missing it produces:
      `qemu-system-aarch64: -device virtio-net-pci,netdev=net0: failed to find romfile "efi-virtio.rom"`

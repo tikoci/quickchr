@@ -10,6 +10,12 @@ name: Extended Verification
 #   e.g. "exec.test.ts,anchor.test.ts"  →  only those two files run
 #   empty string (default)              →  all test/integration/*.test.ts files run
 #
+# Use routeros-target to point CHR boots at a specific release — a channel name
+# (stable/long-term/testing/development) or a pinned version (e.g. 7.22.1, 7.24beta2);
+# empty = stable. It is exported as QUICKCHR_TEST_TARGET and consumed by the integration
+# tests via test/integration/image-target.ts. This is how the arm64/macOS/Windows paths
+# get verified against more than just stable. (Version-pinned tests stay pinned.)
+#
 # arm64 status (tracked in BACKLOG.md):
 #   - clean() second-boot timeout: fixed (EFI vars wipe removed), confirmed on CI
 #   - arm64 REST stale-response: could not reproduce (RouterOS 7.23.1 / Bun 1.3.14);
@@ -18,6 +24,10 @@ name: Extended Verification
 on:
   workflow_dispatch:
     inputs:
+      linux-x86:
+        type: boolean
+        description: "Integration — linux/x86_64 (ubuntu-latest, KVM if available)"
+        default: false
       linux-arm64:
         type: boolean
         description: "Integration — linux/aarch64 (ubuntu-24.04-arm, KVM if available)"
@@ -38,17 +48,134 @@ on:
         type: string
         description: "Comma-separated test file names (e.g. 'exec.test.ts,anchor.test.ts'). Empty = all files."
         default: ""
+      routeros-target:
+        type: string
+        description: "RouterOS target: a channel (stable/long-term/testing/development) or a pinned version (e.g. 7.22.1, 7.24beta2). Empty = stable."
+        default: ""
 
 # Least-privilege default for all jobs (read-only; jobs only run tests + upload artifacts).
 permissions:
   contents: read
 
 jobs:
+  # ── linux/x86_64 (ubuntu-latest, KVM) ────────────────────────────────────────
+  # On-demand x86 run against an arbitrary routeros-target. The push pipeline
+  # (ci.yml) and publish.yml always boot the default (stable); this job is how you
+  # exercise x86 against long-term/testing/development or a pinned version.
+  integration-linux-x86:
+    name: Integration (linux/x86_64)
+    if: ${{ inputs.linux-x86 == true }}
+    runs-on: ubuntu-latest
+    env:
+      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+
+      # ipxe-qemu provides efi-virtio.rom — harmless on x86, kept consistent across runners.
+      - name: Install QEMU + tools
+        run: |
+          set -eo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-x86 qemu-utils ipxe-qemu sshpass
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -w /dev/kvm ] 2>/dev/null; then
+            echo "KVM is available — hardware acceleration active"
+          else
+            echo "::notice::KVM not available — integration tests will use TCG (slower)"
+          fi
+
+      - name: Log platform
+        run: |
+          {
+            echo "### Platform: linux/x86_64"
+            echo "- OS: $(uname -s) $(uname -m)"
+            qemu-system-x86_64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
+            echo "- Bun: $(bun --version)"
+            echo "- RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Cache CHR images
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Resolve test files
+        id: files
+        run: |
+          FILTER="${{ inputs.test-filter }}"
+          if [ -z "$FILTER" ]; then
+            echo "list=$(ls test/integration/*.test.ts | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+          else
+            FILES=""
+            IFS=',' read -ra PARTS <<< "$FILTER"
+            for f in "${PARTS[@]}"; do
+              f="${f// /}"
+              if [ -f "test/integration/$f" ]; then
+                FILES="$FILES test/integration/$f"
+              else
+                echo "::warning::Skipping unknown test file: $f"
+              fi
+            done
+            echo "list=$FILES" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run integration tests (sequential per-file)
+        run: |
+          set -eo pipefail
+          echo "::group::Integration test output"
+          : > /tmp/integration-output.txt
+          fail=0
+          for f in ${{ steps.files.outputs.list }}; do
+            echo "::notice::Running $f"
+            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a /tmp/integration-output.txt; then
+              fail=1
+            fi
+          done
+          echo "::endgroup::"
+          exit "$fail"
+        timeout-minutes: 50
+
+      - name: Write integration summary
+        if: always()
+        run: |
+          {
+            echo "## Integration Tests — linux/x86_64"
+            echo ""
+            echo '```'
+            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload integration logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: integration-logs-linux-x86
+          path: |
+            /tmp/integration-output.txt
+            ~/.local/share/quickchr/machines/**/*.json
+            ~/.local/share/quickchr/machines/**/*.log
+          retention-days: 7
+
   # ── linux/aarch64 (ubuntu-24.04-arm, KVM) ────────────────────────────────────
   integration-linux-arm64:
     name: Integration (linux/aarch64)
     if: ${{ inputs.linux-arm64 == true }}
     runs-on: ubuntu-24.04-arm
+    env:
+      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -221,6 +348,8 @@ jobs:
     name: Integration (macos/arm64)
     if: ${{ inputs.macos-arm64 == true }}
     runs-on: macos-15
+    env:
+      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -315,6 +444,8 @@ jobs:
     runs-on: macos-15-intel
     continue-on-error: true
     timeout-minutes: 75
+    env:
+      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -436,6 +567,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

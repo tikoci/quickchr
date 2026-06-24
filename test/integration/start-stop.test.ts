@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { restGet } from "../../src/lib/rest.ts";
+import { imageTarget } from "./image-target.ts";
 
 /**
  * Integration test — start and stop a CHR.
@@ -35,7 +36,7 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 			// Let start() pick the native arch (x86 + HVF on Rosetta, arm64 + HVF on native)
 			// so QEMU uses hardware acceleration and boots quickly.
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				background: true,
 				name: "integration-test-1",
 			});
@@ -80,7 +81,7 @@ describe.skipIf(SKIP)("package installation", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-pkg-test",
@@ -130,7 +131,7 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-remove-running",
@@ -164,7 +165,7 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 		try {
 			// Boot with a custom user
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-clean-test",
@@ -227,7 +228,7 @@ describe.skipIf(SKIP)("instance channels — serial console", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-serial-test",
@@ -276,7 +277,7 @@ describe.skipIf(SKIP)("instance-level package methods", () => {
 
 		try {
 			instance = await QuickCHR.start({
-				channel: "stable",
+				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-pkg-instance",
