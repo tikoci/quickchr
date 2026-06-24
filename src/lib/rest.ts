@@ -54,7 +54,20 @@ export function restGet(
 				let body = "";
 				res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
 				res.on("end", () => {
-					if (!done) { done = true; clearTimeout(timer); resolve({ status: res.statusCode ?? 0, body }); }
+					if (!done) {
+						done = true;
+						clearTimeout(timer);
+						const result = { status: res.statusCode ?? 0, body };
+						// Wait for socket close before resolving — prevents aarch64 Bun from
+						// reading a stale GET buffer in the immediately-following POST request.
+						const sock = req.socket;
+						if (sock && !sock.destroyed) {
+							const closeCap = setTimeout(() => resolve(result), 2_000);
+							sock.once("close", () => { clearTimeout(closeCap); resolve(result); });
+						} else {
+							resolve(result);
+						}
+					}
 				});
 				res.on("error", (e) => {
 					if (!done) { done = true; clearTimeout(timer); reject(e); }

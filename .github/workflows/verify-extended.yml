@@ -10,9 +10,10 @@ name: Extended Verification
 #   e.g. "exec.test.ts,anchor.test.ts"  →  only those two files run
 #   empty string (default)              →  all test/integration/*.test.ts files run
 #
-# arm64 known issues (tracked in BACKLOG.md):
-#   - clean() second-boot timeout skipped on arm64
-#   - arm64 REST stale-response bug causes exec tests to be skipped
+# arm64 status (tracked in BACKLOG.md):
+#   - clean() second-boot timeout: root cause found (EFI vars wipe), fix applied
+#   - arm64 REST stale-response: conservative fix applied (socket-close wait in restGet);
+#     repro script runs as a dedicated step to confirm root cause
 
 on:
   workflow_dispatch:
@@ -75,9 +76,39 @@ jobs:
 
       - name: Log platform
         run: |
-          echo "### Platform: linux/aarch64" >> "$GITHUB_STEP_SUMMARY"
-          echo "- OS: $(uname -s) $(uname -m)" >> "$GITHUB_STEP_SUMMARY"
-          qemu-system-aarch64 --version 2>/dev/null | head -1 >> "$GITHUB_STEP_SUMMARY" || true
+          {
+            echo "### Platform: linux/aarch64"
+            echo "- OS: $(uname -s) $(uname -m)"
+            echo "- Kernel: $(uname -r)"
+            qemu-system-aarch64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
+            echo "- Bun: $(bun --version)"
+            if [ -w /dev/kvm ] 2>/dev/null; then
+              echo "- KVM: available (hardware acceleration active)"
+              echo "  - \`$(ls -l /dev/kvm)\`"
+            else
+              echo "- KVM: **not available** — tests will run under TCG (slow)"
+            fi
+            echo ""
+            echo "#### OVMF firmware (arm64 UEFI)"
+            for f in /usr/share/AAVMF/AAVMF_CODE.fd \
+                      /usr/share/qemu/QEMU_EFI.fd \
+                      /usr/share/qemu-efi-aarch64/QEMU_EFI.fd; do
+              if [ -f "$f" ]; then
+                echo "- \`$f\` ($(du -h "$f" | cut -f1))"
+              fi
+            done
+            for f in /usr/share/AAVMF/AAVMF_VARS.fd \
+                      /usr/share/qemu/QEMU_VARS.fd \
+                      /usr/share/qemu-efi-aarch64/QEMU_VARS.fd; do
+              if [ -f "$f" ]; then
+                echo "- vars template: \`$f\` ($(du -h "$f" | cut -f1))"
+              fi
+            done
+            echo ""
+            echo "#### System resources"
+            echo "- CPUs: $(nproc)"
+            echo "- RAM: $(free -h | awk '/^Mem:/{print $2}')"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Cache CHR images
         uses: actions/cache@v5
@@ -124,14 +155,40 @@ jobs:
           exit "$fail"
         timeout-minutes: 50
 
+      - name: Run arm64 REST ordering repro
+        if: always()
+        run: |
+          echo "::group::arm64 REST ordering repro (test/lab/arm64-rest-ordering/repro.ts)"
+          QUICKCHR_INTEGRATION=1 bun test test/lab/arm64-rest-ordering/repro.ts \
+            2>&1 | tee /tmp/arm64-rest-repro.txt || true
+          echo "::endgroup::"
+        timeout-minutes: 15
+
       - name: Write integration summary
         if: always()
         run: |
           {
             echo "## Integration Tests — linux/aarch64"
+            echo ""
+            echo "### Main suite"
             echo '```'
-            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            tail -100 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
             echo '```'
+            echo ""
+            echo "### arm64 REST ordering repro"
+            echo '```'
+            cat /tmp/arm64-rest-repro.txt 2>/dev/null || echo "(repro not run)"
+            echo '```'
+            echo ""
+            echo "### QEMU logs (last 60 lines per machine)"
+            for log in ~/.local/share/quickchr/machines/*/qemu.log; do
+              [ -f "$log" ] || continue
+              machine=$(basename "$(dirname "$log")")
+              echo "#### $machine"
+              echo '```'
+              tail -60 "$log"
+              echo '```'
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload integration logs
@@ -141,6 +198,7 @@ jobs:
           name: integration-logs-linux-arm64
           path: |
             /tmp/integration-output.txt
+            /tmp/arm64-rest-repro.txt
             ~/.local/share/quickchr/machines/**/*.json
             ~/.local/share/quickchr/machines/**/*.log
           retention-days: 7
