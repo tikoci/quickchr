@@ -11,9 +11,9 @@ name: Extended Verification
 #   empty string (default)              →  all test/integration/*.test.ts files run
 #
 # arm64 status (tracked in BACKLOG.md):
-#   - clean() second-boot timeout: root cause found (EFI vars wipe), fix applied
-#   - arm64 REST stale-response: conservative fix applied (socket-close wait in restGet);
-#     repro script runs as a dedicated step to confirm root cause
+#   - clean() second-boot timeout: fixed (EFI vars wipe removed), confirmed on CI
+#   - arm64 REST stale-response: could not reproduce (RouterOS 7.23.1 / Bun 1.3.14);
+#     exec tests un-skipped + passing. The repro step below stays as a regression guard.
 
 on:
   workflow_dispatch:
@@ -170,7 +170,7 @@ jobs:
           echo "::endgroup::"
           echo "repro exit code: $rc" | tee -a /tmp/arm64-rest-repro.txt
           if [ "$rc" -eq 0 ]; then
-            echo "::notice::arm64 REST repro PASSED — socket-close wait resolves the GET→POST ordering bug"
+            echo "::notice::arm64 REST repro PASSED — GET→POST ordering is correct (no stale-response)"
           else
             echo "::warning::arm64 REST repro FAILED (rc=$rc) — see scenario output for which layer is at fault"
           fi
