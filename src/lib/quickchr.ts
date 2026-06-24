@@ -362,10 +362,6 @@ function createInstance(state: MachineState): ChrInstance {
 				state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
 			);
 
-			// Remove EFI vars to force re-creation
-			const efiVars = join(state.machineDir, "efi-vars.fd");
-			if (existsSync(efiVars)) rmSync(efiVars);
-
 			// Clean up stored instance credentials (re-provisioned on next start)
 			deleteInstanceCredentials(state.name);
 

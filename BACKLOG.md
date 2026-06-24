@@ -66,15 +66,20 @@ Each lists a concrete **done-when** so an agent knows when to stop.
 
 **`[research]` — self-contained investigations (good `/fleet` / subagent tasks):**
 
-- **arm64 REST "POST returns prior GET" repro** [P3] — Build a *minimal* repro outside
-  quickchr (plain Bun + a real CHR on `linux/aarch64`) hitting the same endpoints. Determine
-  whether the fault is RouterOS arm64 REST, request pipelining, or the Bun runtime.
-  *Done-when:* a runnable repro script + a written verdict (one of: RouterOS / quickchr /
-  Bun) with evidence; if Bun, an upstream issue link. Un-skips the 2 arm64 `exec.test.ts` tests.
-- **arm64 `clean()` second-boot timeout spike** [P3] — Does `clean()` need to reset UEFI
-  vars on arm64, or does `_launchExisting` need different args after a clean? *Done-when:*
-  root cause identified with a qemu.log showing the stall, plus a proposed fix (≤1 page).
-  Un-skips the arm64 `clean()` integration test.
+- **arm64 REST "POST returns prior GET" — could not reproduce; CLOSED** [done] — Lab repro
+  (`test/lab/arm64-rest-ordering/repro.test.ts`) on RouterOS 7.23.1 / Bun 1.3.14 / arm64 KVM
+  did **not** reproduce the stale-response: the POST returned its own response, never the
+  prior GET's body (Scenario A `POST===GET: false`; Scenario D 0/10). Likely an already-fixed
+  Bun issue (report predates a Bun bump). First run also caught a *repro bug* — POSTed
+  `{".command":...}` (HTTP 400) instead of the real exec contract `{script, "as-string":true}`
+  (exec.ts:54); fixed. Un-skipped the 2 arm64 `exec.test.ts` tests — **both pass on arm64 CI**
+  (run 28111921441). The speculative `restGet()` socket-close wait was **removed** — Scenario A
+  passes with a plain (no-wait) GET→POST, so the wait was unneeded defensive code.
+- **arm64 `clean()` second-boot timeout** [P3] — **Fixed + confirmed on CI.** Root cause:
+  `clean()` deleted `efi-vars.fd`, forcing UEFI to do a full device scan (~480s) on next boot.
+  EFI vars only store boot order (not OS state), so deletion was wrong. Removed the delete from
+  `clean()` (`src/lib/quickchr.ts`); skip removed from the integration test. Verified on
+  `ubuntu-24.04-arm` (run 28109632411): `clean()` test passes in ~106s (was 480s timeout).
 - **x86 QGA-under-HVF hypothesis test** [P3] — Confirm whether RouterOS restricts QGA
   activation to `/dev/kvm` (guest never opens the virtio-serial port under HVF). Compare
   KVM vs HVF on the same RouterOS version. *Done-when:* `docs/qga-x86-macos-qemu10-investigation.md`
@@ -161,8 +166,8 @@ Each lists a concrete **done-when** so an agent knows when to stop.
 - [x] [P3] **Windows integration — CI data captured (2026-06-07), suite green on TCG** — the informational `integration-windows-x86` job (dispatch input `windows-x86`) ran the full suite on windows-latest/TCG (run 27097457831): **56 pass / 0 fail / 3 skip**, ~25 min. Validated on Windows: CHR boot, monitor channel +6 (`disk` savevm/loadvm), serial channel +7 (`provisioning` + serial stream), SLiRP networking + port-forward (`forward-cli`), **scp upload/download round-trip** (`file-transfer` — works without `sshpass`, so that's a non-issue), REST exec/license-read/device-mode/library-api/anchor. The "local-first" worry is resolved: standard Windows paths work. Remaining Windows follow-ups split out below (QGA, socat).
 - [ ] [P3] **Windows QGA channel (+8) — unvalidated, KVM-gated not a Windows bug** — `exec.test.ts` internally skips QGA on Windows ("QGA not available on win32/x64 within 30s… requires KVM"), same as macOS/HVF. The +8 TCP-localhost channel plumbing is therefore never exercised end-to-end on CI. Either validate it on a nested-KVM Windows host/self-hosted runner, or accept it stays unit-test-only until then. Track that `+6..+8` IPC offsets don't collide with user `extraPorts` (ties into the port-allocation redesign below).
 - [ ] [P3] **Windows named-socket (socat) networking — no integration coverage** — `socat` is absent on Windows and no integration test exercises the named-socket path, so it's still unvalidated there. Decide: document SLiRP/user-mode + port-forward as the supported Windows networking mode (which CI now shows works via `forward-cli`), or add a socat-equivalent. Ties into the "ship Windows networking" item below.
-- [ ] [P3] **arm64 `clean()` second-boot timeout** — `clean() resets disk to factory defaults` integration test is skipped on arm64; second boot after `clean()` consistently times out at 480s, same flow on x86 KVM is ~66s. Likely a firmware/vars or pflash state interaction with the freshly-cleaned disk on QEMU `virt`. Spike (1–2h): does `clean()` need to reset UEFI vars on arm64, or does `_launchExisting` need different args after a clean?
-- [ ] [P3] **arm64 REST bug: POST returns prior GET's body (research + test)** — On `linux/aarch64` runners, `restPost` to `/rest/execute` returns the response body of the immediately-prior `restGet` to `/user/ssh-keys` (same host:port). Two tests in `exec.test.ts` skipped on arm64. `agent: false`, `Connection: close`, and `node:http` (not `fetch`) all fail the same way — which narrows the set of explanations but **does not prove Bun is the culprit**. Don't encode "Bun bug" as project truth until it's demonstrated in isolation. Build a minimal repro outside quickchr (plain Bun hitting the same CHR REST endpoints); determine whether RouterOS arm64 REST, quickchr's request pipelining, or the Bun runtime is at fault. Then file upstream, fix locally, or fall back to `child_process.spawn("curl")` on arm64.
+- [x] [P3] **arm64 `clean()` second-boot timeout** — **Fixed + confirmed on CI** (run 28109632411: clean() test ~106s, was 480s timeout). Root cause: `clean()` deleted `efi-vars.fd`, forcing UEFI on the `virt` machine to do a full device scan on the next boot. EFI vars only store boot order (Boot0000 → first virtio-blk-pci disk), not OS state. Removed the deletion from `clean()`; disk image re-copy is sufficient for factory reset. Skip removed from the arm64 integration test.
+- [x] [P3] **arm64 REST bug: POST returns prior GET's body — could not reproduce; CLOSED** — The 2026-06-24 lab repro (`test/lab/arm64-rest-ordering/repro.test.ts`) on RouterOS 7.23.1 / Bun 1.3.14 did NOT reproduce the stale-response (POST always returned its own body; Scenario D 0/10). Likely an already-fixed Bun issue. Un-skipped the 2 arm64 `exec.test.ts` tests — both pass on arm64 CI (run 28111921441). Removed the speculative `restGet()` socket-close wait (Scenario A passes with a plain no-wait GET→POST, so it was unneeded).
 - [ ] [P3] **Boot respawn-once — watch-item, root cause unconfirmed** — `QuickCHR.start()` now respawns QEMU once on a wedged nested-KVM/HVF boot (DESIGN.md decision #8, `d62ee86`). This made CI green, but the trigger is **not diagnosed** — it could be runner CPU-steal, a SLiRP stall, or image timing rather than a true QEMU wedge. Deliberately scoped: **not** applied to `_launchExisting` (restart path), and `accelTimeoutFactor` left at 1.5× (no further ceiling inflation). **Watch for:** the `respawning QEMU once` line in CI `qemu.log`/run logs. If it fires often, or `BOOT_TIMEOUT` survives the respawn, or it shows up on the `_launchExisting` path → stop treating as flake; build a repro (serial-log a stuck boot to distinguish wedged vs slow) and decide between extending respawn to `_launchExisting`, raising the factor, or a real fix. Until then, leave the asymmetry as-is.
 
 **Test coverage gaps:**

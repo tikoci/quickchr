@@ -10,9 +10,10 @@ name: Extended Verification
 #   e.g. "exec.test.ts,anchor.test.ts"  →  only those two files run
 #   empty string (default)              →  all test/integration/*.test.ts files run
 #
-# arm64 known issues (tracked in BACKLOG.md):
-#   - clean() second-boot timeout skipped on arm64
-#   - arm64 REST stale-response bug causes exec tests to be skipped
+# arm64 status (tracked in BACKLOG.md):
+#   - clean() second-boot timeout: fixed (EFI vars wipe removed), confirmed on CI
+#   - arm64 REST stale-response: could not reproduce (RouterOS 7.23.1 / Bun 1.3.14);
+#     exec tests un-skipped + passing. The repro step below stays as a regression guard.
 
 on:
   workflow_dispatch:
@@ -75,9 +76,39 @@ jobs:
 
       - name: Log platform
         run: |
-          echo "### Platform: linux/aarch64" >> "$GITHUB_STEP_SUMMARY"
-          echo "- OS: $(uname -s) $(uname -m)" >> "$GITHUB_STEP_SUMMARY"
-          qemu-system-aarch64 --version 2>/dev/null | head -1 >> "$GITHUB_STEP_SUMMARY" || true
+          {
+            echo "### Platform: linux/aarch64"
+            echo "- OS: $(uname -s) $(uname -m)"
+            echo "- Kernel: $(uname -r)"
+            qemu-system-aarch64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
+            echo "- Bun: $(bun --version)"
+            if [ -w /dev/kvm ] 2>/dev/null; then
+              echo "- KVM: available (hardware acceleration active)"
+              echo "  - \`$(ls -l /dev/kvm)\`"
+            else
+              echo "- KVM: **not available** — tests will run under TCG (slow)"
+            fi
+            echo ""
+            echo "#### OVMF firmware (arm64 UEFI)"
+            for f in /usr/share/AAVMF/AAVMF_CODE.fd \
+                      /usr/share/qemu/QEMU_EFI.fd \
+                      /usr/share/qemu-efi-aarch64/QEMU_EFI.fd; do
+              if [ -f "$f" ]; then
+                echo "- \`$f\` ($(du -h "$f" | cut -f1))"
+              fi
+            done
+            for f in /usr/share/AAVMF/AAVMF_VARS.fd \
+                      /usr/share/qemu/QEMU_VARS.fd \
+                      /usr/share/qemu-efi-aarch64/QEMU_VARS.fd; do
+              if [ -f "$f" ]; then
+                echo "- vars template: \`$f\` ($(du -h "$f" | cut -f1))"
+              fi
+            done
+            echo ""
+            echo "#### System resources"
+            echo "- CPUs: $(nproc)"
+            echo "- RAM: $(free -h | awk '/^Mem:/{print $2}')"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Cache CHR images
         uses: actions/cache@v5
@@ -124,14 +155,52 @@ jobs:
           exit "$fail"
         timeout-minutes: 50
 
+      - name: Run arm64 REST ordering repro
+        if: always()
+        # Intentionally non-gating: the repro's assertions are EXPECTED to fail on a
+        # buggy arm64 — that failure IS the diagnostic signal, not a reason to red the
+        # job. pipefail stops `tee` from masking bun's real exit code, so we can record
+        # an explicit PASS/FAIL line in the summary instead of silently swallowing it.
+        run: |
+          set -o pipefail
+          echo "::group::arm64 REST ordering repro (test/lab/arm64-rest-ordering/repro.test.ts)"
+          rc=0
+          QUICKCHR_INTEGRATION=1 bun test test/lab/arm64-rest-ordering/repro.test.ts \
+            2>&1 | tee /tmp/arm64-rest-repro.txt || rc=$?
+          echo "::endgroup::"
+          echo "repro exit code: $rc" | tee -a /tmp/arm64-rest-repro.txt
+          if [ "$rc" -eq 0 ]; then
+            echo "::notice::arm64 REST repro PASSED — GET→POST ordering is correct (no stale-response)"
+          else
+            echo "::warning::arm64 REST repro FAILED (rc=$rc) — see scenario output for which layer is at fault"
+          fi
+        timeout-minutes: 15
+
       - name: Write integration summary
         if: always()
         run: |
           {
             echo "## Integration Tests — linux/aarch64"
+            echo ""
+            echo "### Main suite"
             echo '```'
-            tail -80 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
+            tail -100 /tmp/integration-output.txt 2>/dev/null || echo "(no output captured)"
             echo '```'
+            echo ""
+            echo "### arm64 REST ordering repro"
+            echo '```'
+            cat /tmp/arm64-rest-repro.txt 2>/dev/null || echo "(repro not run)"
+            echo '```'
+            echo ""
+            echo "### QEMU logs (last 60 lines per machine)"
+            for log in ~/.local/share/quickchr/machines/*/qemu.log; do
+              [ -f "$log" ] || continue
+              machine=$(basename "$(dirname "$log")")
+              echo "#### $machine"
+              echo '```'
+              tail -60 "$log"
+              echo '```'
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload integration logs
@@ -141,6 +210,8 @@ jobs:
           name: integration-logs-linux-arm64
           path: |
             /tmp/integration-output.txt
+            /tmp/arm64-rest-repro.txt
+            test/lab/arm64-rest-ordering/REPORT.md
             ~/.local/share/quickchr/machines/**/*.json
             ~/.local/share/quickchr/machines/**/*.log
           retention-days: 7

@@ -305,19 +305,19 @@ describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
 		try { await instance?.remove(); } catch { /* ignore */ }
 	});
 
-	// Skipped on arm64: when secureLogin provisioning's last restGet (/user/ssh-keys)
-	// is followed immediately by restPost (/rest/execute), Bun on aarch64 returns
-	// the prior GET response body for the POST despite Connection: close + agent: false
-	// + node:http. Same flow on x86 KVM works correctly. Tracked in BACKLOG.md
-	// "Bun arm64 node:http stale-response after GET→POST".
-	test.skipIf(process.arch === "arm64")("exec as managed quickchr user succeeds", async () => {
+	// Previously skipped on arm64 for a suspected "POST returns prior GET body"
+	// stale-response bug. The 2026-06-24 lab repro (test/lab/arm64-rest-ordering/)
+	// could not reproduce it on RouterOS 7.23.1 / Bun 1.3.14 — the POST returned its
+	// own response, never the prior GET's body (Scenario A + D 0/10). Both tests pass
+	// on arm64 CI with plain restGet/restPost, so the skip is removed for good.
+	test("exec as managed quickchr user succeeds", async () => {
 		expect(instance).toBeDefined();
 		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
 		const result = await instance!.exec(":put ok", { timeout: 20_000 });
 		expect(result.output.trim()).toBe("ok");
 	}, 30_000);
 
-	test.skipIf(process.arch === "arm64")("exec with explicit provisioned credentials succeeds", async () => {
+	test("exec with explicit provisioned credentials succeeds", async () => {
 		expect(instance).toBeDefined();
 		const { getInstanceCredentials } = await import("../../src/lib/credentials.ts");
 		const creds = await getInstanceCredentials(MACHINE);

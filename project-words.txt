@@ -200,6 +200,7 @@ openflow
 osinfo
 ospf
 overfit
+ovmf
 pacman
 paravirt
 patchless
