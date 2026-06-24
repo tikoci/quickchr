@@ -3,7 +3,7 @@
  *
  * Requires a running CHR with default admin credentials.
  * Usage:
- *   QUICKCHR_INTEGRATION=1 bun test test/lab/arm64-rest-ordering/repro.ts
+ *   QUICKCHR_INTEGRATION=1 bun test test/lab/arm64-rest-ordering/repro.test.ts
  *
  * The script boots a CHR, then exercises the exact GET→POST sequence that
  * triggers the stale-response bug on arm64. It tries the sequence with and

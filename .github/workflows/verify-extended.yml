@@ -163,9 +163,9 @@ jobs:
         # an explicit PASS/FAIL line in the summary instead of silently swallowing it.
         run: |
           set -o pipefail
-          echo "::group::arm64 REST ordering repro (test/lab/arm64-rest-ordering/repro.ts)"
+          echo "::group::arm64 REST ordering repro (test/lab/arm64-rest-ordering/repro.test.ts)"
           rc=0
-          QUICKCHR_INTEGRATION=1 bun test test/lab/arm64-rest-ordering/repro.ts \
+          QUICKCHR_INTEGRATION=1 bun test test/lab/arm64-rest-ordering/repro.test.ts \
             2>&1 | tee /tmp/arm64-rest-repro.txt || rc=$?
           echo "::endgroup::"
           echo "repro exit code: $rc" | tee -a /tmp/arm64-rest-repro.txt
