@@ -157,11 +157,23 @@ jobs:
 
       - name: Run arm64 REST ordering repro
         if: always()
+        # Intentionally non-gating: the repro's assertions are EXPECTED to fail on a
+        # buggy arm64 — that failure IS the diagnostic signal, not a reason to red the
+        # job. pipefail stops `tee` from masking bun's real exit code, so we can record
+        # an explicit PASS/FAIL line in the summary instead of silently swallowing it.
         run: |
+          set -o pipefail
           echo "::group::arm64 REST ordering repro (test/lab/arm64-rest-ordering/repro.ts)"
+          rc=0
           QUICKCHR_INTEGRATION=1 bun test test/lab/arm64-rest-ordering/repro.ts \
-            2>&1 | tee /tmp/arm64-rest-repro.txt || true
+            2>&1 | tee /tmp/arm64-rest-repro.txt || rc=$?
           echo "::endgroup::"
+          echo "repro exit code: $rc" | tee -a /tmp/arm64-rest-repro.txt
+          if [ "$rc" -eq 0 ]; then
+            echo "::notice::arm64 REST repro PASSED — socket-close wait resolves the GET→POST ordering bug"
+          else
+            echo "::warning::arm64 REST repro FAILED (rc=$rc) — see scenario output for which layer is at fault"
+          fi
         timeout-minutes: 15
 
       - name: Write integration summary
@@ -199,6 +211,7 @@ jobs:
           path: |
             /tmp/integration-output.txt
             /tmp/arm64-rest-repro.txt
+            test/lab/arm64-rest-ordering/REPORT.md
             ~/.local/share/quickchr/machines/**/*.json
             ~/.local/share/quickchr/machines/**/*.log
           retention-days: 7

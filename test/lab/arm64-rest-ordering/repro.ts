@@ -32,7 +32,7 @@ function rawGet(url: string, auth: string): Promise<RawResult> {
 			{
 				hostname: parsed.hostname,
 				port: parsed.port,
-				path: parsed.pathname,
+				path: parsed.pathname + parsed.search,
 				method: "GET",
 				headers: { Authorization: auth, Connection: "close" },
 				agent: false,
@@ -61,7 +61,7 @@ function rawGetWithSocketClose(url: string, auth: string): Promise<RawResult & {
 			{
 				hostname: parsed.hostname,
 				port: parsed.port,
-				path: parsed.pathname,
+				path: parsed.pathname + parsed.search,
 				method: "GET",
 				headers: { Authorization: auth, Connection: "close" },
 				agent: false,
@@ -98,7 +98,7 @@ function rawPost(url: string, auth: string, json: Record<string, unknown>): Prom
 			{
 				hostname: parsed.hostname,
 				port: parsed.port,
-				path: parsed.pathname,
+				path: parsed.pathname + parsed.search,
 				method: "POST",
 				headers: {
 					Authorization: auth,
@@ -141,9 +141,18 @@ function log(msg: string) {
 let baseUrl = "";
 let auth = "";
 
+// Stop + remove any leftover machine. QuickCHR has no static remove(); the
+// instance handle is the removal surface (matches test/integration/*.test.ts).
+async function cleanupMachine(name: string): Promise<void> {
+	const existing = QuickCHR.get(name);
+	if (!existing) return;
+	try { await existing.stop(); } catch { /* ignore */ }
+	try { await existing.remove(); } catch { /* ignore */ }
+}
+
 describe.skipIf(SKIP)("arm64 REST ordering repro", () => {
 	beforeAll(async () => {
-		await QuickCHR.remove(MACHINE).catch(() => {});
+		await cleanupMachine(MACHINE);
 		const instance = await QuickCHR.start({ name: MACHINE, channel: "stable" });
 		baseUrl = `http://127.0.0.1:${instance.ports.http}`;
 		auth = `Basic ${btoa("admin:")}`;
@@ -153,7 +162,7 @@ describe.skipIf(SKIP)("arm64 REST ordering repro", () => {
 	afterAll(async () => {
 		writeFileSync(REPORT_PATH, lines.join("\n") + "\n");
 		console.log(`\nReport written to ${REPORT_PATH}`);
-		await QuickCHR.remove(MACHINE).catch(() => {});
+		await cleanupMachine(MACHINE);
 	});
 
 	test("Baseline: POST alone returns correct body", async () => {

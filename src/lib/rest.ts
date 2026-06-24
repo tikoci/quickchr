@@ -60,10 +60,14 @@ export function restGet(
 						const result = { status: res.statusCode ?? 0, body };
 						// Wait for socket close before resolving — prevents aarch64 Bun from
 						// reading a stale GET buffer in the immediately-following POST request.
+						// Detach the close listener when the cap fires so it can't resolve
+						// twice or keep the response buffer alive past the timeout.
 						const sock = req.socket;
 						if (sock && !sock.destroyed) {
-							const closeCap = setTimeout(() => resolve(result), 2_000);
-							sock.once("close", () => { clearTimeout(closeCap); resolve(result); });
+							let closeCap: ReturnType<typeof setTimeout>;
+							const onClose = () => { clearTimeout(closeCap); resolve(result); };
+							closeCap = setTimeout(() => { sock.removeListener("close", onClose); resolve(result); }, 2_000);
+							sock.once("close", onClose);
 						} else {
 							resolve(result);
 						}
