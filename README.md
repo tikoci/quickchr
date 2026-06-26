@@ -374,7 +374,7 @@ test("boot CHR and check version", async () => {
   chr = await QuickCHR.start({ channel: "stable" });
 
   const resource = await chr.rest("/system/resource");
-  expect(resource["board-name"]).toBe("CHR");
+  expect(resource["board-name"]).toContain("CHR");
 }, 120_000);
 
 afterAll(async () => {
@@ -396,9 +396,19 @@ afterAll(async () => {
 - **[MANUAL.md](./MANUAL.md)** — complete reference: every CLI command,
   every library API, provisioning, channels, networking, storage,
   errors. Source-checked.
+- **[examples/](./examples/)** — runnable `bun:test` examples: `grounding/`
+  (apply config → read back), `harness/` (drive an external tool against a
+  CHR), `dude/` (install a package), plus `vienk`/`matrica`/`mndp`/`udp-gateway`.
+- **[docs/networking-recipes.md](./docs/networking-recipes.md)** — which
+  networking mechanism for which traffic shape.
 - **[DESIGN.md](./DESIGN.md)** — architecture, layers, design principles.
 - **[CONTRIBUTING.md](./CONTRIBUTING.md)** — dev setup and `bun run check`.
 - **[CHANGELOG.md](./CHANGELOG.md)** — release history.
+
+**Using quickchr with an AI agent?** The **`routeros-quickchr`** skill (in
+[tikoci/routeros-skills](https://github.com/tikoci/routeros-skills)) teaches
+agents the grounding workflow — boot a CHR, apply config, read it back — plus
+the networking recipes and harness patterns.
 
 ## License
 

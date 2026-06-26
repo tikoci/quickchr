@@ -251,6 +251,14 @@ Three representations of each scenario, targeting different audiences:
 - **bun:test** — library API, TypeScript. First-class integration tests. The "source of truth."
 - **Python** — subprocess around CLI. The language agents and network engineers both reach for. Demonstrates quickchr is a real tool, not just a library.
 
+The three-representation form fits **multi-CHR topology** examples (`matrica`). For
+**single-purpose** examples that teach one capability (`mndp`, `udp-gateway`,
+`grounding`, `harness`, `dude`), the lighter **`.test.ts` + `README.md`** form is
+preferred — it's the load-bearing agent-onboarding surface, stays short and
+self-contained, and keeps the integration/flake surface small (each example boots a
+real CHR). Add the heavier Makefile/Python representations only when an example is
+itself about CLI/`make` orchestration.
+
 Building examples early is a form of "anchor testing" for the CLI surface — it finds ergonomic issues before we commit to new commands.
 
 ### Document Maintenance
