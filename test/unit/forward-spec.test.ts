@@ -194,6 +194,16 @@ describe("expandForwardSpec", () => {
 		}
 	});
 
+	test("host range with a single-port guest segment throws (must be a range)", () => {
+		try {
+			expandForwardSpec("svc:9200-9201:2000/udp");
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect((err as QuickCHRError).code).toBe("INVALID_FORWARD_SPEC");
+			expect((err as Error).message).toContain("must be a range");
+		}
+	});
+
 	test("reversed range throws", () => {
 		try {
 			expandForwardSpec("svc:9210-9200");

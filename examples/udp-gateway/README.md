@@ -1,4 +1,4 @@
-# udp-gateway — receive UDP a CHR *sends*, on the host, with no forward
+# udp-gateway — receive UDP that a CHR *sends*, on the host, with no forward
 
 A host program (a test harness like `tikoci/centrs`, a NetFlow/syslog collector, a
 btest peer) often needs to receive UDP that a CHR **originates** — not reach a guest

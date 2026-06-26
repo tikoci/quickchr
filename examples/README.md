@@ -99,7 +99,7 @@ bun run test:examples
 - [`mndp/`](./mndp/) — receive RouterOS MNDP neighbor-discovery broadcasts on the
   host via a `socket-connect` L2 NIC (rootless, cross-platform). See also
   [`../docs/mndp.md`](../docs/mndp.md).
-- [`udp-gateway/`](./udp-gateway/) — receive UDP a CHR *sends* on the host with no
+- [`udp-gateway/`](./udp-gateway/) — receive UDP that a CHR *sends* on the host with no
   forward (guest → `10.0.2.2` gateway → unconnected host socket). See also
   [`../docs/networking-recipes.md`](../docs/networking-recipes.md).
 

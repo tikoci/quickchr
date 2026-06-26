@@ -11,7 +11,7 @@
  * receive an RFC3164 syslog datagram containing the nonce.
  *
  * Run:
- *   QUICKCHR_INTEGRATION=1 bun test/lab/gateway-udp/gateway-udp-probe.ts
+ *   QUICKCHR_INTEGRATION=1 bun run test/lab/gateway-udp/gateway-udp-probe.ts
  */
 
 import dgram from "node:dgram";

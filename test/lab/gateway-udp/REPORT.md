@@ -16,7 +16,7 @@ RouterOS CHR 7.23.1 (stable). Date: 2026-06-25.
 |---|---|---|
 | `gateway-udp-probe.ts` | single `user` NIC; RouterOS remote-syslog → `10.0.2.2:<P>`; host unconnected UDP socket on `0.0.0.0:<P>` | ✅ 5 datagrams received, no forward |
 
-Run with `QUICKCHR_INTEGRATION=1 bun test/lab/gateway-udp/gateway-udp-probe.ts`
+Run with `QUICKCHR_INTEGRATION=1 bun run test/lab/gateway-udp/gateway-udp-probe.ts`
 (boots a real CHR).
 
 ## Findings

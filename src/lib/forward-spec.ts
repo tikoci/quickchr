@@ -190,10 +190,20 @@ export function expandForwardSpec(spec: string): PortMapping[] {
 	}
 	const hostRange = parseRange(spec, hostSegment, "host");
 
-	const guestRange =
-		parts.length >= 3 && parts[2] !== "" && parts[2] !== undefined
-			? parseRange(spec, parts[2], "guest")
-			: { start: hostRange.start, end: hostRange.end };
+	const guestSegment = parts[2];
+	let guestRange: { start: number; end: number };
+	if (guestSegment !== undefined && guestSegment !== "") {
+		if (!guestSegment.includes("-")) {
+			fail(
+				spec,
+				`guest segment "${guestSegment}" must be a range matching the host range (e.g. 2000-2010), not a single port`,
+			);
+		}
+		guestRange = parseRange(spec, guestSegment, "guest");
+	} else {
+		// guest range omitted → default to the host range's port numbers
+		guestRange = { start: hostRange.start, end: hostRange.end };
+	}
 
 	const hostCount = hostRange.end - hostRange.start + 1;
 	const guestCount = guestRange.end - guestRange.start + 1;

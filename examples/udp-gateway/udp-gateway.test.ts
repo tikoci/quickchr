@@ -5,7 +5,7 @@ import type { ChrInstance } from "../../src/index.ts";
 import { QuickCHR } from "../../src/index.ts";
 
 /**
- * udp-gateway — receive UDP a CHR *sends*, on the host, with no port forward
+ * udp-gateway — receive UDP that a CHR *sends*, on the host, with no port forward
  *
  * QEMU user-mode (SLIRP) networking terminates Layer 2, but the gateway address
  * `10.0.2.2` IS the host as seen from inside the VM. Any datagram the guest sends

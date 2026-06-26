@@ -36,15 +36,6 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   under TCG and the full suite starves the runner. The job now defaults to a smoke subset
   (`anchor.test.ts`) that completes under TCG — an explicit `test-filter` still runs more —
   and `continue-on-error` keeps any TCG stall from turning the dispatch red.
-
-- **Extended Verification CI** — the Windows integration-log upload now writes the test
-  log under `$HOME` (same drive as `~/AppData/Local/quickchr/machines`) so
-  `upload-artifact` stops failing on the cross-drive least-common-ancestor (`C:` state dir
-  vs `D:` workspace). The macOS-x86 job is now `continue-on-error` with a job-level timeout
-  and relabeled best-effort/non-gating: hosted macOS runners have no HVF, so x86 CHR boots
-  under TCG and the full suite starves the runner. The job now defaults to a smoke subset
-  (`anchor.test.ts`) that completes under TCG — an explicit `test-filter` still runs more —
-  and `continue-on-error` keeps any TCG stall from turning the dispatch red.
 - Tightened `qemu-args` anchor assertions (single `-M`, `-m`/`-smp` values, `-drive` +
   headless `-display none`, indexed `-netdev`/`-drive` lookup, TCG-branch coverage) and added
   an empty-body `resolveVersion` → `INVALID_VERSION` case. Folds in the sound parts of the
