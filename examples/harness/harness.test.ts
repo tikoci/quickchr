@@ -73,7 +73,6 @@ describe.skipIf(SKIP)("harness — drive an external process against the CHR", (
 
 			expect(code).toBe(0);
 			expect(out).toContain("CHR");
-			console.log(`  child reached CHR — board-name: ${out}`);
 		},
 		240_000,
 	);
