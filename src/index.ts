@@ -125,7 +125,7 @@ export { WELL_KNOWN_GUEST_PORTS, lookupGuestPort } from "./lib/guest-ports.ts";
 export type { GuestPortDef } from "./lib/guest-ports.ts";
 
 // Forward spec parsing
-export { parseForwardSpec } from "./lib/forward-spec.ts";
+export { parseForwardSpec, expandForwardSpec, FORWARD_RANGE_MAX } from "./lib/forward-spec.ts";
 
 // Logging
 export { createLogger } from "./lib/log.ts";

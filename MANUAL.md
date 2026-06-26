@@ -550,6 +550,34 @@ The barrel also re-exports utility functions from `auth.ts`, `disk.ts`,
 `packages.ts`, `network.ts`, `log.ts`, `versions.ts`. Use them when the
 high-level class doesn't fit (typically not needed).
 
+### Programmatic networking
+
+The CLI's `--add-network` and `--forward` flags are just `StartOptions.networks`
+and `StartOptions.extraPorts`. Full decision guide:
+[`docs/networking-recipes.md`](docs/networking-recipes.md).
+
+```ts
+import { QuickCHR, expandForwardSpec } from "@tikoci/quickchr";
+
+const chr = await QuickCHR.start({
+  // ether1 = user (REST/mgmt + hostfwd); ether2 = L2 frames streamed to a host
+  // TCP server on `port` (e.g. to receive MNDP — see examples/mndp/).
+  networks: ["user", { type: "socket-connect", port }],
+
+  // host→guest forwards; UDP supported. Build PortMappings by hand…
+  extraPorts: [
+    { name: "snmp", host: 9161, guest: 161, proto: "udp" },
+    // …or parse CLI-style spec strings, including a UDP range:
+    ...expandForwardSpec("btest:9200-9210:2000-2010/udp"),
+  ],
+});
+```
+
+To **receive** UDP a guest sends, no forward is needed — bind an *unconnected*
+host socket and have the guest send to `chr.tzspGatewayIp` (`10.0.2.2`); see
+[`docs/networking-recipes.md`](docs/networking-recipes.md) §2 and
+[`examples/udp-gateway/`](examples/udp-gateway/).
+
 ### Version & channel helpers
 
 For tools that pick which CHRs to boot (e.g. CI matrices), the barrel exports
@@ -692,6 +720,20 @@ always be `ether1` because RouterOS auto-creates a DHCP client only on
 the first interface, and SLiRP's built-in DHCP needs the
 `10.0.2.15` address to make `hostfwd` work (see DESIGN.md
 §SLiRP-must-be-ether1 and `test/lab/slirp-hostfwd/`).
+
+### Which mechanism? (by traffic shape)
+
+Picking among the specifiers/forwards by *goal* — full guide with recipes in
+[`docs/networking-recipes.md`](docs/networking-recipes.md):
+
+| You want… | Reach for |
+|---|---|
+| Reach a guest TCP/UDP service (REST, SSH, SNMP, container port) | `user` NIC + `--forward`/`extraPorts` (`hostfwd`) |
+| Reach a guest on many/dynamic ports | `--forward name:9200-9210:2000-2010/udp` (range) |
+| Receive UDP the **guest sends** (syslog, NetFlow, TZSP, a reply) | gateway path — guest → `10.0.2.2:<port>`, host binds an **unconnected** socket; **no forward** |
+| Receive guest L2 frames/broadcasts (MNDP, MAC-Telnet) | `socket-connect` NIC ([`docs/mndp.md`](docs/mndp.md)) |
+| L2 link between two VMs | `socket::<name>` |
+| Real LAN presence / DHCP from host | `shared` / `bridged:<iface>` |
 
 ### Specifiers
 
@@ -1011,6 +1053,22 @@ quickchr add my-chr --forward winbox:9300          # host pinned, guest 8291/tcp
 quickchr add my-chr --forward myapp:9200:7777/udp  # fully explicit
 ```
 
+**Port ranges.** For L3 peer protocols with dynamic data ports (e.g. RouterOS
+bandwidth-test allocates UDP ports at runtime), a range spec
+`name:hostStart-hostEnd[:guestStart-guestEnd][/proto]` expands to one `hostfwd`
+per port (QEMU has no native range):
+
+```bash
+quickchr add btest-lab --forward btest:9200-9210:2000-2010/udp
+```
+
+Rules: the host range is **required** (ranges are not auto-allocated), the guest
+range defaults to the host numbers when omitted and must be the same length, and a
+range may span at most 64 ports. Programmatically, `expandForwardSpec(spec)`
+returns the `PortMapping[]` for an `extraPorts` array; `parseForwardSpec(spec)`
+remains the single-port form. To *receive* guest-originated UDP with no forward at
+all, see §7 (the gateway path) and `docs/networking-recipes.md`.
+
 Port maps are part of `machine.json`. Once a machine exists, `quickchr
 start <name>` uses the stored mapping; create a new machine (or edit the
 state deliberately) if a built-in service needs a different host port.
@@ -1111,8 +1169,13 @@ prevents orphan disks accumulating across attempts.
 - **CHANGELOG.md** — release history; `[Unreleased]` is the working
   set, `[0.1.1]` is the first GitHub release.
 - **CONTRIBUTING.md** — dev setup and `bun run check`.
+- **docs/networking-recipes.md** — "which mechanism for which traffic
+  shape" decision guide (hostfwd, the guest→host gateway path, L2 capture,
+  VM↔VM links, LAN). Start here when picking a networking approach.
 - **docs/networking.md** — platform-specific QEMU networking
   internals (vmnet, TAP, socket netdevs).
+- **docs/mndp.md** — worked recipe for receiving guest L2 broadcasts
+  (MNDP) on the host via a `socket-connect` NIC.
 - **docs/qga-x86-macos-qemu10-investigation.md** — root cause for the
   QGA-on-macOS-arm64 limitation.
 - **`.github/instructions/`** — agent-facing rules (testing, qemu,

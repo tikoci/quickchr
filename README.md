@@ -251,6 +251,12 @@ quickchr start --name r2 --add-network socket::lab-switch
 quickchr start --name gw --add-network user --add-network bridged:en0
 ```
 
+Not sure which mechanism fits your traffic (host→guest service, host receiving
+guest-originated UDP, L2 broadcasts, VM↔VM links, real LAN)? See the
+[networking recipes guide](./docs/networking-recipes.md) — a "traffic shape →
+mechanism" decision table. The CLI flags map 1:1 to the library:
+`--add-network` ↔ `StartOptions.networks`, `--forward` ↔ `StartOptions.extraPorts`.
+
 ### Port Layout
 
 Each instance gets a block of 10 ports. With the default base of 9100, the first instance maps:
@@ -277,7 +283,13 @@ registry when it knows the guest port:
 quickchr add lab --forward smb                  # auto host port → guest 445/tcp
 quickchr add dude-lab --forward winbox:8291     # host 8291 → guest WinBox 8291/tcp
 quickchr add app-lab --forward myapp:9200:7777/udp
+quickchr add btest-lab --forward btest:9200-9210:2000-2010/udp  # UDP port range
 ```
+
+A **port range** (`name:hostStart-hostEnd[:guestStart-guestEnd][/proto]`) expands
+to one `hostfwd` per port — handy for L3 peers with dynamic data ports. To
+*receive* UDP a guest sends (no forward at all), see the gateway path in the
+[networking recipes guide](./docs/networking-recipes.md).
 
 Reusing a built-in service name such as `winbox` pins/replaces that service's
 host port for the machine. Existing machines keep the mapping stored in

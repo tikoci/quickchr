@@ -8,11 +8,26 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
-Internal CI/test/hardening only — no change to the published `src` package, so no
-version bump.
+### Added
+
+- **UDP port-range forwarding** (issue #18) — `--forward name:hostStart-hostEnd[:guestStart-guestEnd][/proto]`
+  expands to one `hostfwd` per port, for L3 peers with dynamic data ports (e.g. btest).
+  New `expandForwardSpec()` export (range-aware; `parseForwardSpec()` stays single-port)
+  plus `FORWARD_RANGE_MAX`. Host range is required and capped at 64 ports.
+- **Networking recipes guide** (`docs/networking-recipes.md`) — a "which mechanism for
+  which traffic shape" decision table, linked from README/MANUAL and surfaced in JSDoc.
+- **Guest→host UDP gateway recipe** — receiving UDP a CHR *sends* (syslog, NetFlow, TZSP,
+  or a server reply) needs no forward: the guest targets `10.0.2.2` and the host binds an
+  *unconnected* loopback socket. Verified end-to-end (`test/lab/gateway-udp/REPORT.md`),
+  with a runnable example (`examples/udp-gateway/`). Generalizes the existing
+  `ChrInstance.tzspGatewayIp` primitive beyond TZSP.
 
 ### Changed
 
+- **JSDoc parity** on the networking option types (`StartOptions.networks`/`extraPorts`,
+  `NetworkSpecifier`, `PortMapping`, `tzspGatewayIp`) — maps specifiers to goals, documents
+  UDP/range forwards, and notes the CLI↔library equivalence, so consumers don't have to read
+  `network.ts` to discover capabilities (issue #18).
 - **Extended Verification CI** — the Windows integration-log upload now writes the test
   log under `$HOME` (same drive as `~/AppData/Local/quickchr/machines`) so
   `upload-artifact` stops failing on the cross-drive least-common-ancestor (`C:` state dir

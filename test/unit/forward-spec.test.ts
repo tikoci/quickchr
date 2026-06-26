@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parseForwardSpec } from "../../src/lib/forward-spec.ts";
+import { parseForwardSpec, expandForwardSpec, FORWARD_RANGE_MAX } from "../../src/lib/forward-spec.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
 describe("parseForwardSpec", () => {
@@ -144,5 +144,96 @@ describe("parseForwardSpec", () => {
 		} catch (err) {
 			expect((err as Error).message).toContain("nope:abc");
 		}
+	});
+});
+
+describe("expandForwardSpec", () => {
+	test("single-port spec delegates to parseForwardSpec (parity)", () => {
+		expect(expandForwardSpec("smb")).toEqual([{ name: "smb", host: 0, guest: 445, proto: "tcp" }]);
+		expect(expandForwardSpec("foo:9200:7777/udp")).toEqual([
+			{ name: "foo", host: 9200, guest: 7777, proto: "udp" },
+		]);
+	});
+
+	test("host+guest range expands to one mapping per port with unique keys", () => {
+		expect(expandForwardSpec("btest:9200-9202:2000-2002/udp")).toEqual([
+			{ name: "btest-9200", host: 9200, guest: 2000, proto: "udp" },
+			{ name: "btest-9201", host: 9201, guest: 2001, proto: "udp" },
+			{ name: "btest-9202", host: 9202, guest: 2002, proto: "udp" },
+		]);
+	});
+
+	test("host-only range defaults guest range to host numbers", () => {
+		expect(expandForwardSpec("svc:9300-9301")).toEqual([
+			{ name: "svc-9300", host: 9300, guest: 9300, proto: "tcp" },
+			{ name: "svc-9301", host: 9301, guest: 9301, proto: "tcp" },
+		]);
+	});
+
+	test("proto inherits from registry for a range when no /proto given", () => {
+		// snmp is registered as udp; a host-only range keeps that proto
+		expect(expandForwardSpec("snmp:9400-9401")).toEqual([
+			{ name: "snmp-9400", host: 9400, guest: 9400, proto: "udp" },
+			{ name: "snmp-9401", host: 9401, guest: 9401, proto: "udp" },
+		]);
+	});
+
+	test("single-port range (start==end) yields one mapping", () => {
+		expect(expandForwardSpec("svc:9500-9500:2000-2000/tcp")).toEqual([
+			{ name: "svc-9500", host: 9500, guest: 2000, proto: "tcp" },
+		]);
+	});
+
+	test("mismatched range lengths throw INVALID_FORWARD_SPEC", () => {
+		try {
+			expandForwardSpec("btest:9200-9210:2000-2002/udp");
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect((err as QuickCHRError).code).toBe("INVALID_FORWARD_SPEC");
+			expect((err as Error).message).toContain("same length");
+		}
+	});
+
+	test("host range with a single-port guest segment throws (must be a range)", () => {
+		try {
+			expandForwardSpec("svc:9200-9201:2000/udp");
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect((err as QuickCHRError).code).toBe("INVALID_FORWARD_SPEC");
+			expect((err as Error).message).toContain("must be a range");
+		}
+	});
+
+	test("reversed range throws", () => {
+		try {
+			expandForwardSpec("svc:9210-9200");
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect((err as QuickCHRError).code).toBe("INVALID_FORWARD_SPEC");
+			expect((err as Error).message).toContain("below start");
+		}
+	});
+
+	test("range over the cap throws", () => {
+		const end = 9000 + FORWARD_RANGE_MAX; // span = FORWARD_RANGE_MAX + 1 ports
+		try {
+			expandForwardSpec(`svc:9000-${end}`);
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect((err as QuickCHRError).code).toBe("INVALID_FORWARD_SPEC");
+			expect((err as Error).message).toContain("cap");
+		}
+	});
+
+	test("non-numeric range bound throws", () => {
+		expect(() => expandForwardSpec("svc:9200-abc")).toThrow(QuickCHRError);
+	});
+
+	test("range with bad proto throws", () => {
+		expect(() => expandForwardSpec("svc:9200-9201/sctp")).toThrow(QuickCHRError);
+	});
+
+	test("empty spec throws", () => {
+		expect(() => expandForwardSpec("")).toThrow(QuickCHRError);
 	});
 });

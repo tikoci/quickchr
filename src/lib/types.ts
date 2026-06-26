@@ -25,17 +25,44 @@ export type NetworkMode =
  * Network specifier — expresses user intent for a network interface.
  * Generic specifiers (user, socket, shared, bridged) are cross-platform;
  * explicit specifiers (vmnet-shared, vmnet-bridged, tap) bypass platform resolution.
+ *
+ * Pick by traffic shape (full guide: `docs/networking-recipes.md`):
+ * - **Management / host→guest TCP+UDP services** → `"user"` (SLIRP + `hostfwd`).
+ *   Keep `"user"` first (ether1) so RouterOS' DHCP client gets `10.0.2.15`.
+ * - **Host needs to see guest L2 frames** (MNDP, MAC-Telnet, raw Ethernet,
+ *   broadcasts) → `{type:"socket-connect", port}` against a host TCP server
+ *   (rootless, cross-platform; recipe in `docs/mndp.md`).
+ * - **L2 link between two VMs** → `{type:"socket", name}` (named pair) or
+ *   `socket-listen`/`socket-connect`/`socket-mcast` (low-level).
+ * - **Real LAN / DHCP-from-host presence** → `"shared"` or `{type:"bridged", iface}`
+ *   (rootless via socket_vmnet on macOS / pre-created TAP on Linux).
+ *
+ * Note: receiving guest-*originated* UDP (e.g. a guest replying to `10.0.2.2`)
+ * needs no extra NIC and no forward — see {@link ChrInstance.tzspGatewayIp}.
  */
 export type NetworkSpecifier =
+	/** SLIRP user-mode NAT + `hostfwd` port mapping. Management default; the only
+	 *  NIC that makes `extraPorts`/`--forward` reachable. Terminates Layer 2. */
 	| "user"
+	/** L2 socket pair between two VMs sharing a registered `name` (`quickchr networks sockets`). */
 	| { type: "socket"; name: string }
+	/** Low-level QEMU `socket` netdev that binds and listens (`0.0.0.0:port`). */
 	| { type: "socket-listen"; port: number }
+	/** Low-level QEMU `socket` netdev that connects to `127.0.0.1:port`. The
+	 *  rootless, cross-platform way for a host process to receive guest L2 frames. */
 	| { type: "socket-connect"; port: number }
+	/** Multi-VM L2 segment over UDP multicast. Works on Linux/CI; **broken on macOS**
+	 *  (QEMU sets only `SO_REUSEADDR`). */
 	| { type: "socket-mcast"; group: string; port: number }
+	/** NAT'd L3 with DHCP from the host; resolves to socket_vmnet/vmnet (macOS) or TAP (Linux). */
 	| "shared"
+	/** L2 bridged onto a host interface; resolves like `"shared"` but bridged. */
 	| { type: "bridged"; iface: string }
+	/** Explicit macOS vmnet-shared (bypasses resolution; runs QEMU as root). */
 	| "vmnet-shared"
+	/** Explicit macOS vmnet-bridged (bypasses resolution; runs QEMU as root). */
 	| { type: "vmnet-bridged"; iface: string }
+	/** Pre-created user-owned TAP on Linux (no quickchr setup). */
 	| { type: "tap"; ifname: string };
 
 /** Result of resolving a NetworkSpecifier on a specific platform. */
@@ -82,10 +109,24 @@ export interface SocketVmnetInfo {
 	bridgedSockets: Record<string, string>;
 }
 
+/** A single host→guest port forward, realized as one QEMU SLIRP `hostfwd`
+ *  directive (`hostfwd=<proto>::<host>-:<guest>`).
+ *
+ *  This is the programmatic equivalent of one CLI `--forward` spec. Build them
+ *  by hand, or parse spec strings with {@link parseForwardSpec} (single port) /
+ *  {@link expandForwardSpec} (port ranges). Forwards only reach the guest over a
+ *  user-mode (`"user"`) NIC — see the networking recipes guide
+ *  (`docs/networking-recipes.md`) for which mechanism fits which traffic shape. */
 export interface PortMapping {
+	/** Label for this forward; also the key in `MachineState.ports` and what
+	 *  `quickchr list` shows. Must be unique within a machine. */
 	name: string;
+	/** Host-side port. `0` (or omitted) auto-allocates from the instance's port block. */
 	host: number;
+	/** Guest-side (RouterOS) port the forward targets. */
 	guest: number;
+	/** Transport — carried verbatim into the `hostfwd` directive. `udp` is fully
+	 *  supported (e.g. SNMP, syslog, bandwidth-test data ports). */
 	proto: "tcp" | "udp";
 }
 
@@ -241,13 +282,38 @@ export interface StartOptions {
 	portBase?: number;
 	/** Services to exclude from port mappings (e.g. ["winbox", "api-ssl"]). */
 	excludePorts?: ServiceName[];
-	/** Additional custom port mappings appended to the default set. */
+	/** Additional host→guest port forwards appended to the default service set —
+	 *  the library equivalent of the CLI `--forward` flag. Each becomes one SLIRP
+	 *  `hostfwd` directive and only works over a `"user"` NIC.
+	 *
+	 *  `proto` may be `"tcp"` or `"udp"`. To turn CLI-style spec strings into this
+	 *  array, use {@link parseForwardSpec} (single port) or {@link expandForwardSpec}
+	 *  (port ranges, e.g. dynamic UDP data ports). `WELL_KNOWN_GUEST_PORTS` /
+	 *  {@link lookupGuestPort} resolve guest port + proto for common service names.
+	 *
+	 *  For *receiving* guest-originated UDP (no forward needed), see
+	 *  {@link ChrInstance.tzspGatewayIp} and `docs/networking-recipes.md`.
+	 *  @example
+	 *  extraPorts: [{ name: "snmp", host: 9161, guest: 161, proto: "udp" }]
+	 *  @example
+	 *  // dynamic UDP data ports via a range spec:
+	 *  extraPorts: expandForwardSpec("btest:9200-9210:2000-2010/udp")
+	 */
 	extraPorts?: PortMapping[];
 	/** @deprecated Use `networks` instead. Kept for backward compatibility. */
 	network?: NetworkMode;
-	/** Network interfaces. Each entry becomes a NIC on the CHR.
-	 *  Default (when omitted): single user-mode NIC.
-	 *  When specified: count of entries = count of NICs (explicit control). */
+	/** Network interfaces — the library equivalent of repeated `--add-network` flags.
+	 *  Each entry becomes a NIC on the CHR, in order (so `networks[0]` is ether1).
+	 *  Default (when omitted): a single `"user"` NIC.
+	 *  When specified: count of entries = count of NICs (explicit control).
+	 *
+	 *  Keep `"user"` first for management/`hostfwd`; add a second NIC for L2 work.
+	 *  See {@link NetworkSpecifier} for which specifier fits which traffic shape,
+	 *  and `docs/networking-recipes.md` / `docs/mndp.md` for runnable recipes.
+	 *  @example
+	 *  // management + host-visible L2 (e.g. to receive MNDP on the host):
+	 *  networks: ["user", { type: "socket-connect", port: hostTcpServerPort }]
+	 */
 	networks?: NetworkSpecifier[];
 	/** Install OS-level dependencies (QEMU, firmware) automatically if missing. */
 	installDeps?: boolean;
@@ -361,10 +427,19 @@ export interface ChrInstance {
 	 *  Pass directly to tshark: `tshark -i ${instance.captureInterface} -f "udp port 37008"`
 	 *  Only meaningful when the instance has a user-mode (`"user"`) network interface. */
 	captureInterface: string;
-	/** QEMU user-mode networking gateway IP — the host's address as seen from inside the VM.
-	 *  Use this as the RouterOS `/tool/sniffer` streaming-server target so TZSP traffic
-	 *  reaches the host. Always `"10.0.2.2"` for QEMU slirp user-mode networking.
+	/** QEMU user-mode (SLIRP) gateway IP — the host's address as seen from inside the VM.
+	 *  Always `"10.0.2.2"` for QEMU slirp user-mode networking.
+	 *
+	 *  This is the general **guest→host UDP** primitive, not just for TZSP: any
+	 *  datagram the guest sends to `10.0.2.2:<port>` is delivered to a host process
+	 *  bound on loopback at `<port>` (capture it on {@link captureInterface}) with
+	 *  **no `hostfwd` and no extra NIC**. The host socket must be left **unconnected**
+	 *  (use `recvfrom`, not `connect`) — a connected socket filters out the
+	 *  gateway-origin datagrams. This covers guest-originated UDP (syslog, NetFlow,
+	 *  TZSP) and a guest server replying to the gateway. Recipe + lab evidence:
+	 *  `docs/networking-recipes.md`, `examples/udp-gateway/`.
 	 *  @example
+	 *  // RouterOS TZSP sniffer streaming to the host:
 	 *  await instance.exec(`/tool/sniffer/set streaming-server=${instance.tzspGatewayIp}:37008`);
 	 */
 	tzspGatewayIp: string;
