@@ -56,7 +56,7 @@ src/cli/    CLI layer — thin wrapper over src/lib/
 src/index.ts  Public barrel export for npm consumers
 test/unit/  Fast, pure tests — no network, no QEMU
 test/integration/  Needs QEMU, guarded by QUICKCHR_INTEGRATION=1
-examples/   Self-contained usage examples with their own tests
+examples/   Self-contained runnable usage examples (scripts; grounding/ is a bun:test)
 ```
 
 ### Key Rules

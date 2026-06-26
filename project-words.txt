@@ -111,6 +111,7 @@ funcs
 gbps
 getaddrinfo
 getent
+getpid
 getuid
 googleable
 gre
@@ -249,12 +250,15 @@ rsc
 rta
 savevm
 scp
+scriptable
 seabios
 sed
 sendall
 setcap
 setmode
 settimeout
+shellcheck
+srand
 setuid
 sfc
 sidegrade
@@ -274,6 +278,7 @@ statfs
 stdlib
 steamdeck
 subcmd
+subdirs
 subshell
 subtests
 svm

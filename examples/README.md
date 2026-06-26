@@ -1,12 +1,83 @@
-# Using `@tikoci/quickchr` from another project
+# quickchr examples
 
-This directory holds runnable examples that exercise quickchr against real CHR
-VMs. If you're building your own consumer (a sibling experiment dir, a CI
-harness, another tool), there are **three supported ways** to depend on
-`@tikoci/quickchr`. Pick the one that matches how stable you need the version
-to be and how often the two repos change together.
+Runnable examples that exercise quickchr against real CHR VMs. Each is a
+copy-and-run artifact that *does something real* — boot a router, apply config,
+forward a port — showing both the **CLI and the library API**.
 
-## The three patterns
+New here? Start with [`quickstart/`](./quickstart/) → [`grounding/`](./grounding/).
+For what each example grounds (and where there's deliberately no example), see
+[`COVERAGE.md`](./COVERAGE.md).
+
+## The shape of an example
+
+Every `examples/<name>/` follows one convention (see
+[`.github/instructions/examples.instructions.md`](../.github/instructions/examples.instructions.md)
+and the [`_template/`](./_template/)):
+
+| File | What it is |
+|---|---|
+| `<name>.ts` | **Primary** — a runnable Bun script (library API). `bun run examples/<name>/<name>.ts`. |
+| `<name>.sh` / `<name>.ps1` | The **CLI** version — the `quickchr …` commands a human/agent types. |
+| `<name>.py` | A Python CLI driver (run with `uv run`), where a non-TS audience helps. |
+| `README.md` | What it does, how to run it, expected time, and any "friction found". |
+
+### Why runnable scripts, not tests
+
+Examples are **scripts you `bun run`** — because the real-world thing a consumer
+writes is a script that does something, not a test fixture. The one exception is
+[`grounding/`](./grounding/), which is a `bun:test`: there the **assertions are
+the documentation** (a regression suite for the apply→read-back contract), and it
+doubles as the reference for writing CHR integration tests. Reach for `bun:test`
+only when that's the point — an agent can wrap any script in `test()` in seconds.
+
+Scripts self-check with plain `check()` (from [`lib.ts`](./lib.ts)) and tear the
+machine down on success *or* failure via `runExample()`.
+
+## The examples
+
+| Example | Grounds |
+|---|---|
+| [`quickstart/`](./quickstart/) | boot one CHR, query REST, tear down *(was `vienk`)* |
+| [`grounding/`](./grounding/) | apply config with `exec()`, read back with `rest()` — the `bun:test` reference |
+| [`dude/`](./dude/) | install a package (`installPackage`), enable + read it back (x86 **and** arm64) |
+| [`harness/`](./harness/) | drive an external tool via `subprocessEnv()` / `descriptor()` |
+| [`rollback/`](./rollback/) | snapshot → change → restore (`snapshot.save/load/list`) |
+| [`service-forward/`](./service-forward/) | pin a guest service to a host port (`--forward` / `extraPorts`) |
+| [`file-transfer/`](./file-transfer/) | `upload()` / `download()` round-trip |
+| [`device-mode/`](./device-mode/) | provision `/system/device-mode` (enable container) |
+| [`trial-license/`](./trial-license/) | apply a CHR trial license — **manual-only** (rate limits) |
+| [`udp-gateway/`](./udp-gateway/) | receive guest-originated UDP with no forward (`tzspGatewayIp`) |
+| [`mndp/`](./mndp/) | receive MNDP L2 broadcasts via a `socket-connect` NIC |
+| [`version-matrix/`](./version-matrix/) | boot every RouterOS channel in parallel and compare *(was `matrica`)* |
+
+## Running them
+
+```sh
+# Library scripts (boot a real CHR — needs QEMU + KVM/HVF):
+bun run examples/quickstart/quickstart.ts
+
+# CLI scripts:
+sh examples/quickstart/quickstart.sh          # POSIX
+pwsh examples/quickstart/quickstart.ps1       # Windows
+
+# Python drivers (uv preferred over a venv):
+uv run examples/mndp/mndp.py
+
+# The one test example:
+QUICKCHR_INTEGRATION=1 bun test examples/grounding/grounding.test.ts
+
+# The CI smoke harness (curated subset + failure-path case):
+bun run smoke:examples
+```
+
+CLI scripts resolve quickchr via `$QUICKCHR` (default: this repo's source CLI, so
+you exercise local changes). Set `QUICKCHR=quickchr` to use an installed binary.
+
+## Depending on `@tikoci/quickchr` from your own project
+
+The example scripts import quickchr from the repo source (`../../src/index.ts`).
+As an external consumer, replace that with the package name — there are three
+supported ways to depend on it:
 
 ### 1. Published npm (recommended for normal users)
 
@@ -15,123 +86,41 @@ bun add @tikoci/quickchr            # stable channel (latest)
 bun add @tikoci/quickchr@next       # pre-release channel
 ```
 
-Channel policy (see `scripts/release.ts`):
-
-- **Even minor** versions (`0.2.x`, `0.4.x`, …) publish to npm tag `latest` — stable.
-- **Odd minor** versions (`0.1.x`, `0.3.x`, …) publish to npm tag `next` — pre-release.
-
-Use this when you don't need to touch quickchr internals and just want a
-pinned version in your `package.json`.
+Channel policy (see `scripts/release.ts`): **even** minor versions (`0.2.x`,
+`0.4.x`, …) publish to npm tag `latest` (stable); **odd** minors (`0.3.x`, …)
+publish to `next` (pre-release).
 
 ### 2. Local path (recommended for sibling experiment dirs)
 
 ```sh
-# from your consumer project, with quickchr checked out as a sibling
 bun add file:../quickchr
 ```
 
-…or directly in `package.json`:
-
-```json
-{
-  "dependencies": {
-    "@tikoci/quickchr": "file:../quickchr"
-  }
-}
-```
-
-Bun resolves the package from the local directory. Edits to `../quickchr/src`
-are picked up on the next `bun` invocation — no rebuild step (quickchr ships
-`.ts` sources directly via the `exports` map). Best for quick local iteration
-where you don't want the symlink semantics of `bun link`.
+Bun resolves the package from the local directory; edits to `../quickchr/src` are
+picked up on the next `bun` invocation (quickchr ships `.ts` sources directly).
 
 ### 3. `bun link` (recommended when co-developing both repos)
 
 ```sh
-# one-time, in the quickchr checkout:
-cd /path/to/quickchr
-bun link
-
-# then in each consumer:
-cd /path/to/your-consumer
-bun link @tikoci/quickchr
+cd /path/to/quickchr && bun link
+cd /path/to/your-consumer && bun link @tikoci/quickchr
 ```
 
-This creates a global symlink so every consumer sees the same live checkout.
-Best when you're actively changing both repos in the same session.
-
-**Caveat:** some long-running Bun processes (test watchers, `bun --hot`) may
-cache the resolved module path. If your edits don't seem to apply, restart the
-Bun process. If `bun link` resolution looks wrong, `bun pm ls` will show what
-got resolved.
-
-## When to use which
+A global symlink so every consumer sees the same live checkout. If edits don't
+apply, restart long-running Bun processes (`bun --hot`, watchers).
 
 | Scenario | Pattern |
 |---|---|
 | Production / CI pinned to a release | Published npm |
-| Trying a pre-release of quickchr | Published npm with `@next` |
-| Sibling experiment dir, occasional edits to quickchr | Local path (`file:../quickchr`) |
-| Active co-development of quickchr + consumer | `bun link` |
+| Trying a pre-release | Published npm `@next` |
+| Sibling experiment dir, occasional edits | Local path (`file:../quickchr`) |
+| Active co-development | `bun link` |
 
-There is no `npm workspaces` / `bun workspaces` setup in this repo — quickchr
-is a standalone package, not part of a monorepo.
-
-## Runnable examples in this directory
-
-The examples here are **Bun tests** (`bun:test`). Run them with:
-
-```sh
-QUICKCHR_INTEGRATION=1 bun test examples/vienk/vienk.test.ts
-QUICKCHR_INTEGRATION=1 bun test examples/grounding/grounding.test.ts
-QUICKCHR_INTEGRATION=1 bun test examples/harness/harness.test.ts
-QUICKCHR_INTEGRATION=1 bun test examples/dude/dude.test.ts
-QUICKCHR_INTEGRATION=1 bun test examples/matrica/matrica.test.ts
-QUICKCHR_INTEGRATION=1 bun test examples/mndp/mndp.test.ts
-QUICKCHR_INTEGRATION=1 bun test examples/udp-gateway/udp-gateway.test.ts
-```
-
-Or via the package script:
-
-```sh
-bun run test:examples
-```
-
-- [`vienk/`](./vienk/) — minimal quickstart: one CHR, boot, query REST, remove.
-- [`grounding/`](./grounding/) — the core loop: apply a RouterOS config with
-  `exec()`, read it back with `rest()`, assert it took. Ground generated config
-  against a real router.
-- [`harness/`](./harness/) — drive an *external* process against a live CHR using
-  `subprocessEnv()` / `descriptor()` (the restraml/centrs pattern), instead of
-  reading `machine.json`.
-- [`dude/`](./dude/) — install an optional RouterOS package (`installPackage`),
-  configure it, and read the setting back (x86-only).
-- [`matrica/`](./matrica/) — multi-CHR parallel matrix across RouterOS channels.
-- [`mndp/`](./mndp/) — receive RouterOS MNDP neighbor-discovery broadcasts on the
-  host via a `socket-connect` L2 NIC (rootless, cross-platform). See also
-  [`../docs/mndp.md`](../docs/mndp.md).
-- [`udp-gateway/`](./udp-gateway/) — receive UDP that a CHR *sends* on the host with no
-  forward (guest → `10.0.2.2` gateway → unconnected host socket). See also
-  [`../docs/networking-recipes.md`](../docs/networking-recipes.md).
-
-### In-repo import vs external consumer import
-
-The example tests import from the repo source directly:
+Then in your code:
 
 ```ts
-// examples/vienk/vienk.test.ts — in-repo path
-import { QuickCHR, type ChrInstance } from "../../src/index.ts";
-```
-
-That relative path only works **inside** this repository. As an external
-consumer using any of the three patterns above, replace it with the package
-name:
-
-```ts
-// your-consumer/test.ts
 import { QuickCHR, type ChrInstance } from "@tikoci/quickchr";
 ```
 
-Everything else in the example tests (the `QuickCHR.start(...)` call, the
-`ChrInstance` API, channel selection, cleanup in `afterAll`) works identically
-from an external consumer.
+Each example's README has an "If you copied only this directory" note covering the
+import swap and the `../lib.ts` helpers.

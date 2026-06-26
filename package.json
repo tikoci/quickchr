@@ -20,14 +20,17 @@
     "DESIGN.md"
   ],
   "scripts": {
-    "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown && bun run lint:cspell",
+    "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown && bun run lint:cspell && bun run lint:examples && bun run lint:shell",
     "lint": "biome check . && tsc --noEmit",
     "lint:biome": "biome check .",
     "lint:typecheck": "tsc --noEmit",
     "lint:markdown": "bunx markdownlint-cli2 '**/*.md'",
     "lint:cspell": "cspell lint . --no-progress",
+    "lint:examples": "bun run scripts/validate-examples.ts",
+    "lint:shell": "sh scripts/lint-shell.sh",
     "test": "bun test test/unit/",
     "test:examples": "bun test examples/",
+    "smoke:examples": "QUICKCHR_INTEGRATION=1 EXAMPLES_SMOKE=1 bun test test/integration/examples-smoke.test.ts",
     "test:integration": "QUICKCHR_INTEGRATION=1 bun test test/integration/",
     "test:all": "QUICKCHR_INTEGRATION=1 bun test test/unit/ test/integration/ examples/",
     "dev": "bun run src/cli/index.ts",

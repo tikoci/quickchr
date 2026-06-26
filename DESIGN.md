@@ -144,7 +144,7 @@ merges (`continue-on-error: true`). Thresholds are overridable via dispatch inpu
 
 ### Scope Boundary — QEMU Expert, Not Orchestrator
 
-quickchr manages individual CHR instances. Multi-router topologies, test matrices, and workflow orchestration are **out of scope** for the CLI and library. Provide `examples/` with Makefiles and `bun:test` scripts to inspire, but don't build a framework. Users (and their AI agents) compose quickchr instances into whatever topology they need — we give them reliable building blocks.
+quickchr manages individual CHR instances. Multi-router topologies, test matrices, and workflow orchestration are **out of scope** for the CLI and library. Provide `examples/` as runnable scripts (a `bun run`-able `<name>.ts` plus `.sh`/`.ps1`/`.py` siblings; `grounding/` is the one `bun:test` reference) to inspire, but don't build a framework. The example convention lives in `.github/instructions/examples.instructions.md`; Python examples prefer `uv run` over a venv. Users (and their AI agents) compose quickchr instances into whatever topology they need — we give them reliable building blocks.
 
 ### Networking — Discover, Don't Configure
 

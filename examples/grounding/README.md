@@ -1,44 +1,56 @@
-# grounding — validate RouterOS config against a real router
+# `grounding` — apply config, read it back (the `bun:test` reference)
 
-The core quickchr loop: **apply** a RouterOS config snippet, **read it back**, and
-**assert** it took — against real RouterOS, not a guess. This is what an agent
-should do before trusting generated config: ground it on a disposable CHR.
+**Status:** ✓ CI-verified · ✓ cross-platform · maintainer-supported
 
-`vienk` only *reads* built-in resources. `grounding` *writes* config and verifies
-the write landed.
+**Validated against:** RouterOS 7.x (any).
 
-## The loop
+The canonical quickchr loop: boot a disposable CHR, **apply** a config snippet
+with `exec()`, **read it back** with `rest()`, and assert it took. This is how you
+ground generated RouterOS config against real RouterOS instead of guessing —
+exactly what an agent should do before trusting its own output.
 
-```ts
-const chr = await QuickCHR.start({ name, channel: "stable", secureLogin: false });
-// start() resolves REST-ready — no extra waitForBoot() needed.
+## This is the one `bun:test` example — on purpose
 
-await chr.exec(`/ip/firewall/address-list/add list=quickchr-grounding address=10.99.99.99 comment="${tag}"`);
+Every other example is a runnable script you `bun run`, because the real-world
+thing a consumer writes is a script that *does something*. This one is a
+`bun:test` because here **the assertions are the documentation** — a regression
+suite proving the apply→read-back contract holds. Reach for `bun:test` when
+that's the point; otherwise write a runnable script. (An agent can wrap any
+script in `test()` in seconds.)
 
-const entries = await chr.rest("/ip/firewall/address-list");
-// assert an entry whose comment === tag exists
-```
+It also doubles as the reference for the bun:test patterns other projects reuse
+against a CHR: `beforeAll`/`afterAll` to share one booted instance, several
+focused `test()` blocks, `test.skipIf(...)` for runtime-gated cases, and a spread
+of `expect` matchers (`toContain`, `toBeArray`, `toMatchObject`, `toMatch`).
 
-`exec()` runs a CLI command (here a config write); `rest()` reads structured
-state back. The same shape grounds any config: firewall rules, addresses,
-routing, queues, scripts.
-
-## Re-run safety
-
-Every run uses a unique `NONCE` baked into **both** the machine name and the
-asserted values (the address-list comment and the system identity). A stale
-machine from an interrupted run can't make a later run pass falsely: a fresh run
-makes a new machine, and the assertions only accept values carrying *this* run's
-nonce. (Clean up stale machines with `quickchr remove --all` if an interrupted
-run leaves any behind.)
-
-## Run
+## Run it
 
 ```sh
+# This example IS a test — run it with bun test (not bun run):
 QUICKCHR_INTEGRATION=1 bun test examples/grounding/grounding.test.ts
+
+# CLI mirror of the same apply→read-back loop:
+sh grounding.sh
+# Windows:
+pwsh grounding.ps1
 ```
 
-Boots a real CHR (~25–40 s with KVM/HVF; minutes under TCG). See
-[`../README.md`](../README.md) for how to depend on `@tikoci/quickchr` from your
-own project, and [`../../docs/networking-recipes.md`](../../docs/networking-recipes.md)
-for reaching guest services / receiving guest traffic.
+Expected time: ~25–40 s with KVM/HVF.
+
+## If you copied only this directory
+
+- Replace `../../src/index.ts` → `@tikoci/quickchr`.
+- Copy `../lib.ts` (only `exampleMachineName` is used) or inline it.
+- CLI scripts resolve quickchr via `$QUICKCHR`; set `QUICKCHR=quickchr` for an
+  installed binary.
+
+## Friction found
+
+None. (`exec()` runs one statement per call — to read JSON back from RouterOS,
+wrap with `:serialize to=json`, shown in the last test.)
+
+## See also
+
+- [`../quickstart/`](../quickstart/) — the read-only version (boot + query).
+- [`../dude/`](../dude/) — grounding a package-gated subsystem.
+- [`../COVERAGE.md`](../COVERAGE.md) — capability coverage.

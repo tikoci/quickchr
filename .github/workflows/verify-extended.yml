@@ -52,6 +52,14 @@ on:
         type: string
         description: "RouterOS target: a channel (stable/long-term/testing/development) or a pinned version (e.g. 7.22.1, 7.24beta2). Empty = stable."
         default: ""
+      include-examples:
+        type: boolean
+        description: "Examples — run the examples smoke harness (linux/x86 KVM) + PowerShell lint"
+        default: false
+      example-filter:
+        type: string
+        description: "Comma-separated example names for the smoke harness (e.g. 'quickstart,rollback'). Empty = the curated subset."
+        default: ""
 
 # Least-privilege default for all jobs (read-only; jobs only run tests + upload artifacts).
 permissions:
@@ -706,3 +714,72 @@ jobs:
             ~/AppData/Local/quickchr/machines/**/*.json
             ~/AppData/Local/quickchr/machines/**/*.log
           retention-days: 7
+
+  # ── examples smoke (linux/x86_64, KVM) ───────────────────────────────────────
+  # Runs a curated subset of the runnable examples end-to-end (one representative
+  # per language + the intentional failure-path case) to catch CLI/env/exit-code/
+  # cleanup drift that the cheap gate (tsc/biome/shellcheck/validate-examples) can't.
+  # `trial-license` is excluded (MikroTik rate limits). EXAMPLE_FILTER subsets it.
+  examples-smoke:
+    name: Examples smoke (linux/x86_64)
+    if: ${{ inputs.include-examples == true }}
+    runs-on: ubuntu-latest
+    env:
+      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
+      EXAMPLE_FILTER: ${{ inputs.example-filter }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install QEMU + tools
+        run: |
+          set -eo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-x86 qemu-utils ipxe-qemu sshpass python3
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Cache CHR images
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      # Cheap gate first — convention/drift validator + shellcheck (no QEMU).
+      - run: bun run lint:examples
+      - name: Install shellcheck
+        run: sudo apt-get install -y -qq shellcheck
+      - run: bun run lint:shell
+
+      - name: Run examples smoke harness
+        run: bun run smoke:examples
+
+  # ── PowerShell lint (windows-latest) ─────────────────────────────────────────
+  # Static-analyze the example .ps1 scripts so PowerShell can't silently bit-rot.
+  lint-powershell:
+    name: Lint PowerShell examples
+    if: ${{ inputs.include-examples == true }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $issues = Get-ChildItem -Recurse -Path examples -Filter *.ps1 |
+            ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Severity Warning,Error }
+          $issues | Format-Table -AutoSize
+          if ($issues.Count -gt 0) {
+            Write-Error "PSScriptAnalyzer found $($issues.Count) issue(s) in example .ps1 scripts"
+            exit 1
+          }
+          Write-Host "PSScriptAnalyzer: example .ps1 scripts are clean"
