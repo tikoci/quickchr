@@ -5,7 +5,7 @@
 
 import type { StartOptions, Arch, Channel, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { parseNetworkSpecifier } from "../lib/network.ts";
-import { parseForwardSpec } from "../lib/forward-spec.ts";
+import { expandForwardSpec } from "../lib/forward-spec.ts";
 import {
 	MIN_PROVISION_VERSION,
 	PROVISIONING_BOOT_ONLY_SUMMARY,
@@ -499,7 +499,7 @@ async function cmdAdd(argv: string[]) {
 		bootDiskFormat: (flag(flags, "boot-disk-format") as StartOptions["bootDiskFormat"] | undefined) ?? "qcow2",
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
-		extraPorts: flagList(flags, "forward").map(parseForwardSpec),
+		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
 	};
 
 	const deviceModeValue = flag(flags, "device-mode");
@@ -1181,7 +1181,7 @@ async function cmdStart(argv: string[]) {
 		bootDiskFormat: (flag(flags, "boot-disk-format") as StartOptions["bootDiskFormat"] | undefined) ?? "qcow2",
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
-		extraPorts: flagList(flags, "forward").map(parseForwardSpec),
+		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
 		installDeps: flagBool(flags, "install-deps"),
 		dryRun: flagBool(flags, "dry-run"),
 		timeoutExtra: parseInt(flag(flags, "timeout-extra") ?? flag(flags, "T") ?? "0", 10) * 1000 || undefined,
@@ -2600,10 +2600,13 @@ Options:
 	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install on first boot (repeatable)
   --forward <spec>      Add an extra hostfwd port (repeatable). Spec:
-                        name[:host[:guest]][/proto]. Examples:
+                        name[:host[:guest]][/proto], or a port range
+                        name:hostStart-hostEnd[:guestStart-guestEnd][/proto].
+                        Examples:
                           --forward smb              (host auto, guest 445/tcp from registry)
                           --forward winbox:9300      (host pinned, guest from registry)
                           --forward myapp:9200:7777/udp  (fully explicit)
+                          --forward btest:9200-9210:2000-2010/udp  (range, e.g. dynamic ports)
   --install-all-packages  Install all packages on first boot
   --add-user <u:p>      Create user on first boot (name:password)
   --disable-admin       Disable the default admin account on first boot
@@ -2679,8 +2682,10 @@ Options:
 	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install (repeatable)
   --forward <spec>      Add an extra hostfwd port (repeatable). Spec:
-                        name[:host[:guest]][/proto]. Examples: smb,
-                        winbox:9300, myapp:9200:7777/udp.
+                        name[:host[:guest]][/proto], or a range
+                        name:hostStart-hostEnd[:guestStart-guestEnd][/proto].
+                        Examples: smb, winbox:9300, myapp:9200:7777/udp,
+                        btest:9200-9210:2000-2010/udp.
   --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
   --no-secure-login     Keep admin with no password (skip managed account)

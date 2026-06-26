@@ -85,6 +85,7 @@ The examples here are **Bun tests** (`bun:test`). Run them with:
 QUICKCHR_INTEGRATION=1 bun test examples/vienk/vienk.test.ts
 QUICKCHR_INTEGRATION=1 bun test examples/matrica/matrica.test.ts
 QUICKCHR_INTEGRATION=1 bun test examples/mndp/mndp.test.ts
+QUICKCHR_INTEGRATION=1 bun test examples/udp-gateway/udp-gateway.test.ts
 ```
 
 Or via the package script:
@@ -98,6 +99,9 @@ bun run test:examples
 - [`mndp/`](./mndp/) — receive RouterOS MNDP neighbor-discovery broadcasts on the
   host via a `socket-connect` L2 NIC (rootless, cross-platform). See also
   [`../docs/mndp.md`](../docs/mndp.md).
+- [`udp-gateway/`](./udp-gateway/) — receive UDP a CHR *sends* on the host with no
+  forward (guest → `10.0.2.2` gateway → unconnected host socket). See also
+  [`../docs/networking-recipes.md`](../docs/networking-recipes.md).
 
 ### In-repo import vs external consumer import
 

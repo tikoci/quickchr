@@ -60,6 +60,21 @@ REST after boot.
 `waitForBoot` probe. Under TCG where TCP round-trips are slow, this compounds badly.
 Lab evidence: `test/lab/slirp-hostfwd/`.
 
+### Guest→host UDP via the gateway (no hostfwd)
+
+SLIRP's gateway `10.0.2.2` **is the host** from inside the guest. A datagram the
+guest sends to `10.0.2.2:<port>` is relayed to a host process bound on loopback
+`<port>` — **no `hostfwd`, no extra NIC**. This is the general form of the TZSP path
+(`ChrInstance.tzspGatewayIp` / `captureInterface`); it also covers remote syslog,
+NetFlow, and a guest server replying to the gateway.
+
+**The host socket must be left unconnected** (`recvfrom`, not `connect`): SLIRP
+re-emits the datagram from a rewritten loopback source (`127.0.0.1:<ephemeral>`,
+not the guest's `10.0.2.15`), so a connected socket filters it out. Lab evidence:
+`test/lab/gateway-udp/REPORT.md`; recipe: `docs/networking-recipes.md`. For
+host→guest (incl. dynamic/range ports) use `hostfwd` (`--forward`/`extraPorts`,
+range form `name:hostStart-hostEnd[:guestStart-guestEnd][/proto]`).
+
 ## Channels (background mode)
 
 - Monitor: Unix socket, readline protocol. Wait for `(qemu)` prompt before sending commands.

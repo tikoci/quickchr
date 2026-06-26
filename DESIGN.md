@@ -183,6 +183,32 @@ multicast port; two CHRs on one group don't discover each other and host capture
 gets nothing. mcast still works on Linux/CI. Prefer `socket-connect` for host
 capture on any platform. Evidence: `test/lab/mndp/REPORT.md`.
 
+#### Guest→Host UDP via the Gateway — No Forward (discovered 2026-06-25)
+
+The dual of `hostfwd`: SLIRP's gateway `10.0.2.2` *is* the host from inside the
+guest, so guest-originated UDP to `10.0.2.2:<port>` reaches a host socket bound on
+loopback `<port>` with **no forward and no extra NIC**. This generalizes the TZSP
+path (`tzspGatewayIp`/`captureInterface`) — it is not TZSP-specific and reaches an
+ordinary bound socket, not just a `tshark`/pcap capture. The host socket **must be
+unconnected**: SLIRP re-emits from a rewritten loopback source
+(`127.0.0.1:<ephemeral>`), which a `connect()`-ed socket would filter. This closed
+centrs' btest UDP-coverage gap (issue #18) with no new quickchr feature — it was a
+discoverability gap. Recipe: `docs/networking-recipes.md`; evidence:
+`test/lab/gateway-udp/REPORT.md`.
+
+#### Port-Range Forwards — Explicit-Host-Only
+
+`--forward`/`extraPorts` accept a range (`name:hostStart-hostEnd[:guest…][/proto]`)
+that expands to one `PortMapping`/`hostfwd` per port — QEMU has no native range.
+**Design choice:** range host ports must be *explicit*. Auto-allocation draws from
+the per-instance 10-port block, which cannot guarantee a contiguous run; requiring
+explicit host ports keeps the change additive (the existing
+`validateExplicitExtraPorts` collision check covers them) and avoids reworking the
+port-block contract. A 64-port cap bounds the generated `hostfwd` string. For
+guest-chosen *unpredictable* ports, the gateway path (above) is the better fit for
+the guest→host direction. `expandForwardSpec` is the range-aware entry point;
+`parseForwardSpec` stays single-port for backward compatibility.
+
 ### Platform Priority
 
 macOS → Linux → Windows. Mac and Linux share most code paths with minor `#ifdef`-style branches. Windows is tracked but lower priority — larger RouterOS admin audience there, but fewer recipes and harder to test. Windows CI runner planned after the existing macOS/Linux matrix is stable.

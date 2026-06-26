@@ -222,12 +222,15 @@ provpass
 pxe
 pyc
 pycache
+qchr
+qchrgw
 qcow
 qemu
 qga
 qmp
 quickchr
 readback
+recvfrom
 resolv
 respawn
 respawning

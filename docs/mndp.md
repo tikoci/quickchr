@@ -2,7 +2,9 @@
 
 > How a quickchr **caller** wires up host-side receipt of RouterOS
 > [MNDP](https://help.mikrotik.com/docs/spaces/ROS/pages/8978519/Neighbor+discovery)
-> neighbor-discovery broadcasts. Runnable example:
+> neighbor-discovery broadcasts. This is the worked L2-capture recipe; for the
+> by-goal "which mechanism for which traffic shape" index see
+> [`networking-recipes.md`](./networking-recipes.md). Runnable example:
 > [`examples/mndp/`](../examples/mndp/). Experimental evidence:
 > [`test/lab/mndp/REPORT.md`](../test/lab/mndp/REPORT.md). For the MNDP wire format
 > itself, see the `routeros-mndp` skill.
