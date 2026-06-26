@@ -265,11 +265,11 @@ Coverage is 79.59% funcs / 67.86% lines (above thresholds). Remaining sub-70 can
 
 ### Paired skill maintenance
 
-Canonical location for `routeros-qemu-chr` is `~/GitHub/routeros-skills/routeros-qemu-chr/` (symlinked into `~/.copilot/skills/` and `~/.claude/skills/`). `quickchr` is the reference implementation — keep `SKILL.md` + `references/quickchr-automation.md` aligned when QEMU/CHR behavior changes.
+Canonical location for the paired skills is `~/GitHub/routeros-skills/` (symlinked into `~/.copilot/skills/` and `~/.claude/skills/`). `quickchr` is the reference implementation for **two** skills now: `routeros-qemu-chr` (generic QEMU/CHR) and `routeros-quickchr` (driving quickchr itself). Keep their `SKILL.md` + `routeros-quickchr/references/quickchr-api.md` aligned when behavior changes.
 
 **Workflow note:** for now, edit the skill in-place under `~/GitHub/routeros-skills/` (local path; that repo is under git but the PR-based publishing flow isn't active yet — backlog too busy here). SKILL.md files themselves must never contain local paths. Long-term goal: shift to a PR workflow against `tikoci/routeros-skills` once the work queue here is sparser. Skill updates should be part of code review whenever QEMU/CHR behavior changes.
 
-- [ ] [P2] **`references/quickchr-automation.md`** — trigger terms, `QuickCHR.start()` options, `ChrInstance` methods, port layout. Update whenever behavior changes here (e.g. when `upload()`/`download()` lands).
+- [x] **`references/quickchr-automation.md` → replaced by `routeros-quickchr/references/quickchr-api.md`** (2026-06-26). The automation reference (trigger terms, `QuickCHR.start()` options, `ChrInstance` methods/properties, port layout, error codes) was never created under `routeros-qemu-chr`; it now lives in the dedicated `routeros-quickchr` skill where it belongs. No stale paired-skill obligation remains under `routeros-qemu-chr`.
 
 **Standalone lab tests (others merged into parent items):**
 
@@ -444,8 +444,8 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 **Open work:**
 
-- [ ] [P2] **Better address the networking-discoverability gap (issue #18 strategy).** The first pass (recipes doc + JSDoc + example) lives in this repo. The deeper question is the *agent* surface: the paired `routeros-qemu-chr` skill is **generic CHR/QEMU knowledge**, not "how to drive quickchr from a test/integration harness." Options to weigh: **(a)** fold a "using quickchr for testing" section into the existing skill (lower overhead, but dilutes its generic scope and mixes tool-specific API with QEMU fundamentals); **(b)** a **dedicated `using-quickchr-for-testing-routeros` skill** — trigger: writing integration/lab tests against CHR — covering `QuickCHR.start` options, `networks`/`extraPorts` (with the recipes decision table), `waitFor`/`waitForBoot`, `captureInterface`/`tzspGatewayIp` + the gateway path, `socket-connect`, port pinning, `descriptor()`/`subprocessEnv()`, and the "check status before using stored ports" rule. Leaning (b): the audience (harness authors) and trigger differ from the generic skill's (booting/debugging CHR), and `routeros-skills` already separates concerns by skill. Risk: a third skill to keep aligned with quickchr's API. Maintainer call. Cross-refs the `references/quickchr-automation.md` item under Paired skill maintenance, which would likely become this skill's reference doc.
-- [ ] [P3] **Paired `routeros-qemu-chr` skill — networking recipes follow-up (deferred from #18).** Issue #18's quickchr-repo changes were intentionally scoped to *not* touch `tikoci/routeros-skills`. When the strategy item above is decided, propagate: the guest→host UDP gateway path (no-forward, unconnected socket) and a compact "traffic shape → mechanism" table into whichever skill wins. The skill currently documents `user`/hostfwd + `socket`/`socket-connect` but **not** the gateway path. Source of truth: `docs/networking-recipes.md`, `docs/mndp.md`.
+- [x] **Networking-discoverability gap → dedicated `routeros-quickchr` skill (issue #18 strategy, 2026-06-26).** Resolved with option (b): a new public **`routeros-quickchr`** skill in `tikoci/routeros-skills` (beside `routeros-qemu-chr`), pointer-heavy so it can't drift from the API — it embeds the stable mental-model, the by-goal networking decision table (incl. the guest→host gateway path), the connection-surface/harness pattern, and grounding gotchas, deferring version-specific detail to quickchr's own GitHub-linked docs. Reference doc: `routeros-quickchr/references/quickchr-api.md`. `routeros-qemu-chr` cross-links it from Additional Resources. Skill is broader than "testing" — framed as "ground RouterOS config/scripts/API against a real router." Symlinked into both AI dirs (`make link`/`make check`). **Note:** edited in-place in `~/GitHub/routeros-skills/`; pushing that repo is a separate step.
+- [x] **Paired-skill networking follow-up (deferred from #18) — done via the new skill.** The guest→host UDP gateway path (no-forward, unconnected socket) + the compact "traffic shape → mechanism" table now live in `routeros-quickchr` (not `routeros-qemu-chr`, which stays generic QEMU/CHR). Source of truth remains `docs/networking-recipes.md`, `docs/mndp.md`.
 - [ ] [P4] **Service-port pinning API polish / paired-skill follow-up** — Existing `--forward winbox:<host>` same-name replacement is documented and unit-tested; production behavior is unchanged. Remaining question: keep this as the intended API or add an explicit service override (`--port winbox=<host>`, `servicePorts`, etc.). If keeping it, update examples and the paired `routeros-qemu-chr` skill; if changing it, emit a clear deprecation/error for ambiguous same-name `extraPorts`.
 - [ ] [P2] Review CLI output and library API for LLM ergonomics — structured output options, clear error messages.
 - [ ] [P2] Copilot skills and `.prompt.md` files — teach agents how to use quickchr. Update `~/GitHub/routeros-skills/routeros-qemu-chr/SKILL.md` in-place (see Paired skill maintenance). Include port pinning (`--forward winbox:8291`), `portBase`, `captureInterface`, `tzspGatewayIp`, `waitFor()`, and the "check status before using stored ports" rule.
@@ -470,7 +470,7 @@ Multi-CHR topologies with `user` + `socket` (rootless, CI-friendly). RouterOS tu
 
 **Open library friction:**
 
-- [x] **First-class file transfer on `ChrInstance`** — `upload(localPath, remotePath?)` and `download(remotePath, localPath)` shipped (`src/lib/quickchr.ts:518-538`, SCP plumbing in `src/lib/scp.ts`, integration test `test/integration/file-transfer.test.ts`). Unblocks the `dude` example. Skill recipes update for `routeros-qemu-chr/references/quickchr-automation.md` is the remaining follow-up.
+- [x] **First-class file transfer on `ChrInstance`** — `upload(localPath, remotePath?)` and `download(remotePath, localPath)` shipped (`src/lib/quickchr.ts:518-538`, SCP plumbing in `src/lib/scp.ts`, integration test `test/integration/file-transfer.test.ts`). The `dude` example shipped 2026-06-26 (`examples/dude/`). File-transfer surface is summarized in `routeros-quickchr/references/quickchr-api.md`.
 - [x] [P1] **Well-known guest service port registry** — Lookup table so callers can write `extraPorts: [{name:"smb"}]` and get `guest:445, proto:"tcp"` auto-filled. Pairs with `--forward`. Output of the port-research spike.
 - [x] [P2] **`examples/README.md` — document three consumption patterns** — Same customer spent visible reasoning on how to reference `@tikoci/quickchr` from a sibling experiment dir (bun link vs workspace vs local path vs published npm). Short README naming the three supported patterns and when to use each.
 - [x] **`waitFor`, `captureInterface`, `tzspGatewayIp`, `portBase` on `ChrInstance`** (0.3.0, `e6ca0dc`) — Surfaces from tikoci/donny dude-agent lab (2026-04-23): manual polling loop for "/dude enabled: yes", hardcoded `lo0`/`10.0.2.2` for TZSP capture, and digging into `state.portBase` to pick a non-colliding socket port. All four properties + 9 unit tests shipped together.
@@ -561,13 +561,30 @@ wholesale, but centrs has reusable RouterOS protocol layers and sharp test-harne
 
 </details>
 
+**Shipped 2026-06-26 (light `.test.ts` + README convention, all verified on real CHR):**
+
+- [x] **`examples/grounding/`** — the canonical loop: apply config via `exec()`, read back via
+  `rest()`, assert. Nonce-bearing machine name + asserted values (re-run safe). The example
+  `routeros-quickchr` points to first.
+- [x] **`examples/harness/`** — drive an external child process against a live CHR via
+  `subprocessEnv()`/`descriptor()` (the restraml/centrs pattern); `child.ts` shows the
+  `Basic ${btoa(BASICAUTH)}` header + the secret-bearing caveat.
+- [x] **`examples/dude/`** — install the `dude` package (`installPackage`), enable it, read the
+  setting back (x86; verified on 7.23.1). Shipped **without** a seeded `.db` fixture — a pre-built
+  `dude.db` is version-fragile across releases, so the example grounds the install+config path
+  deterministically instead (file-transfer API itself is already anchored by
+  `test/integration/file-transfer.test.ts`).
+
 **Open examples — each needs a 1-page design (topology sketch, .rsc seeds, assertions) before coding:**
 
-- [ ] [P4] tris (3-CHR hub-and-spoke, OSPF) — Makefile, bun:test, Python, README, hub.rsc, branch-a.rsc, branch-b.rsc
-- [ ] [P4] solis (sequential version migration) — Makefile, bun:test, Python, README, rb5009-sample.rsc
-- [ ] [P4] trauks (/app container testing) — Makefile, bun:test, Python, README, github-workflow.yaml
-- [ ] [P4] divi (2-CHR redundancy, VRRP+VXLAN) — Requires root. Makefile, bun:test, Python, README, chr-a.rsc, chr-b.rsc
-- [ ] [P4] **dude** (Dude package + custom `.db` load, from tikoci/donny 2026-04-22) — Now unblocked (`upload()`/`download()` shipped). Boot CHR, `installPackage("dude")`, `chr.upload(localDb, "/dude/dude.db")`, `exec("/dude/set enabled=yes data-directory=dude")`, assert `/dude/devices/print` matches seeded devices. Doubles as anchor test for the file-transfer API and reference for any `/dude/*` work.
+> Evaluated 2026-06-26 alongside the skill work and **deferred** — each is multi-CHR, multi-boot, or
+> root-only, so it adds materially more flake/cost than the three single-CHR examples above. Keep as
+> design sketches; don't ship until a 1-pager pins the topology + deterministic assertions.
+
+- [ ] [P4] tris (3-CHR hub-and-spoke, OSPF) — Makefile, bun:test, Python, README, hub.rsc, branch-a.rsc, branch-b.rsc. *Deferred: 3 boots + socket L2 topology.*
+- [ ] [P4] solis (sequential version migration) — Makefile, bun:test, Python, README, rb5009-sample.rsc. *Deferred: multi-boot + in-guest upgrade timing.*
+- [ ] [P4] trauks (/app container testing) — Makefile, bun:test, Python, README, github-workflow.yaml. *Deferred: in-guest OCI pulls (network-dependent).*
+- [ ] [P4] divi (2-CHR redundancy, VRRP+VXLAN) — Requires root. Makefile, bun:test, Python, README, chr-a.rsc, chr-b.rsc. *Deferred: not rootless/CI-friendly.*
 
 ### Snapshots + RouterOS config export
 

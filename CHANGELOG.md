@@ -10,6 +10,14 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Added
 
+- **`routeros-quickchr` agent skill** (in `tikoci/routeros-skills`) — a pointer-heavy guide for
+  AI agents (and anyone) on grounding RouterOS config/scripts/API against a real router with
+  quickchr: the apply→read-back loop, the by-goal networking decision table, the harness
+  connection-surface, and grounding gotchas. Cross-linked from `routeros-qemu-chr`.
+- **Three runnable examples** — `examples/grounding/` (apply config via `exec()` → read back via
+  `rest()` → assert; re-run-safe via a per-run nonce), `examples/harness/` (drive an external
+  child process against a live CHR via `subprocessEnv()`/`descriptor()`), and `examples/dude/`
+  (install the `dude` package and ground its config, x86). All verified on real CHR (7.23.1).
 - **UDP port-range forwarding** (issue #18) — `--forward name:hostStart-hostEnd[:guestStart-guestEnd][/proto]`
   expands to one `hostfwd` per port, for L3 peers with dynamic data ports (e.g. btest).
   New `expandForwardSpec()` export (range-aware; `parseForwardSpec()` stays single-port)

@@ -83,6 +83,9 @@ The examples here are **Bun tests** (`bun:test`). Run them with:
 
 ```sh
 QUICKCHR_INTEGRATION=1 bun test examples/vienk/vienk.test.ts
+QUICKCHR_INTEGRATION=1 bun test examples/grounding/grounding.test.ts
+QUICKCHR_INTEGRATION=1 bun test examples/harness/harness.test.ts
+QUICKCHR_INTEGRATION=1 bun test examples/dude/dude.test.ts
 QUICKCHR_INTEGRATION=1 bun test examples/matrica/matrica.test.ts
 QUICKCHR_INTEGRATION=1 bun test examples/mndp/mndp.test.ts
 QUICKCHR_INTEGRATION=1 bun test examples/udp-gateway/udp-gateway.test.ts
@@ -95,6 +98,14 @@ bun run test:examples
 ```
 
 - [`vienk/`](./vienk/) — minimal quickstart: one CHR, boot, query REST, remove.
+- [`grounding/`](./grounding/) — the core loop: apply a RouterOS config with
+  `exec()`, read it back with `rest()`, assert it took. Ground generated config
+  against a real router.
+- [`harness/`](./harness/) — drive an *external* process against a live CHR using
+  `subprocessEnv()` / `descriptor()` (the restraml/centrs pattern), instead of
+  reading `machine.json`.
+- [`dude/`](./dude/) — install an optional RouterOS package (`installPackage`),
+  configure it, and read the setting back (x86-only).
 - [`matrica/`](./matrica/) — multi-CHR parallel matrix across RouterOS channels.
 - [`mndp/`](./mndp/) — receive RouterOS MNDP neighbor-discovery broadcasts on the
   host via a `socket-connect` L2 NIC (rootless, cross-platform). See also
