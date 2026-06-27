@@ -40,7 +40,8 @@ Expected time: ~90 s wall (HVF/KVM, parallel); minutes under TCG.
 - **No CLI file-transfer.** The library applies the sample config with
   `ChrInstance.upload()`, but the CLI/Python driver can't — there's no
   `quickchr cp` command. So `version-matrix.py` compares *default* exports only.
-  Tracked as a CLI-surface gap (shared with [`../file-transfer/`](../file-transfer/)).
+  Tracked in [tikoci/quickchr#23](https://github.com/tikoci/quickchr/issues/23)
+  (shared with [`../file-transfer/`](../file-transfer/)).
 - **Old CLI package flag was wrong.** The previous Makefile/Python used
   `--packages a,b` (no such flag) so packages never installed via the CLI path;
   fixed here to repeated `--add-package`.

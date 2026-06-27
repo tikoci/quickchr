@@ -45,8 +45,8 @@ The **library** can install a package on a *running* machine
 (`ChrInstance.installPackage("dude")`), but the **CLI** can only install at first
 boot (`--add-package`) — there's no `quickchr install <name> <pkg>` for a running
 instance. That's why `dude.ts` and `dude.sh` take slightly different paths to the
-same end state. Tracked as a CLI-surface gap (`quickchr install`/`pkg add`) — see
-[`../../BACKLOG.md`](../../BACKLOG.md).
+same end state. Tracked in
+[tikoci/quickchr#24](https://github.com/tikoci/quickchr/issues/24).
 
 ## See also
 

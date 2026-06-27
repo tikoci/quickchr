@@ -33,9 +33,9 @@ identical to the `.sh` gap note — not worth a separate file. Expected time: ~4
 **No `quickchr cp` CLI.** File transfer is library-only — there's no
 `quickchr cp <name> <src> <dst>` command, so the CLI/Python drivers can't do a
 clean round-trip (they'd fall back to raw `scp`, which we won't normalize). Tracked
-as a CLI-surface gap in [`../../BACKLOG.md`](../../BACKLOG.md) ("`quickchr cp`").
-The same gap shows up in [`../version-matrix/`](../version-matrix/), whose CLI
-driver can't upload the sample config.
+in [tikoci/quickchr#23](https://github.com/tikoci/quickchr/issues/23). The same gap
+shows up in [`../version-matrix/`](../version-matrix/), whose CLI driver can't
+upload the sample config.
 
 ## See also
 

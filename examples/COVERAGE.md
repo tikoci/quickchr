@@ -73,5 +73,5 @@ Legend: ✅ example · 📘 docs/MANUAL only · 🧪 covered by `test/` only.
 
 | Surface | Status |
 |---|---|
-| `socket::<name>` multi-CHR L2 (rootless-l2 / `socket-lan`) | ⏳ needs a 1-page topology design first — tracked in [`../BACKLOG.md`](../BACKLOG.md) |
+| `socket::<name>` multi-CHR L2 (rootless-l2 / `socket-lan`) | ⏳ design-first, tracked in [tikoci/quickchr#25](https://github.com/tikoci/quickchr/issues/25) |
 | `shared` / `bridged:<if>` / `tap:<if>` networks | 📘 host-setup heavy (sudo / socket_vmnet); documented, not a rootless example |
