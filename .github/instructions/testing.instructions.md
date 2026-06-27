@@ -128,6 +128,23 @@ See `.github/instructions/ci.instructions.md` for the full artifact map and fail
 | ECONNRESET noise in output | Expected on fire-and-forget calls (device-mode power-cycle) | Ensure `.catch(() => {})` attached immediately to pending promise |
 | Polls for 90s then fails | Error in response body misclassified as "pending" | Check classification function — RouterOS returns errors inside HTTP 200 |
 
+### A failing test is a signal — masking it is forbidden
+
+The flowchart above bans the timeout-bump. The same logic bans **every** move that turns
+a red test green without understanding why it was red:
+
+- **`skip` / `.skipIf` / `os`- or `arch`-gating a failing test is the worst of these.** A
+  bumped timeout still runs the test; a skip removes it from the suite, so the bug it
+  caught silently escapes tracking. Filing an issue alongside the skip does not make it
+  safe — it just makes masking look responsible. Only gate AFTER a local reproduction
+  proves a genuine, unfixable platform limit, and make the gate cite that repro.
+- **"It's a platform limitation" is a hypothesis, not a conclusion, until reproduced
+  locally.** We have QEMU here and can boot any CHR arch — x86 under HVF, arm64 under TCG
+  (slow, but real). One CI run across a few runners is not a repro. Never substitute a
+  remembered "known QEMU behavior" for an actual local experiment.
+- **One CI failure must not cascade.** A single unverified red run is not license to edit
+  `DESIGN.md`, API docs, `BACKLOG.md`, issues, or skills. Ground first; document second.
+
 ### Experiment First, Code Second
 
 **MANDATORY for any REST/provisioning change**: Before writing or refactoring code, run a
