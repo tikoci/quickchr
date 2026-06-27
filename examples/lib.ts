@@ -16,11 +16,11 @@ import type { ChrInstance } from "../src/index.ts";
  * Deterministic, collision-resistant machine name: `examples-<slug>-<unique>`.
  *
  * The `examples-` prefix lets CI reap leftovers by prefix and keeps example
- * machines distinct from a user's own; the unique suffix (pid + random) makes
- * parallel runs safe and interrupted-run recovery deterministic.
+ * machines distinct from a user's own; the unique suffix (pid + crypto-random)
+ * makes parallel runs safe and interrupted-run recovery deterministic.
  */
 export function exampleMachineName(slug: string): string {
-	const unique = `${process.pid.toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+	const unique = `${process.pid.toString(36)}${crypto.randomUUID().slice(0, 8)}`;
 	return `examples-${slug}-${unique}`;
 }
 

@@ -34,7 +34,7 @@ import { exampleMachineName } from "../lib.ts";
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 
 // Unique per run — drives the machine name and the asserted config values.
-const NONCE = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+const NONCE = `${Date.now().toString(36)}${crypto.randomUUID().slice(0, 8)}`;
 
 interface AddressListEntry {
 	address?: string;

@@ -13,8 +13,7 @@ name: Extended Verification
 #
 # Platform × mode is the matrix: e.g. tick macos-arm64 + windows-x86, leave
 # run-integration on and turn run-examples on, to confirm both the suite and the
-# runnable examples pass on those OSes. `coverage` (default on) adds an
-# informational unit+integration coverage run — numbers only, never gates.
+# runnable examples pass on those OSes.
 #
 # Examples are held to the same bar as the code: a broken example REDS this workflow
 # on the gating platforms (linux KVM, macOS HVF). macOS/x86 (TCG) and Windows (TCG)
@@ -43,10 +42,6 @@ on:
         type: boolean
         description: "Run the examples smoke harness on the selected platforms (+ PowerShell lint)"
         default: false
-      coverage:
-        type: boolean
-        description: "Emit informational unit+integration coverage numbers (linux/x86, never gates)"
-        default: true
       # ── Which platforms ──────────────────────────────────────────────────────
       linux-x86:
         type: boolean
@@ -917,90 +912,3 @@ jobs:
             exit 1
           }
           Write-Host "PSScriptAnalyzer: example .ps1 scripts are clean"
-
-  # ── coverage (informational metrics, never gates) ────────────────────────────
-  # ci.yml reports UNIT coverage on push; this adds the INTEGRATION-exercised paths
-  # that extended verification actually runs — the coverage the push pipeline can't
-  # see. Numbers only: `continue-on-error` so a flaky integration test never reds
-  # the metrics. Runs the suite in ONE `bun test --coverage` invocation (bun can't
-  # merge coverage across separate runs), so a mid-suite failure yields partial
-  # numbers — acceptable for review-only metrics. Toggle with the `coverage` input.
-  coverage:
-    name: Coverage (metrics only)
-    if: ${{ inputs.coverage == true }}
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    env:
-      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install QEMU + tools
-        run: |
-          set -eo pipefail
-          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            qemu-system-x86 qemu-utils ipxe-qemu sshpass
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm || true
-
-      - name: Cache CHR images
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
-          restore-keys: chr-images-${{ runner.os }}-
-
-      - run: bun install --frozen-lockfile
-
-      # pipefail is mandatory — without it `tee` masks bun's exit code.
-      - name: Run unit + integration with coverage
-        run: |
-          set -o pipefail
-          echo "::group::Coverage run"
-          QUICKCHR_INTEGRATION=1 bun test --coverage test/unit/ test/integration/ 2>&1 \
-            | tee /tmp/coverage-extended.txt
-          echo "::endgroup::"
-        timeout-minutes: 75
-
-      - name: Write coverage to job summary
-        if: always()
-        run: |
-          set -eo pipefail
-          if [ ! -s /tmp/coverage-extended.txt ]; then
-            echo "(no coverage captured — bun test crashed before coverage)" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          FUNC_PCT=$(grep "^All files" /tmp/coverage-extended.txt \
-            | awk -F'|' '{gsub(/ /,"",$2); print $2}' || echo 0)
-          LINE_PCT=$(grep "^All files" /tmp/coverage-extended.txt \
-            | awk -F'|' '{gsub(/ /,"",$3); print $3}' || echo 0)
-          {
-            echo "## Coverage — unit + integration (informational, never gates)"
-            echo ""
-            echo "RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
-            echo ""
-            echo "| Metric | Coverage |"
-            echo "|--------|----------|"
-            echo "| Functions | ${FUNC_PCT:-0}% |"
-            echo "| Lines | ${LINE_PCT:-0}% |"
-            echo ""
-            echo '```'
-            awk '/^-{10}/{found=1} found{print}' /tmp/coverage-extended.txt 2>/dev/null \
-              | tail -200 || tail -80 /tmp/coverage-extended.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: coverage-extended
-          path: /tmp/coverage-extended.txt
-          retention-days: 14

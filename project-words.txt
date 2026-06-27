@@ -249,6 +249,8 @@ rootfs
 rosetta
 routerboard
 routeros
+runspace
+runspaces
 rsc
 rta
 savevm

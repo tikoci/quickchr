@@ -14,11 +14,14 @@ foreach ($ch in $channels) {
 	Register-Cleanup $name
 	$base = 9200 + $i * 10
 	Write-Host "-> starting $name (channel=$ch, port-base=$base)..."
+	# $using: captures each iteration's loop values at Start-Job time (Start-Job
+	# serializes them into the child runspace). This is the form PSScriptAnalyzer's
+	# PSUseUsingScopeModifierInNewRunspaces wants — it doesn't recognize the older
+	# param()+-ArgumentList pattern and flags those as missing the Using: scope.
 	$jobs += Start-Job -ScriptBlock {
-		param($qc, $name, $ch, $base)
-		$parts = $qc -split '\s+'
-		& $parts[0] @($parts[1..($parts.Length - 1)]) start $name --channel $ch --no-secure-login --port-base $base --add-package container --mem 256
-	} -ArgumentList $qc, $name, $ch, $base
+		$parts = $using:qc -split '\s+'
+		& $parts[0] @($parts[1..($parts.Length - 1)]) start $using:name --channel $using:ch --no-secure-login --port-base $using:base --add-package container --mem 256
+	}
 	$i++
 }
 
