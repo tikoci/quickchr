@@ -893,22 +893,10 @@ jobs:
   # Static-analyze the example .ps1 scripts so PowerShell can't silently bit-rot.
   # Uses examples/PSScriptAnalyzerSettings.psd1 (documents which rules are waived
   # and why). Gating: a flagged .ps1 reds the workflow.
+  # Reuses the dedicated PowerShell-lint workflow (also runs on its own for `.ps1`
+  # changes — see lint-powershell.yml / issue #28), so the dispatch path stays
+  # covered without duplicating the PSScriptAnalyzer invocation here.
   lint-powershell:
     name: Lint PowerShell examples
     if: ${{ inputs.run-examples == true }}
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: PSScriptAnalyzer
-        shell: pwsh
-        run: |
-          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
-          $settings = Join-Path $PWD 'examples/PSScriptAnalyzerSettings.psd1'
-          $issues = Get-ChildItem -Recurse -Path examples -Filter *.ps1 |
-            ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Settings $settings }
-          $issues | Format-Table -AutoSize
-          if ($issues.Count -gt 0) {
-            Write-Error "PSScriptAnalyzer found $($issues.Count) issue(s) in example .ps1 scripts"
-            exit 1
-          }
-          Write-Host "PSScriptAnalyzer: example .ps1 scripts are clean"
+    uses: ./.github/workflows/lint-powershell.yml
