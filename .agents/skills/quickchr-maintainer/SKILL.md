@@ -17,13 +17,17 @@ description: "Maintain the quickchr Bun/TypeScript CLI and library. Use when cha
 ## Source Routing
 
 - Source/library code: `.github/instructions/general.instructions.md`.
-- QEMU launch, channels, platform detection: `qemu.instructions.md`.
-- Provisioning and first boot: `provisioning.instructions.md`.
-- RouterOS REST and blocking endpoints: `routeros-rest.instructions.md`.
-- Bun HTTP/fetch behavior: `bun-http.instructions.md`.
-- Tests and live CHR requirements: `testing.instructions.md`.
-- Examples: `examples.instructions.md`.
-- GitHub Actions and CI diagnosis: `ci.instructions.md`.
+- QEMU launch, channels, platform detection:
+  `.github/instructions/qemu.instructions.md`.
+- Provisioning and first boot:
+  `.github/instructions/provisioning.instructions.md`.
+- RouterOS REST and blocking endpoints:
+  `.github/instructions/routeros-rest.instructions.md`.
+- Bun HTTP/fetch behavior: `.github/instructions/bun-http.instructions.md`.
+- Tests and live CHR requirements:
+  `.github/instructions/testing.instructions.md`.
+- Examples: `.github/instructions/examples.instructions.md`.
+- GitHub Actions and CI diagnosis: `.github/instructions/ci.instructions.md`.
 
 Use rosetta MCP for RouterOS documentation search and command/property lookup
 when available. Use live quickchr/CHR experiments for behavior that must be
