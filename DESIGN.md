@@ -31,6 +31,7 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 3. **No shell scripts** — QEMU args built entirely in TypeScript. Enables Windows support and testability.
 
 4. **Optional qcow2** — Default boot disk uses raw `.img` (MikroTik provides them). Users can opt into `qcow2` format for boot resize and QEMU snapshot/restore support. Requires `qemu-img` when enabled.
+   - **arm64 caveat** — QEMU's internal `savevm`/`loadvm` snapshots are **x86-only in practice**. `loadvm` returns clean on the aarch64 `virt` machine but the restored guest is wedged (REST never comes back), across both HVF and TCG. The examples smoke harness gates the `rollback` example to x64 for this reason. Tracked in issue #31.
 
 5. **ARM64 VirtIO rule** — Never use `if=virtio` on aarch64 `virt` machine. Always explicit `-device virtio-blk-pci,drive=drive0`.
 

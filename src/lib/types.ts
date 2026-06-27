@@ -564,6 +564,10 @@ export interface ChrInstance {
 	 *  **For stopped machines**, only `list` works (reads qcow2 metadata directly
 	 *  via `qemu-img info`).  Other operations require the machine to be running.
 	 *
+	 *  **x86 only in practice.** Internal `savevm`/`loadvm` snapshots do not
+	 *  reliably restore an aarch64 `virt` guest — `loadvm` returns clean but the
+	 *  restored CHR is wedged and never comes back on REST. See issue #31.
+	 *
 	 *  @example
 	 *  const snaps = await instance.snapshot.list();
 	 *  await instance.snapshot.save("before-upgrade");

@@ -6,6 +6,10 @@
  * change the config, then restore the snapshot and prove the change is gone.
  * Snapshots need a qcow2 boot disk (the quickchr default) — raw disks can't.
  *
+ * x86 only: QEMU's internal savevm/loadvm snapshots don't reliably restore an
+ * aarch64 `virt` CHR (loadvm returns clean but the guest wedges and REST never
+ * returns). See issue #31 — the examples smoke harness skips this on arm64.
+ *
  * Run:  bun run examples/rollback/rollback.ts
  * Time: ~30–50 s.
  */

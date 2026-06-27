@@ -30,6 +30,9 @@ interface Runnable {
 	env?: Record<string, string>;
 	// Restrict to these platforms (process.platform). Omitted = all.
 	os?: NodeJS.Platform[];
+	// Restrict to these CPU arches (process.arch). Omitted = all. Used to gate
+	// examples that hit a genuine per-arch QEMU limitation (e.g. rollback, below).
+	arch?: NodeJS.Architecture[];
 }
 
 // One representative per language, selected per OS so the CLI mirror that actually
@@ -40,7 +43,12 @@ interface Runnable {
 // Kept small — each entry boots a real CHR.
 const RUNNABLE: Runnable[] = [
 	{ name: "quickstart", lang: "ts", cmd: ["bun", "run", "examples/quickstart/quickstart.ts"] },
-	{ name: "rollback", lang: "ts", cmd: ["bun", "run", "examples/rollback/rollback.ts"] },
+	// x64-only: QEMU's internal savevm/loadvm snapshots don't restore a working
+	// aarch64 `virt` CHR — loadvm returns clean but the guest is wedged and REST
+	// never comes back, so this fails on macos/arm64 + linux/aarch64 while passing
+	// on every x86 accelerator. Tracked in issue #31. The example itself is
+	// unchanged; it just isn't exercised where the snapshot round-trip can't work.
+	{ name: "rollback", lang: "ts", cmd: ["bun", "run", "examples/rollback/rollback.ts"], arch: ["x64"] },
 	{
 		name: "quickstart-sh",
 		lang: "sh",
@@ -81,7 +89,9 @@ if (!SKIP && unknownFilter.length > 0) {
 }
 
 const want = (name: string) => FILTER.length === 0 || FILTER.includes(name);
-const applies = (r: Runnable) => !r.os || r.os.includes(process.platform);
+const applies = (r: Runnable) =>
+	(!r.os || r.os.includes(process.platform)) &&
+	(!r.arch || r.arch.includes(process.arch));
 
 async function run(cmd: string[], env: Record<string, string> = {}) {
 	const proc = Bun.spawn(cmd, {

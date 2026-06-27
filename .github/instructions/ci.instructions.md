@@ -6,12 +6,13 @@ applyTo: ".github/workflows/**"
 
 ## Workflow Overview
 
-Three workflows, each with a distinct purpose:
+Four workflows, each with a distinct purpose:
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
 | **CI** | `ci.yml` | push/PR to `main`, `workflow_dispatch` | Core quality gate — every push |
 | **Extended Verification** | `verify-extended.yml` | `workflow_dispatch` only | arm64, macOS, Windows integration |
+| **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
 | **Publish** | `publish.yml` | `push: tags: v*`, `workflow_dispatch` | NPM publish pipeline |
 
 ### CI pipeline (ci.yml)
@@ -41,7 +42,7 @@ Triggered by `bun run release` (creates and pushes a `vX.Y.Z` tag) or via GitHub
 
 `workflow_dispatch` only — never runs on push/PR. One dispatch chooses **which platforms** (the five toggles), **what runs on them** (`run-integration` and/or `run-examples` — the examples smoke harness), against **which RouterOS** (`routeros-target`), on **which branch** (the ref picked in the "Run workflow" dropdown). So platform × mode is the matrix: the same dispatch can verify the integration suite AND the runnable examples across the selected OSes. Use `test-filter` to narrow integration to specific files and `example-filter` to narrow the smoke harness. Unlike `ci.yml`/`publish.yml` (which always boot the default/stable), this is how arm64/macOS/Windows — and, via the selectable `linux-x86` toggle, x86 — get exercised against long-term/testing/development or a pinned version.
 
-Most jobs are independent, except the examples smoke matrix is built dynamically: `plan-smoke` reads the selected platform toggles and emits the `examples-smoke` matrix (one job per chosen OS). **Examples are held to the same bar as the code** — a broken example REDS the workflow on the gating platforms (linux KVM, macOS HVF); macOS/x86 and Windows (TCG) stay non-gating/informational, mirroring the integration jobs. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on. (Integration-exercised coverage is **not** collected here yet — the standalone coverage job was removed because it re-ran the whole suite; reworking it as a byproduct of the integration jobs is tracked in [#30](https://github.com/tikoci/quickchr/issues/30).)
+Most jobs are independent, except the examples smoke matrix is built dynamically: `plan-smoke` reads the selected platform toggles and emits the `examples-smoke` matrix (one job per chosen OS). **Examples are held to the same bar as the code** — a broken example REDS the workflow on the gating platforms (linux KVM, macOS HVF); macOS/x86 and Windows (TCG) stay non-gating/informational, mirroring the integration jobs. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` so `.ps1` regressions surface in normal PR CI, not just on a manual dispatch ([#28](https://github.com/tikoci/quickchr/issues/28)). (Integration-exercised coverage is **not** collected here yet — the standalone coverage job was removed because it re-ran the whole suite; reworking it as a byproduct of the integration jobs is tracked in [#30](https://github.com/tikoci/quickchr/issues/30).)
 
 ## Release Process
 
