@@ -55,6 +55,12 @@ jobs:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      # shellcheck makes `bun run check`'s lint:shell actually enforce POSIX-sh on
+      # the example scripts (it skips silently when shellcheck is absent locally).
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
       - name: Run repo checks
         run: bun run check
 

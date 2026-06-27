@@ -1,64 +1,46 @@
-# udp-gateway — receive UDP that a CHR *sends*, on the host, with no forward
+# `udp-gateway` — receive guest-originated UDP on the host, with no forward
 
-A host program (a test harness like `tikoci/centrs`, a NetFlow/syslog collector, a
-btest peer) often needs to receive UDP that a CHR **originates** — not reach a guest
-service, but catch what the guest emits. This example shows how, over the plain
-default `user` NIC, with **no `hostfwd` and no extra NIC**.
+**Status:** ✓ CI-verified · macOS/Linux · maintainer-supported
 
-## The mechanism
+**Validated against:** RouterOS 7.x (any). QEMU user-mode (SLIRP) networking.
 
-QEMU user-mode (SLIRP) networking terminates Layer 2, but the gateway address
-`10.0.2.2` **is the host** as seen from inside the VM. Any datagram the guest sends
-to `10.0.2.2:<port>` is relayed to a host process bound on loopback `<port>`:
+Receive UDP that a CHR *sends* on the host, with no `hostfwd` and no extra NIC.
+Any datagram the guest sends to the SLIRP gateway `10.0.2.2:<port>` is relayed to
+a host process bound on loopback `<port>` — the general form of the TZSP path
+`ChrInstance.tzspGatewayIp` exposes. Emitter here: RouterOS remote syslog.
 
-```ts
-const port = /* host's bound UDP port */;
-// guest: send UDP to instance.tzspGatewayIp (= "10.0.2.2") : port
-await instance.exec(
-  `/system/logging/action/add name=qchrgw target=remote remote=${instance.tzspGatewayIp} remote-port=${port}`,
-);
-await instance.exec("/system/logging/add action=qchrgw topics=info");
-await instance.exec(`:log info "hello from the guest"`);
-```
+The catch: relayed datagrams arrive from a SLIRP-rewritten loopback source, so the
+host socket must be left **unconnected** (recvfrom) — a connected socket filters
+them out.
 
-This is the general form of the TZSP path `ChrInstance.tzspGatewayIp` already
-exposes — it is **not** TZSP-specific and reaches an ordinary bound UDP socket.
-
-## The one catch: leave the host socket **unconnected**
-
-The relayed datagrams arrive from a **SLIRP-rewritten loopback source**
-(`127.0.0.1:<ephemeral>`), not the guest's `10.0.2.15`. So bind and `recvfrom` —
-do **not** `connect()` the host socket, or it will filter the gateway-origin
-datagrams out. (This is exactly why issue #18's btest peer needed an unconnected
-socket to catch the guest server's replies.)
-
-```ts
-const sock = dgram.createSocket("udp4");
-sock.bind(0, "0.0.0.0");        // unconnected — accepts the SLIRP relay source
-```
-
-## Gotchas
-
-- **RouterOS logging-action names must be alphanumeric** — `qchr-gw` is rejected
-  (*"action name can contain only letters and numbers"*); use `qchrgw`.
-- This is the **guest→host** direction. For **host→guest** (reach a guest UDP/TCP
-  service, including dynamic data ports), use `hostfwd` via `--forward` /
-  `extraPorts` — see [`../../docs/networking-recipes.md`](../../docs/networking-recipes.md)
-  for the full traffic-shape → mechanism guide and the UDP **range** form.
-
-## Run
+## Run it
 
 ```sh
-QUICKCHR_INTEGRATION=1 bun test examples/udp-gateway/udp-gateway.test.ts
+# Library API — boots a CHR and runs the unconnected dgram listener:
+bun run udp-gateway.ts
+
+# CLI — RouterOS-side setup only (the listener can't be portable shell):
+sh udp-gateway.sh [host-port]
 ```
 
-Expected run time: ~25–40 s with HVF/KVM. Evidence and the SLIRP source-rewrite
-detail: [`../../test/lab/gateway-udp/REPORT.md`](../../test/lab/gateway-udp/REPORT.md).
+No `.ps1`: the receive side is an unconnected UDP listener, not a CLI flow — the
+runnable `.ts` is the cross-platform path. Expected time: ~30–50 s.
 
-## Adapting it
+## If you copied only this directory
 
-- **Other emitters:** anything the guest sends to `10.0.2.2:<port>` works — NetFlow
-  (`/ip/traffic-flow`), TZSP (`/tool/sniffer`), or a guest server replying to a
-  client whose SLIRP-apparent address is the gateway.
-- **External consumer:** replace the `../../src/index.ts` import with
-  `@tikoci/quickchr` (see [`../README.md`](../README.md)). Everything else is identical.
+- Replace `../../src/index.ts` → `@tikoci/quickchr`; copy `../lib.ts` or inline
+  the helpers.
+- For host→guest forwards (incl. UDP port ranges), see
+  [`../service-forward/`](../service-forward/) and
+  [`../../docs/networking-recipes.md`](../../docs/networking-recipes.md).
+
+## Friction found
+
+None — the unconnected-socket requirement is inherent to SLIRP, documented in the
+`tzspGatewayIp` JSDoc and `docs/networking-recipes.md`.
+
+## See also
+
+- [`../../test/lab/gateway-udp/REPORT.md`](../../test/lab/gateway-udp/REPORT.md) — evidence.
+- [`../mndp/`](../mndp/) — the L2 (socket-connect) capture path.
+- [`../COVERAGE.md`](../COVERAGE.md) — capability coverage.

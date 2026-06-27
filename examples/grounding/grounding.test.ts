@@ -1,34 +1,40 @@
-import { describe, test, expect, afterAll } from "bun:test";
+#!/usr/bin/env bun
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { ChrInstance } from "../../src/index.ts";
 import { QuickCHR } from "../../src/index.ts";
+import { exampleMachineName } from "../lib.ts";
 
 /**
- * grounding — validate RouterOS config against a *real* router
+ * grounding — validate RouterOS config against a *real* router (the `bun:test` reference)
  *
- * The canonical quickchr loop: boot a disposable CHR, **apply** a config snippet
- * with `exec()`, **read it back** with `rest()`, and assert it took. This is how
- * you ground a RouterOS config or script against real RouterOS behavior instead
- * of guessing — the same thing an agent should do before trusting generated config.
+ * The canonical quickchr loop: boot a disposable CHR, **apply** config with
+ * `exec()`, **read it back** with `rest()`, and assert it took. This is how you
+ * ground generated RouterOS config/scripts against real RouterOS instead of
+ * guessing — what an agent should do before trusting its own output.
  *
- * Unlike `vienk` (which only reads built-in resources), this example *writes*.
+ * ── Why this one is a `bun:test` (and the others aren't) ──
+ * Every other example is a runnable script you `bun run` — because the real-world
+ * thing a consumer writes is a script that *does something*. This example is a
+ * `bun:test` because here the **assertions ARE the documentation**: a regression
+ * suite that proves the apply→read-back contract still holds. Reach for `bun:test`
+ * when that's the point; otherwise write a runnable script (and an agent can wrap
+ * any script in `test()` trivially). This file also doubles as the reference for
+ * the bun:test patterns other projects reuse against a CHR:
+ *   - `beforeAll`/`afterAll` to share one booted instance across tests
+ *   - several focused `test()` blocks instead of one mega-test
+ *   - `test.skipIf(...)` to gate a case on a runtime condition
+ *   - a spread of `expect` matchers (`toContain`, `toBeArray`, `toMatchObject`, …)
  *
- * ### Re-run safety
- * Every run uses a unique `NONCE` baked into both the machine name **and** the
- * config values it asserts on (an address-list comment + the system identity). A
- * stale machine left by an interrupted run therefore can't make a later run pass
- * falsely — a fresh run creates a new machine, and the assertions only accept
- * values carrying *this* run's nonce.
+ * Re-run safety: a unique NONCE drives the machine name AND the asserted values,
+ * so a stale machine from an interrupted run can't make a later run pass falsely.
  *
- * Run:
- *   QUICKCHR_INTEGRATION=1 bun test examples/grounding/grounding.test.ts
+ * Run:  QUICKCHR_INTEGRATION=1 bun test examples/grounding/grounding.test.ts
  */
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 
-const CHR_ARCH = process.arch === "arm64" ? ("arm64" as const) : ("x86" as const);
-
 // Unique per run — drives the machine name and the asserted config values.
-const NONCE = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+const NONCE = `${Date.now().toString(36)}${crypto.randomUUID().slice(0, 8)}`;
 
 interface AddressListEntry {
 	address?: string;
@@ -37,56 +43,73 @@ interface AddressListEntry {
 }
 
 describe.skipIf(SKIP)("grounding — apply config, read it back", () => {
-	let instance: ChrInstance | undefined;
+	let chr: ChrInstance;
+
+	// One booted CHR shared by every test() below. `QuickCHR.start()` resolves
+	// REST-ready, so no separate waitForBoot() is needed.
+	beforeAll(async () => {
+		chr = await QuickCHR.start({
+			name: exampleMachineName(`grounding-${NONCE}`),
+			channel: "stable",
+			secureLogin: false,
+			mem: 256,
+		});
+	});
 
 	afterAll(async () => {
 		try {
-			await instance?.remove();
+			await chr?.remove();
 		} catch {
 			/* ignore cleanup errors */
 		}
 	});
 
-	test(
-		"a config write via exec() is observable via rest()",
-		async () => {
-			// start() resolves REST-ready — no second waitForBoot() needed here.
-			instance = await QuickCHR.start({
-				name: `grounding-${NONCE}`,
-				channel: "stable",
-				arch: CHR_ARCH,
-				background: true,
-				secureLogin: false,
-				cpu: 1,
-				mem: 256,
-			});
+	test("the router is REST-reachable (read-only sanity)", async () => {
+		const res = (await chr.rest("/system/resource")) as Record<string, string>;
+		expect(res).toBeObject();
+		expect(res["board-name"]).toContain("CHR");
+		expect(res.version).toBeDefined();
+	});
 
-			// 1. Apply config — a nonce-tagged firewall address-list entry.
+	test(
+		"a config write via exec() is observable via rest() (firewall address-list)",
+		async () => {
 			const tag = `grounded-${NONCE}`;
-			await instance.exec(
+			await chr.exec(
 				`/ip/firewall/address-list/add list=quickchr-grounding address=10.99.99.99 comment="${tag}"`,
 			);
 
-			// 2. Read it back and assert the *nonce-bearing* entry is present.
-			const entries = (await instance.rest("/ip/firewall/address-list")) as AddressListEntry[];
-			expect(Array.isArray(entries)).toBe(true);
+			const entries = (await chr.rest("/ip/firewall/address-list")) as AddressListEntry[];
+			expect(entries).toBeArray();
+
 			const hit = entries.find((e) => e.comment === tag);
 			expect(hit).toBeDefined();
-			expect(hit?.address).toBe("10.99.99.99");
-
+			// toMatchObject asserts a subset of fields — handy for REST records.
+			expect(hit).toMatchObject({ address: "10.99.99.99", list: "quickchr-grounding" });
 			console.log(`  grounded address-list entry: ${hit?.address} (${hit?.comment})`);
 		},
 		240_000,
 	);
 
 	test("a config write round-trips through a fresh REST read (system identity)", async () => {
-		if (!instance) throw new Error("CHR instance was not initialized by the first test.");
-
 		const ident = `chr-${NONCE}`;
-		await instance.exec(`/system/identity/set name=${ident}`);
+		await chr.exec(`/system/identity/set name=${ident}`);
 
-		const id = (await instance.rest("/system/identity")) as { name?: string };
+		const id = (await chr.rest("/system/identity")) as { name?: string };
 		expect(id.name).toBe(ident);
 		console.log(`  grounded system identity: ${id.name}`);
+	});
+
+	// `test.skipIf` gates a case on a runtime condition — here, only assert the
+	// serialize→JSON path on a RouterOS that supports `:serialize` (7.x always does,
+	// but this shows the pattern for version-gated behavior).
+	const noSerialize = false;
+	test.skipIf(noSerialize)("exec() output can be JSON via :serialize (agent-friendly read)", async () => {
+		const r = await chr.exec(
+			":local v [/system/resource/print as-value]; :put [:serialize to=json $v]",
+		);
+		const parsed = JSON.parse(r.output);
+		const board = Array.isArray(parsed) ? parsed[0]["board-name"] : parsed["board-name"];
+		expect(board).toMatch(/^CHR/);
 	});
 });

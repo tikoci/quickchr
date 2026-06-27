@@ -20,6 +20,7 @@ ahostsv
 amm
 apk
 apkindex
+argjson
 armv
 armvirt
 askpass
@@ -111,6 +112,7 @@ funcs
 gbps
 getaddrinfo
 getent
+getpid
 getuid
 googleable
 gre
@@ -149,6 +151,7 @@ kmgt
 kmod
 kvm
 lanbridge
+lastexitcode
 libexec
 libsecret
 lic
@@ -236,6 +239,7 @@ respawn
 respawning
 respawns
 restraml
+rethrowing
 retriable
 reuseaddr
 reuseport
@@ -245,16 +249,21 @@ rootfs
 rosetta
 routerboard
 routeros
+runspace
+runspaces
 rsc
 rta
 savevm
 scp
+scriptable
 seabios
 sed
 sendall
 setcap
 setmode
 settimeout
+shellcheck
+srand
 setuid
 sfc
 sidegrade
@@ -274,6 +283,7 @@ statfs
 stdlib
 steamdeck
 subcmd
+subdirs
 subshell
 subtests
 svm

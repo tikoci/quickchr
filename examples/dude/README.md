@@ -1,46 +1,54 @@
-# dude — ground a RouterOS package + its config against a real router
+# `dude` — install a RouterOS package and ground its config
 
-A richer grounding loop than [`grounding`](../grounding/): install an optional
-RouterOS **package**, configure the subsystem it adds, and read the setting back.
-The Dude server is a good case — its `/dude` menu only exists once the `dude`
-package is installed.
+**Status:** ✓ CI-verified · ✓ cross-platform (x86 **and** arm64) · maintainer-supported
 
-## The loop
+**Validated against:** RouterOS 7.21.1–7.23.1 (dude package present on both arches).
 
-```ts
-const installed = await chr.installPackage("dude"); // downloads + reboots to activate
-// installed === ["dude"] when the package was found for this version/arch
+A richer grounding loop than [`grounding`](../grounding/): install the optional
+`dude` server package, enable The Dude, and read the setting back. Demonstrates
+that a package-gated subsystem (`/dude`) only exists once its package is present —
+and how quickchr downloads, uploads, and activates a package for you.
 
-await chr.rest("/dude");            // the menu now exists (package present)
-await chr.exec("/dude/set enabled=yes");
-await chr.rest("/dude");            // → { enabled: "true", … }
-```
+## x86 *and* arm64 (corrected)
 
-`installPackage()` fetches the `.npk` from MikroTik (host-side), uploads it over
-SCP, reboots, and waits for REST to come back — so when it resolves, the package
-is active. It returns the names it actually installed; a package missing for the
-version/arch is skipped (not in the returned list).
+Earlier docs claimed dude was x86-only. That's wrong: MikroTik ships
+`dude-<ver>-arm64.npk` alongside the x86 build (verified 7.21.1–7.23.1), and
+quickchr's package resolver (`src/lib/packages.ts` `findPackageFile`) picks the
+arch-correct file. `arch` is omitted here, so it follows the host.
 
-## x86-only
-
-The `dude` server package ships for **x86** only, so this example skips on arm64.
-Verified on RouterOS `7.23.1` (x86). If a future release drops or renames the
-package, `installPackage("dude")` returns `[]` and the assertion fails loudly —
-that's the signal to re-ground, not to paper over.
-
-## Why no seeded `dude.db`
-
-Loading a pre-built `dude.db` is version-fragile across RouterOS releases, so this
-example deliberately doesn't ship one — it grounds the **install + config** path
-deterministically instead. (For the file-transfer API itself —
-`upload()` / `download()` — see `test/integration/file-transfer.test.ts`.)
-
-## Run
+## Run it
 
 ```sh
-QUICKCHR_INTEGRATION=1 bun test examples/dude/dude.test.ts
+# Library API — uses ChrInstance.installPackage() (post-boot install + reboot):
+bun run dude.ts
+
+# CLI — installs at first boot via --add-package:
+sh dude.sh
+# Windows:
+pwsh dude.ps1
+
+# Python CLI driver (stdlib only; uv preferred over a venv):
+uv run dude.py
 ```
 
-Boots a real CHR and installs a package (~50–90 s with KVM/HVF). If you hit a
-non-deterministic failure, re-run once; if it persists, please file an issue at
-<https://github.com/tikoci/quickchr/issues>.
+Expected time: ~50–90 s (the install downloads the package and reboots once).
+
+## If you copied only this directory
+
+- Replace `../../src/index.ts` → `@tikoci/quickchr`; copy `../lib.ts` or inline
+  `runExample`/`exampleMachineName`/`check`.
+- CLI/Python scripts resolve quickchr via `$QUICKCHR` (default: repo source CLI).
+
+## Friction found
+
+The **library** can install a package on a *running* machine
+(`ChrInstance.installPackage("dude")`), but the **CLI** can only install at first
+boot (`--add-package`) — there's no `quickchr install <name> <pkg>` for a running
+instance. That's why `dude.ts` and `dude.sh` take slightly different paths to the
+same end state. Tracked in
+[tikoci/quickchr#24](https://github.com/tikoci/quickchr/issues/24).
+
+## See also
+
+- [`../grounding/`](../grounding/) — the base apply→read-back loop.
+- [`../COVERAGE.md`](../COVERAGE.md) — capability coverage.

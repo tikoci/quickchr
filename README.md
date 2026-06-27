@@ -396,9 +396,11 @@ afterAll(async () => {
 - **[MANUAL.md](./MANUAL.md)** — complete reference: every CLI command,
   every library API, provisioning, channels, networking, storage,
   errors. Source-checked.
-- **[examples/](./examples/)** — runnable `bun:test` examples: `grounding/`
-  (apply config → read back), `harness/` (drive an external tool against a
-  CHR), `dude/` (install a package), plus `vienk`/`matrica`/`mndp`/`udp-gateway`.
+- **[examples/](./examples/)** — runnable scripts (`bun run`): `quickstart/`
+  (boot + query), `grounding/` (apply config → read back — the one `bun:test`),
+  `dude/` (install a package), `harness/` (drive an external tool), `rollback/`,
+  `service-forward/`, `file-transfer/`, `device-mode/`, plus `mndp`/`udp-gateway`/
+  `version-matrix`. See [examples/COVERAGE.md](./examples/COVERAGE.md).
 - **[docs/networking-recipes.md](./docs/networking-recipes.md)** — which
   networking mechanism for which traffic shape.
 - **[DESIGN.md](./DESIGN.md)** — architecture, layers, design principles.

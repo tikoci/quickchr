@@ -183,6 +183,18 @@ describe("findPackageFile", () => {
 
 		expect(findPackageFile(dir, "wireless")).toBe(join(dir, "wireless-7.22.1.npk"));
 	});
+
+	// Grounds examples/dude/: the old "dude is x86-only" claim was wrong — MikroTik
+	// ships dude-<ver>-arm64.npk (verified 7.21.1–7.23.1), so the resolver finds it
+	// on arm64 too. This is the offline half of the dude-arm64 correction.
+	test("resolves the dude package on BOTH arm64 and x86 (corrects x86-only myth)", () => {
+		writeFileSync(join(dir, "dude-7.23.1-arm64.npk"), "");
+		expect(findPackageFile(dir, "dude")).toBe(join(dir, "dude-7.23.1-arm64.npk"));
+
+		rmSync(join(dir, "dude-7.23.1-arm64.npk"));
+		writeFileSync(join(dir, "dude-7.23.1.npk"), "");
+		expect(findPackageFile(dir, "dude")).toBe(join(dir, "dude-7.23.1.npk"));
+	});
 });
 
 // --- Mock-fetch helper ---

@@ -1,20 +1,29 @@
 name: Extended Verification
 
-# Manual workflow for integration testing on platforms not covered by the main
-# CI push pipeline (which runs linux/x86_64 integration + Windows unit tests).
+# Manual cross-platform verification not covered by the push pipeline (ci.yml, which
+# gates on linux/x86_64 integration + Windows unit tests). One dispatch chooses:
+#   1. WHICH platforms       — the five platform toggles below.
+#   2. WHAT runs on them      — `run-integration` and/or `run-examples` (the examples
+#                               smoke harness). Both default-on/off so the same
+#                               dispatch can verify the test suite AND the examples.
+#   3. Against WHICH RouterOS — `routeros-target` (a channel or pinned version).
+#   4. On WHICH branch        — the ref selected in the "Run workflow" dropdown (a
+#                               native workflow_dispatch field; the whole run, incl.
+#                               the examples it executes, uses that checkout).
 #
-# Each dispatch input maps 1:1 to a platform job — enable any combination.
-# Jobs are independent and run in parallel.
+# Platform × mode is the matrix: e.g. tick macos-arm64 + windows-x86, leave
+# run-integration on and turn run-examples on, to confirm both the suite and the
+# runnable examples pass on those OSes.
 #
-# Use test-filter to run only specific integration test files for faster iteration:
-#   e.g. "exec.test.ts,anchor.test.ts"  →  only those two files run
-#   empty string (default)              →  all test/integration/*.test.ts files run
+# Examples are held to the same bar as the code: a broken example REDS this workflow
+# on the gating platforms (linux KVM, macOS HVF). macOS/x86 (TCG) and Windows (TCG)
+# stay non-gating/informational, mirroring the integration jobs.
 #
-# Use routeros-target to point CHR boots at a specific release — a channel name
-# (stable/long-term/testing/development) or a pinned version (e.g. 7.22.1, 7.24beta2);
-# empty = stable. It is exported as QUICKCHR_TEST_TARGET and consumed by the integration
-# tests via test/integration/image-target.ts. This is how the arm64/macOS/Windows paths
-# get verified against more than just stable. (Version-pinned tests stay pinned.)
+# Use test-filter to narrow integration to specific files (e.g.
+# "exec.test.ts,anchor.test.ts"); example-filter narrows the smoke harness
+# (e.g. "quickstart,rollback"). routeros-target is exported as QUICKCHR_TEST_TARGET
+# and consumed by both the integration tests (test/integration/image-target.ts) and
+# the examples. (Version-pinned tests stay pinned.)
 #
 # arm64 status (tracked in BACKLOG.md):
 #   - clean() second-boot timeout: fixed (EFI vars wipe removed), confirmed on CI
@@ -24,29 +33,44 @@ name: Extended Verification
 on:
   workflow_dispatch:
     inputs:
+      # ── What to run (modes) ──────────────────────────────────────────────────
+      run-integration:
+        type: boolean
+        description: "Run the integration test suite on the selected platforms"
+        default: true
+      run-examples:
+        type: boolean
+        description: "Run the examples smoke harness on the selected platforms (+ PowerShell lint)"
+        default: false
+      # ── Which platforms ──────────────────────────────────────────────────────
       linux-x86:
         type: boolean
-        description: "Integration — linux/x86_64 (ubuntu-latest, KVM if available)"
+        description: "Platform — linux/x86_64 (ubuntu-latest, KVM if available)"
         default: false
       linux-arm64:
         type: boolean
-        description: "Integration — linux/aarch64 (ubuntu-24.04-arm, KVM if available)"
+        description: "Platform — linux/aarch64 (ubuntu-24.04-arm, KVM if available)"
         default: false
       macos-arm64:
         type: boolean
-        description: "Integration — macos/arm64 (macos-15, HVF if available)"
+        description: "Platform — macos/arm64 (macos-15, HVF if available)"
         default: false
       macos-x86:
         type: boolean
-        description: "Integration — macos/x86_64 (macos-15-intel, TCG — best-effort, non-gating; defaults to a smoke subset, set test-filter to run more)"
+        description: "Platform — macos/x86_64 (macos-15-intel, TCG — best-effort, non-gating; integration defaults to a smoke subset, set test-filter to run more)"
         default: false
       windows-x86:
         type: boolean
-        description: "Integration — windows/x86_64 (windows-latest, TCG — EXPERIMENTAL, informational, non-gating)"
+        description: "Platform — windows/x86_64 (windows-latest, TCG — EXPERIMENTAL, informational, non-gating)"
         default: false
+      # ── Scope / target ───────────────────────────────────────────────────────
       test-filter:
         type: string
-        description: "Comma-separated test file names (e.g. 'exec.test.ts,anchor.test.ts'). Empty = all files."
+        description: "Integration: comma-separated test file names (e.g. 'exec.test.ts,anchor.test.ts'). Empty = all files."
+        default: ""
+      example-filter:
+        type: string
+        description: "Examples: comma-separated example names for the smoke harness (e.g. 'quickstart,rollback'). Empty = the curated subset."
         default: ""
       routeros-target:
         type: string
@@ -64,7 +88,7 @@ jobs:
   # exercise x86 against long-term/testing/development or a pinned version.
   integration-linux-x86:
     name: Integration (linux/x86_64)
-    if: ${{ inputs.linux-x86 == true }}
+    if: ${{ inputs.linux-x86 == true && inputs.run-integration == true }}
     runs-on: ubuntu-latest
     env:
       QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
@@ -182,7 +206,7 @@ jobs:
   # ── linux/aarch64 (ubuntu-24.04-arm, KVM) ────────────────────────────────────
   integration-linux-arm64:
     name: Integration (linux/aarch64)
-    if: ${{ inputs.linux-arm64 == true }}
+    if: ${{ inputs.linux-arm64 == true && inputs.run-integration == true }}
     runs-on: ubuntu-24.04-arm
     env:
       QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
@@ -366,7 +390,7 @@ jobs:
   # ── macos/arm64 (macos-15, HVF) ──────────────────────────────────────────────
   integration-macos-arm64:
     name: Integration (macos/arm64)
-    if: ${{ inputs.macos-arm64 == true }}
+    if: ${{ inputs.macos-arm64 == true && inputs.run-integration == true }}
     runs-on: macos-15
     env:
       QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
@@ -470,7 +494,7 @@ jobs:
   # the job-level timeout keep any TCG stall from turning the dispatch red.
   integration-macos-x86:
     name: Integration (macos/x86_64)
-    if: ${{ inputs.macos-x86 == true }}
+    if: ${{ inputs.macos-x86 == true && inputs.run-integration == true }}
     runs-on: macos-15-intel
     continue-on-error: true
     timeout-minutes: 75
@@ -601,7 +625,7 @@ jobs:
   # (e.g. `start-stop.test.ts`) before running the full suite.
   integration-windows-x86:
     name: Integration (windows/x86_64)
-    if: ${{ inputs.windows-x86 == true }}
+    if: ${{ inputs.windows-x86 == true && inputs.run-integration == true }}
     runs-on: windows-latest
     continue-on-error: true
     defaults:
@@ -706,3 +730,185 @@ jobs:
             ~/AppData/Local/quickchr/machines/**/*.json
             ~/AppData/Local/quickchr/machines/**/*.log
           retention-days: 7
+
+  # ── plan: examples-smoke matrix ──────────────────────────────────────────────
+  # Builds the smoke matrix from the selected platform toggles so one dispatch fans
+  # the examples across exactly the chosen OSes (mirroring the integration jobs),
+  # without five near-identical job definitions. gating=true → a failure reds the
+  # workflow (linux KVM / macOS HVF); gating=false → informational (TCG platforms).
+  plan-smoke:
+    name: Plan examples-smoke matrix
+    if: ${{ inputs.run-examples == true }}
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+      any: ${{ steps.gen.outputs.any }}
+    steps:
+      - id: gen
+        env:
+          LINUX_X86: ${{ inputs.linux-x86 }}
+          LINUX_ARM64: ${{ inputs.linux-arm64 }}
+          MACOS_ARM64: ${{ inputs.macos-arm64 }}
+          MACOS_X86: ${{ inputs.macos-x86 }}
+          WINDOWS_X86: ${{ inputs.windows-x86 }}
+        run: |
+          set -eo pipefail
+          inc='[]'
+          add() {
+            inc=$(printf '%s' "$inc" | jq -c \
+              --arg label "$1" --arg os "$2" --argjson gating "$3" \
+              '. + [{label:$label, os:$os, gating:$gating}]')
+          }
+          if [ "$LINUX_X86" = "true" ];   then add "linux/x86_64"   "ubuntu-latest"    true;  fi
+          if [ "$LINUX_ARM64" = "true" ]; then add "linux/aarch64"  "ubuntu-24.04-arm" true;  fi
+          if [ "$MACOS_ARM64" = "true" ]; then add "macos/arm64"    "macos-15"         true;  fi
+          if [ "$MACOS_X86" = "true" ];   then add "macos/x86_64"   "macos-15-intel"   false; fi
+          if [ "$WINDOWS_X86" = "true" ]; then add "windows/x86_64" "windows-latest"   false; fi
+          echo "matrix={\"include\":$inc}" >> "$GITHUB_OUTPUT"
+          if [ "$inc" = "[]" ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::run-examples is on but no platform is selected — examples smoke will be skipped."
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Resolved smoke matrix: $inc"
+
+  # ── examples smoke (platform matrix) ─────────────────────────────────────────
+  # Runs the runnable examples end-to-end (one representative per language for the
+  # current OS + the intentional failure-path case) to catch CLI/env/exit-code/
+  # cleanup drift the cheap gate (tsc/biome/shellcheck/validate-examples) can't.
+  # A broken example here REDS the workflow on gating platforms. `trial-license` is
+  # excluded (MikroTik rate limits). EXAMPLE_FILTER subsets it.
+  examples-smoke:
+    name: Examples smoke (${{ matrix.label }})
+    needs: plan-smoke
+    if: ${{ needs.plan-smoke.outputs.any == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan-smoke.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.gating == false }}
+    env:
+      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
+      EXAMPLE_FILTER: ${{ inputs.example-filter }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install QEMU + tools (Linux x86)
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          set -eo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-x86 qemu-utils ipxe-qemu sshpass
+
+      - name: Install QEMU + tools (Linux arm64)
+        if: ${{ matrix.os == 'ubuntu-24.04-arm' }}
+        run: |
+          set -eo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu sshpass
+
+      - name: Install QEMU + tools (macOS)
+        if: ${{ runner.os == 'macOS' }}
+        run: brew install qemu sshpass
+
+      - name: Install QEMU (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          choco install qemu -y --no-progress
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\qemu"
+
+      # uv runs the Python example representative (mndp.py) the documented way.
+      - name: Install uv (Linux/macOS)
+        if: ${{ runner.os != 'Windows' }}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Enable KVM
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      # Tilde in `path:` is expanded by actions/cache (same as the integration jobs).
+      - name: Cache CHR images (POSIX)
+        if: ${{ runner.os != 'Windows' }}
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/share/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - name: Cache CHR images (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        uses: actions/cache@v5
+        with:
+          path: ~/AppData/Local/quickchr/cache
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: chr-images-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Log platform
+        shell: bash
+        run: |
+          {
+            echo "### Examples smoke: ${{ matrix.label }}"
+            echo "- OS: $(uname -s 2>/dev/null || echo Windows) / ${{ runner.arch }}"
+            echo "- Bun: $(bun --version)"
+            echo "- RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
+            echo "- Example filter: \`${EXAMPLE_FILTER:-curated subset}\`"
+            echo "- Gating: ${{ matrix.gating }}"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The harness (test/integration/examples-smoke.test.ts) picks the right
+      # representatives for the current OS (.ts everywhere; .sh/.py on POSIX; .ps1
+      # on Windows). `bun run` evaluates the VAR=val script prefix cross-platform.
+      - name: Run examples smoke harness
+        shell: bash
+        run: |
+          set -o pipefail
+          bun run smoke:examples 2>&1 | tee smoke-output.txt
+        timeout-minutes: 60
+
+      - name: Write smoke summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Examples smoke — ${{ matrix.label }}"
+            echo '```'
+            tail -60 smoke-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── PowerShell lint (windows-latest) ─────────────────────────────────────────
+  # Static-analyze the example .ps1 scripts so PowerShell can't silently bit-rot.
+  # Uses examples/PSScriptAnalyzerSettings.psd1 (documents which rules are waived
+  # and why). Gating: a flagged .ps1 reds the workflow.
+  lint-powershell:
+    name: Lint PowerShell examples
+    if: ${{ inputs.run-examples == true }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $settings = Join-Path $PWD 'examples/PSScriptAnalyzerSettings.psd1'
+          $issues = Get-ChildItem -Recurse -Path examples -Filter *.ps1 |
+            ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Settings $settings }
+          $issues | Format-Table -AutoSize
+          if ($issues.Count -gt 0) {
+            Write-Error "PSScriptAnalyzer found $($issues.Count) issue(s) in example .ps1 scripts"
+            exit 1
+          }
+          Write-Host "PSScriptAnalyzer: example .ps1 scripts are clean"

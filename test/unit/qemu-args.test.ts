@@ -274,7 +274,8 @@ describe("buildQemuArgs — acceleration", () => {
 			} else if (accelValue === "hvf") {
 				expect(cpuValue).toBe("host");
 			}
-			// kvm on Linux: also expects "host" but may vary — don't assert
+			// kvm on linux/arm64 → cortex-a710 (buildQemuArgs only special-cases hvf
+			// for non-x86); not asserted here since the accelerator depends on the host.
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e &&
 				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
@@ -285,15 +286,18 @@ describe("buildQemuArgs — acceleration", () => {
 		}
 	});
 
-	test("x86 HVF uses host CPU model", async () => {
+	test("x86 hardware accel (HVF/KVM) uses host CPU model; TCG omits -cpu", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ arch: "x86" }));
 			const accelValue = args[args.indexOf("-accel") + 1] ?? "";
 			const cpuIdx = args.indexOf("-cpu");
-			if (accelValue === "hvf") {
+			if (accelValue === "hvf" || accelValue === "kvm") {
+				// Both hardware accelerators expose the real host CPU (see buildQemuArgs);
+				// KVM on Linux runners adds -cpu host just like HVF on macOS.
 				expect(cpuIdx).toBeGreaterThan(-1);
 				expect(args[cpuIdx + 1]).toBe("host");
 			} else {
+				// TCG fallback adds no -cpu flag for x86.
 				expect(cpuIdx).toBe(-1);
 			}
 		} catch (e: unknown) {

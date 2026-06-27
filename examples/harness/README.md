@@ -1,51 +1,45 @@
-# harness — drive an external tool against a live CHR
+# `harness` — drive an external tool against a CHR via the connection surface
 
-When a *separate* process needs to talk to a running CHR — a schema extractor
-like [`tikoci/restraml`](https://github.com/tikoci/restraml), a protocol suite
-like [`tikoci/centrs`](https://github.com/tikoci/centrs), or any CLI — don't have
-it read `machine.json`. quickchr exposes a stable connection surface:
+**Status:** ✓ CI-verified · ✓ cross-platform · maintainer-supported
 
-| Surface | Shape | Use |
-|---|---|---|
-| `instance.subprocessEnv()` | env vars (`URLBASE`, `BASICAUTH`, `QUICKCHR_*`) | hand to a child process |
-| `instance.descriptor()` | `{ urls, auth, ports, status, version, … }` | structured record / evidence |
+**Validated against:** RouterOS 7.x (any).
 
-## The pattern
+The pattern `restraml` / `centrs` use: quickchr owns the VM lifecycle; a separate
+process only needs the **connection surface**. Don't read `machine.json` — use
+`subprocessEnv()` (env vars for a child) or `descriptor()` (a structured
+`{ urls, auth, ports, status, … }` record). The "external tool" stand-in is
+[`tool/child.ts`](./tool/child.ts), which receives nothing but the env and talks
+to the CHR's REST API on its own.
 
-```ts
-const env = await chr.subprocessEnv();        // URLBASE, BASICAUTH, …
-Bun.spawn(["bun", "run", "child.ts"], { env: { ...process.env, ...env } });
-```
+Both surfaces are **secret-bearing** — treat their output like a password.
+`BASICAUTH` is the raw `user:password` string, not a header (base64-encode it).
 
-The child ([`child.ts`](./child.ts)) reads `URLBASE` + `BASICAUTH` from its
-environment and calls the CHR REST API on its own.
-
-### `BASICAUTH` is `user:password`, not a header
-
-`BASICAUTH` / `QUICKCHR_AUTH` are the **raw `user:password`** string. Base64-encode
-it yourself for HTTP Basic auth:
-
-```ts
-fetch(`${process.env.URLBASE}/system/resource`, {
-  headers: { Authorization: `Basic ${btoa(process.env.BASICAUTH)}` },
-});
-```
-
-`URLBASE` already includes the `/rest` base, so append the menu path directly.
-
-## ⚠ Secret-bearing output
-
-`subprocessEnv()` and `descriptor()` carry the **real credentials** for the
-machine. Treat their output like a password: pass it to the child via the
-environment, but don't log it or write it into CI artifacts. (This example boots
-with `secureLogin: true` so the credential is an actual managed-user password,
-not the empty admin password.)
-
-## Run
+## Run it
 
 ```sh
-QUICKCHR_INTEGRATION=1 bun test examples/harness/harness.test.ts
+# Library API — spawns tool/child.ts with subprocessEnv():
+bun run harness.ts
+
+# CLI — `quickchr env` feeds the child (set -a exports the KEY=value lines):
+sh harness.sh
+# Windows — uses `quickchr env --json` + $env:* (the natural PowerShell path):
+pwsh harness.ps1
 ```
 
-Boots a real CHR (~40–60 s with KVM/HVF). See [`../README.md`](../README.md) for
-dependency patterns.
+Expected time: ~40–60 s.
+
+## If you copied only this directory
+
+- Replace `../../src/index.ts` → `@tikoci/quickchr`; copy `../lib.ts` or inline
+  the helpers. Keep `tool/child.ts` alongside.
+- CLI scripts resolve quickchr via `$QUICKCHR` (default: repo source CLI).
+
+## Friction found
+
+None — `subprocessEnv()` / `descriptor()` exist precisely so harnesses stop
+reading `machine.json`.
+
+## See also
+
+- [`../../MANUAL.md`](../../MANUAL.md) §4 — the `ChrInstance` connection surface.
+- [`../COVERAGE.md`](../COVERAGE.md) — capability coverage.

@@ -39,7 +39,9 @@ Triggered by `bun run release` (creates and pushes a `vX.Y.Z` tag) or via GitHub
 
 ### Extended Verification (verify-extended.yml)
 
-`workflow_dispatch` only — never runs on push/PR. All jobs are independent (no `needs:` between platforms). Use `test-filter` to run only specific test files for faster iteration, and `routeros-target` to boot a specific RouterOS channel/version across the selected platforms (see below). Unlike `ci.yml`/`publish.yml` (which always boot the default/stable), this is how arm64/macOS/Windows — and, via the selectable `linux-x86` job, x86 — get exercised against long-term/testing/development or a pinned version.
+`workflow_dispatch` only — never runs on push/PR. One dispatch chooses **which platforms** (the five toggles), **what runs on them** (`run-integration` and/or `run-examples` — the examples smoke harness), against **which RouterOS** (`routeros-target`), on **which branch** (the ref picked in the "Run workflow" dropdown). So platform × mode is the matrix: the same dispatch can verify the integration suite AND the runnable examples across the selected OSes. Use `test-filter` to narrow integration to specific files and `example-filter` to narrow the smoke harness. Unlike `ci.yml`/`publish.yml` (which always boot the default/stable), this is how arm64/macOS/Windows — and, via the selectable `linux-x86` toggle, x86 — get exercised against long-term/testing/development or a pinned version.
+
+Most jobs are independent, except the examples smoke matrix is built dynamically: `plan-smoke` reads the selected platform toggles and emits the `examples-smoke` matrix (one job per chosen OS). **Examples are held to the same bar as the code** — a broken example REDS the workflow on the gating platforms (linux KVM, macOS HVF); macOS/x86 and Windows (TCG) stay non-gating/informational, mirroring the integration jobs. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on. (Integration-exercised coverage is **not** collected here yet — the standalone coverage job was removed because it re-ran the whole suite; reworking it as a byproduct of the integration jobs is tracked in [#30](https://github.com/tikoci/quickchr/issues/30).)
 
 ## Release Process
 
@@ -82,19 +84,36 @@ To run locally on Windows: `bun test test/unit/`
 
 ## Extended Verification — Dispatch Inputs
 
-Each input maps 1:1 to a platform integration job — enable any combination. (Windows **unit** tests aren't here; they run on every push in the main CI pipeline.)
+Inputs split into **modes** (what to run), **platforms** (where), and **scope/target**. Each selected platform runs integration (if `run-integration`) and/or the examples smoke harness (if `run-examples`). (Windows **unit** tests aren't here; they run on every push in the main CI pipeline.)
 
-| Input | Type | Default | Job | Runner |
-|-------|------|---------|-----|--------|
-| `linux-x86` | boolean | false | `integration-linux-x86` | ubuntu-latest |
-| `linux-arm64` | boolean | false | `integration-linux-arm64` | ubuntu-24.04-arm |
-| `macos-arm64` | boolean | false | `integration-macos-arm64` | macos-15 |
-| `macos-x86` | boolean | false | `integration-macos-x86` (TCG, best-effort/non-gating; defaults to `anchor.test.ts` smoke subset unless `test-filter` set) | macos-15-intel |
-| `windows-x86` | boolean | false | `integration-windows-x86` (TCG, experimental/informational, non-gating) | windows-latest |
-| `test-filter` | string | "" | (all jobs) Comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all | — |
-| `routeros-target` | string | "" | (all jobs) RouterOS channel (`stable`/`long-term`/`testing`/`development`) **or** a pinned version (`7.22.1`, `7.24beta2`); empty = stable | — |
+**Modes — what runs:**
+
+| Input | Type | Default | Effect |
+|-------|------|---------|--------|
+| `run-integration` | boolean | **true** | Run `test/integration/` on each selected platform (the integration jobs). |
+| `run-examples` | boolean | false | Run the examples smoke harness on each selected platform (`examples-smoke` matrix) + `lint-powershell`. |
+
+**Platforms — where (each drives both modes):**
+
+| Input | Type | Default | Runner | Smoke gating |
+|-------|------|---------|--------|--------------|
+| `linux-x86` | boolean | false | ubuntu-latest (KVM) | gating |
+| `linux-arm64` | boolean | false | ubuntu-24.04-arm (KVM) | gating |
+| `macos-arm64` | boolean | false | macos-15 (HVF) | gating |
+| `macos-x86` | boolean | false | macos-15-intel (TCG; integration defaults to `anchor.test.ts` unless `test-filter` set) | non-gating |
+| `windows-x86` | boolean | false | windows-latest (TCG, experimental) | non-gating |
+
+**Scope / target:**
+
+| Input | Type | Default | Effect |
+|-------|------|---------|--------|
+| `test-filter` | string | "" | Integration: comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all |
+| `example-filter` | string | "" | Examples: comma-separated example names — e.g. `"quickstart,rollback"`; empty = curated subset. A typo fails fast (the harness validates against known names). |
+| `routeros-target` | string | "" | RouterOS channel (`stable`/`long-term`/`testing`/`development`) **or** a pinned version (`7.22.1`, `7.24beta2`); empty = stable. Feeds both integration and examples. |
 
 **`test-filter` for agent iteration**: when debugging a specific arm64 failure, set `linux-arm64: true` and `test-filter: "exec.test.ts"` to skip the 40-minute full suite and get results in ~5 minutes.
+
+**The examples smoke harness** (`test/integration/examples-smoke.test.ts`) runs a curated subset of runnable examples end-to-end — one representative per language *for the current OS* (`.ts` everywhere; `.sh`/`.py`-via-`uv` on POSIX; `.ps1` on Windows) — plus an intentional failure-path case that asserts teardown fires on error. `trial-license` is excluded (MikroTik rate-limits). Double-gated by `QUICKCHR_INTEGRATION` + `EXAMPLES_SMOKE` so the integration jobs don't pay for example boots; the `examples-smoke` job sets both via `bun run smoke:examples`.
 
 **`routeros-target`** is exported to each job as `QUICKCHR_TEST_TARGET` and consumed by
 integration tests via `test/integration/image-target.ts`: a channel name resolves to

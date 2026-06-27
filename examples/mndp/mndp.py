@@ -15,14 +15,17 @@ SO_REUSEPORT macOS needs to share a multicast port). socket-connect has no such
 limit. See ../../docs/mndp.md and ../../test/lab/mndp/REPORT.md.
 
 Usage:
-    python3 mndp.py [--channel stable] [--arch auto] [--timeout 45] [--no-cleanup]
+    uv run mndp.py [--channel stable] [--arch auto] [--timeout 45] [--no-cleanup]
+    (uv is preferred over a venv; this script is stdlib-only.)
 
 Requirements:
-    - quickchr installed (or run via the Makefile with QUICKCHR="bun run ../../src/cli/index.ts --")
+    - quickchr resolvable: an installed `quickchr`, or set QUICKCHR / pass
+      --quickchr "bun run ../../src/cli/index.ts --" to use the repo source CLI
     - QEMU for the chosen arch; acceleration auto-detected (quickchr doctor)
 """
 
 import argparse
+import os
 import platform
 import socket
 import struct
@@ -31,10 +34,11 @@ import sys
 import threading
 import time
 
-NAME = "mndp-example"
+# Parallel-safe, prefix-scoped name (examples-<slug>-<unique>).
+NAME = f"examples-mndp-{os.getpid():x}"
 IDENTITY = "mndp-example"
 MNDP_PORT = 5678
-QUICKCHR = ["quickchr"]  # overridden by --quickchr / Makefile
+QUICKCHR = ["quickchr"]  # overridden by --quickchr / $QUICKCHR
 
 
 def run_quickchr(*args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -181,6 +185,8 @@ def main() -> None:
     args = ap.parse_args()
     if args.quickchr:
         QUICKCHR = args.quickchr.split()
+    elif os.environ.get("QUICKCHR"):
+        QUICKCHR = os.environ["QUICKCHR"].split()
 
     arch = args.arch
     if arch == "auto":

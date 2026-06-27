@@ -1180,10 +1180,12 @@ prevents orphan disks accumulating across attempts.
   QGA-on-macOS-arm64 limitation.
 - **`.github/instructions/`** — agent-facing rules (testing, qemu,
   routeros-rest, provisioning, ci, bun-http, general).
-- **`examples/`** — runnable references: `vienk` (single-CHR smoke),
-  `grounding` (apply config → read back), `harness` (drive an external tool
-  via `subprocessEnv()`/`descriptor()`), `dude` (install a package),
-  `matrica` (parallel version matrix), `mndp`/`udp-gateway` (networking).
+- **`examples/`** — runnable scripts (`bun run`): `quickstart` (single-CHR smoke),
+  `grounding` (apply config → read back — the one `bun:test`), `harness` (drive an
+  external tool via `subprocessEnv()`/`descriptor()`), `dude` (install a package),
+  `rollback`/`service-forward`/`file-transfer`/`device-mode`/`trial-license`,
+  `version-matrix` (parallel matrix), `mndp`/`udp-gateway` (networking). Coverage
+  map: `examples/COVERAGE.md`; convention: `.github/instructions/examples.instructions.md`.
 - **`routeros-quickchr` skill** (in
   [tikoci/routeros-skills](https://github.com/tikoci/routeros-skills)) —
   agent-facing guide to grounding RouterOS against a real router with quickchr
