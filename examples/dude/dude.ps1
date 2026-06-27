@@ -1,4 +1,4 @@
-# dude (CLI, Windows) — install the dude package on first boot, enable it, read it back.
+# dude (CLI, Windows) - install the dude package on first boot, enable it, read it back.
 # PowerShell mirror of dude.sh.
 . "$PSScriptRoot/../common.ps1"
 

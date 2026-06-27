@@ -17,8 +17,8 @@ import { join, resolve } from "node:path";
 const EXAMPLES = resolve(import.meta.dir, "..", "examples");
 const ALLOWED_EXT = new Set([".ts", ".sh", ".ps1", ".py", ".md"]);
 const SKIP_DIRS = new Set(["_template", "config", "tool", "node_modules"]);
-// Top-level files that aren't examples.
-const TOP_FILES = new Set(["README.md", "COVERAGE.md", "lib.ts", "common.sh", "common.ps1", ".DS_Store"]);
+// (Top-level files like README.md / lib.ts / common.sh are skipped implicitly:
+// the dir scan below only descends into directories, never stat's loose files.)
 
 const errors: string[] = [];
 const err = (where: string, msg: string) => errors.push(`  ${where}: ${msg}`);

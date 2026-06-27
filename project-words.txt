@@ -20,6 +20,7 @@ ahostsv
 amm
 apk
 apkindex
+argjson
 armv
 armvirt
 askpass
@@ -150,6 +151,7 @@ kmgt
 kmod
 kvm
 lanbridge
+lastexitcode
 libexec
 libsecret
 lic
@@ -237,6 +239,7 @@ respawn
 respawning
 respawns
 restraml
+rethrowing
 retriable
 reuseaddr
 reuseport

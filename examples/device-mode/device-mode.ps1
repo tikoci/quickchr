@@ -1,4 +1,4 @@
-# device-mode (CLI, Windows) — enable a device-mode feature on first boot, read it back.
+# device-mode (CLI, Windows) - enable a device-mode feature on first boot, read it back.
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'device-mode'

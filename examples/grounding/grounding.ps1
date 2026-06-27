@@ -1,4 +1,4 @@
-# grounding (CLI, Windows) — apply RouterOS config, read it back, prove it took.
+# grounding (CLI, Windows) - apply RouterOS config, read it back, prove it took.
 # PowerShell mirror of grounding.sh.
 . "$PSScriptRoot/../common.ps1"
 

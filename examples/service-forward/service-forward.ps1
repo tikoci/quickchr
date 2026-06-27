@@ -1,4 +1,4 @@
-# service-forward (CLI, Windows) — pin a guest service to a chosen host port.
+# service-forward (CLI, Windows) - pin a guest service to a chosen host port.
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'service-forward'

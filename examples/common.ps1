@@ -1,4 +1,4 @@
-# Shared helpers for quickchr CLI examples (PowerShell — the Windows mirror of common.sh).
+# Shared helpers for quickchr CLI examples (PowerShell - the Windows mirror of common.sh).
 #
 # Dot-source at the top of <name>.ps1, then wrap the body in try/finally:
 #   . "$PSScriptRoot/../common.ps1"
@@ -10,6 +10,11 @@
 # globally installed `quickchr`.
 
 $ErrorActionPreference = 'Stop'
+# Turn a non-zero exit from a native command (quickchr/bun) into a terminating
+# error so a failed `start` stops the example instead of running the body anyway.
+# (PowerShell 7.3+ honours this; on older hosts Invoke-Qc's $LASTEXITCODE check
+# below is the backstop.)
+$PSNativeCommandUseErrorActionPreference = $true
 
 if ($env:QUICKCHR) {
 	$script:Quickchr = $env:QUICKCHR
@@ -30,6 +35,9 @@ function Invoke-Qc {
 	$exe = $parts[0]
 	$pre = if ($parts.Length -gt 1) { $parts[1..($parts.Length - 1)] } else { @() }
 	& $exe @($pre + $Rest)
+	if ($LASTEXITCODE -ne 0) {
+		throw "quickchr exited with code $LASTEXITCODE: $($Rest -join ' ')"
+	}
 }
 
 function Get-ExampleName {
@@ -55,7 +63,10 @@ function Register-Cleanup {
 
 function Invoke-QcCleanup {
 	foreach ($name in $script:QcCleanup) {
-		try { Invoke-Qc remove $name *> $null } catch { <# best-effort teardown #> }
+		# Best-effort teardown: a remove failure (already gone) must not mask the
+		# example's own error, so log at verbose level rather than rethrowing.
+		try { Invoke-Qc remove $name *> $null }
+		catch { Write-Verbose "cleanup: remove $name failed: $_" }
 	}
 }
 

@@ -246,20 +246,36 @@ Output formatting via `--json` flag. RouterOS trick for structured output: wrap 
 
 ### Examples Philosophy
 
-Three representations of each scenario, targeting different audiences:
-- **Makefile** — recipe-driven, targets as documentation (tikoci tradition, see tikoci/netinstall). Agents read targets; humans run `make`.
-- **bun:test** — library API, TypeScript. First-class integration tests. The "source of truth."
-- **Python** — subprocess around CLI. The language agents and network engineers both reach for. Demonstrates quickchr is a real tool, not just a library.
+`examples/` is **load-bearing agent-onboarding surface** — agents (and humans) open
+it before `src/lib/`, so a *wrong* example is worse than none: it teaches the wrong
+lesson and costs a later code-review to unwind. Examples are therefore held to the
+same bar as the code, and a broken one **gates** extended verification.
 
-The three-representation form fits **multi-CHR topology** examples (`matrica`). For
-**single-purpose** examples that teach one capability (`mndp`, `udp-gateway`,
-`grounding`, `harness`, `dude`), the lighter **`.test.ts` + `README.md`** form is
-preferred — it's the load-bearing agent-onboarding surface, stays short and
-self-contained, and keeps the integration/flake surface small (each example boots a
-real CHR). Add the heavier Makefile/Python representations only when an example is
-itself about CLI/`make` orchestration.
+Each `examples/<name>/` is a **runnable artifact that does something real** against a
+CHR, in the canonical shape (full rules in
+[`.github/instructions/examples.instructions.md`](.github/instructions/examples.instructions.md)):
 
-Building examples early is a form of "anchor testing" for the CLI surface — it finds ergonomic issues before we commit to new commands.
+- **`<name>.ts`** — the **primary**: a `bun run`-able script using the library API,
+  with `runExample()` guaranteeing teardown (success *or* failure). Not a test.
+- **`<name>.sh` / `<name>.ps1`** — the **CLI** mirror (POSIX `sh` + PowerShell),
+  sourcing `examples/common.{sh,ps1}`. New examples ship both; existing ones add
+  `.ps1` where the CLI flow is simple.
+- **`<name>.py`** — optional CLI driver for a non-TS audience, run with `uv run`.
+- **`grounding/` is the one `bun:test` example** — kept as a test on purpose, because
+  there the *assertions are the documentation* (it's the "how to write CHR
+  integration tests" reference). Everywhere else, an agent can wrap a script in
+  `test()` trivially, so a runnable script is the better teaching surface.
+
+Makefiles were the old convention and are now **disallowed** in `examples/`
+(`scripts/validate-examples.ts` enforces this) — they mixed CLI orchestration with
+raw `scp`/`curl`/`ssh`, the opposite of "one example teaches one capability."
+
+Building examples early is a form of "anchor testing" for the CLI surface — it finds
+ergonomic issues before we commit to new commands, and each gap surfaced gets a
+"friction found" note in the example's README plus a BACKLOG/issue link rather than
+being papered over (this pass surfaced the missing `quickchr cp`, #23). Coverage of
+the CLI/library surface is tracked in
+[`examples/COVERAGE.md`](examples/COVERAGE.md).
 
 ### Document Maintenance
 

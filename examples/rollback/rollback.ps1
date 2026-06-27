@@ -1,4 +1,4 @@
-# rollback (CLI, Windows) — snapshot a CHR, change it, restore the snapshot.
+# rollback (CLI, Windows) - snapshot a CHR, change it, restore the snapshot.
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'rollback'

@@ -44,7 +44,8 @@ in [`COVERAGE.md`](../../examples/COVERAGE.md) (mark docs/test-only with a reaso
 - **Friction found.** If an example needs raw curl/scp/ssh, `machine.json` reads,
   long sleeps, or fragile parsing, log it in the README's "friction found" + BACKLOG
   — decide whether quickchr should grow a better surface (don't paper over it).
-- **CI:** `bun run check` runs `tsc --noEmit`, biome, markdownlint, shellcheck (`-s sh`),
-  and `scripts/validate-examples.ts`. The smoke harness
+- **CI:** `bun run check` runs biome, `tsc --noEmit`, markdownlint, cspell,
+  `scripts/validate-examples.ts`, and shellcheck (`-s sh`). The smoke harness
   (`test/integration/examples-smoke.test.ts`) + PowerShell `Invoke-ScriptAnalyzer`
-  run in extended verification. `trial-license` is manual-only (rate limits).
+  run in extended verification, across the supported-OS matrix. `trial-license`
+  is manual-only (rate limits).

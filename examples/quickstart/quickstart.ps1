@@ -1,4 +1,4 @@
-# quickstart (CLI, Windows) — boot a CHR, read resource + descriptor, tear down.
+# quickstart (CLI, Windows) - boot a CHR, read resource + descriptor, tear down.
 # PowerShell mirror of quickstart.sh. try/finally guarantees teardown.
 . "$PSScriptRoot/../common.ps1"
 

@@ -1,4 +1,4 @@
-# trial-license (CLI, Windows) — apply a CHR trial license, read it back. MANUAL-ONLY.
+# trial-license (CLI, Windows) - apply a CHR trial license, read it back. MANUAL-ONLY.
 # MikroTik rate-limits trial requests, so this is excluded from CI.
 . "$PSScriptRoot/../common.ps1"
 

@@ -1,4 +1,4 @@
-# version-matrix (CLI, Windows) — boot one CHR per channel in parallel, then list.
+# version-matrix (CLI, Windows) - boot one CHR per channel in parallel, then list.
 # PowerShell mirror of version-matrix.sh (parallel start via background jobs).
 param([switch]$Lite)
 
