@@ -49,3 +49,24 @@ in [`COVERAGE.md`](../../examples/COVERAGE.md) (mark docs/test-only with a reaso
   (`test/integration/examples-smoke.test.ts`) + PowerShell `Invoke-ScriptAnalyzer`
   run in extended verification, across the supported-OS matrix. `trial-license`
   is manual-only (rate limits).
+
+## A failing example is a quickchr bug until proven otherwise
+
+Examples are **canaries**, not chores. The reason each one boots a real CHR is to catch
+what focused unit/integration tests miss — runtime behavior, platform quirks, the whole
+stack. So when one fails, the working assumption is **quickchr has a bug**, not "the
+example is wrong for this platform."
+
+- **Never `skip`, `os`-gate, or `arch`-gate a failing example as the first move.** A gate
+  deletes the signal *permanently and silently* — worse than the timeout-bump
+  `testing.instructions.md` already forbids, because a skipped canary never sings again.
+  Gating is a *last* resort, applied only AFTER the behavior is reproduced locally and
+  root-caused, and the gate must cite that grounding (a repro, not a guess).
+- **Reproduce locally before concluding anything.** One red CI job is a signal, not a
+  fact. We build this tool and run QEMU locally — including arm64 CHR under TCG on Intel
+  (slow, but real). A claim like "snapshots don't work on arm64" must be *demonstrated*
+  with a local run, never inferred from a CI matrix plus remembered "known QEMU behavior."
+- **Don't write an unproven cause anywhere durable.** Until reproduced, a suspected
+  limitation does not go into `DESIGN.md`, API docs, `BACKLOG.md`, an issue stated as
+  fact, or — worst of all — a shared `routeros-*` SKILL. A plausible mechanism recorded
+  as truth is how one bad guess contaminates every project downstream.

@@ -4,6 +4,17 @@ applyTo: ".github/workflows/**"
 
 # CI System — quickchr
 
+## One CI run is a signal, not a fact
+
+A red job tells you *something changed*, not *what is true*. Before acting on it:
+
+- **Reproduce locally.** We run QEMU here (x86 under HVF, arm64 under TCG — slow but
+  real). A failure seen only in CI is a lead to investigate, not a proven limitation.
+- **Don't let one run cascade.** A single unverified failure is not license to sweep
+  doc/code/skill edits. Above all, never `skip`/`os`-gate/`arch`-gate a failing test or
+  example to green the pipeline before the behavior is reproduced and root-caused — that
+  masks the bug (see `testing.instructions.md` and `examples.instructions.md`).
+
 ## Workflow Overview
 
 Three workflows, each with a distinct purpose:
