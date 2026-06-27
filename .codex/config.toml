@@ -1,0 +1,12 @@
+# Project-scoped Codex settings for quickchr.
+#
+# Keep this file limited to public, project-safe configuration. User-specific
+# model choices, approvals, writable roots, and private MCP servers belong in
+# ~/.codex/config.toml.
+
+[mcp_servers.rosetta]
+command = "bunx"
+args = ["@tikoci/rosetta"]
+startup_timeout_sec = 30
+tool_timeout_sec = 60
+default_tools_approval_mode = "auto"
