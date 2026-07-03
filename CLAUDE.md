@@ -15,7 +15,7 @@ Project instructions live in Copilot's scheme, not here. Claude Code: read these
   - `ci.instructions.md` — CI workflows.
 - `DESIGN.md` — design decisions and discovered constraints.
 - `CONTRIBUTING.md` "Tracking work" — how work is tracked (Issues, not a flat log).
-- `BACKLOG.md` — a thin **map** of that scheme plus items not yet filed; not a work log. Open work lives in GitHub Issues; record durable facts in the scoped doc that governs the area, not in agent memory (Copilot can't see Claude memory).
+- `BACKLOG.md` — a thin **map** of that scheme (browse-by-label links + named grounding anchors); not a work log. Open work lives in GitHub Issues; record durable facts in the scoped doc that governs the area, not in agent memory (Copilot can't see Claude memory).
 - `MANUAL.md`, `README.md` — user-facing usage.
 
 ## Paired skills

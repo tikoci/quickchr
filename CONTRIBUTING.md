@@ -18,8 +18,9 @@ flat log. Each kind of content has exactly one home:
 | Narrative history | git history |
 
 The rule is **one home per thing** — do not mirror an open issue inside a doc, or a doc's fact
-inside an issue. [BACKLOG.md](./BACKLOG.md) is a thin **map** of this scheme plus a short list of
-items not yet filed as issues; it is not a work log.
+inside an issue. [BACKLOG.md](./BACKLOG.md) is a thin **map** of this scheme — browse-by-label
+links to the live issues plus a few named grounding anchors — not a per-issue mirror and not a
+work log.
 
 New non-trivial work becomes an issue (templates: **Task**, **Research**, **Needs-decision**).
 Every issue states a **Done-when** so the finish line is explicit. Label each with:
