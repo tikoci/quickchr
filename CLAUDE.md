@@ -14,7 +14,8 @@ Project instructions live in Copilot's scheme, not here. Claude Code: read these
   - `testing.instructions.md` — `bun:test`, unit vs integration (`QUICKCHR_INTEGRATION=1`).
   - `ci.instructions.md` — CI workflows.
 - `DESIGN.md` — design decisions and discovered constraints.
-- `BACKLOG.md` — tracked work. Record actionable items here, not in agent memory (Copilot can't see Claude memory).
+- `CONTRIBUTING.md` "Tracking work" — how work is tracked (Issues, not a flat log).
+- `BACKLOG.md` — a thin **map** of that scheme plus items not yet filed; not a work log. Open work lives in GitHub Issues; record durable facts in the scoped doc that governs the area, not in agent memory (Copilot can't see Claude memory).
 - `MANUAL.md`, `README.md` — user-facing usage.
 
 ## Paired skills
@@ -24,4 +25,4 @@ as a pointer; do not duplicate skill ownership rules here.
 
 ## End-of-session review
 
-After significant work, check whether `DESIGN.md` and `BACKLOG.md` need updates (see `general.instructions.md` for the checklist).
+After significant work, run the issue-centric checklist in `general.instructions.md` (End-of-Session Review): close/open the GitHub issue, record durable knowledge in `DESIGN.md` or the scoped doc, and add a `CHANGELOG.md` entry if user-facing.

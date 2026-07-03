@@ -343,6 +343,12 @@ function createInstance(state: MachineState): ChrInstance {
 			if (state.pid && isMachineRunning(state)) {
 				await stopQemu(state.pid);
 			}
+			// NOTE: clean() deliberately does NOT delete efi-vars.fd. On the arm64 `virt`
+			// machine that file stores UEFI boot order (Boot0000 -> first virtio-blk-pci
+			// disk), not OS state; wiping it forces a full device scan (~480s) on the next
+			// boot. The fresh disk re-copy below is a sufficient factory reset. Regression
+			// anchor: the "clean() resets disk to factory defaults" arm64 integration test
+			// (120s reboot wait would blow past 480s if the wipe were reintroduced).
 			// Re-copy fresh image from cache
 			const imgPath = join(getCacheDir(), `chr-${state.version}${state.arch === "arm64" ? "-arm64" : ""}.img`);
 			if (!existsSync(imgPath)) {

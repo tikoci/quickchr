@@ -52,7 +52,9 @@ machine lifecycle. Always clean up CHR instances in `finally` blocks.
 - Code follows Bun/ESM/library-layer rules.
 - Relevant unit, integration, smoke, or lint checks have been run or explicitly
   reported as not run.
-- Significant behavior changes are reflected in `DESIGN.md`, `BACKLOG.md`,
-  `MANUAL.md`, examples, and/or shared RouterOS skills as appropriate.
+- Significant behavior changes are reflected in `DESIGN.md`, the relevant GitHub
+  issue, `CHANGELOG.md` (if user-facing), `MANUAL.md`, examples, and/or shared
+  RouterOS skills as appropriate. Work is tracked in Issues, not `BACKLOG.md` (see
+  CONTRIBUTING.md "Tracking work").
 - Failing tests are investigated before changing timeouts, skips, or platform
   gates.

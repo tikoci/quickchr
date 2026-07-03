@@ -1,7 +1,8 @@
 # quickchr Networking — Platform Reference
 
 > **Status:** Reference document for QEMU networking internals across platforms.
-> Design decisions and implementation checklist live in [BACKLOG.md](../BACKLOG.md) § P5 — Networking.
+> Design rationale lives in [DESIGN.md](../DESIGN.md) ("Networking — Discover, Don't Configure");
+> open networking work is tracked as GitHub Issues (`area:networking`).
 > This document covers *how things work under the hood* — what QEMU does, how each
 > platform's networking stack operates, and what quickchr's resolution engine maps to.
 
@@ -436,7 +437,7 @@ Windows networking for QEMU is messy. The rootless path (user-mode) works well. 
 
 > **Note:** The primary networking model is **resolution-based discovery** — generic specifiers
 > (`shared`, `bridged:<ifname>`) resolve to available platform infrastructure at start time.
-> See [BACKLOG.md](../BACKLOG.md) § P5 "Cross-Platform Network Abstraction" for the current design.
+> See [DESIGN.md](../DESIGN.md) "Networking — Discover, Don't Configure" for the design rationale.
 >
 > The `quickchr network add` command below is a **future extension** for one-time setup of
 > privileged infrastructure (installing socket_vmnet launchd services, creating persistent TAPs).
@@ -643,7 +644,7 @@ VRRP needs a shared broadcast domain visible to the host. This is the one scenar
 
 ## Open Questions
 
-These are tracked here as platform-level questions. Implementation items are in [BACKLOG.md](../BACKLOG.md) § P5.
+These are tracked here as platform-level questions. Implementation items are tracked as GitHub Issues (`area:networking`).
 
 - **socket_vmnet fd numbering with multi-NIC:** Need to verify the exact fd passthrough mechanism when chaining two `socket_vmnet_client` calls. Test before committing to the multi-NIC socket_vmnet design.
 - **ARM64 CHR `--add-network` NIC limit:** RouterOS arm64 CHR has been observed to support up to 9 VirtIO-net NICs on `virt` machine. Verify the exact limit before documenting it.

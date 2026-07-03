@@ -93,7 +93,7 @@ Unit tests and mock tests are insufficient for any feature that:
 - Performs a hard reboot / power-cycle sequence
 - Reads or writes RouterOS state (device-mode, license, users, packages)
 
-**Do NOT mark a feature `[x]` in BACKLOG.md until `QUICKCHR_INTEGRATION=1 bun test test/integration/` passes with a test that exercises that feature end-to-end.**
+**Do NOT treat a feature as done — closing its GitHub issue or adding it to CHANGELOG.md — until `QUICKCHR_INTEGRATION=1 bun test test/integration/` passes with a test that exercises that feature end-to-end.**
 
 Rationale: the RouterOS REST API has non-obvious blocking behavior (e.g. `/system/device-mode/update`
 holds the HTTP connection open until power-cycle confirmation). These behaviors cannot be caught
@@ -143,7 +143,7 @@ a red test green without understanding why it was red:
   (slow, but real). One CI run across a few runners is not a repro. Never substitute a
   remembered "known QEMU behavior" for an actual local experiment.
 - **One CI failure must not cascade.** A single unverified red run is not license to edit
-  `DESIGN.md`, API docs, `BACKLOG.md`, issues, or skills. Ground first; document second.
+  `DESIGN.md`, API docs, a scoped instruction/doc, issues, or skills. Ground first; document second.
 
 ### Experiment First, Code Second
 

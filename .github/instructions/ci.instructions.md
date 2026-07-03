@@ -87,11 +87,15 @@ The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Win
 **Windows integration tests** run via the `windows-x86` dispatch input in
 Extended Verification — **experimental, informational, non-gating** (`continue-on-error: true`).
 QEMU is installed with `choco install qemu` and runs under TCG (no HVF/WHPX on GitHub
-Windows runners). Expected failures: `sshpass` and `socat` don't exist on Windows, so
-scp-based and named-socket paths fail; TCG boots are slow (90-min job timeout). Start
-narrow with `test-filter` (e.g. `start-stop.test.ts`) before the full suite. Purpose: get
-real data on the Windows path (TCP channels, SLiRP networking, CHR boot) to unblock the
-local-first plan in `BACKLOG.md`.
+Windows runners). **Result (2026-06-07, run 27097457831): the full suite passed on
+windows-latest/TCG — 56 pass / 0 fail / 3 skip.** Validated end-to-end: CHR boot, monitor
+(+6) and serial (+7) channels, SLiRP networking + port-forward, REST
+exec/license/device-mode/anchor, and **scp upload/download — which works on Windows
+*without* `sshpass`**. So "standard Windows paths work" is settled — `sshpass` is a non-issue.
+Remaining Windows gaps (still unvalidated, not blockers): QGA (+8, KVM-gated, skipped under
+TCG), named-socket/`socat` networking (no `socat` on Windows), TAP-Windows setup, and
+snapshot smoke — listed in `BACKLOG.md`. TCG boots are slow (90-min job timeout); start
+narrow with `test-filter` (e.g. `start-stop.test.ts`) before the full suite.
 To run locally on Windows: `bun test test/unit/`
 
 ## Extended Verification — Dispatch Inputs

@@ -1,0 +1,11 @@
+# Blank issues are disabled so every issue picks a template
+# (Task / Research / Needs-decision) and lands with labels + a Done-when.
+# Use the contact links below for anything that doesn't fit a template.
+blank_issues_enabled: false
+contact_links:
+  - name: How work is tracked (scheme + labels)
+    url: https://github.com/tikoci/quickchr/blob/main/CONTRIBUTING.md#tracking-work
+    about: Where open work, decisions, grounded facts, and history each live.
+  - name: Design decisions & rationale
+    url: https://github.com/tikoci/quickchr/blob/main/DESIGN.md
+    about: Read before proposing a change that touches an existing design decision.

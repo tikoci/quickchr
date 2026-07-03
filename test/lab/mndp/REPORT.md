@@ -75,8 +75,10 @@ So the **"no length-prefix parsing" hope is wrong for `-netdev stream`**: parsin
 `socket-connect`. The only genuine advantage over `socket-connect` is dropping the loopback TCP
 port in favor of a filesystem path. The genuinely *unframed* transport would be `-netdev dgram`
 (SOCK_DGRAM — one datagram per frame), which is a different, costlier-to-wire netdev and was
-**not** validated here. Tracked in `BACKLOG.md` ("`-netdev stream` + AF_UNIX as a port-free
-host-capture transport").
+**not** validated here. **Verdict:** not worth a new public specifier now (same conclusion as
+the `udp=`/`localaddr` rejection). Revisit only if filesystem-path addressing (no loopback port)
+becomes valuable — e.g. capturing from many concurrent CHRs — and at that point evaluate
+`-netdev dgram` for the unframed path.
 
 ### 4. Incidental observations
 

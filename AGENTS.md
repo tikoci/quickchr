@@ -10,9 +10,18 @@ the existing Copilot instruction files; do not duplicate them here.
 - `.github/instructions/*.md` - scoped rules. Apply each file when its
   `applyTo` glob matches the files you are changing.
 - `DESIGN.md` - design decisions and discovered constraints.
-- `BACKLOG.md` - tracked work. Record durable follow-up here, not only in agent
-  memory.
 - `MANUAL.md` and `README.md` - user-facing behavior and examples.
+
+## Where work is tracked
+
+Open work lives in **GitHub Issues**, not in a flat file. See CONTRIBUTING.md
+"Tracking work" for the full scheme: work -> Issues, decisions -> DESIGN.md,
+grounded RouterOS/QEMU facts -> the narrowest `.github/instructions/*.md` (or
+`docs/`, `test/lab/<topic>/REPORT.md`), shipped changes -> CHANGELOG.md, history
+-> git. `BACKLOG.md` is a thin map of that scheme plus a short list of items not
+yet filed as issues - it is not a work log. When you finish work, close/open the
+issue and record any durable fact in the scoped doc that governs it; do not
+re-grow BACKLOG.md.
 
 ## Project Defaults
 
@@ -46,4 +55,5 @@ the existing Copilot instruction files; do not duplicate them here.
 - Do not turn a red integration test green by broadening timeouts, skipping,
   or platform-gating before reproducing and root-causing the failure.
 - Check whether significant behavior changes need updates in `DESIGN.md`,
-  `BACKLOG.md`, `MANUAL.md`, examples, or the shared RouterOS skills.
+  `CHANGELOG.md`, `MANUAL.md`, examples, or the shared RouterOS skills — and
+  whether a GitHub issue should be opened or closed.

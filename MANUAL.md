@@ -1190,5 +1190,5 @@ prevents orphan disks accumulating across attempts.
   [tikoci/routeros-skills](https://github.com/tikoci/routeros-skills)) —
   agent-facing guide to grounding RouterOS against a real router with quickchr
   (the apply→read-back loop, networking recipes, harness patterns).
-- **BACKLOG.md** — open work and design questions still under
-  discussion. Completed items are git history.
+- **BACKLOG.md** — a map of how work is tracked. Open work lives in GitHub
+  Issues; see CONTRIBUTING.md "Tracking work".

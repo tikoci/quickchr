@@ -13,3 +13,6 @@ topic and point to it from other surfaces.
   turn the broader file into a pointer.
 - Do not add Codex-only entrypoint files; root `AGENTS.md` is the portable router
   for Codex and other agents.
+- Work items belong in GitHub Issues, not instruction files. Durable behaviour
+  facts belong in the narrowest scoped doc (a sibling `*.instructions.md`, `docs/`,
+  or `test/lab/<topic>/REPORT.md`). See CONTRIBUTING.md "Tracking work".

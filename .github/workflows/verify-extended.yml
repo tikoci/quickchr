@@ -25,7 +25,7 @@ name: Extended Verification
 # and consumed by both the integration tests (test/integration/image-target.ts) and
 # the examples. (Version-pinned tests stay pinned.)
 #
-# arm64 status (tracked in BACKLOG.md):
+# arm64 status (resolved; see git history + the clean() note in src/lib/quickchr.ts):
 #   - clean() second-boot timeout: fixed (EFI vars wipe removed), confirmed on CI
 #   - arm64 REST stale-response: could not reproduce (RouterOS 7.23.1 / Bun 1.3.14);
 #     exec tests un-skipped + passing. The repro step below stays as a regression guard.
@@ -618,11 +618,11 @@ jobs:
 
   # ── windows/x86_64 (windows-latest, TCG) ─────────────────────────────────────
   # EXPERIMENTAL / informational only — `continue-on-error` so it never gates a
-  # publish. Purpose: get real data on the Windows end-to-end path (TCP channels,
-  # SLiRP networking, CHR boot under TCG) to unblock the local-first plan in
-  # BACKLOG.md. Known expected failures: no `sshpass`/`socat` on Windows (scp +
-  # named-socket paths), and TCG boots are slow — start narrow with `test-filter`
-  # (e.g. `start-stop.test.ts`) before running the full suite.
+  # publish. The full suite already passed here once (2026-06-07, 56/0/3 on TCG);
+  # this job keeps watching the Windows end-to-end path (TCP channels, SLiRP
+  # networking, CHR boot under TCG). scp works without `sshpass`; the only known
+  # gap is named-socket (`socat` absent on Windows). TCG boots are slow — start
+  # narrow with `test-filter` (e.g. `start-stop.test.ts`) before the full suite.
   integration-windows-x86:
     name: Integration (windows/x86_64)
     if: ${{ inputs.windows-x86 == true && inputs.run-integration == true }}
