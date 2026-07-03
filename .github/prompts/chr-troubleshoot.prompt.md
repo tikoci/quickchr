@@ -83,19 +83,20 @@ curl -u admin: http://127.0.0.1:9100/rest/system/resource
 
 1. Check QEMU log:
    ```sh
-   cat ~/.quickchr/machines/<name>/qemu.log
+   bun run dev -- logs <name>
    ```
-2. Verify PID is alive:
+2. Inspect machine state, ports, and machine directory:
    ```sh
-   cat ~/.quickchr/machines/<name>/qemu.pid
-   kill -0 $(cat ~/.quickchr/machines/<name>/qemu.pid)
+   bun run dev -- inspect <name> --json
    ```
-3. Check ports aren't conflicting:
+3. For direct file inspection, resolve the data root from `QUICKCHR_DATA_DIR`
+   or MANUAL.md §8; do not assume a fixed state path.
+4. Check ports aren't conflicting:
    ```sh
    bun run dev -- start --dry-run
    ```
-4. ARM64 specific: ensure EFI vars file is present and same size as code firmware.
-5. Try TCG (software emulation): look for `accel=tcg` in the QEMU log.
+5. ARM64 specific: ensure EFI vars file is present and same size as code firmware.
+6. Try TCG (software emulation): look for `accel=tcg` in the QEMU log.
 
 ### QEMU exits immediately
 

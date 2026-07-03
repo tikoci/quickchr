@@ -17,10 +17,10 @@ Project instructions live in Copilot's scheme, not here. Claude Code: read these
 - `BACKLOG.md` — tracked work. Record actionable items here, not in agent memory (Copilot can't see Claude memory).
 - `MANUAL.md`, `README.md` — user-facing usage.
 
-## Paired skill
+## Paired skills
 
-General CHR/QEMU knowledge is consolidated in the `routeros-qemu-chr` skill
-(`tikoci/routeros-skills`). quickchr is its reference implementation — keep them aligned when QEMU behavior changes.
+Paired-skill routing lives in `.github/copilot-instructions.md`. Keep this file
+as a pointer; do not duplicate skill ownership rules here.
 
 ## End-of-session review
 

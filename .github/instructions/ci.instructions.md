@@ -153,12 +153,12 @@ aarch64 on x86_64 TCG is significantly slower than native but works.
 Each runner boots the `routeros-target` (default `stable`) for its native arch — the
 target selects the RouterOS *release*, never the *architecture*.
 
-## arm64 Known Issues (tracked in BACKLOG.md)
+## arm64 Status Notes
 
-- `clean()` second-boot timeout on arm64 — one test skipped with `.skipIf(arch === "arm64")`
-- Bun arm64 `node:http` stale-response bug — exec tests skipped on arm64
-
-These are tracked for future investigation. They do not block x86 publishing.
+Historical arm64 issues around `clean()` second-boot timeout and suspected
+`node:http` stale responses were fixed or closed after lab/CI verification.
+Do not reintroduce arm64 skips for those cases without a fresh local repro and
+a new tracked issue.
 
 ## Artifacts — Where to Look After a Failure
 

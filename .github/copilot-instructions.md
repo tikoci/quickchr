@@ -5,14 +5,18 @@
 quickchr is a TypeScript/Bun CLI + library to manage MikroTik CHR virtual machines via QEMU.
 Published as `@tikoci/quickchr` on npm.
 
-## Paired skill
+## Paired skills
 
-General CHR/QEMU knowledge (virtio rules, boot tracks, acceleration detection, UEFI pflash,
-boot-wait pitfalls) is consolidated in the **`routeros-qemu-chr`** skill at
-[tikoci/routeros-skills](https://github.com/tikoci/routeros-skills/tree/main/routeros-qemu-chr).
-quickchr is the reference implementation of that skill — when adding or changing QEMU behavior,
-cross-check `SKILL.md` and `references/quickchr-automation.md` so the documented rules stay
-aligned with what the library actually does.
+quickchr is the reference implementation for two public `tikoci/routeros-skills` skills:
+
+- **`routeros-qemu-chr`** — generic QEMU/CHR behavior: virtio rules, boot tracks,
+  acceleration detection, UEFI pflash, boot-wait pitfalls.
+- **`routeros-quickchr`** — using quickchr itself to boot disposable CHR VMs and
+  ground RouterOS config/scripts/API behavior. Keep `SKILL.md` and
+  `references/quickchr-api.md` aligned with this repo.
+
+When changing QEMU/CHR behavior, update the relevant shared skill in
+`tikoci/routeros-skills`; quickchr remains the source of truth for runtime behavior.
 
 ## Runtime
 
