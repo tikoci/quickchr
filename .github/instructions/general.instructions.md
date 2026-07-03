@@ -46,7 +46,8 @@ the root cause is a startup timing race, not the expired flag.
 
 After completing significant work (new features, design changes, bug fixes with architectural impact), check:
 
-1. **DESIGN.md** — Do new implementation details, design decisions, or discovered constraints need documenting? Review git diff and memory for "added but undocumented" behavior.
-2. **BACKLOG.md** — Has any tracked item been completed? Did new work reveal items to add? Update status and priority as needed.
+1. **GitHub issue** — Close the issue this work resolved, or open one for follow-up work you uncovered. Work is tracked in Issues, not BACKLOG.md — see CONTRIBUTING.md "Tracking work".
+2. **Durable knowledge** — Record any new design decision or discovered constraint in **DESIGN.md**, and any grounded RouterOS/QEMU behaviour fact in the narrowest scoped doc (`.github/instructions/*.md`, `docs/`, or `test/lab/<topic>/REPORT.md`). Review the git diff for "added but undocumented" behavior. Do not re-grow BACKLOG.md.
+3. **CHANGELOG.md** — Add an entry if the change is user-facing.
 
 This is a lightweight habit, not a gate. Skip for trivial changes.

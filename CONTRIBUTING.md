@@ -4,6 +4,35 @@
 > Architecture: **[DESIGN.md](./DESIGN.md)**.
 > Agent-facing rules: **`.github/instructions/*.md`**.
 
+## Tracking work
+
+Work is tracked in **[GitHub Issues](https://github.com/tikoci/quickchr/issues)**, not in a
+flat log. Each kind of content has exactly one home:
+
+| Content | Home |
+|---------|------|
+| Open, actionable work | [GitHub Issues](https://github.com/tikoci/quickchr/issues) |
+| Design decisions & rationale | [DESIGN.md](./DESIGN.md) |
+| Grounded RouterOS/QEMU behaviour facts | the narrowest `.github/instructions/*.md` (by `applyTo`), else `docs/`, else `test/lab/<topic>/REPORT.md` |
+| Shipped, user-facing changes | [CHANGELOG.md](./CHANGELOG.md) |
+| Narrative history | git history |
+
+The rule is **one home per thing** — do not mirror an open issue inside a doc, or a doc's fact
+inside an issue. [BACKLOG.md](./BACKLOG.md) is a thin **map** of this scheme plus a short list of
+items not yet filed as issues; it is not a work log.
+
+New non-trivial work becomes an issue (templates: **Task**, **Research**, **Needs-decision**).
+Every issue states a **Done-when** so the finish line is explicit. Label each with:
+
+- an **area** — `area:qemu`, `area:networking`, `area:cli`, `area:wizard`, `area:provisioning`,
+  `area:rest`, `area:library-api`, `area:examples`, `area:ci`, `area:docs`;
+- a **priority** — `P1` (take next) … `P4` (polish);
+- a **type** — `bug` / `enhancement` / `documentation`, plus `research` (produces a
+  repro/`REPORT.md`, not shipped code) or `needs-decision` (changes a persisted-state / port /
+  public-API contract — the maintainer decides direction before work starts).
+
+Open a Pull Request against a filed issue for review (PRs are wired to automated review).
+
 ## Development Setup
 
 ### Prerequisites

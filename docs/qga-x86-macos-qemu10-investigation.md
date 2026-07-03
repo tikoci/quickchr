@@ -292,4 +292,4 @@ the KVM requirement explicitly in the CHR manual.
 - QEMU `target/i386/cpu.c` — CPUID 0x40000000 handling (identical v9.2.0 / v10.2.0)
 - MikroTik CHR manual: <https://help.mikrotik.com/docs/spaces/ROS/pages/18350234/>
 - virtio-serial spec: <https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html>
-- quickchr issue tracking: BACKLOG.md in this repo
+- quickchr issue tracking: GitHub Issues in this repo (`area:qemu`)

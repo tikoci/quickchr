@@ -44,7 +44,7 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
    - **Not applied to `_launchExisting`** (the restart-existing-machine path) — that path also spawns + `waitForBoot`s but has never been observed to flake. Extend the same respawn there only with evidence.
    - **Timeout factor left at 1.5×** (`accelTimeoutFactor`, `src/lib/platform.ts`) rather than inflated further — the respawn is the recovery mechanism, not a bigger ceiling.
 
-   How to tell it's firing: grep CI `qemu.log`/run logs for `respawning QEMU once`. A frequent occurrence, or a `BOOT_TIMEOUT` that *survives* the respawn (or appears on the `_launchExisting` path), is the signal to stop treating it as a flake and find the real cause. Tracked in `BACKLOG.md` (boot-respawn watch-item).
+   How to tell it's firing: grep CI `qemu.log`/run logs for `respawning QEMU once`. A frequent occurrence, or a `BOOT_TIMEOUT` that *survives* the respawn (or appears on the `_launchExisting` path), is the signal to stop treating it as a flake and find the real cause. Listed in `BACKLOG.md`'s unfiled checklist (boot-respawn watch-item) until filed as an issue.
 
 9. **Resilient downloads: normal `fetch` first, public-DNS IPv4 as a failback** — All fetches to MikroTik's `upgrade`/`download` hosts go through `fetchResilient()` (`src/lib/net.ts`), never bare `fetch()`. The intent is narrow: a **plain `fetch` is the path** — dual-stack (happy eyeballs), on par with curl/most tools, and honoring local DNS (`/etc/hosts` pins, VPN/split-horizon, mirror redirects, IPv6-only egress) — and we layer one **failback** beneath it to ride out *DNS misconfiguration somewhere in the environment*, wherever it comes from. We deliberately do **not** invert this (public-DNS+IPv4 first) — that would override local DNS on every machine and could introduce its own failures (e.g. an IPv4-only connect on an IPv6-only network). Normal first keeps us on par with most tools; the failback only adds smarts when the normal path actually breaks.
 
@@ -65,6 +65,17 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 | +4     | API-SSL    | 8729       |
 | +5     | WinBox     | 8291       |
 | +6—9   | Custom     | —          |
+
+On Windows, the monitor/serial/QGA channels use TCP localhost at `portBase+6/+7/+8` (Winsock can't bind `\\.\pipe\` paths), so the `+6..+8` "Custom" slots are effectively reserved there.
+
+### Allocation rationale & open questions
+
+Ports are assigned in fixed 10-port blocks from `DEFAULT_PORT_BASE` (9100), scanning existing machines and probe-binding to avoid collisions. Two rough edges are **maintainer decisions, not yet settled** — don't "fix" them unilaterally, since they change the persisted-state / port contract (tracked as `needs-decision` work):
+
+1. **Base 9100 is a poor default** — collides with JetDirect/PDL (printers) and trains agents to memorize "quickchr = 9100 for REST", which only holds for the *first* instance (the second gets 9110). Open: random base in a clean high range (persisted per machine) vs caller-requested range vs both; and whether that's a breaking change or a setting with 9100 as the default.
+2. **Fixed blocks are overfit** — extras bolt on at `+6..+9` and collide with the Windows IPC offsets above (one slot before spilling); manual `extraPorts` bypass collision checking. Open: dynamic variable-size blocks vs a fixed core pool + a separate extras pool.
+
+Current consumers are all first-party tikoci projects (centrs, donny, restraml), so a port-scheme migration can be coordinated across them — but `@tikoci/quickchr` is published and public, so a change to the persisted port contract still needs an issue, a CHANGELOG/docs note, and (for the `ChrInstance`/`StartOptions` surface) a deprecation/migration path, not a silent break.
 
 ## Storage Layout
 
@@ -217,6 +228,13 @@ macOS → Linux → Windows. Mac and Linux share most code paths with minor `#if
 
 Tighten before expanding. New subcommands (`logs`, `exec`, `console`) wait for a full command tree review. The CLI should be discoverable without paging `--help` — shell completions help more than a long command list. Use multipass and virsh as reference points for symmetry, not to copy.
 
+**Command-surface principles** (locked — these shape every new subcommand):
+
+- **Interactive prompts are confined to `setup`.** Every other command is non-interactive — no selectors. Without a `<name>` argument, print the list + a tip; don't prompt.
+- **`start`/`stop` are pure operations** — no wizard, no creation. `add` creates; `setup` is the wizard.
+- **`set`/`get` are for machine config, not re-provisioning.** After first provisioning, don't add commands that re-provision — the surface grows and each post-provision capability needs its own RouterOS edge-case testing. A drifted machine is recreated, not mutated (see *Out of Scope*).
+- **`--json` on read commands only** — same content as console output (richer metadata OK), pipe-friendly for `jq`. No `--yaml`/`--serialize`/TSV/CSV; callers pipe `--json` through `jq`/`yq`. For `exec`, `--json` wraps the quickchr response — the RouterOS result stays a string (use `:serialize` in-script for structured RouterOS output).
+
 ### RouterOS Verification
 
 Always read back what we write. One extra REST API call after a provisioning action (license, user, package) catches version-specific command drift early. Surface errors with actionable hints rather than silent failures.
@@ -272,11 +290,28 @@ raw `scp`/`curl`/`ssh`, the opposite of "one example teaches one capability."
 
 Building examples early is a form of "anchor testing" for the CLI surface — it finds
 ergonomic issues before we commit to new commands, and each gap surfaced gets a
-"friction found" note in the example's README plus a BACKLOG/issue link rather than
+"friction found" note in the example's README plus a GitHub issue rather than
 being papered over (this pass surfaced the missing `quickchr cp`, #23). Coverage of
 the CLI/library surface is tracked in
 [`examples/COVERAGE.md`](examples/COVERAGE.md).
 
+### Agent-Friendliness — Discoverability Over Features
+
+A recurring lesson from downstream agents (donny, centrs, restraml): the friction is usually **finding** an existing capability, not a missing one. Issue #18 (centrs) nearly rebuilt UDP forwarding, `socket-connect` L2, and the guest→host gateway — all of which already existed — because the only way to choose among them was reading `src/lib/network.ts`. Rule: **every CLI-documented capability also needs a library-facing, by-goal surface** — JSDoc at the call site, a by-goal recipe (`docs/networking-recipes.md`), and coverage in the `routeros-quickchr` skill — or agents won't find it. Connection handoff for harnesses goes through `ChrInstance.descriptor()` / `quickchr inspect` / `quickchr env` (credential-bearing by design), never by reading `machine.json`.
+
+### Out of Scope (decided)
+
+Explicitly rejected, with rationale, so they aren't re-proposed:
+
+- **Cloud deployment** — `tikoci/chr-armed` already does OCI + AWS; revisit only once local CHR is solid and provisioning/image layers can be reused.
+- **Multi-CHR orchestration** — building blocks + `examples/`, not a framework (see *Scope Boundary*). Users/agents compose topologies.
+- **`quickchr upgrade <name>` / post-provisioning mutation** — replaced by a future *config audit/verify* report (flags drift; user recreates). Re-provisioning has too many failure modes (version bumps, rotated creds, changed deps).
+- **Packaging (Homebrew/Deb)** and **service management (launchd/systemd)** — lower priority than core; optional later.
+- **Machine templates** — CLI flags are the template, API objects are reusable, the wizard always prompts. No separate template system.
+- **`--no-ansi` flag** — ANSI is fine in text output (`grep`/`jq` cope); the real discipline (separate presentation from content) belongs in a centralized error-message surface instead.
+- **`machine.json` → YAML** — staying JSON (pretty-printed) for `jq` users; YAML adds complexity without a matching benefit.
+- **Separate multi-version/arch matrix runner** — the CI matrix + `examples/version-matrix` cover it.
+
 ### Document Maintenance
 
-DESIGN.md and BACKLOG.md are living documents. At the end of any significant work session, agents should review whether new implementation details, design decisions, or discovered constraints belong in DESIGN.md, and whether completed/new work should update BACKLOG.md. Treat this as a lightweight checklist, not a gate.
+DESIGN.md is the living home for design decisions and rationale. At the end of any significant work session, agents should review whether new implementation details, design decisions, or discovered constraints belong here. Open/close work in **GitHub Issues** — not BACKLOG.md (see CONTRIBUTING.md "Tracking work"); record grounded RouterOS/QEMU behaviour facts in the narrowest scoped doc (`.github/instructions/*.md`, `docs/`, or `test/lab/<topic>/REPORT.md`); add a CHANGELOG.md entry for user-facing changes. Treat this as a lightweight checklist, not a gate.

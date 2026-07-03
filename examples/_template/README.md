@@ -50,8 +50,8 @@ helpers from `../lib.ts`. As an external consumer:
 
 <During implementation, note anything that needed raw curl/scp/ssh, direct
 `machine.json` reads, long sleeps, fragile parsing, or lots of glue — and whether
-quickchr should grow a better API/CLI surface. Link the BACKLOG item / GitHub
-issue. "None" is a valid answer.>
+quickchr should grow a better API/CLI surface. Link the GitHub issue.
+"None" is a valid answer.>
 
 ## See also
 

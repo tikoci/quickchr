@@ -42,8 +42,8 @@ in [`COVERAGE.md`](../../examples/COVERAGE.md) (mark docs/test-only with a reaso
 - **`$QUICKCHR` resolution** (CLI scripts) defaults to the repo source CLI so CI and
   local runs exercise *this* checkout, not a global install.
 - **Friction found.** If an example needs raw curl/scp/ssh, `machine.json` reads,
-  long sleeps, or fragile parsing, log it in the README's "friction found" + BACKLOG
-  — decide whether quickchr should grow a better surface (don't paper over it).
+  long sleeps, or fragile parsing, log it in the README's "friction found" and open a
+  GitHub issue — decide whether quickchr should grow a better surface (don't paper over it).
 - **CI:** `bun run check` runs biome, `tsc --noEmit`, markdownlint, cspell,
   `scripts/validate-examples.ts`, and shellcheck (`-s sh`). The smoke harness
   (`test/integration/examples-smoke.test.ts`) + PowerShell `Invoke-ScriptAnalyzer`
@@ -67,6 +67,6 @@ example is wrong for this platform."
   (slow, but real). A claim like "snapshots don't work on arm64" must be *demonstrated*
   with a local run, never inferred from a CI matrix plus remembered "known QEMU behavior."
 - **Don't write an unproven cause anywhere durable.** Until reproduced, a suspected
-  limitation does not go into `DESIGN.md`, API docs, `BACKLOG.md`, an issue stated as
-  fact, or — worst of all — a shared `routeros-*` SKILL. A plausible mechanism recorded
+  limitation does not go into `DESIGN.md`, API docs, a scoped instruction/doc, an issue
+  stated as fact, or — worst of all — a shared `routeros-*` SKILL. A plausible mechanism recorded
   as truth is how one bad guess contaminates every project downstream.

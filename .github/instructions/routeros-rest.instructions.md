@@ -80,8 +80,8 @@ controlling a power-cycle or a bounded RouterOS wait.
 
 Do not copy the blocking-endpoint timers to normal REST calls. Treat 60s as a working
 assumption inherited from centrs for ordinary REST requests, but do not add a quickchr clamp
-until the REST-timeout reconciliation lab in `BACKLOG.md` confirms the rule and documents
-any endpoint-specific exceptions.
+until the REST-timeout reconciliation task (listed in `BACKLOG.md` until filed as an issue)
+confirms the rule and documents any endpoint-specific exceptions.
 
 ## device-mode/update — The Oddball
 

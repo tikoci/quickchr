@@ -36,7 +36,7 @@ and `mndp.py` are the runnable paths. Expected time: ~25–40 s with KVM/HVF.
 
 None for receive/inject — `socket-connect` carries raw L2 both ways with no native
 helper. MAC-Telnet (the bidirectional case) is the same technique run as
-request/reply; tracked for `centrs` in [`../../BACKLOG.md`](../../BACKLOG.md).
+request/reply; listed for `centrs` in [`../../BACKLOG.md`](../../BACKLOG.md) until filed as an issue.
 
 ## See also
 
