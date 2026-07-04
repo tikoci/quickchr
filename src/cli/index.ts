@@ -117,19 +117,27 @@ function isNoPrompt(): boolean {
 }
 
 /** Merge the `-T` short-flag alias for `--timeout-extra` into `flags`, since parseFlags
- *  only recognizes `--` flags (single-dash args fall through to positional) — same
- *  reason cmdLogs scans argv directly for its own `-f`/`-n` aliases. Mutates and
- *  returns `flags`. Does nothing when `--timeout-extra` was already parsed, so an
- *  explicit `--timeout-extra` always wins over a stray `-T` elsewhere in argv. */
+ *  only recognizes `--` flags. Also consumes the `-T <value>` pair from `positional`
+ *  so `quickchr start -T 15 lab` still targets `lab`. */
 export function applyTimeoutExtraShortFlag(
 	argv: readonly string[],
 	flags: Record<string, string | boolean | string[]>,
+	positional?: string[],
 ): Record<string, string | boolean | string[]> {
-	if (flags["timeout-extra"] === undefined) {
-		const tIdx = argv.indexOf("-T");
-		const value = tIdx !== -1 ? argv[tIdx + 1] : undefined;
-		if (value !== undefined) {
+	const tIdx = argv.indexOf("-T");
+	if (tIdx !== -1) {
+		const value = argv[tIdx + 1];
+		if (flags["timeout-extra"] === undefined && value !== undefined) {
 			flags["timeout-extra"] = value;
+		}
+		if (positional) {
+			const pIdx = positional.indexOf("-T");
+			if (pIdx !== -1) {
+				positional.splice(pIdx, 1);
+				if (value !== undefined && positional[pIdx] === value) {
+					positional.splice(pIdx, 1);
+				}
+			}
 		}
 	}
 	return flags;
@@ -1166,7 +1174,7 @@ async function cmdSetup() {
 
 async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
-	applyTimeoutExtraShortFlag(argv, flags);
+	applyTimeoutExtraShortFlag(argv, flags, positional);
 
 	// --all: start every stopped machine in background
 	if (flagBool(flags, "all")) {

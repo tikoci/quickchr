@@ -11,14 +11,14 @@ import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { getCacheDir, loadAllMachines } from "./state.ts";
 import { chrImageBasename, compareRouterOsVersion, isValidVersion } from "./versions.ts";
-import type { Arch } from "./types.ts";
+import { QuickCHRError, type Arch } from "./types.ts";
 
 export const DEFAULT_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** Parse a human size string (NK/NM/NG/NT, IEC binary, case-insensitive) to bytes. */
 export function parseSizeString(s: string): number {
 	const m = s.match(/^(\d+(?:\.\d+)?)([KMGT]?)i?B?$/i);
-	if (!m) throw new Error(`Invalid size "${s}" (use NK/NM/NG/NT, e.g. 2G)`);
+	if (!m) throw new QuickCHRError("INVALID_SIZE_STRING", `Invalid size "${s}" (use NK/NM/NG/NT, e.g. 2G)`);
 	const n = Number.parseFloat(m[1] ?? "0");
 	const unit = (m[2] ?? "").toUpperCase();
 	const mult: Record<string, number> = { "": 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4 };

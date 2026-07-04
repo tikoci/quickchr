@@ -69,6 +69,22 @@ describe("applyTimeoutExtraShortFlag", () => {
 		applyTimeoutExtraShortFlag(argv, flags);
 		expect(await resolveTimeoutExtraMs(flags)).toBe(15_000);
 	});
+
+	test("consumes -T <n> from positional args when it appears before the machine name", () => {
+		const argv = ["-T", "15", "lab"];
+		const { flags, positional } = parseFlags(argv);
+		applyTimeoutExtraShortFlag(argv, flags, positional);
+		expect(flags["timeout-extra"]).toBe("15");
+		expect(positional).toEqual(["lab"]);
+	});
+
+	test("still consumes a stray -T pair from positional args when --timeout-extra wins", () => {
+		const argv = ["--timeout-extra", "30", "-T", "15", "lab"];
+		const { flags, positional } = parseFlags(argv);
+		applyTimeoutExtraShortFlag(argv, flags, positional);
+		expect(flags["timeout-extra"]).toBe("30");
+		expect(positional).toEqual(["lab"]);
+	});
 });
 
 describe("resolveTimeoutExtraMs", () => {

@@ -394,7 +394,7 @@ Precedence per key (highest wins): CLI flag > `QUICKCHR_<KEY>` env var >
 | `default-arch` | `add`/`start`'s `--arch`, wizard's arch prompt | `arm64`\|`x86`\|`auto` | `auto` (host native) |
 | `cache-max-size` | Auto-prune cap applied after each successful `start` | size string (e.g. `2G`, `512M`) | `2G` |
 | `timeout-extra` | `start`'s `--timeout-extra`/`-T` when omitted | non-negative integer seconds | `0` |
-| `secure-login` | `add`/`start`'s `--secure-login` when neither `--secure-login` nor `--no-secure-login` is passed | boolean | `false` (reported as `(unset)` — see note) |
+| `secure-login` | `add`/`start`'s `--secure-login` when neither `--secure-login` nor `--no-secure-login` is passed | boolean | `unset` (reported as `(unset)` — see note) |
 
 `secure-login` is the one key `settings print`/`get` report as `(unset)` rather than a
 concrete `false`, unlike the other four: the setup wizard's login prompt needs to tell
@@ -1201,6 +1201,7 @@ present, then exits `1`.
 | `PROVISIONING_VERSION_UNSUPPORTED` | provisioning option on RouterOS < 7.20.8 | use `--channel long-term` or pin a `7.20.8+` version |
 | `INSUFFICIENT_DISK_SPACE` | host data dir full | free space or move via `QUICKCHR_DATA_DIR` |
 | `STATE_ERROR` | snapshot on raw boot disk | recreate with `--boot-disk-format=qcow2` |
+| `INVALID_SIZE_STRING` | invalid cache/settings size string | use size syntax like `512M`, `2G`, or `1.5G` |
 | `INVALID_SETTING_KEY` | `settings get`/`set`/`reset` received an unrecognized key | `quickchr settings print` to see the managed keys |
 | `INVALID_SETTING_VALUE` | `settings set` (or a `QUICKCHR_*` env var / `quickchr.env` line) failed validation for a recognized key | `quickchr help settings` for the expected type/enum per key |
 

@@ -263,6 +263,33 @@ describe("settingsGet / settingsSet / settingsReset round-trip", () => {
 		expect(raw).toContain("QUICKCHR_DEFAULT_CHANNEL=testing");
 		expect(raw).toContain("QUICKCHR_DEFAULT_ARCH=x86");
 	});
+
+	test("settingsSet updates the effective duplicate line and self-heals older duplicates", () => {
+		writeSettingsFile("QUICKCHR_DEFAULT_CHANNEL=testing\nFOO=bar\nQUICKCHR_DEFAULT_CHANNEL=development\n");
+		expect(resolveSetting("default-channel")).toEqual({ value: "development", source: "file" });
+
+		const result = settingsSet("default-channel", "long-term");
+
+		expect(result.previous).toBe("development");
+		expect(result.value).toBe("long-term");
+		expect(resolveSetting("default-channel")).toEqual({ value: "long-term", source: "file" });
+		const raw = readSettingsFileRaw();
+		expect(raw.match(/^QUICKCHR_DEFAULT_CHANNEL=/gm)?.length).toBe(1);
+		expect(raw).toContain("QUICKCHR_DEFAULT_CHANNEL=long-term");
+		expect(raw).toContain("FOO=bar");
+	});
+
+	test("settingsReset(attr) removes every duplicate line for that managed key", () => {
+		writeSettingsFile("QUICKCHR_DEFAULT_CHANNEL=testing\nFOO=bar\nQUICKCHR_DEFAULT_CHANNEL=development\n");
+
+		const result = settingsReset("default-channel");
+
+		expect(result.cleared).toEqual(["default-channel"]);
+		const raw = readSettingsFileRaw();
+		expect(raw).not.toContain("QUICKCHR_DEFAULT_CHANNEL");
+		expect(raw).toContain("FOO=bar");
+		expect(resolveSetting("default-channel")).toEqual({ value: "stable", source: "default" });
+	});
 });
 
 describe("settingsPrint tolerance", () => {

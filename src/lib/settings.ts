@@ -32,8 +32,8 @@ export interface SettingsKeyDef {
 	parse: (raw: string) => SettingsValue;
 	/** Canonical on-disk/display form. */
 	serialize: (value: SettingsValue) => string;
-	/** Concrete built-in default, when one exists. Keys without one (cache-max-size,
-	 *  timeout-extra, secure-login) defer to their own consumer's runtime fallback. */
+	/** Concrete built-in default when settings get/print should report one.
+	 *  Omit only when "unset" has meaning distinct from a concrete value. */
 	builtinDefault?: SettingsValue;
 }
 
@@ -180,14 +180,20 @@ export function loadSettingsFileDefaults(): Record<string, string> {
 	return parseSettingsFileLines(readSettingsFileLines());
 }
 
-function findLineIndex(lines: readonly string[], envKey: string): number {
-	return lines.findIndex((line) => {
-		const trimmed = line.trim();
-		if (trimmed.length === 0 || trimmed.startsWith("#")) return false;
-		const eq = trimmed.indexOf("=");
-		if (eq <= 0) return false;
-		return trimmed.slice(0, eq).trim() === envKey;
-	});
+function lineEnvKey(line: string): string | undefined {
+	const trimmed = line.trim();
+	if (trimmed.length === 0 || trimmed.startsWith("#")) return undefined;
+	const eq = trimmed.indexOf("=");
+	if (eq <= 0) return undefined;
+	return trimmed.slice(0, eq).trim();
+}
+
+function matchingLineIndices(lines: readonly string[], envKey: string): number[] {
+	const indices: number[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		if (lineEnvKey(lines[i] ?? "") === envKey) indices.push(i);
+	}
+	return indices;
 }
 
 function rawValueAtLine(lines: readonly string[], index: number): string {
@@ -300,7 +306,8 @@ export function settingsSet(attr: string, rawValue: string): SettingsSetResult {
 	const parsed = def.parse(rawValue);
 
 	const lines = readSettingsFileLines();
-	const index = findLineIndex(lines, def.envKey);
+	const indices = matchingLineIndices(lines, def.envKey);
+	const index = indices.at(-1) ?? -1;
 	const previousRaw = index >= 0 ? rawValueAtLine(lines, index) : undefined;
 	let previous: SettingsValue | undefined;
 	if (previousRaw !== undefined) {
@@ -314,6 +321,9 @@ export function settingsSet(attr: string, rawValue: string): SettingsSetResult {
 	const newLine = `${def.envKey}=${def.serialize(parsed)}`;
 	if (index >= 0) {
 		lines[index] = newLine;
+		for (let i = indices.length - 2; i >= 0; i--) {
+			lines.splice(indices[i] ?? -1, 1);
+		}
 	} else {
 		lines.push(newLine);
 	}
@@ -333,9 +343,11 @@ export function settingsReset(attr?: string): SettingsResetResult {
 		const def = lookupSettingsKey(attr);
 		if (!def) throw unknownKeyError(attr);
 		const lines = readSettingsFileLines();
-		const index = findLineIndex(lines, def.envKey);
-		if (index < 0) return { cleared: [] };
-		lines.splice(index, 1);
+		const indices = matchingLineIndices(lines, def.envKey);
+		if (indices.length === 0) return { cleared: [] };
+		for (let i = indices.length - 1; i >= 0; i--) {
+			lines.splice(indices[i] ?? -1, 1);
+		}
 		writeSettingsFileLinesSync(lines);
 		return { cleared: [def.attr] };
 	}
