@@ -22,7 +22,7 @@ Four workflows, each with a distinct purpose:
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
 | **CI** | `ci.yml` | push/PR to `main`, `workflow_dispatch` | Core quality gate — every push |
-| **Extended Verification** | `verify-extended.yml` | `workflow_dispatch` only | arm64, macOS, Windows integration |
+| **Integration** | `integration.yml` | `workflow_dispatch`, `workflow_call` | THE reusable integration unit — any platform × RouterOS target × test filter |
 | **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1` or `PSScriptAnalyzerSettings.psd1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
 | **Publish** | `publish.yml` | `push: tags: v*`, `workflow_dispatch` | NPM publish pipeline |
 
@@ -49,11 +49,22 @@ added 2026-06-24, #15/#16). Both publish against the default (stable) image.
 
 Triggered by `bun run release` (creates and pushes a `vX.Y.Z` tag) or via GitHub Actions UI (`workflow_dispatch`). The publish step runs `npm publish --tag next` for pre-releases (odd minor) and `--tag latest` for stable releases (even minor).
 
-### Extended Verification (verify-extended.yml)
+### Integration (integration.yml)
 
-`workflow_dispatch` only — never runs on push/PR. One dispatch chooses **which platforms** (the five toggles), **what runs on them** (`run-integration` and/or `run-examples` — the examples smoke harness), against **which RouterOS** (`routeros-target`), on **which branch** (the ref picked in the "Run workflow" dropdown). So platform × mode is the matrix: the same dispatch can verify the integration suite AND the runnable examples across the selected OSes. Use `test-filter` to narrow integration to specific files and `example-filter` to narrow the smoke harness. Unlike `ci.yml`/`publish.yml` (which always boot the default/stable), this is how arm64/macOS/Windows — and, via the selectable `linux-x86` toggle, x86 — get exercised against long-term/testing/development or a pinned version.
+The single owner of integration-test execution ([#29](https://github.com/tikoci/quickchr/issues/29)) — no other workflow defines its own CHR runner logic. Two faces: `workflow_call` for wrapper workflows, and `workflow_dispatch` as the manual/lab face. One dispatch chooses **which platforms** (`platforms` — comma list or `gating`/`all` alias), **what runs** (`run-integration` and/or `run-examples`), against **which RouterOS** (`routeros-target`), on **which branch** (the ref in the "Run workflow" dropdown). Use `test-filter` to narrow integration to specific files and `example-filter` to narrow the smoke harness.
 
-Most jobs are independent, except the examples smoke matrix is built dynamically: `plan-smoke` reads the selected platform toggles and emits the `examples-smoke` matrix (one job per chosen OS). **Examples are held to the same bar as the code** — a broken example REDS the workflow on the gating platforms (linux KVM, macOS HVF); macOS/x86 and Windows (TCG) stay non-gating/informational, mirroring the integration jobs. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1`, so `.ps1` regressions surface in normal PR CI, not just on a manual dispatch ([#28](https://github.com/tikoci/quickchr/issues/28)). (Integration-exercised coverage is **not** collected here yet — the standalone coverage job was removed because it re-ran the whole suite; reworking it as a byproduct of the integration jobs is tracked in [#30](https://github.com/tikoci/quickchr/issues/30).)
+**Agents: dispatch this to ground a hypothesis on a platform you don't have locally**, instead of guessing from training data or waiting for a full verification cycle:
+
+```bash
+gh workflow run integration.yml --ref <branch> \
+  -f platforms=macos-arm64 -f test-filter=exec.test.ts -f routeros-target=7.24beta2
+gh run list --workflow integration.yml --limit 1   # grab the run id
+gh run watch <run-id> --exit-status                # wait for the verdict
+```
+
+A `plan` job resolves `platforms` into one cross-OS matrix job (unknown platform ids **fail the plan** — a typo never produces an empty green run). **There is no `continue-on-error` anywhere**: TCG platforms (macos-x86, windows-x86) default to a curated smoke subset (`anchor.test.ts`) that reliably completes instead of being green-washed; an explicit `test-filter` overrides the subset. **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
+
+Every integration job records per-file wall-clock timing to `integration-timing.txt` (in the artifact) — the raw feed for the metrics scheme tracked in [#30](https://github.com/tikoci/quickchr/issues/30).
 
 ## Release Process
 
@@ -84,8 +95,9 @@ The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Win
 - `test/unit/windows-channels.test.ts` — on Windows, `buildQemuArgs` produces TCP-localhost chardev paths (`host=127.0.0.1,port=portBase+N`: monitor +6, serial +7, qga +8), because QEMU's Winsock `bind()` cannot handle `\\.\pipe\` paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` when the TCP port is not listening; `stopMachineByName` handles no `.sock` files
 - `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`
 
-**Windows integration tests** run via the `windows-x86` dispatch input in
-Extended Verification — **experimental, informational, non-gating** (`continue-on-error: true`).
+**Windows integration tests** run via `platforms=windows-x86` on `integration.yml` —
+TCG-only, defaulting to the smoke subset (`anchor.test.ts`); a red job is a real failure
+(no `continue-on-error`). Set `test-filter` explicitly for a broader run.
 QEMU is installed with `choco install qemu` and runs under TCG (no HVF/WHPX on GitHub
 Windows runners). **Result (2026-06-07, run 27097457831): the full suite passed on
 windows-latest/TCG — 56 pass / 0 fail / 3 skip.** Validated end-to-end: CHR boot, monitor
@@ -98,36 +110,32 @@ snapshot smoke — listed in `BACKLOG.md`. TCG boots are slow (90-min job timeou
 narrow with `test-filter` (e.g. `start-stop.test.ts`) before the full suite.
 To run locally on Windows: `bun test test/unit/`
 
-## Extended Verification — Dispatch Inputs
+## Integration — Dispatch Inputs
 
-Inputs split into **modes** (what to run), **platforms** (where), and **scope/target**. Each selected platform runs integration (if `run-integration`) and/or the examples smoke harness (if `run-examples`). (Windows **unit** tests aren't here; they run on every push in the main CI pipeline.)
-
-**Modes — what runs:**
+Inputs split into **platforms** (where), **modes** (what to run), and **scope/target**. Each selected platform runs integration (if `run-integration`) and/or the examples smoke harness (if `run-examples`). (Windows **unit** tests aren't here; they run on every push in the main CI pipeline.)
 
 | Input | Type | Default | Effect |
 |-------|------|---------|--------|
-| `run-integration` | boolean | **true** | Run `test/integration/` on each selected platform (the integration jobs). |
-| `run-examples` | boolean | false | Run the examples smoke harness on each selected platform (`examples-smoke` matrix) + `lint-powershell`. |
-
-**Platforms — where (each drives both modes):**
-
-| Input | Type | Default | Runner | Smoke gating |
-|-------|------|---------|--------|--------------|
-| `linux-x86` | boolean | false | ubuntu-latest (KVM) | gating |
-| `linux-arm64` | boolean | false | ubuntu-24.04-arm (KVM) | gating |
-| `macos-arm64` | boolean | false | macos-15 (HVF) | gating |
-| `macos-x86` | boolean | false | macos-15-intel (TCG; integration defaults to `anchor.test.ts` unless `test-filter` set) | non-gating |
-| `windows-x86` | boolean | false | windows-latest (TCG, experimental) | non-gating |
-
-**Scope / target:**
-
-| Input | Type | Default | Effect |
-|-------|------|---------|--------|
-| `test-filter` | string | "" | Integration: comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all |
+| `platforms` | string | `linux-x86` | Comma-separated platform ids, or alias `gating` (= linux-x86,linux-arm64,macos-arm64) / `all`. Unknown ids fail the plan job. |
+| `run-integration` | boolean | **true** | Run `test/integration/` on each selected platform. |
+| `run-examples` | boolean | false | Run the examples smoke harness on each selected platform + `lint-powershell`. |
+| `test-filter` | string | "" | Integration: comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all (TCG platforms: smoke subset `anchor.test.ts`) |
 | `example-filter` | string | "" | Examples: comma-separated example names — e.g. `"quickstart,rollback"`; empty = curated subset. A typo fails fast (the harness validates against known names). |
 | `routeros-target` | string | "" | RouterOS channel (`stable`/`long-term`/`testing`/`development`) **or** a pinned version (`7.22.1`, `7.24beta2`); empty = stable. Feeds both integration and examples. |
 
-**`test-filter` for agent iteration**: when debugging a specific arm64 failure, set `linux-arm64: true` and `test-filter: "exec.test.ts"` to skip the 40-minute full suite and get results in ~5 minutes.
+(`workflow_call` adds `artifact-prefix` so parallel callers don't collide on artifact names.)
+
+**Platform table** (one row per matrix leg; the `plan` job owns this mapping):
+
+| Platform id | Runner | CHR arch | Accel | Default scope |
+|-------------|--------|----------|-------|---------------|
+| `linux-x86` | ubuntu-latest | x86 | KVM | full suite |
+| `linux-arm64` | ubuntu-24.04-arm | arm64 | KVM | full suite |
+| `macos-arm64` | macos-15 | arm64 | HVF | full suite |
+| `macos-x86` | macos-15-intel | x86 | TCG | smoke subset (`anchor.test.ts`) |
+| `windows-x86` | windows-latest | x86 | TCG | smoke subset (`anchor.test.ts`) |
+
+**`test-filter` for agent iteration**: when debugging a specific arm64 failure, dispatch `platforms=linux-arm64` with `test-filter=exec.test.ts` to skip the 40-minute full suite and get results in ~5 minutes.
 
 **The examples smoke harness** (`test/integration/examples-smoke.test.ts`) runs a curated subset of runnable examples end-to-end — one representative per language *for the current OS* (`.ts` everywhere; `.sh`/`.py`-via-`uv` on POSIX; `.ps1` on Windows) — plus an intentional failure-path case that asserts teardown fires on error. `trial-license` is excluded (MikroTik rate-limits). Double-gated by `QUICKCHR_INTEGRATION` + `EXAMPLES_SMOKE` so the integration jobs don't pay for example boots; the `examples-smoke` job sets both via `bun run smoke:examples`.
 
@@ -177,12 +185,13 @@ a new tracked issue.
 ### Integration test failures
 - **Artifact** (7-day retention) — one per job:
   - `ci.yml`: `integration-logs-linux-x64`
-  - `verify-extended.yml`: `integration-logs-{linux-x86|linux-arm64|macos-arm64|macos-x64|windows-x64}`
+  - `integration.yml`: `integration-logs-{linux-x86|linux-arm64|macos-arm64|macos-x86|windows-x86}` (callers may override the `integration-` prefix via `artifact-prefix`)
   - `publish.yml`: `publish-integration-logs-{x86|arm64}`
   - `integration-output.txt` — full `bun test` output including error messages
+  - `integration-timing.txt` — per-file wall-clock seconds + pass/fail (integration.yml only)
   - `machines/**/*.json` — `machine.json` with last-known state, ports, config
   - `machines/**/*.log` — `qemu.log` with QEMU stdout/stderr (boot messages, panics)
-- **Step summary**: last 80 lines of test output shown per runner
+- **Step summary**: `integration.yml` shows failing lines + per-file timing (full log in the artifact); `ci.yml`/`publish.yml` show the last 80 lines per runner
 
 ### Boot failure diagnosis checklist
 1. Open `qemu.log` from the artifact — look for `Panic`, `Error`, `EFI` failures
@@ -251,7 +260,7 @@ bun test test/unit/ --coverage
 QUICKCHR_INTEGRATION=1 bun test test/integration/
 
 # Same, but boot a specific RouterOS target (channel or pinned version) —
-# mirrors the verify-extended.yml `routeros-target` dispatch input:
+# mirrors the integration.yml `routeros-target` dispatch input:
 QUICKCHR_TEST_TARGET=long-term QUICKCHR_INTEGRATION=1 bun test test/integration/
 
 # Release (creates tag + triggers publish):
@@ -268,9 +277,10 @@ cache needs to be invalidated (e.g. corrupted image from a partial download).
 
 ## Adding a New Runner
 
-1. Add the job to the appropriate workflow file:
-   - Core platforms → `ci.yml` (must be fast and reliable)
-   - Experimental/fragile platforms → `verify-extended.yml`
+1. Add a row to the `plan` job's platform table in `integration.yml` (id, label, runner,
+   tcg, smoke-default) and a conditional `Install QEMU + tools` step if the OS needs a new
+   package set. Do NOT add standalone integration jobs to other workflows — `integration.yml`
+   is the single owner of runner logic.
 2. Install the right apt/brew packages directly in the job's `Install QEMU + tools` step.
    Required Linux apt packages by platform:
    - **x86_64**: `qemu-system-x86 qemu-utils ipxe-qemu sshpass`

@@ -2,16 +2,16 @@ name: PowerShell Lint
 
 # Lints the example PowerShell mirrors (examples/**/*.ps1) with PSScriptAnalyzer.
 #
-# Why a dedicated workflow (not a step in ci.yml or only in verify-extended.yml):
+# Why a dedicated workflow (not a step in ci.yml or only in integration.yml):
 #   - PSScriptAnalyzer needs a Windows runner + the module installed; folding it
 #     into the Linux core pipeline would slow every push for a niche check.
-#   - It used to live ONLY in verify-extended.yml (workflow_dispatch), so .ps1
-#     regressions surfaced late — a PSUseUsingScopeModifierInNewRunspaces failure
-#     in #22 only appeared on a manual Extended Verification run (see issue #28).
+#   - It used to live ONLY in a dispatch-only workflow, so .ps1 regressions
+#     surfaced late — a PSUseUsingScopeModifierInNewRunspaces failure in #22
+#     only appeared on a manual verification run (see issue #28).
 #
 # So: trigger on `.ps1` (and the analyzer settings) changes for fast PR feedback,
-# AND expose `workflow_call` so Extended Verification reuses the same job — one
-# source of truth for "are the .ps1 examples clean?".
+# AND expose `workflow_call` so integration.yml reuses the same job when examples
+# run — one source of truth for "are the .ps1 examples clean?".
 
 on:
   push:
@@ -26,7 +26,7 @@ on:
       - "examples/**/*.ps1"
       - "examples/PSScriptAnalyzerSettings.psd1"
       - ".github/workflows/lint-powershell.yml"
-  # Reusable: verify-extended.yml calls this so the dispatch path stays covered.
+  # Reusable: integration.yml calls this so the dispatch path stays covered.
   workflow_call:
 
 permissions:

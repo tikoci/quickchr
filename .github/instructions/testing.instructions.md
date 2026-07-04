@@ -39,7 +39,7 @@ bun test                                         # All tests
 
 Integration tests boot `stable` by default. Set `QUICKCHR_TEST_TARGET` to point CHR boots
 at another release — a channel (`stable`/`long-term`/`testing`/`development`) or a pinned
-version (`7.22.1`, `7.24beta2`). This is the same knob the `verify-extended.yml`
+version (`7.22.1`, `7.24beta2`). This is the same knob the `integration.yml`
 `routeros-target` dispatch input exports; tests read it via `test/integration/image-target.ts`.
 
 ```bash
