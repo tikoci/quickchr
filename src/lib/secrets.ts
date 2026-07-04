@@ -12,11 +12,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
-
-function configDir(): string {
-	return join(process.env.HOME ?? process.env.USERPROFILE ?? homedir(), ".config", "quickchr");
-}
+import { quickchrConfigDir } from "./paths.ts";
 
 /** True when the Bun.secrets API is available at runtime. */
 function hasBunSecrets(): boolean {
@@ -32,7 +28,7 @@ function hasBunSecrets(): boolean {
 function configPath(service: string): string {
 	// One JSON file per service, keyed by name
 	const safeName = service.replace(/[^a-zA-Z0-9._-]/g, "_");
-	return join(configDir(), `${safeName}.json`);
+	return join(quickchrConfigDir(), `${safeName}.json`);
 }
 
 function readConfigStore(service: string): Record<string, string> {
@@ -129,5 +125,5 @@ export async function secretDelete(service: string, name: string): Promise<boole
 /** Human-readable label for where secrets are stored. */
 export function secretStorageLabel(): string {
 	if (hasBunSecrets()) return "OS credential store (via Bun.secrets)";
-	return `config file (${configDir()})`;
+	return `config file (${quickchrConfigDir()})`;
 }

@@ -10,6 +10,14 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Added
 
+- **`quickchr settings` command** (issue #46) — a small user-scoped settings framework for 5
+  previously-hardcoded defaults: `default-channel`, `default-arch`, `cache-max-size`,
+  `timeout-extra`, `secure-login`. Stored in `~/.config/quickchr/quickchr.env` (dotenv-style).
+  Precedence: CLI flag > `QUICKCHR_<KEY>` env var > `quickchr.env` > built-in default.
+  `add`/`start`, the setup wizard's channel/arch selection, and the post-boot cache
+  auto-prune cap all now consult these. Never mutates `machine.json`; refuses to hold
+  credential-shaped values (mirrors `tikoci/centrs`'s `settings` precedent). New
+  `quickchr settings print|get|set|reset` verbs; see MANUAL.md §3/§11/§14.
 - **`routeros-quickchr` agent skill** (in `tikoci/routeros-skills`) — a pointer-heavy guide for
   AI agents (and anyone) on grounding RouterOS config/scripts/API against a real router with
   quickchr: the apply→read-back loop, the by-goal networking decision table, the harness
@@ -32,6 +40,17 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Changed
 
+- **Wizard channel default** (issue #46) now resolves the same way `add`/`start` do (`stable`
+  when not configured, or the `default-channel` setting) instead of a hardcoded `long-term`,
+  fixing a pre-existing inconsistency between the two entry points. The "recommended for
+  provisioning" hint on `long-term` is unchanged. The wizard's architecture prompt and login
+  prompt now similarly reflect the `default-arch`/`secure-login` settings.
+- **`quickchr start --timeout-extra 0`** is now honored as an explicit zero instead of being
+  silently treated as if the flag were omitted (incidental fix while wiring the new
+  `timeout-extra` setting; issue #46).
+- **`DESIGN.md`/`MANUAL.md`** storage-layout diagrams corrected: the documented-but-never-
+  implemented `$QUICKCHR_DATA_DIR/quickchr/config.json` is replaced with the real
+  `~/.config/quickchr/quickchr.env` (issue #46).
 - **JSDoc parity** on the networking option types (`StartOptions.networks`/`extraPorts`,
   `NetworkSpecifier`, `PortMapping`, `tzspGatewayIp`) — maps specifiers to goals, documents
   UDP/range forwards, and notes the CLI↔library equivalence, so consumers don't have to read
@@ -48,6 +67,51 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   headless `-display none`, indexed `-netdev`/`-drive` lookup, TCG-branch coverage) and added
   an empty-body `resolveVersion` → `INVALID_VERSION` case. Folds in the sound parts of the
   closed AI-findings PRs (#6/#8/#9).
+
+### Fixed
+
+- **`secureLogin` was silently dropped when starting an already-`add()`-created machine**
+  (issue #46) — `QuickCHR.start()`'s "first boot of an add()-created machine" path computed
+  its own `hasPending` provisioning check without `secureLogin`, and didn't fall back to the
+  value stored in `machine.json` the way sibling fields (`user`, `disableAdmin`, etc.) already
+  did. This meant `--secure-login` (and the new `secure-login` setting/`QUICKCHR_SECURE_LOGIN`
+  env var) had no effect at all for the standard `add` then `start <name>` workflow — only a
+  single combined `add --secure-login` immediately followed by boot worked. Found via the new
+  `secure-login` setting's integration test; fixed by including `secureLogin === true` in the
+  pending-provisioning check and adding the missing `?? existing.secureLogin` fallback.
+- **Wizard "quickchr managed login" never actually provisioned the managed account**
+  (issue #46) — the wizard's `userChoice === "managed"` branch only set `disableAdmin: true`,
+  never `secureLogin: true`, and `provision()` only auto-creates the replacement `quickchr`
+  account when `secureLogin` is explicitly `true`. Choosing the recommended "managed login"
+  option in the wizard could disable the default admin account with no replacement login
+  provisioned at all. Fixed by setting both fields together; the decision logic is now a pure,
+  directly unit-tested `resolveUserChoiceOptions()` export in `src/cli/wizard.ts`.
+- **`quickchr start --all` ignored `timeout-extra`/`secure-login` entirely** (issue #46) — the
+  bulk-restart path called `QuickCHR.start({ name, background: true })` directly, bypassing
+  the settings/env/flag resolution the single-target path used. Both bulk and single-target
+  restarts now share the same `resolveTimeoutExtraMs()`/`resolveSecureLoginFlag()` helpers.
+- **An invalid `--timeout-extra` value silently became `NaN`** (issue #46) — e.g.
+  `--timeout-extra abc` flowed through as `StartOptions.timeoutExtra: NaN`, serializing as
+  `null` in `--dry-run` output and potentially causing an immediate boot-timeout cleanup on a
+  real start. The flag is now validated with the same non-negative-integer rule the
+  `timeout-extra` setting itself uses (shared `parseTimeoutExtraSeconds()`), while an explicit
+  `--timeout-extra 0` is still correctly honored as zero, not "omitted."
+- **`-T` (the documented short alias for `--timeout-extra`) never actually worked** (issue #46,
+  found while adding test coverage for the previous fix) — `parseFlags()` only recognizes `--`
+  prefixed flags; a bare `-T 15` fell through entirely into positional args and was silently
+  ignored. Fixed with a small `applyTimeoutExtraShortFlag()` helper (same pattern `cmdLogs`
+  already uses for its own `-f`/`-n` single-dash aliases), with unit coverage.
+- **`quickchr settings print` crashed on a single malformed value** instead of showing the rest
+  of the table (issue #46) — the all-keys path resolved each key with the strict
+  `resolveSetting()` rather than the already-tested tolerant `settingsPrint()` helper. Now uses
+  `settingsPrint()`, with CLI-level regression coverage (`test/unit/cli-settings.test.ts`).
+- **`cache-max-size`/`timeout-extra` settings metadata contradicted their own documented
+  defaults** (issue #46) — `quickchr settings print` showed `(unset)` for both even though
+  MANUAL.md and the CLI's own help text documented concrete defaults (`2G`/`0`). Both now have
+  a real `builtinDefault` (`DEFAULT_CACHE_MAX_BYTES` / `0`) — every consumer already treated
+  "unset" and these exact values identically, so this is display-only, not a behavior change.
+  `secure-login` intentionally keeps no `builtinDefault`: the wizard needs to distinguish "not
+  configured" from "explicitly false" to know whether to still recommend managed login.
 
 ### Security
 

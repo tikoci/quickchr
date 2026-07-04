@@ -26,6 +26,7 @@ armvirt
 askpass
 authless
 awk
+bak
 backoff
 basicauth
 bavail

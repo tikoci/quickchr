@@ -5,6 +5,7 @@ import {
 	autoPruneIfOverCap,
 	listCacheEntries,
 	parseCacheBasename,
+	parseSizeString,
 	pruneCache,
 } from "../../src/lib/cache.ts";
 import { getCacheDir, getMachinesDir } from "../../src/lib/state.ts";
@@ -189,5 +190,32 @@ describe("autoPruneIfOverCap", () => {
 
 	test("never throws on errors", () => {
 		expect(() => autoPruneIfOverCap({ cacheDir: "/nonexistent/path/xyz", maxSizeBytes: 0 })).not.toThrow();
+	});
+});
+
+describe("parseSizeString", () => {
+	test("parses plain integers as bytes", () => {
+		expect(parseSizeString("1024")).toBe(1024);
+	});
+
+	test("parses K/M/G/T suffixes as IEC binary units", () => {
+		expect(parseSizeString("512M")).toBe(512 * 1024 ** 2);
+		expect(parseSizeString("2G")).toBe(2 * 1024 ** 3);
+		expect(parseSizeString("1T")).toBe(1024 ** 4);
+	});
+
+	test("parses fractional sizes, flooring to an integer byte count", () => {
+		expect(parseSizeString("1.5G")).toBe(Math.floor(1.5 * 1024 ** 3));
+	});
+
+	test("is case-insensitive and tolerates trailing i/B (KiB, GB, etc.)", () => {
+		expect(parseSizeString("2g")).toBe(2 * 1024 ** 3);
+		expect(parseSizeString("2GiB")).toBe(2 * 1024 ** 3);
+		expect(parseSizeString("2GB")).toBe(2 * 1024 ** 3);
+	});
+
+	test("throws on an invalid size string", () => {
+		expect(() => parseSizeString("not-a-size")).toThrow();
+		expect(() => parseSizeString("2X")).toThrow();
 	});
 });

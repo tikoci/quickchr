@@ -95,8 +95,14 @@ Current consumers are all first-party tikoci projects (centrs, donny, restraml),
 │       ├── qga.sock           # QGA (x86 only)
 │       ├── qemu.pid           # PID file
 │       └── qemu.log           # Output log
-└── config.json                # Global config
 ```
+
+**Global settings** live separately, under the XDG **config** tier (not the data tree
+above): `~/.config/quickchr/quickchr.env`, dotenv-style (`QUICKCHR_KEY=value` lines).
+Managed via `quickchr settings get|set|print|reset`. Precedence per key: CLI flag >
+`QUICKCHR_<KEY>` env var > `quickchr.env` > built-in default. The 5 managed keys:
+`default-channel`, `default-arch`, `cache-max-size`, `timeout-extra`, `secure-login`.
+See MANUAL.md's CLI reference and environment-variables sections for the full surface.
 
 ## Platform Support
 

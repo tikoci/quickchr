@@ -15,6 +15,24 @@ import type { Arch } from "./types.ts";
 
 export const DEFAULT_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 
+/** Parse a human size string (NK/NM/NG/NT, IEC binary, case-insensitive) to bytes. */
+export function parseSizeString(s: string): number {
+	const m = s.match(/^(\d+(?:\.\d+)?)([KMGT]?)i?B?$/i);
+	if (!m) throw new Error(`Invalid size "${s}" (use NK/NM/NG/NT, e.g. 2G)`);
+	const n = Number.parseFloat(m[1] ?? "0");
+	const unit = (m[2] ?? "").toUpperCase();
+	const mult: Record<string, number> = { "": 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4 };
+	return Math.floor(n * (mult[unit] ?? 1));
+}
+
+/** Format a byte count as a human size (IEC binary), matching cache list's display. */
+export function formatSizeBytes(b: number): string {
+	if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GiB`;
+	if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MiB`;
+	if (b >= 1024) return `${(b / 1024).toFixed(1)} KiB`;
+	return `${b} B`;
+}
+
 export interface CacheEntry {
 	path: string;
 	basename: string;
