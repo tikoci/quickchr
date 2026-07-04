@@ -1,0 +1,190 @@
+name: Release
+
+# The one-click release path (replaces publish.yml + scripts/release.ts):
+#
+#   gh workflow run release.yml -f version-bump=patch              # release now
+#   gh workflow run release.yml -f version-bump=patch -f dry-run=true   # preview
+#
+# What it does (prepare job → publish job):
+#   1. Refuses to run off main; refuses a dirty [Unreleased] gate:
+#      - Integration freshness: latest completed main.yml run on main must be
+#        GREEN (scripts/ci-freshness.ts — same gate PRs see). No suite re-run:
+#        main is kept continuously release-able instead.
+#      - CHANGELOG.md [Unreleased] must be non-empty (it becomes the notes).
+#   2. Quick sanity re-check on the exact release commit: bun test test/unit/.
+#   3. scripts/release-prep.ts: bump package.json, roll [Unreleased] over to
+#      `## [X.Y.Z] — date`, emit release notes.
+#   4. Commit "release: vX.Y.Z", tag vX.Y.Z, push, create the GitHub Release
+#      (notes = the changelog section).
+#   5. Publish to npm with --provenance. Dist-tag from the odd/even-minor
+#      scheme: odd minor (0.5.x) → `next`, even minor (0.4.x) → `latest`.
+#
+# Dry-run mode runs every check and prints the would-be version/notes but
+# pushes nothing and publishes nothing.
+#
+# Required secret: NPM_TOKEN — npm automation token for @tikoci/quickchr.
+# Note: the version-bump push to main triggers ci.yml + main.yml runs on the
+# release commit as usual — the freshness gate for the NEXT release reads those.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version-bump:
+        type: choice
+        description: "Version bump — or pick 'exact' and fill exact-version"
+        options: [patch, minor, major, exact]
+        default: patch
+      exact-version:
+        type: string
+        description: "Exact X.Y.Z (only used when version-bump = exact)"
+        default: ""
+      dry-run:
+        type: boolean
+        description: "Dry run — run all checks, push nothing, publish nothing"
+        default: false
+
+permissions:
+  contents: read
+
+# Never run two releases at once; never cancel one mid-flight.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # ── prepare: gates, version bump, tag, GitHub Release ────────────────────────
+  prepare:
+    name: Gate, bump, tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      npm-tag: ${{ steps.prep.outputs.npm-tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+      - run: bun install --frozen-lockfile
+
+      - name: Refuse non-main refs
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Releases run from main only (got ${{ github.ref }})"
+          exit 1
+
+      - name: Integration freshness gate
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun run scripts/ci-freshness.ts
+
+      - name: Unit-test the release commit
+        run: |
+          set -eo pipefail
+          bun test test/unit/ 2>&1 | tee /tmp/release-unit.txt | tail -5
+
+      - name: Bump version + roll CHANGELOG
+        id: prep
+        env:
+          BUMP: ${{ inputs.version-bump }}
+          EXACT: ${{ inputs.exact-version }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -eo pipefail
+          ARG="$BUMP"
+          if [ "$BUMP" = "exact" ]; then
+            if [ -z "$EXACT" ]; then
+              echo "::error::version-bump=exact requires exact-version"
+              exit 1
+            fi
+            ARG="$EXACT"
+          fi
+          FLAGS=""
+          [ "$DRY_RUN" = "true" ] && FLAGS="--dry-run"
+          bun scripts/release-prep.ts "$ARG" $FLAGS --notes-out /tmp/release-notes.md \
+            | tee /tmp/release-prep.txt
+          VERSION=$(grep '^version=' /tmp/release-prep.txt | cut -d= -f2)
+          NPM_TAG=$(grep '^npm-tag=' /tmp/release-prep.txt | cut -d= -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "npm-tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Release ${VERSION}"
+            echo "- npm tag: \`${NPM_TAG}\`"
+            echo "- dry run: ${DRY_RUN}"
+            echo ""
+            echo "### Notes"
+            cat /tmp/release-notes.md 2>/dev/null || sed -n '/--- release notes/,$p' /tmp/release-prep.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit, tag, push, create GitHub Release
+        if: ${{ inputs.dry-run != true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prep.outputs.version }}
+          NPM_TAG: ${{ steps.prep.outputs.npm-tag }}
+        run: |
+          set -eo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json CHANGELOG.md
+          git commit -m "release: v${VERSION}"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin main "v${VERSION}"
+          PRERELEASE=""
+          [ "$NPM_TAG" = "next" ] && PRERELEASE="--prerelease"
+          gh release create "v${VERSION}" --title "v${VERSION}" \
+            --notes-file /tmp/release-notes.md $PRERELEASE
+
+  # ── publish: npm with provenance ─────────────────────────────────────────────
+  publish:
+    name: Publish to npm
+    needs: prepare
+    if: ${{ inputs.dry-run != true }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: v${{ needs.prepare.outputs.version }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+      - uses: actions/setup-node@v5
+        with:
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+
+      - name: Verify tag matches package.json
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          PKG_VER=$(node -pe "require('./package.json').version")
+          if [ "$PKG_VER" != "$VERSION" ]; then
+            echo "::error::package.json ($PKG_VER) does not match release version ($VERSION)"
+            exit 1
+          fi
+
+      - name: Verify NPM_TOKEN is present
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not available to this run"
+            exit 1
+          fi
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TAG: ${{ needs.prepare.outputs.npm-tag }}
+        run: bunx npm publish --access public --provenance --tag "$NPM_TAG"
+
+      - name: Publish summary
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          NPM_TAG: ${{ needs.prepare.outputs.npm-tag }}
+        run: |
+          {
+            echo "## Published"
+            echo "- \`@tikoci/quickchr@${VERSION}\` → npm dist-tag \`${NPM_TAG}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

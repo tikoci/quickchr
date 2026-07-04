@@ -148,9 +148,11 @@ automatically, no per-runner overrides. TCG platforms (macos-x86, windows-x86) d
 a curated smoke subset instead of `continue-on-error` — green means the selected tests
 passed ("green should be green").
 
-**`publish.yml`** — triggers on `v*` tags (or dispatch). Runs lint + unit + x86 integration +
-windows-unit before `npm publish` (`--tag next` for odd/pre-release minors, `--tag latest`
-for even/stable). See "Release Process" in `ci.instructions.md`.
+**`release.yml`** — one-click `workflow_dispatch` release: gates on the PR freshness check
+(latest `main.yml` integration run green — no suite re-run) + a non-empty CHANGELOG
+`[Unreleased]`, then bumps/rolls over via `scripts/release-prep.ts`, tags, creates the
+GitHub Release, and runs `npm publish --provenance` (`--tag next` for odd/pre-release
+minors, `--tag latest` for even/stable). See "Release Process" in `ci.instructions.md`.
 
 **Coverage**: `unit-tests` parses `bun test --coverage` output and compares against thresholds
 (default 75% functions, 60% lines). Failures emit `::warning::` annotations but do NOT block
