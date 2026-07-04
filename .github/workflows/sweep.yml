@@ -29,7 +29,11 @@ jobs:
   sweep:
     name: All-platform sweep
     uses: ./.github/workflows/integration.yml
+    # contents: write flows down to the aggregate job (ci-data metrics push).
+    permissions:
+      contents: write
     with:
       platforms: all
       run-examples: true
+      collect-metrics: true
       artifact-prefix: sweep

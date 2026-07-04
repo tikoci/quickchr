@@ -222,6 +222,10 @@ export interface MachineState extends MachineConfig {
 	pid?: number;
 	/** Path to the machine directory. */
 	machineDir: string;
+	/** Accelerator resolved for the most recent boot ("kvm" | "hvf" | "tcg"). */
+	lastAccel?: string;
+	/** Wall-clock ms from QEMU spawn to REST-ready for the most recent boot. */
+	lastBootMs?: number;
 }
 
 // --- Start Options ---

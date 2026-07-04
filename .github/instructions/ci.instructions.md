@@ -94,7 +94,31 @@ gh run watch <run-id> --exit-status                # wait for the verdict
 
 A `plan` job resolves `platforms` into one cross-OS matrix job (unknown platform ids **fail the plan** — a typo never produces an empty green run). **There is no `continue-on-error` anywhere**: TCG platforms (macos-x86, windows-x86) default to a curated smoke subset (`anchor.test.ts`) that reliably completes instead of being green-washed; an explicit `test-filter` overrides the subset. **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
 
-Every integration job records per-file wall-clock timing to `integration-timing.txt` (in the artifact) — the raw feed for the metrics scheme tracked in [#30](https://github.com/tikoci/quickchr/issues/30).
+Every integration job records per-file wall-clock timing to `integration-timing.txt` and assembles `metrics.ndjson` (both in the artifact) — see "CI metrics (ci-data)" below ([#30](https://github.com/tikoci/quickchr/issues/30)).
+
+## CI metrics (ci-data)
+
+CHR boot timing and test outcomes are collected as a **byproduct** of integration runs —
+never a second run, never affecting pass/fail:
+
+1. The **library** appends every successful boot to `<dataDir>/boot-log.ndjson`
+   (`{ts, name, version, arch, accel, bootMs, host}`, rotated at 1000→500 lines) and stamps
+   `lastAccel`/`lastBootMs` into `machine.json`. This survives test cleanup — machine dirs
+   are removed by tests, so machine.json alone cannot carry timing to CI.
+2. Each integration job runs `bun scripts/ci-metrics.ts assemble` (always, even on failure):
+   boot-log + `integration-timing.txt` → `metrics.ndjson` (boot / test-file / suite records)
+   + a boot-timing table in the job summary.
+3. When a caller passes `collect-metrics: true` (main.yml, sweep.yml, ros-versions
+   dispatches), the `aggregate` job pushes each platform's `metrics.ndjson` to the
+   **`ci-data` orphan branch** as `runs/<run_id>-<platform>.ndjson` and folds suite records
+   into `tested-versions.json` (`{version: {platform: {run_id, date, conclusion}}}`).
+   Only `scope=full` runs mark a version tested; fails are recorded so the scheduler
+   re-flags them. Callers must grant `contents: write` (reusable-workflow permissions are
+   capped by the calling job).
+
+The ci-data branch README documents the schema + `gh`/jq/SQLite query recipes. Agents
+debugging "why is this platform slow" should read `tested-versions.json` and the recent
+`runs/*.ndjson` before theorizing.
 
 ## Release Process
 

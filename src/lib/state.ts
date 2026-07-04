@@ -24,6 +24,42 @@ export function getMachinesDir(): string {
 	return join(getDataDir(), "machines");
 }
 
+/** One line per successful boot, appended to <dataDir>/boot-log.ndjson — local
+ *  boot-history for users ("how slow are my boots") and the durable CI metrics
+ *  feed (machine dirs are removed by tests, machine.json alone is not enough). */
+export interface BootLogEntry {
+	ts: string;
+	name: string;
+	version: string;
+	arch: string;
+	accel: string;
+	bootMs: number;
+	/** Host platform, `process.platform` ("linux" | "darwin" | "win32"). */
+	host: string;
+}
+
+const BOOT_LOG_MAX_LINES = 1000;
+const BOOT_LOG_KEEP_LINES = 500;
+
+/** Path to the boot-history log. */
+export function bootLogPath(): string {
+	return join(getDataDir(), "boot-log.ndjson");
+}
+
+/** Append a boot record; rotates to the newest BOOT_LOG_KEEP_LINES when the
+ *  log exceeds BOOT_LOG_MAX_LINES. */
+export function appendBootLog(entry: BootLogEntry): void {
+	const path = bootLogPath();
+	ensureDir(getDataDir());
+	let lines: string[] = [];
+	if (existsSync(path)) {
+		lines = readFileSync(path, "utf-8").split("\n").filter(Boolean);
+	}
+	lines.push(JSON.stringify(entry));
+	if (lines.length > BOOT_LOG_MAX_LINES) lines = lines.slice(-BOOT_LOG_KEEP_LINES);
+	writeFileSync(path, `${lines.join("\n")}\n`);
+}
+
 /** Get the cache directory. */
 export function getCacheDir(): string {
 	return join(getDataDir(), "cache");

@@ -43,6 +43,7 @@ import {
 	ensureDir,
 	getCacheDir,
 	getDataDir,
+	appendBootLog,
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
@@ -1406,6 +1407,7 @@ export class QuickCHR {
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const wrapper = extractWrapper(resolvedNetworks);
+		const bootStart = Date.now();
 		let { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper);
 
 		// Foreground (no provisioning): spawnQemu blocks until QEMU exits
@@ -1461,6 +1463,24 @@ export class QuickCHR {
 				` Machine "${name}" has been cleaned up automatically.${qemuLogTail}`,
 			);
 		}
+
+		// Record boot timing (cumulative from first spawn, incl. the respawn-once
+		// path) — in machine.json for `list`/`get` and in the boot-history log.
+		// Side-band metrics must never fail a boot that succeeded.
+		state.lastAccel = accel;
+		state.lastBootMs = Date.now() - bootStart;
+		saveMachine(state);
+		try {
+			appendBootLog({
+				ts: new Date().toISOString(),
+				name,
+				version,
+				arch,
+				accel,
+				bootMs: state.lastBootMs,
+				host: process.platform,
+			});
+		} catch { /* never propagate */ }
 
 		if (hasProvisioning) {
 			await QuickCHR._provisionInstance(instance, state, {
@@ -1688,6 +1708,7 @@ export class QuickCHR {
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const wrapper = extractWrapper(resolvedNetworks);
+		const bootStart = Date.now();
 		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground, wrapper);
 
 		// Foreground without provisioning: spawnQemu blocks until QEMU exits
@@ -1723,6 +1744,22 @@ export class QuickCHR {
 				` Machine "${state.name}" has been cleaned up automatically.${qemuLogTail}`,
 			);
 		}
+
+		// Record boot timing — mirrors start(); side-band, never fails the boot.
+		state.lastAccel = accel;
+		state.lastBootMs = Date.now() - bootStart;
+		saveMachine(state);
+		try {
+			appendBootLog({
+				ts: new Date().toISOString(),
+				name: state.name,
+				version: state.version,
+				arch: state.arch,
+				accel,
+				bootMs: state.lastBootMs,
+				host: process.platform,
+			});
+		} catch { /* never propagate */ }
 
 		if (hasProvisioning && provisioningOpts) {
 			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig, logger);

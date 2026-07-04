@@ -33,6 +33,12 @@ jobs:
   integration:
     name: Integration (gating platforms)
     uses: ./.github/workflows/integration.yml
+    # contents: write flows down to integration.yml's aggregate job, which
+    # pushes this run's metrics to the ci-data branch (reusable-workflow
+    # permissions are capped by the calling job).
+    permissions:
+      contents: write
     with:
       platforms: linux-x86,linux-arm64
+      collect-metrics: true
       artifact-prefix: main
