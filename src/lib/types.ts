@@ -650,7 +650,10 @@ export type ErrorCode =
 	| "INVALID_FORWARD_SPEC"
 	| "PROVISIONING_VERSION_UNSUPPORTED"
 	| "INSUFFICIENT_DISK_SPACE"
-	| "STATE_ERROR";
+	| "STATE_ERROR"
+	| "INVALID_SIZE_STRING"
+	| "INVALID_SETTING_KEY"
+	| "INVALID_SETTING_VALUE";
 
 export class QuickCHRError extends Error {
 	code: ErrorCode;

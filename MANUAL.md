@@ -333,8 +333,8 @@ another machine, view status, or quit.
 | Step | Prompt | Default | Corresponding flag |
 |---|---|---|---|
 | 1 | Version source: channel or specific | channel | `--channel` / `--version` |
-| 2 | Channel (if channel chosen) | `long-term` | `--channel` |
-| 3 | Architecture | host native | `--arch` |
+| 2 | Channel (if channel chosen) | `stable` (or the `default-channel` setting) | `--channel` |
+| 3 | Architecture | host native (or the `default-arch` setting) | `--arch` |
 | 4 | Instance name | auto-generated | `--name` |
 | 5 | CPU cores | 1 | `--cpu` |
 | 6 | Memory | 256 MB | `--mem` |
@@ -366,9 +366,10 @@ shell completions if not yet configured.
 
 **Notes**:
 
-- The wizard never sets `secureLogin: true` directly. "Managed login" sets
-  `disableAdmin: true`; the provisioning step auto-creates the `quickchr`
-  managed user from that signal.
+- "Managed login" sets both `disableAdmin: true` and `secureLogin: true` —
+  the provisioning step only auto-creates the `quickchr` managed account when
+  `secureLogin` is explicitly `true`, so both fields must be set together or
+  admin would be disabled with no replacement login provisioned.
 - Set `QUICKCHR_NO_PROMPT=1` to suppress all wizard flows (useful in scripts
   and CI pipelines).
 - `Ctrl-C` at any prompt cleanly cancels with no partial machine left behind.
@@ -376,6 +377,45 @@ shell completions if not yet configured.
 #### `completions [bash|zsh|fish]`
 
 Print or install shell completions. With no arg, detects current shell.
+
+#### `settings [print|get|set|reset] [key] [value] [--json]`
+
+Manage quickchr's own global preferences — repeated flags/defaults that
+previously had no persisted home. Stored in `~/.config/quickchr/quickchr.env`
+(dotenv-style: `QUICKCHR_KEY=value` lines). See §8 (Storage layout) and §11
+(Environment variables) for the file format and full env var list.
+
+Precedence per key (highest wins): CLI flag > `QUICKCHR_<KEY>` env var >
+`quickchr.env` > built-in default.
+
+| Key | Consumed by | Type | Built-in default |
+|---|---|---|---|
+| `default-channel` | `add`/`start`'s `--channel`, wizard's channel prompt | `stable`\|`long-term`\|`testing`\|`development` | `stable` |
+| `default-arch` | `add`/`start`'s `--arch`, wizard's arch prompt | `arm64`\|`x86`\|`auto` | `auto` (host native) |
+| `cache-max-size` | Auto-prune cap applied after each successful `start` | size string (e.g. `2G`, `512M`) | `2G` |
+| `timeout-extra` | `start`'s `--timeout-extra`/`-T` when omitted | non-negative integer seconds | `0` |
+| `secure-login` | `add`/`start`'s `--secure-login` when neither `--secure-login` nor `--no-secure-login` is passed | boolean | `unset` (reported as `(unset)` — see note) |
+
+`secure-login` is the one key `settings print`/`get` report as `(unset)` rather than a
+concrete `false`, unlike the other four: the setup wizard's login prompt needs to tell
+"not configured" apart from "explicitly set to false" (it only pre-highlights "Keep
+admin with no password" when the setting is concretely `false`; leaving it unset keeps
+the wizard's own recommended "managed login" highlighted). Giving it a real
+`builtinDefault` would collapse that distinction. Every *consumer* still treats
+"unset" and "false" identically — `add`/`start` never force `secureLogin: true` unless
+the setting resolves to exactly `true`.
+
+```bash
+quickchr settings print                       # all 5 keys, resolved value + source
+quickchr settings set default-channel testing # write one key to quickchr.env
+quickchr settings get default-arch            # print one key's resolved value
+quickchr settings reset default-channel       # delete one managed line
+quickchr settings reset                       # clear all managed lines
+```
+
+Credentials (`--add-user`, `MIKROTIK_WEB_ACCOUNT`/`MIKROTIK_WEB_PASSWORD`) are
+never stored here — `settings` only manages the 5 keys above, and does not
+mutate any machine's `machine.json`.
 
 ### Global behavior
 
@@ -790,13 +830,17 @@ $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
 │       ├── qemu.log
 │       ├── start-lock           start serialization
 │       └── ssh/id_ed25519[.pub] SSH key (if managed user provisioned)
-├── networks/                     Named L2 socket reservations
-│   └── <name>.json
-└── config.json                   Global config (rare)
+└── networks/                     Named L2 socket reservations
+    └── <name>.json
 ```
 
 `$XDG_DATA_HOME` defaults to `~/.local/share/quickchr/`. Override the
 whole tree with `QUICKCHR_DATA_DIR=/some/path`.
+
+**Global settings** live separately, under the XDG **config** tier, not this
+data tree: `~/.config/quickchr/quickchr.env` (dotenv-style). See §3's
+`settings` command (under Meta) for the command surface and §11 for the env
+var list.
 
 ### Windows
 
@@ -891,7 +935,9 @@ Cross-arch TCG: factor ~15 → up to 1800s.
 Package install adds a 2× multiplier (extra reboot cycle).
 
 If boot times out, the machine is **automatically stopped + removed**.
-Use `--timeout-extra` to add a buffer if you know your host is slow.
+Use `--timeout-extra` to add a buffer if you know your host is slow, or
+persist a default via `quickchr settings set timeout-extra <seconds>` so
+every `start` picks it up without repeating the flag.
 
 ---
 
@@ -929,6 +975,17 @@ with Ctrl-C). Don't add workarounds for the "expired admin" myth.
 - **MikroTik.com creds**: Bun.secrets when TTY is available; same
   config file otherwise.
 
+### Settings file (`quickchr.env`)
+
+`~/.config/quickchr/quickchr.env` — user-scoped global preferences, separate
+from the secret stores above. Dotenv-style (`QUICKCHR_KEY=value` lines),
+managed via `quickchr settings get|set|print|reset` (§3, Meta). Atomic writes
+(temp file + `fsync` + rename); `set`/`reset` touch only the matching line and
+preserve every other line (comments, blank lines, foreign vars) byte-for-byte.
+`reset <key>` deletes the line entirely rather than blanking it, since a blank
+`KEY=` line is still "set" to a bash-sourced file. Never stores credentials —
+the 5 managed keys are all structural preferences, not secrets.
+
 ### Environment variables consumed
 
 | Var | Where |
@@ -937,6 +994,11 @@ with Ctrl-C). Don't add workarounds for the "expired admin" myth.
 | `QUICKCHR_NO_PROMPT` | CLI dispatcher — forces non-interactive mode |
 | `QUICKCHR_DEBUG` | progress logger — emits `[debug]` lines |
 | `QUICKCHR_INTEGRATION` | `bun:test` gate for `test/integration/` |
+| `QUICKCHR_DEFAULT_CHANNEL` | `settings.ts` — env tier for the `default-channel` setting |
+| `QUICKCHR_DEFAULT_ARCH` | `settings.ts` — env tier for the `default-arch` setting |
+| `QUICKCHR_CACHE_MAX_SIZE` | `settings.ts` — env tier for the `cache-max-size` setting |
+| `QUICKCHR_TIMEOUT_EXTRA` | `settings.ts` — env tier for the `timeout-extra` setting |
+| `QUICKCHR_SECURE_LOGIN` | `settings.ts` — env tier for the `secure-login` setting |
 | `MIKROTIK_WEB_ACCOUNT` | license-renewal account (fallback) |
 | `MIKROTIK_WEB_PASSWORD` | license-renewal password (fallback) |
 | `NO_COLOR` | disable ANSI styling |
@@ -1139,6 +1201,9 @@ present, then exits `1`.
 | `PROVISIONING_VERSION_UNSUPPORTED` | provisioning option on RouterOS < 7.20.8 | use `--channel long-term` or pin a `7.20.8+` version |
 | `INSUFFICIENT_DISK_SPACE` | host data dir full | free space or move via `QUICKCHR_DATA_DIR` |
 | `STATE_ERROR` | snapshot on raw boot disk | recreate with `--boot-disk-format=qcow2` |
+| `INVALID_SIZE_STRING` | invalid cache/settings size string | use size syntax like `512M`, `2G`, or `1.5G` |
+| `INVALID_SETTING_KEY` | `settings get`/`set`/`reset` received an unrecognized key | `quickchr settings print` to see the managed keys |
+| `INVALID_SETTING_VALUE` | `settings set` (or a `QUICKCHR_*` env var / `quickchr.env` line) failed validation for a recognized key | `quickchr help settings` for the expected type/enum per key |
 
 ### Auto-cleanup on boot timeout
 

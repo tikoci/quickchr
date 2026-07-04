@@ -5,12 +5,43 @@
 import type { Arch, Channel, DeviceModeOptions, LicenseLevel, LicenseOptions, NetworkSpecifier, StartOptions } from "../lib/types.ts";
 import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
 
+export type WizardUserChoice = "custom" | "managed" | "admin";
+
+export interface WizardUserChoiceResult {
+	user?: { name: string; password: string };
+	disableAdmin: boolean;
+	secureLogin?: boolean;
+}
+
+/**
+ * Maps the wizard's "CHR login setup" choice to StartOptions fields. Pulled out as a
+ * pure function (rather than inlined in runWizard) so it's unit-testable without
+ * mocking the entire @clack/prompts prompt sequence — "managed" must set both
+ * disableAdmin AND secureLogin, since provision() only auto-creates the replacement
+ * quickchr account when secureLogin === true (src/lib/provision.ts); disableAdmin
+ * alone would disable the default account with no replacement login provisioned.
+ */
+export function resolveUserChoiceOptions(
+	userChoice: WizardUserChoice,
+	customUser?: { name: string; password: string },
+): WizardUserChoiceResult {
+	if (userChoice === "custom") {
+		return { user: customUser, disableAdmin: true };
+	}
+	if (userChoice === "managed") {
+		return { disableAdmin: true, secureLogin: true };
+	}
+	// "admin" — keep admin with no password
+	return { disableAdmin: false, secureLogin: false };
+}
+
 /** Run the interactive wizard using @clack/prompts. */
 export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<void> {
 	// Dynamic import — only loaded when wizard is actually used
 	const clack = await import("@clack/prompts");
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { formatPorts, bold } = await import("./format.ts");
+	const { resolveSetting } = await import("../lib/settings.ts");
 
 	clack.intro("quickchr — MikroTik CHR Manager");
 	if (wizardOpts?.firstRun) {
@@ -31,6 +62,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	let channel: Channel | undefined;
 
 	if (versionSource === "channel") {
+		const defaultChannel = resolveSetting("default-channel").value as Channel;
 		const ch = await clack.select({
 			message: "Select channel:",
 			options: CHANNELS.map((c) => ({
@@ -38,7 +70,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 				label: c,
 				hint: c === "long-term" ? "recommended for provisioning" : undefined,
 			})),
-			initialValue: "long-term" as Channel,
+			initialValue: defaultChannel,
 		});
 		if (clack.isCancel(ch)) { clack.cancel("Cancelled."); process.exit(0); }
 		channel = ch;
@@ -57,6 +89,8 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 
 	// 2. Architecture
 	const hostArch = process.arch === "arm64" ? "arm64" : "x86";
+	const settingArch = resolveSetting("default-arch").value as Arch | "auto";
+	const archInitial: Arch = settingArch === "auto" ? hostArch : settingArch;
 	const arch = await clack.select({
 		message: "Architecture:",
 		options: ARCHES.map((a) => ({
@@ -64,7 +98,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 			label: a,
 			hint: a === hostArch ? "host native" : "emulated (slower)",
 		})),
-		initialValue: hostArch as Arch,
+		initialValue: archInitial,
 	});
 	if (clack.isCancel(arch)) { clack.cancel("Cancelled."); process.exit(0); }
 
@@ -427,6 +461,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 		}
 
 		// 6c. User setup
+		const secureLoginSetting = resolveSetting("secure-login").value;
 		const userChoice = await clack.select({
 			message: "CHR login setup:",
 			options: [
@@ -434,10 +469,11 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 				{ value: "custom", label: "Custom user", hint: "you provide username + password" },
 				{ value: "admin", label: "Keep admin with no password", hint: "less secure" },
 			],
-			initialValue: "managed",
+			initialValue: secureLoginSetting === false ? "admin" : "managed",
 		});
 		if (clack.isCancel(userChoice)) { clack.cancel("Cancelled."); process.exit(0); }
 
+		let customUser: { name: string; password: string } | undefined;
 		if (userChoice === "custom") {
 			const userName = await clack.text({
 				message: "Username:",
@@ -448,14 +484,9 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 			const userPass = await clack.password({ message: "Password:" });
 			if (clack.isCancel(userPass)) { clack.cancel("Cancelled."); process.exit(0); }
 
-			user = { name: userName, password: userPass };
-			disableAdmin = true;
-		} else if (userChoice === "managed") {
-			disableAdmin = true;
-		} else {
-			// "admin" — keep admin with no password
-			secureLogin = false;
+			customUser = { name: userName, password: userPass };
 		}
+		({ user, disableAdmin, secureLogin } = resolveUserChoiceOptions(userChoice as WizardUserChoice, customUser));
 
 		// 6d. License
 		const wantLicense = await clack.confirm({

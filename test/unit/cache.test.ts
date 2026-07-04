@@ -3,11 +3,14 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	autoPruneIfOverCap,
+	formatSizeBytes,
 	listCacheEntries,
 	parseCacheBasename,
+	parseSizeString,
 	pruneCache,
 } from "../../src/lib/cache.ts";
 import { getCacheDir, getMachinesDir } from "../../src/lib/state.ts";
+import { QuickCHRError } from "../../src/lib/types.ts";
 
 const TEST_DIR = join(import.meta.dir, ".tmp-cache-test");
 const origDataDir = process.env.QUICKCHR_DATA_DIR;
@@ -189,5 +192,53 @@ describe("autoPruneIfOverCap", () => {
 
 	test("never throws on errors", () => {
 		expect(() => autoPruneIfOverCap({ cacheDir: "/nonexistent/path/xyz", maxSizeBytes: 0 })).not.toThrow();
+	});
+});
+
+describe("parseSizeString", () => {
+	test("parses plain integers as bytes", () => {
+		expect(parseSizeString("1024")).toBe(1024);
+	});
+
+	test("parses K/M/G/T suffixes as IEC binary units", () => {
+		expect(parseSizeString("512M")).toBe(512 * 1024 ** 2);
+		expect(parseSizeString("2G")).toBe(2 * 1024 ** 3);
+		expect(parseSizeString("1T")).toBe(1024 ** 4);
+	});
+
+	test("parses fractional sizes, flooring to an integer byte count", () => {
+		expect(parseSizeString("1.5G")).toBe(Math.floor(1.5 * 1024 ** 3));
+	});
+
+	test("is case-insensitive and tolerates trailing i/B (KiB, GB, etc.)", () => {
+		expect(parseSizeString("2g")).toBe(2 * 1024 ** 3);
+		expect(parseSizeString("2GiB")).toBe(2 * 1024 ** 3);
+		expect(parseSizeString("2GB")).toBe(2 * 1024 ** 3);
+	});
+
+	test("throws on an invalid size string", () => {
+		expect(() => parseSizeString("not-a-size")).toThrow(QuickCHRError);
+		expect(() => parseSizeString("2X")).toThrow(QuickCHRError);
+		try {
+			parseSizeString("2X");
+			throw new Error("should have thrown");
+		} catch (e) {
+			expect((e as QuickCHRError).code).toBe("INVALID_SIZE_STRING");
+		}
+	});
+});
+
+describe("formatSizeBytes", () => {
+	test("formats byte and exact IEC thresholds", () => {
+		expect(formatSizeBytes(1023)).toBe("1023 B");
+		expect(formatSizeBytes(1024)).toBe("1.0 KiB");
+		expect(formatSizeBytes(1024 ** 2)).toBe("1.0 MiB");
+		expect(formatSizeBytes(1024 ** 3)).toBe("1.00 GiB");
+	});
+
+	test("rounds non-exact KiB/MiB/GiB values using the display precision", () => {
+		expect(formatSizeBytes(1536)).toBe("1.5 KiB");
+		expect(formatSizeBytes(Math.floor(1.25 * 1024 ** 2))).toBe("1.3 MiB");
+		expect(formatSizeBytes(Math.floor(2.346 * 1024 ** 3))).toBe("2.35 GiB");
 	});
 });

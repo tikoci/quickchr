@@ -46,6 +46,7 @@ import {
 } from "./state.ts";
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
+import { resolveSetting } from "./settings.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint } from "./channels.ts";
@@ -1237,7 +1238,7 @@ export class QuickCHR {
 					user: opts.user ?? existing.user,
 					disableAdmin: opts.disableAdmin ?? existing.disableAdmin,
 					license: opts.license,
-					secureLogin: opts.secureLogin,
+					secureLogin: opts.secureLogin ?? existing.secureLogin,
 				};
 				const hasPending = !!(
 					pendingOpts.installAllPackages ||
@@ -1245,7 +1246,8 @@ export class QuickCHR {
 					pendingOpts.deviceMode ||
 					pendingOpts.user ||
 					pendingOpts.disableAdmin ||
-					pendingOpts.license
+					pendingOpts.license ||
+					pendingOpts.secureLogin === true
 				);
 				if (hasPending) {
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger);
@@ -1727,7 +1729,11 @@ export class QuickCHR {
 		}
 
 		try {
-			autoPruneIfOverCap({ logger: logger ? (msg) => logger.status(msg) : undefined, protectVersions: [state.version] });
+			autoPruneIfOverCap({
+				logger: logger ? (msg) => logger.status(msg) : undefined,
+				protectVersions: [state.version],
+				maxSizeBytes: resolveSetting("cache-max-size").value as number | undefined,
+			});
 		} catch { /* never propagate */ }
 
 		return instance;

@@ -116,6 +116,57 @@ function isNoPrompt(): boolean {
 	return !!process.env.QUICKCHR_NO_PROMPT || !process.stdout.isTTY || !process.stdin.isTTY;
 }
 
+/** Merge the `-T` short-flag alias for `--timeout-extra` into `flags`, since parseFlags
+ *  only recognizes `--` flags. Also consumes the `-T <value>` pair from `positional`
+ *  so `quickchr start -T 15 lab` still targets `lab`. */
+export function applyTimeoutExtraShortFlag(
+	argv: readonly string[],
+	flags: Record<string, string | boolean | string[]>,
+	positional?: string[],
+): Record<string, string | boolean | string[]> {
+	const tIdx = argv.indexOf("-T");
+	if (tIdx !== -1) {
+		const value = argv[tIdx + 1];
+		if (flags["timeout-extra"] === undefined && value !== undefined) {
+			flags["timeout-extra"] = value;
+		}
+		if (positional) {
+			const pIdx = positional.indexOf("-T");
+			if (pIdx !== -1) {
+				positional.splice(pIdx, 1);
+				if (value !== undefined && positional[pIdx] === value) {
+					positional.splice(pIdx, 1);
+				}
+			}
+		}
+	}
+	return flags;
+}
+
+/** Resolve --timeout-extra into a millisecond boot-timeout addend. Validates an
+ *  explicit flag with the same non-negative-integer rule the timeout-extra setting
+ *  itself uses, falling back to the setting (env/file/default) only when the flag
+ *  is absent. Shared by cmdStart's single-target and --all bulk-restart paths.
+ *  Callers merge the `-T` short-flag alias into `flags["timeout-extra"]` before
+ *  calling this — `-T` is single-dash and parseFlags only recognizes `--` flags
+ *  (same reason cmdLogs scans argv directly for its own `-f`/`-n` aliases). */
+export async function resolveTimeoutExtraMs(flags: Record<string, string | boolean | string[]>): Promise<number | undefined> {
+	const { resolveSetting, parseTimeoutExtraSeconds } = await import("../lib/settings.ts");
+	const flagRaw = flag(flags, "timeout-extra");
+	const seconds = flagRaw !== undefined ? parseTimeoutExtraSeconds(flagRaw) : (resolveSetting("timeout-extra").value as number | undefined);
+	return seconds !== undefined ? seconds * 1000 : undefined;
+}
+
+/** Resolve --secure-login/--no-secure-login, falling back to the secure-login setting
+ *  only when neither flag was passed. Shared by cmdAdd, cmdStart, and cmdStart's
+ *  --all bulk-restart path. */
+export async function resolveSecureLoginFlag(flags: Record<string, string | boolean | string[]>): Promise<boolean | undefined> {
+	if (flags["secure-login"] === false) return false;
+	if (flagBool(flags, "secure-login")) return true;
+	const { resolveSetting } = await import("../lib/settings.ts");
+	return resolveSetting("secure-login").value === true ? true : undefined;
+}
+
 async function main() {
 	try {
 		switch (command) {
@@ -190,6 +241,9 @@ async function main() {
 				break;
 			case "cache":
 				await cmdCache(args.slice(1));
+				break;
+			case "settings":
+				await cmdSettings(args.slice(1));
 				break;
 			case "version":
 			case "--version":
@@ -480,11 +534,12 @@ async function cmdAdd(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold, formatPorts, formatNetworks, dim } = await import("./format.ts");
+	const { resolveSetting } = await import("../lib/settings.ts");
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
-		channel: flag(flags, "channel") as Channel | undefined,
-		arch: flag(flags, "arch") as Arch | "auto" | undefined,
+		channel: (flag(flags, "channel") as Channel | undefined) ?? (resolveSetting("default-channel").value as Channel | undefined),
+		arch: (flag(flags, "arch") as Arch | "auto" | undefined) ?? (resolveSetting("default-arch").value as Arch | "auto" | undefined),
 		name: flag(flags, "name") ?? positional[0],
 		cpu: flag(flags, "cpu") ? Number(flag(flags, "cpu")) : undefined,
 		mem: flag(flags, "mem") ? Number(flag(flags, "mem")) : undefined,
@@ -519,13 +574,7 @@ async function cmdAdd(argv: string[]) {
 		opts.user = { name: uname, password: password ?? "" };
 	}
 	opts.disableAdmin = flagBool(flags, "disable-admin");
-
-	// --secure-login / --no-secure-login
-	if (flags["secure-login"] === false) {
-		opts.secureLogin = false;
-	} else if (flagBool(flags, "secure-login")) {
-		opts.secureLogin = true;
-	}
+	opts.secureLogin = await resolveSecureLoginFlag(flags);
 
 	const state = await QuickCHR.add(opts);
 
@@ -1125,11 +1174,14 @@ async function cmdSetup() {
 
 async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
+	applyTimeoutExtraShortFlag(argv, flags, positional);
 
 	// --all: start every stopped machine in background
 	if (flagBool(flags, "all")) {
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const { statusIcon, link, bold, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
+		const timeoutExtra = await resolveTimeoutExtraMs(flags);
+		const secureLogin = await resolveSecureLoginFlag(flags);
 		const stopped = QuickCHR.list().filter((m) => m.status !== "running");
 		if (stopped.length === 0) {
 			console.log("No stopped instances.");
@@ -1137,7 +1189,7 @@ async function cmdStart(argv: string[]) {
 		}
 		for (const m of stopped) {
 			console.log(`Starting ${bold(m.name)}...`);
-			const instance = await QuickCHR.start({ name: m.name, background: true });
+			const instance = await QuickCHR.start({ name: m.name, background: true, timeoutExtra, secureLogin });
 			const creds = await resolveDisplayCredentials(instance.state);
 			console.log(`${statusIcon("running")} ${bold(instance.name)}  REST: ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}  SSH: ${formatSshCommand(creds.user, instance.sshPort)}`);
 		}
@@ -1162,11 +1214,12 @@ async function cmdStart(argv: string[]) {
 	// Build start options from flags
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { statusIcon, formatPorts, formatNetworks, link, bold, dim, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
+	const { resolveSetting } = await import("../lib/settings.ts");
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
-		channel: flag(flags, "channel") as Channel | undefined,
-		arch: flag(flags, "arch") as Arch | "auto" | undefined,
+		channel: (flag(flags, "channel") as Channel | undefined) ?? (resolveSetting("default-channel").value as Channel | undefined),
+		arch: (flag(flags, "arch") as Arch | "auto" | undefined) ?? (resolveSetting("default-arch").value as Arch | "auto" | undefined),
 		name: flag(flags, "name") ?? positional[0],
 		cpu: flag(flags, "cpu") ? Number(flag(flags, "cpu")) : undefined,
 		mem: flag(flags, "mem") ? Number(flag(flags, "mem")) : undefined,
@@ -1184,7 +1237,7 @@ async function cmdStart(argv: string[]) {
 		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
 		installDeps: flagBool(flags, "install-deps"),
 		dryRun: flagBool(flags, "dry-run"),
-		timeoutExtra: parseInt(flag(flags, "timeout-extra") ?? flag(flags, "T") ?? "0", 10) * 1000 || undefined,
+		timeoutExtra: await resolveTimeoutExtraMs(flags),
 	};
 
 	const deviceModeValue = flag(flags, "device-mode");
@@ -1227,13 +1280,7 @@ async function cmdStart(argv: string[]) {
 	}
 
 	opts.disableAdmin = flagBool(flags, "disable-admin");
-
-	// --secure-login / --no-secure-login
-	if (flags["secure-login"] === false) {
-		opts.secureLogin = false;
-	} else if (flagBool(flags, "secure-login")) {
-		opts.secureLogin = true;
-	}
+	opts.secureLogin = await resolveSecureLoginFlag(flags);
 
 	// Background default: true. Explicitly foreground only with --fg / --foreground / --no-background / --no-bg.
 	const wantFg =
@@ -2314,7 +2361,7 @@ async function cmdCache(argv: string[]) {
 		return;
 	}
 
-	const { listCacheEntries, pruneCache } = await import("../lib/cache.ts");
+	const { listCacheEntries, pruneCache, parseSizeString, formatSizeBytes } = await import("../lib/cache.ts");
 
 	const parseDuration = (s: string): number => {
 		const m = s.match(/^(\d+(?:\.\d+)?)([smhdw])$/);
@@ -2324,20 +2371,8 @@ async function cmdCache(argv: string[]) {
 		const mult: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
 		return Math.floor(n * (mult[unit ?? ""] ?? 0));
 	};
-	const parseSize = (s: string): number => {
-		const m = s.match(/^(\d+(?:\.\d+)?)([KMGT]?)i?B?$/i);
-		if (!m) throw new Error(`Invalid size "${s}" (use NK/NM/NG/NT, e.g. 2G)`);
-		const n = Number.parseFloat(m[1] ?? "0");
-		const unit = (m[2] ?? "").toUpperCase();
-		const mult: Record<string, number> = { "": 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4 };
-		return Math.floor(n * (mult[unit] ?? 1));
-	};
-	const formatSize = (b: number): string => {
-		if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GiB`;
-		if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MiB`;
-		if (b >= 1024) return `${(b / 1024).toFixed(1)} KiB`;
-		return `${b} B`;
-	};
+	const parseSize = parseSizeString;
+	const formatSize = formatSizeBytes;
 	const formatAge = (ms: number): string => {
 		const s = Math.floor(ms / 1000);
 		if (s < 60) return `${s}s`;
@@ -2425,6 +2460,82 @@ async function cmdCache(argv: string[]) {
 		}
 		default:
 			console.error(`Unknown cache subcommand: ${sub}\nRun 'quickchr help cache' for usage.`);
+			process.exit(1);
+	}
+}
+
+async function cmdSettings(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const sub = positional[0] ?? "print";
+
+	if (sub === "help" || sub === "--help" || sub === "-h") {
+		printCommandHelp("settings");
+		return;
+	}
+
+	const { settingsFilePath, settingsGet, settingsSet, settingsReset, settingsPrint } = await import("../lib/settings.ts");
+	const { formatSizeBytes } = await import("../lib/cache.ts");
+	const asJson = flags.json === true;
+
+	const displayValue = (key: string, value: unknown): string => {
+		if (value === undefined) return "(unset)";
+		if (key === "cache-max-size" && typeof value === "number") return formatSizeBytes(value);
+		if (key === "timeout-extra" && typeof value === "number") return `${value}s`;
+		return String(value);
+	};
+
+	switch (sub) {
+		case "print": {
+			const key = positional[1];
+			// All-keys print uses the tolerant settingsPrint() — a single malformed
+			// env/file value must not crash the whole table (settingsGet, used for a
+			// single named key below, is intentionally strict).
+			const entries = key ? [settingsGet(key)] : settingsPrint();
+			if (asJson) {
+				console.log(JSON.stringify({ file: settingsFilePath(), settings: entries }, null, 2));
+				return;
+			}
+			console.log(`Settings file: ${settingsFilePath()}\n`);
+			for (const e of entries) {
+				console.log(`${e.key.padEnd(16)} ${displayValue(e.key, e.value).padEnd(12)} [${e.source}]`);
+			}
+			break;
+		}
+		case "get": {
+			const key = positional[1];
+			if (!key) {
+				console.error("Usage: quickchr settings get <key>");
+				process.exit(1);
+			}
+			const entry = settingsGet(key);
+			console.log(asJson ? JSON.stringify(entry, null, 2) : displayValue(entry.key, entry.value));
+			break;
+		}
+		case "set": {
+			const key = positional[1];
+			const value = positional[2];
+			if (!key || value === undefined) {
+				console.error("Usage: quickchr settings set <key> <value>");
+				process.exit(1);
+			}
+			const result = settingsSet(key, value);
+			console.log(`${result.key}: ${displayValue(result.key, result.previous)} -> ${displayValue(result.key, result.value)}`);
+			break;
+		}
+		case "reset": {
+			const key = positional[1];
+			const result = settingsReset(key);
+			console.log(
+				result.cleared.length === 0
+					? key
+						? `${key} was not set.`
+						: "Nothing to clear."
+					: `Cleared: ${result.cleared.join(", ")}`,
+			);
+			break;
+		}
+		default:
+			console.error(`Unknown settings subcommand: ${sub}\nRun 'quickchr help settings' for usage.`);
 			process.exit(1);
 	}
 }
@@ -2557,6 +2668,7 @@ Commands:
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
   networks                Network discovery & socket management
   cache [list|prune|clear] Manage cached CHR images
+  settings [print|get|set|reset]  Manage quickchr's own global settings (quickchr.env)
   completions             Manage shell completions (Tab completion)
   logs <name>             Tail the QEMU log for an instance
   doctor [--json]         Check prerequisites
@@ -2917,7 +3029,39 @@ Subcommands:
 
 Duration: <N>(s|m|h|d|w)   Size: <N>(K|M|G|T)[i][B] (case-insensitive, IEC binary).
 
-Default auto-prune cap: 2 GiB (applied after each successful start).`);
+Default auto-prune cap: 2 GiB — override via 'quickchr settings set cache-max-size <size>'
+or the QUICKCHR_CACHE_MAX_SIZE env var (applied after each successful start).`);
+			break;
+		case "settings":
+			console.log(`quickchr settings [print|get|set|reset] [key] [value] [--json]
+
+Manage quickchr's own global preferences, stored in
+~/.config/quickchr/quickchr.env (dotenv-style: QUICKCHR_KEY=value lines).
+
+Managed keys:
+  default-channel   Default --channel for 'add'/'start' and the setup wizard.
+                    stable|long-term|testing|development (default: stable)
+  default-arch      Default --arch. arm64|x86|auto (default: auto = host native)
+  cache-max-size    Auto-prune cap applied after each successful start.
+                    Size string (e.g. 2G, 512M). (default: 2G)
+  timeout-extra     Default for 'start's --timeout-extra/-T when omitted.
+                    Non-negative integer seconds. (default: 0)
+  secure-login      Default for 'add'/'start's --secure-login when neither
+                    --secure-login nor --no-secure-login is passed.
+                    true|false (default: false — 'settings print' shows this
+                    one as "(unset)" rather than "false"; the setup wizard
+                    needs to tell "not configured" apart from "explicitly
+                    false" to know whether to still recommend managed login)
+
+Precedence (highest wins): CLI flag > QUICKCHR_<KEY> env var > quickchr.env > built-in default.
+
+Subcommands:
+  print [key] [--json]     Show resolved value + source for one/all keys.
+  get <key> [--json]       Print one key's resolved value.
+  set <key> <value>        Validate and write a value to quickchr.env.
+  reset [key]              Delete one managed line, or all managed lines.
+
+Credentials (--add-user, MIKROTIK_WEB_ACCOUNT/PASSWORD) are never stored here.`);
 			break;
 		default:
 			console.log(`No detailed help for '${command}'.`);
