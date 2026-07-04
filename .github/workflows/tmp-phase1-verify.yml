@@ -1,0 +1,41 @@
+name: TMP Phase-1 verify
+
+# TEMPORARY scaffold — verifies integration.yml's workflow_call face on this
+# branch (workflow_dispatch can't target a workflow that isn't on the default
+# branch yet). DELETE THIS FILE before merging the PR.
+#
+# Expected outcome:
+#   verify-call       → green (start-stop.test.ts on linux-x86)
+#   verify-examples   → green (quickstart example smoke on linux-x86)
+#   verify-fail-fast  → RED at the plan job (bogus platform id) — that red is
+#                       the assertion; the run being red overall is expected.
+
+on:
+  push:
+    branches: [ci/29-integration-unit]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-call:
+    uses: ./.github/workflows/integration.yml
+    with:
+      platforms: linux-x86
+      test-filter: start-stop.test.ts
+      artifact-prefix: tmp-verify-call
+
+  verify-examples:
+    uses: ./.github/workflows/integration.yml
+    with:
+      platforms: linux-x86
+      run-integration: false
+      run-examples: true
+      example-filter: quickstart
+      artifact-prefix: tmp-verify-examples
+
+  verify-fail-fast:
+    uses: ./.github/workflows/integration.yml
+    with:
+      platforms: bogus-platform
+      artifact-prefix: tmp-verify-fail
