@@ -330,7 +330,7 @@ jobs:
       - name: Run arm64 REST ordering repro
         if: ${{ always() && matrix.id == 'linux-arm64' }}
         run: |
-          set -o pipefail
+          set -eo pipefail
           echo "::group::arm64 REST ordering repro (test/lab/arm64-rest-ordering/repro.test.ts)"
           rc=0
           QUICKCHR_INTEGRATION=1 bun test test/lab/arm64-rest-ordering/repro.test.ts \
@@ -507,7 +507,7 @@ jobs:
       # on Windows). `bun run` evaluates the VAR=val script prefix cross-platform.
       - name: Run examples smoke harness
         run: |
-          set -o pipefail
+          set -eo pipefail
           bun run smoke:examples 2>&1 | tee "$HOME/smoke-output.txt"
 
       - name: Kill leftover QEMU processes
