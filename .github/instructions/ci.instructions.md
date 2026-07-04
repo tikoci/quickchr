@@ -21,7 +21,9 @@ Four workflows, each with a distinct purpose:
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
-| **CI** | `ci.yml` | push/PR to `main`, `workflow_dispatch` | Core quality gate — every push |
+| **CI** | `ci.yml` | push/PR to `main`, `workflow_dispatch` | Fast quality gate (~3-5 min, no QEMU): lint, unit, Windows unit, PR freshness gate |
+| **Main Integration** | `main.yml` | push to `main`, `workflow_dispatch` | The continuous integration-test signal: full suite on linux/x86_64 + linux/aarch64 |
+| **Weekly Sweep** | `sweep.yml` | schedule (Mon 05:37 UTC), `workflow_dispatch` | All-platform sweep + examples smoke (separate file so a red TCG leg never blocks PRs) |
 | **Integration** | `integration.yml` | `workflow_dispatch`, `workflow_call` | THE reusable integration unit — any platform × RouterOS target × test filter |
 | **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1` or `PSScriptAnalyzerSettings.psd1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
 | **Publish** | `publish.yml` | `push: tags: v*`, `workflow_dispatch` | NPM publish pipeline |
@@ -29,11 +31,39 @@ Four workflows, each with a distinct purpose:
 ### CI pipeline (ci.yml)
 
 ```text
-lint (ubuntu-latest) ──┐
-unit-tests (ubuntu-latest) ─┴→ integration-x86 (ubuntu-latest) → windows-unit-tests (windows-latest)
+lint ∥ unit-tests (coverage) ∥ windows-unit-tests ∥ integration-freshness (PR only)
 ```
 
-Lint and unit-tests run **in parallel**. `integration-x86` waits for both via `needs:`. `windows-unit-tests` gates on `integration-x86` — if the core is broken, Windows runner minutes add no signal.
+All four jobs run **in parallel** — nothing boots QEMU, so PR feedback lands in ~3-5 min.
+Integration tests do NOT run on PRs; they run on every push to `main` (see below).
+
+### Main Integration (main.yml) + the PR freshness gate
+
+`main.yml` runs the **full integration suite on linux/x86_64 + linux/aarch64** (the release
+bar) on every push to `main`, delegating to `integration.yml`. Superseded pushes are
+cancelled (their signal is stale by definition — a cancelled run never counts as red).
+
+The **`integration-freshness`** job in `ci.yml` (PR-only, a required branch-protection
+check) is the honesty contract for that arrangement: it queries the latest completed
+`main.yml` run on `main` (skipping cancelled/skipped runs) and
+
+- **PASSES** when that run is green — with a note if `main`'s tip has a newer run still
+  in flight;
+- **FAILS** when that run is red, with the run URL. A red `main` therefore visibly blocks
+  ALL PRs until someone fixes it — the failure cannot rot quietly in the Actions list.
+
+Verdict logic lives in `scripts/ci-freshness.ts` (unit-tested in
+`test/unit/ci-freshness.test.ts`). **Override path** when the gate blocks you: fix `main`
+first (usual case), or — if your PR *is* the fix — validate it by dispatching
+`integration.yml` on your branch, then merge with an admin override; the next `main` push
+turns the gate green again. Never "fix" the gate by weakening the verdict logic.
+
+### Weekly Sweep (sweep.yml)
+
+Monday 05:37 UTC (or `gh workflow run sweep.yml`): all five platforms + the examples smoke
+harness, via `integration.yml` with `platforms=all`. TCG platforms run their smoke subset.
+Deliberately a separate workflow from `main.yml` so a red TCG leg **never** trips the PR
+freshness gate — but a red sweep is still a real failure to investigate, never green-washed.
 
 ### Publish pipeline (publish.yml)
 
@@ -184,8 +214,8 @@ a new tracked issue.
 
 ### Integration test failures
 - **Artifact** (7-day retention) — one per job:
-  - `ci.yml`: `integration-logs-linux-x64`
-  - `integration.yml`: `integration-logs-{linux-x86|linux-arm64|macos-arm64|macos-x86|windows-x86}` (callers may override the `integration-` prefix via `artifact-prefix`)
+  - `integration.yml` dispatches: `integration-logs-{linux-x86|linux-arm64|macos-arm64|macos-x86|windows-x86}`
+  - `main.yml` runs: `main-logs-{linux-x86|linux-arm64}`; `sweep.yml` runs: `sweep-logs-<platform>` (the `artifact-prefix` call input)
   - `publish.yml`: `publish-integration-logs-{x86|arm64}`
   - `integration-output.txt` — full `bun test` output including error messages
   - `integration-timing.txt` — per-file wall-clock seconds + pass/fail (integration.yml only)
@@ -290,7 +320,9 @@ cache needs to be invalidated (e.g. corrupted image from a partial download).
      `qemu-system-aarch64: -device virtio-net-pci,netdev=net0: failed to find romfile "efi-virtio.rom"`
      and QEMU exits before boot.
 3. Verify `platform.ts` `EFI_CODE_PATHS` contains the firmware path for that distro/OS.
-4. For `ci.yml` jobs: make the new job `needs: [integration-x86]` unless it is the x86 job itself.
+4. Decide where the new platform runs regularly: add it to `sweep.yml`'s weekly `all`
+   alias coverage (automatic once it's in the plan table) and, only if it is fast and
+   KVM/HVF-reliable, to `main.yml`'s per-push platform list.
 
 ## Pipefail rule (MANDATORY)
 

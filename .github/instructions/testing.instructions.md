@@ -101,9 +101,15 @@ by unit tests and have caused previously "done" features to be broken in practic
 
 ## CI Integration
 
-Integration tests run in CI on every push/PR to `main` across two runners:
+Integration tests run in CI on every **push to `main`** (`main.yml`) across two runners:
 - `linux/x86_64` (ubuntu-latest) → x86 CHR, KVM if available
 - `linux/aarch64` (ubuntu-24.04-arm) → arm64 CHR, KVM if available
+
+They do **not** run on PRs — PRs carry a required `Integration freshness` check instead
+(latest completed `main.yml` run on `main` must be green; see `ci.instructions.md`). To get
+integration signal for a branch before merging, dispatch the reusable unit directly:
+`gh workflow run integration.yml --ref <branch> -f platforms=linux-x86 -f test-filter=<file>`.
+The weekly `sweep.yml` covers macOS/Windows platforms and the examples smoke harness.
 
 Each runner auto-selects the CHR arch from `process.arch` — no test changes needed.
 
