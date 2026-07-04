@@ -35,6 +35,9 @@ interface WorkflowRun {
 	updated_at: string;
 }
 
+/** GET a GitHub API path. A 404 returns null — for the workflow-runs lookup it
+ *  means the workflow has never been registered on the default branch, which is
+ *  the same signal as "no runs yet" (the bootstrap verdict, not a crash). */
 async function gh(path: string): Promise<unknown> {
 	const res = await fetch(`${API}${path}`, {
 		headers: {
@@ -43,6 +46,7 @@ async function gh(path: string): Promise<unknown> {
 			"X-GitHub-Api-Version": "2022-11-28",
 		},
 	});
+	if (res.status === 404) return null;
 	if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`);
 	return res.json();
 }
@@ -95,12 +99,15 @@ async function main(): Promise<void> {
 	}
 	const runsResp = (await gh(
 		`/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?branch=${BRANCH}&status=completed&per_page=10`,
-	)) as { workflow_runs: WorkflowRun[] };
+	)) as { workflow_runs: WorkflowRun[] } | null;
 	const branchResp = (await gh(`/repos/${REPO}/branches/${BRANCH}`)) as {
 		commit: { sha: string };
-	};
+	} | null;
 
-	const verdict = evaluateFreshness(runsResp.workflow_runs ?? [], branchResp.commit.sha);
+	const verdict = evaluateFreshness(
+		runsResp?.workflow_runs ?? [],
+		branchResp?.commit.sha ?? "",
+	);
 
 	const line = `Integration freshness: ${verdict.ok ? "PASS" : "FAIL"} — ${verdict.message}`;
 	console.log(line);
