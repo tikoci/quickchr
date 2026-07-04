@@ -10,6 +10,11 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Added
 
+- **Boot-history log + boot timing fields** (issue #30) — every successful boot appends
+  `{ts, name, version, arch, accel, bootMs, host}` to `<dataDir>/boot-log.ndjson`
+  (rotated at 1000→500 lines), and `machine.json` gains `lastAccel`/`lastBootMs`.
+  Feeds the CI metrics scheme (`ci-data` branch); locally useful to answer
+  "how slow are my boots" per accel/version.
 - **`quickchr settings` command** (issue #46) — a small user-scoped settings framework for 5
   previously-hardcoded defaults: `default-channel`, `default-arch`, `cache-max-size`,
   `timeout-extra`, `secure-login`. Stored in `~/.config/quickchr/quickchr.env` (dotenv-style).

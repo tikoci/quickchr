@@ -62,6 +62,10 @@ on:
         type: string
         description: "RouterOS target: a channel (stable/long-term/testing/development) or a pinned version (e.g. 7.22.1, 7.24beta2). Empty = stable."
         default: ""
+      collect-metrics:
+        type: boolean
+        description: "Append this run's boot/test timing to the ci-data branch (runs/<run_id>-<platform>.ndjson + tested-versions.json)"
+        default: false
   workflow_call:
     inputs:
       platforms:
@@ -82,6 +86,10 @@ on:
       routeros-target:
         type: string
         default: ""
+      collect-metrics:
+        type: boolean
+        description: "Append boot/test timing to the ci-data branch (caller must grant contents: write)"
+        default: false
       artifact-prefix:
         type: string
         description: "Prefix for uploaded artifact names so parallel callers don't collide"
@@ -263,8 +271,12 @@ jobs:
             ALL=""
             for f in test/integration/*.test.ts; do ALL="$ALL $f"; done
             echo "list=$ALL" >> "$GITHUB_OUTPUT"
+            # scope=full is what lets a run mark a RouterOS version "tested" in
+            # ci-data/tested-versions.json — filtered/smoke runs never do.
+            echo "scope=full" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "scope=filtered" >> "$GITHUB_OUTPUT"
           FILES=""
           IFS=',' read -ra PARTS <<< "$FILTER"
           for f in "${PARTS[@]}"; do
@@ -287,6 +299,7 @@ jobs:
       # platform: on Windows the workspace is on D:\ while quickchr state is on
       # C:\, and upload-artifact needs a common ancestor across all paths.
       - name: Run integration tests (sequential per-file)
+        id: run
         env:
           FILE_LIST: ${{ steps.files.outputs.list }}
         run: |
@@ -344,6 +357,17 @@ jobs:
           fi
         timeout-minutes: 15
 
+      # Metrics as a byproduct (#30): boots from the library's boot-history log
+      # + the per-file timing file → one metrics.ndjson (uploaded always; the
+      # aggregate job pushes it to the ci-data branch when collect-metrics is on).
+      - name: Assemble metrics
+        if: always()
+        env:
+          PLATFORM_ID: ${{ matrix.id }}
+          SCOPE: ${{ steps.files.outputs.scope }}
+          SUITE_CONCLUSION: ${{ steps.run.outcome == 'success' && 'pass' || 'fail' }}
+        run: bun scripts/ci-metrics.ts assemble --timing "$HOME/integration-timing.txt" --out "$HOME/metrics.ndjson"
+
       # Agent-friendly summary: failing lines only (not a log dump), then the
       # per-file timing table. The full output is in the artifact.
       - name: Write integration summary
@@ -389,7 +413,9 @@ jobs:
           path: |
             ~/integration-output.txt
             ~/integration-timing.txt
+            ~/metrics.ndjson
             ~/arm64-rest-repro.txt
+            ~/.local/share/quickchr/boot-log.ndjson
             ~/.local/share/quickchr/machines/**/*.json
             ~/.local/share/quickchr/machines/**/*.log
           retention-days: 7
@@ -403,9 +429,74 @@ jobs:
           path: |
             ~/integration-output.txt
             ~/integration-timing.txt
+            ~/metrics.ndjson
+            ~/AppData/Local/quickchr/boot-log.ndjson
             ~/AppData/Local/quickchr/machines/**/*.json
             ~/AppData/Local/quickchr/machines/**/*.log
           retention-days: 7
+
+  # ── aggregate: push metrics to the ci-data branch ────────────────────────────
+  # Runs when collect-metrics is on, even when integration legs failed — a red
+  # run's timing/conclusion is exactly what tested-versions.json must record so
+  # the ros-versions scheduler can re-flag the version. Callers via workflow_call
+  # must grant `contents: write` (reusable-workflow perms are capped by the
+  # calling job). Per-run filenames avoid push conflicts; the rebase-retry loop
+  # covers the shared tested-versions.json rollup.
+  aggregate:
+    name: Aggregate metrics → ci-data
+    needs: [plan, integration]
+    if: ${{ !cancelled() && inputs.collect-metrics && inputs.run-integration }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          ref: ci-data
+          path: ci-data
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+      - run: bun install --frozen-lockfile
+
+      - name: Download metrics artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: ${{ inputs.artifact-prefix || 'integration' }}-logs-*
+          path: artifacts
+
+      - name: Fold into ci-data
+        run: bun scripts/ci-metrics.ts aggregate --data ci-data --artifacts artifacts
+
+      - name: Commit and push (rebase-retry)
+        run: |
+          set -eo pipefail
+          cd ci-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add runs tested-versions.json
+          if git diff --cached --quiet; then
+            echo "no metrics changes to record"
+            exit 0
+          fi
+          git commit -m "metrics: run ${{ github.run_id }} (${{ github.event_name }})"
+          for attempt in 1 2 3; do
+            if git push origin ci-data; then
+              exit 0
+            fi
+            echo "push attempt $attempt failed — rebasing onto remote ci-data"
+            git pull --rebase origin ci-data
+          done
+          git push origin ci-data
+
+      - name: Write aggregate summary
+        if: always()
+        run: |
+          {
+            echo "## ci-data"
+            echo '```'
+            cat ci-data/tested-versions.json 2>/dev/null || echo "(no tested-versions.json)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ── examples smoke (platform matrix) ─────────────────────────────────────────
   # Runs the runnable examples end-to-end (one representative per language for the
