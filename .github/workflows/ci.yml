@@ -1,7 +1,7 @@
 name: CI
 
 # Runs on every push/PR to main.  Core pipeline only — arm64, macOS, and Windows
-# integration tests live in verify-extended.yml (manual workflow_dispatch).
+# integration tests live in integration.yml (manual workflow_dispatch).
 #
 # Pipeline:
 #
@@ -12,7 +12,7 @@ name: CI
 # platform-agnostic and Windows runner minutes add no signal.
 #
 # Extended verification (arm64, macOS, Windows integration):
-#   → .github/workflows/verify-extended.yml  (workflow_dispatch only)
+#   → .github/workflows/integration.yml  (workflow_dispatch / workflow_call)
 #
 # Artifacts produced (retention: see each job):
 #   coverage-report                 — full bun coverage table text (14 days)

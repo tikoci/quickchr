@@ -17,7 +17,7 @@ import { runExample } from "../../examples/lib.ts";
 
 // Double-gated: needs QEMU (QUICKCHR_INTEGRATION) AND an explicit opt-in
 // (EXAMPLES_SMOKE), so the normal/gating integration run doesn't pay for these
-// extra boots. `bun run smoke:examples` and the verify-extended job set both.
+// extra boots. `bun run smoke:examples` and integration.yml's smoke job set both.
 const SKIP = !process.env.QUICKCHR_INTEGRATION || !process.env.EXAMPLES_SMOKE;
 const REPO = resolve(import.meta.dir, "..", "..");
 // CLI scripts resolve $QUICKCHR — point them at THIS checkout's source CLI.

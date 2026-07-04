@@ -122,7 +122,7 @@ See MANUAL.md's CLI reference and environment-variables sections for the full su
 
 ## CI System
 
-**Workflows**: `.github/workflows/{ci,verify-extended,publish}.yml`. Full artifact map and
+**Workflows**: `.github/workflows/{ci,integration,publish}.yml`. Full artifact map and
 failure-diagnosis guide live in `.github/instructions/ci.instructions.md` — this section is
 the high-level rationale only.
 
@@ -138,11 +138,15 @@ available, else TCG) and gates on both. `windows-unit-tests` runs last — if th
 broken, Windows runner minutes add no signal. Only x86 integration runs on every push;
 cross-arch and macOS are too slow/fragile for the per-push gate.
 
-**`verify-extended.yml`** — `workflow_dispatch` only. Independent jobs (no cross-`needs:`)
-for the platforms kept out of the per-push gate: linux/aarch64, macOS (arm64 + x86), and
-Windows. Dispatch inputs `arm64` / `macos` / `windows` select platforms; `test-filter`
-narrows to specific test files for fast iteration. Each runner boots a CHR matching its
-native arch — `detectAccel()` selects KVM/HVF/TCG automatically, no per-runner overrides.
+**`integration.yml`** — the single reusable integration unit (`workflow_call` +
+`workflow_dispatch`, issue #29). A plan job resolves the `platforms` input
+(linux-x86 / linux-arm64 / macos-arm64 / macos-x86 / windows-x86, or `gating`/`all`
+aliases) into one cross-OS matrix job; `test-filter` narrows to specific test files for
+fast iteration and `routeros-target` points boots at any channel or pinned version. Each
+runner boots a CHR matching its native arch — `detectAccel()` selects KVM/HVF/TCG
+automatically, no per-runner overrides. TCG platforms (macos-x86, windows-x86) default to
+a curated smoke subset instead of `continue-on-error` — green means the selected tests
+passed ("green should be green").
 
 **`publish.yml`** — triggers on `v*` tags (or dispatch). Runs lint + unit + x86 integration +
 windows-unit before `npm publish` (`--tag next` for odd/pre-release minors, `--tag latest`

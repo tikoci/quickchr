@@ -92,6 +92,7 @@ econnreset
 ecx
 edk
 efi
+elif
 endgroup
 env
 errno
@@ -290,6 +291,7 @@ subtests
 svm
 syscalls
 sysfs
+taskkill
 tcg
 tcpdump
 tgz
