@@ -1,0 +1,38 @@
+name: Main Integration
+
+# The continuous integration-test signal for main (the CI quality bar lives
+# here, not on PRs — see ci.yml "integration-freshness" and ci.instructions.md).
+#
+#   push to main      → full suite on the KVM platforms: linux/x86_64 + linux/aarch64
+#                       (the same bar releases require — kept continuously green)
+#   workflow_dispatch → same (manual freshness refresh)
+#
+# The broader weekly platform sweep lives in sweep.yml — deliberately a separate
+# workflow so a red TCG smoke leg there never trips the PR freshness gate.
+#
+# All execution is delegated to integration.yml — this file only chooses
+# platforms. The PR gate (scripts/ci-freshness.ts) reads THIS workflow's latest
+# completed run on main; renaming this file breaks the gate (MAIN_WORKFLOW env
+# in ci.yml would need to match).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A superseded main-push run carries no signal — cancel it. Dispatch runs get a
+# unique group and are never cancelled.
+concurrency:
+  group: main-integration-${{ github.event_name == 'push' && 'push' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  integration:
+    name: Integration (gating platforms)
+    uses: ./.github/workflows/integration.yml
+    with:
+      platforms: linux-x86,linux-arm64
+      artifact-prefix: main
