@@ -395,7 +395,7 @@ afterAll(async () => {
 | `MIKROTIK_WEB_PASSWORD` | MikroTik.com password (for license renewal) |
 | `QUICKCHR_DEFAULT_CHANNEL`, `QUICKCHR_DEFAULT_ARCH`, `QUICKCHR_CACHE_MAX_SIZE`, `QUICKCHR_TIMEOUT_EXTRA`, `QUICKCHR_SECURE_LOGIN` | Env-tier overrides for the 5 `quickchr settings` keys — see [MANUAL.md §3 `settings`](./MANUAL.md#3-cli-command-reference) |
 | `QUICKCHR_INTEGRATION` | Set to `1` to run integration tests |
-| `QUICKCHR_TEST_TARGET` | Integration tests only: RouterOS channel (`stable`/`long-term`/`testing`/`development`) or pinned version (e.g. `7.22.1`) to boot. Empty = `stable`. The Extended Verification workflow sets this from its `routeros-target` input to test a release across platforms |
+| `QUICKCHR_TEST_TARGET` | Integration tests only: RouterOS channel (`stable`/`long-term`/`testing`/`development`) or pinned version (e.g. `7.22.1`) to boot. Empty = `stable`. The Integration workflow (`integration.yml`) sets this from its `routeros-target` dispatch input to test a release across platforms |
 
 The full list (including `QUICKCHR_DATA_DIR`, `QUICKCHR_NO_PROMPT`, `QUICKCHR_DEBUG`,
 `NO_COLOR`) is in [MANUAL.md §11](./MANUAL.md#11-auth-secrets-environment-variables).
