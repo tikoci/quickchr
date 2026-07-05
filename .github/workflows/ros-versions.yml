@@ -1,0 +1,145 @@
+name: RouterOS Versions
+
+# Daily check: has MikroTik shipped a RouterOS version we have never
+# integration-tested? For each release channel (stable/testing/development/
+# long-term) this fetches the newest version from upgrade.mikrotik.com, checks
+# it against ci-data/tested-versions.json (written by integration.yml's
+# aggregate job), and dispatches a full linux/x86_64 integration run with
+# collect-metrics for any version with NO linux-x86 record yet.
+#
+# A version that ran and FAILED is not re-dispatched (its fail is recorded in
+# tested-versions.json and the red run stays visible) — investigate, fix, then
+# re-run manually:
+#   gh workflow run integration.yml -f platforms=linux-x86 \
+#     -f routeros-target=<version> -f collect-metrics=true
+#
+# Manual check with extra knobs:
+#   gh workflow run ros-versions.yml -f skip-versions=7.23beta5
+#
+# Pattern borrowed from tikoci/restraml + tikoci/mikropkl auto.yaml (version
+# fetch via NEWESTa7.<channel>, github-script createWorkflowDispatch,
+# empty-array guard).
+
+on:
+  schedule:
+    - cron: "17 4 * * *" # daily 04:17 UTC
+  workflow_dispatch:
+    inputs:
+      skip-versions:
+        type: string
+        description: "Comma-separated versions to skip (known-broken betas etc.)"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ros-versions
+  cancel-in-progress: false
+
+jobs:
+  # ── check: what's new vs what's tested ───────────────────────────────────────
+  check:
+    name: Check channels vs tested-versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.diff.outputs.versions }}
+    steps:
+      - name: Fetch newest version per channel
+        id: fetch
+        run: |
+          set -eo pipefail
+          declare -A seen
+          rows=""
+          for ch in stable testing development long-term; do
+            ver=$(curl -sS --max-time 10 --fail "https://upgrade.mikrotik.com/routeros/NEWESTa7.${ch}" | awk '{print $1}') || {
+              echo "::warning::could not fetch channel ${ch} — skipping"
+              continue
+            }
+            # The response is untrusted input headed for shell loops and workflow
+            # dispatch inputs — accept only RouterOS-version-shaped strings
+            # (7.23.1, 7.24beta3, 7.24rc1) and drop anything else.
+            if ! printf '%s' "$ver" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?((beta|rc)[0-9]+)?$'; then
+              echo "::warning::channel ${ch} returned non-version-shaped '${ver}' — skipping"
+              continue
+            fi
+            rows="${rows}${ch}=${ver}\n"
+            seen["$ver"]=1
+          done
+          printf 'channels<<EOF\n%b\nEOF\n' "$rows" >> "$GITHUB_OUTPUT"
+          printf 'unique=%s\n' "$(printf '%s' "${!seen[*]}")" >> "$GITHUB_OUTPUT"
+          printf '%b' "$rows"
+
+      - name: Fetch tested-versions.json from ci-data
+        id: tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eo pipefail
+          gh api "repos/${{ github.repository }}/contents/tested-versions.json?ref=ci-data" \
+            -H "Accept: application/vnd.github.raw" > tested-versions.json \
+            || echo '{}' > tested-versions.json
+          cat tested-versions.json
+
+      - name: Diff — versions with no linux-x86 record
+        id: diff
+        env:
+          UNIQUE: ${{ steps.fetch.outputs.unique }}
+          CHANNELS: ${{ steps.fetch.outputs.channels }}
+          SKIP: ${{ inputs.skip-versions }}
+        run: |
+          set -eo pipefail
+          out='[]'
+          SKIP_CLEAN=",${SKIP// /},"
+          for ver in $UNIQUE; do
+            case "$SKIP_CLEAN" in *",$ver,"*)
+              echo "::notice::skipping $ver (skip-versions input)"
+              continue ;;
+            esac
+            state=$(jq -r --arg v "$ver" '.[$v]["linux-x86"].conclusion // "untested"' tested-versions.json)
+            if [ "$state" = "untested" ]; then
+              out=$(printf '%s' "$out" | jq -c --arg v "$ver" '. + [$v]')
+            else
+              echo "$ver already has a linux-x86 record: $state"
+            fi
+          done
+          echo "versions=$out" >> "$GITHUB_OUTPUT"
+          {
+            echo "## RouterOS version check"
+            echo '```'
+            echo "channels:"
+            echo "$CHANNELS"
+            echo "to test: $out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── dispatch: one full linux-x86 run per untested version ────────────────────
+  dispatch:
+    name: Dispatch integration (${{ matrix.version }})
+    needs: check
+    if: ${{ fromJSON(needs.check.outputs.versions)[0] != null }}
+    permissions:
+      actions: write
+    strategy:
+      matrix:
+        version: ${{ fromJSON(needs.check.outputs.versions) }}
+      max-parallel: 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v8
+        env:
+          VERSION: ${{ matrix.version }}
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "integration.yml",
+              ref: "main",
+              inputs: {
+                platforms: "linux-x86",
+                "routeros-target": process.env.VERSION,
+                "collect-metrics": "true",
+              },
+            });
+            core.notice(`dispatched integration.yml for RouterOS ${process.env.VERSION}`);

@@ -26,7 +26,8 @@ Four workflows, each with a distinct purpose:
 | **Weekly Sweep** | `sweep.yml` | schedule (Mon 05:37 UTC), `workflow_dispatch` | All-platform sweep + examples smoke (separate file so a red TCG leg never blocks PRs) |
 | **Integration** | `integration.yml` | `workflow_dispatch`, `workflow_call` | THE reusable integration unit — any platform × RouterOS target × test filter |
 | **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1` or `PSScriptAnalyzerSettings.psd1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
-| **Publish** | `publish.yml` | `push: tags: v*`, `workflow_dispatch` | NPM publish pipeline |
+| **Release** | `release.yml` | `workflow_dispatch` only | One-click gate → version bump → tag → GitHub Release → npm publish |
+| **RouterOS Versions** | `ros-versions.yml` | schedule (daily 04:17 UTC), `workflow_dispatch` | New-version check → dispatches integration on never-tested versions |
 
 ### CI pipeline (ci.yml)
 
@@ -65,19 +66,19 @@ harness, via `integration.yml` with `platforms=all`. TCG platforms run their smo
 Deliberately a separate workflow from `main.yml` so a red TCG leg **never** trips the PR
 freshness gate — but a red sweep is still a real failure to investigate, never green-washed.
 
-### Publish pipeline (publish.yml)
+### Release pipeline (release.yml)
+
+One-click `workflow_dispatch` — no tag pushing, no local script, no suite re-run:
 
 ```text
-lint ──┐      ┌ integration-x86 ──┐
-unit-tests ─┴─┴ integration-arm64 ┴→ windows-unit-tests → publish
+prepare (gate: main-only + Integration freshness green + [Unreleased] non-empty
+         → unit re-check → release-prep.ts bump/rollover → commit+tag+GitHub Release)
+  → publish (npm publish --provenance, dist-tag from odd/even minor)
 ```
 
-`integration-x86` (ubuntu-latest) and `integration-arm64` (ubuntu-24.04-arm) run **in
-parallel**, both gating `windows-unit-tests → publish` — a release cannot publish unless
-the full integration suite passes on **both** linux/x86_64 and linux/aarch64 (arm64 gate
-added 2026-06-24, #15/#16). Both publish against the default (stable) image.
-
-Triggered by `bun run release` (creates and pushes a `vX.Y.Z` tag) or via GitHub Actions UI (`workflow_dispatch`). The publish step runs `npm publish --tag next` for pre-releases (odd minor) and `--tag latest` for stable releases (even minor).
+The integration bar is the freshness gate: the latest completed `main.yml` run on `main`
+must be green — the same full x86+arm64 suite the old publish pipeline re-ran, but paid
+continuously on every push instead of at release time (arm64 gate lineage: #15/#16).
 
 ### Integration (integration.yml)
 
@@ -123,23 +124,45 @@ debugging "why is this platform slow" should read `tested-versions.json` and the
 ## Release Process
 
 ```bash
-# 1. Bump version in package.json manually (odd minor = pre-release, even = stable)
-# 2. Run: bun run release
+gh workflow run release.yml -f version-bump=patch                 # release now
+gh workflow run release.yml -f version-bump=patch -f dry-run=true # preview first
+gh workflow run release.yml -f version-bump=exact -f exact-version=0.6.0
 ```
 
-`bun run release` (`scripts/release.ts`):
-- Validates git is clean and version format is valid
-- Creates annotated tag `vX.Y.Z`
-- Pushes the tag → triggers `publish.yml` automatically
-- Prints the workflow URL for monitoring
+`release.yml` (`workflow_dispatch` only, main-only) does everything:
+1. **Gates**: latest `main.yml` integration run green (freshness — no suite re-run) and
+   `CHANGELOG.md` `[Unreleased]` non-empty (it becomes the release notes; the
+   end-of-session checklist keeps it current). Plus a quick `bun test test/unit/`.
+2. **Mutation** (`scripts/release-prep.ts`, unit-tested): bump `package.json`, roll
+   `[Unreleased]` over to `## [X.Y.Z] — date`.
+3. **Publish**: commit `release: vX.Y.Z` + annotated tag + GitHub Release (notes = the
+   changelog section), then `npm publish --provenance` from the tag.
 
-**Pre-release vs stable** (from version minor):
-- `0.1.x`, `0.3.x` — odd minor → `npm tag: next` (pre-release)
+**Pre-release vs stable** (from version minor — pick the version accordingly):
+- `0.1.x`, `0.3.x` — odd minor → `npm tag: next` (pre-release, GitHub Release marked pre-release)
 - `0.2.x`, `0.4.x` — even minor → `npm tag: latest` (stable release)
 
-**Dry run**: dispatch `publish.yml` manually with `dry-run: true` to run all checks without publishing.
+**Dry run** (`dry-run: true`): every gate and the version/notes computation run; nothing
+is committed, tagged, or published.
 
 **Required secret**: `NPM_TOKEN` — npm automation token with publish access to `@tikoci/quickchr`.
+
+**Main is always release-able**: that is the point of the freshness gate + squash-only
+PRs. If the gate blocks a release, fix `main` — do not bypass the gate.
+
+## RouterOS Version Scheduler (ros-versions.yml)
+
+Daily (04:17 UTC) or `gh workflow run ros-versions.yml`: fetches the newest version per
+release channel from `upgrade.mikrotik.com/routeros/NEWESTa7.<channel>`, checks each
+against `ci-data/tested-versions.json`, and dispatches a **full linux/x86_64 integration
+run** (`collect-metrics: true`) for any version with **no linux-x86 record at all**.
+
+- A version that ran and **failed is not re-dispatched** — the fail is recorded in
+  tested-versions.json and the red run stays visible. After investigating/fixing, re-run
+  manually: `gh workflow run integration.yml -f platforms=linux-x86 -f routeros-target=<version> -f collect-metrics=true`
+- Known-broken betas: `-f skip-versions=7.24beta3,...` on a manual dispatch.
+- Successful dispatched runs fold into tested-versions.json via the normal aggregate
+  path, so the next day's check is a no-op for that version.
 
 ## Windows Unit Tests
 
@@ -240,12 +263,11 @@ a new tracked issue.
 - **Artifact** (7-day retention) — one per job:
   - `integration.yml` dispatches: `integration-logs-{linux-x86|linux-arm64|macos-arm64|macos-x86|windows-x86}`
   - `main.yml` runs: `main-logs-{linux-x86|linux-arm64}`; `sweep.yml` runs: `sweep-logs-<platform>` (the `artifact-prefix` call input)
-  - `publish.yml`: `publish-integration-logs-{x86|arm64}`
   - `integration-output.txt` — full `bun test` output including error messages
   - `integration-timing.txt` — per-file wall-clock seconds + pass/fail (integration.yml only)
   - `machines/**/*.json` — `machine.json` with last-known state, ports, config
   - `machines/**/*.log` — `qemu.log` with QEMU stdout/stderr (boot messages, panics)
-- **Step summary**: `integration.yml` shows failing lines + per-file timing (full log in the artifact); `ci.yml`/`publish.yml` show the last 80 lines per runner
+- **Step summary**: `integration.yml` shows failing lines + per-file timing + boot-timing table (full log in the artifact)
 
 ### Boot failure diagnosis checklist
 1. Open `qemu.log` from the artifact — look for `Panic`, `Error`, `EFI` failures
@@ -317,8 +339,8 @@ QUICKCHR_INTEGRATION=1 bun test test/integration/
 # mirrors the integration.yml `routeros-target` dispatch input:
 QUICKCHR_TEST_TARGET=long-term QUICKCHR_INTEGRATION=1 bun test test/integration/
 
-# Release (creates tag + triggers publish):
-bun run release
+# Release (one-click, runs in CI — see "Release Process"):
+gh workflow run release.yml -f version-bump=patch
 ```
 
 ## CHR Image Caching
