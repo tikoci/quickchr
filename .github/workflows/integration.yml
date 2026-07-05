@@ -305,7 +305,7 @@ jobs:
             else
               echo "- Accel hint: HVF (expected)"
             fi
-          } | tee "$HOME/platform-info.txt" >> "$GITHUB_STEP_SUMMARY"
+          } | tee "$HOME/platform-info.txt" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Cache CHR images (POSIX)
         if: ${{ runner.os != 'Windows' }}

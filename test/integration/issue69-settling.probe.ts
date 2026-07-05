@@ -1,4 +1,4 @@
-import { describe, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { arch as osArch, cpus, freemem, homedir, platform as osPlatform, release, totalmem } from "node:os";
@@ -344,6 +344,28 @@ function collectMachineFileDiagnostics(iteration: number, instance: ChrInstance)
 	}
 }
 
+async function collectQemuLoad(iteration: number, instance: ChrInstance, moment: string): Promise<void> {
+	const started = Date.now();
+	try {
+		const load = await instance.queryLoad();
+		emit({
+			phase: "qemu-load",
+			iteration,
+			moment,
+			durationMs: Date.now() - started,
+			load,
+		});
+	} catch (error) {
+		emit({
+			phase: "qemu-load",
+			iteration,
+			moment,
+			durationMs: Date.now() - started,
+			error: errorInfo(error),
+		});
+	}
+}
+
 async function runIteration(iteration: number, arch: Arch): Promise<number> {
 	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 	const machineName = `issue69-${process.pid}-${iteration}`;
@@ -384,8 +406,7 @@ async function runIteration(iteration: number, arch: Arch): Promise<number> {
 			instance: instanceMeta(instance),
 		});
 
-		const loadBefore = await instance.queryLoad();
-		emit({ phase: "qemu-load", iteration, moment: "before-create-user", load: loadBefore });
+		await collectQemuLoad(iteration, instance, "before-create-user");
 
 		const tcpLoop = startTcpProbeLoop(
 			iteration,
@@ -462,8 +483,7 @@ async function runIteration(iteration: number, arch: Arch): Promise<number> {
 			await tcpLoop.stop();
 		}
 
-		const loadAfter = await instance.queryLoad();
-		emit({ phase: "qemu-load", iteration, moment: "after-rest-probes", load: loadAfter });
+		await collectQemuLoad(iteration, instance, "after-rest-probes");
 		await collectConsoleDiagnostics(iteration, instance);
 		collectMachineFileDiagnostics(iteration, instance);
 	} finally {
@@ -490,12 +510,15 @@ describe.skipIf(SKIP)("issue #69 first-new-credential settling probe", () => {
 
 		let observedProblems = 0;
 		for (let iteration = 1; iteration <= iterations; iteration++) {
-			observedProblems += await runIteration(iteration, arch);
+			try {
+				observedProblems += await runIteration(iteration, arch);
+			} catch (error) {
+				observedProblems++;
+				emit({ phase: "iteration-error", iteration, error: errorInfo(error) });
+			}
 		}
 
 		emit({ phase: "probe-end", iterations, observedProblems });
-		if (observedProblems > 0) {
-			throw new Error(`issue #69 probe observed ${observedProblems} problem(s); see ${OUTPUT_PATH}`);
-		}
+		expect(observedProblems, `issue #69 probe details: ${OUTPUT_PATH}`).toBe(0);
 	}, 5_400_000);
 });
