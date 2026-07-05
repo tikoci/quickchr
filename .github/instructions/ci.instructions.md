@@ -40,8 +40,9 @@ Integration tests do NOT run on PRs; they run on every push to `main` (see below
 
 ### Main Integration (main.yml) + the PR freshness gate
 
-`main.yml` runs the **full integration suite on linux/x86_64 + linux/aarch64** (the release
-bar) on every push to `main`, delegating to `integration.yml`. Superseded pushes are
+`main.yml` runs the **full integration suite + examples smoke (+ PowerShell lint) on
+linux/x86_64 + linux/aarch64** (the release bar) on every push to `main`, delegating to
+`integration.yml`. Examples are part of the per-push flow, not a weekly extra. Superseded pushes are
 cancelled (their signal is stale by definition — a cancelled run never counts as red).
 
 The **`integration-freshness`** job in `ci.yml` (PR-only, a required branch-protection
@@ -82,18 +83,19 @@ continuously on every push instead of at release time (arm64 gate lineage: #15/#
 
 ### Integration (integration.yml)
 
-The single owner of integration-test execution ([#29](https://github.com/tikoci/quickchr/issues/29)) — no other workflow defines its own CHR runner logic. Two faces: `workflow_call` for wrapper workflows, and `workflow_dispatch` as the manual/lab face. One dispatch chooses **which platforms** (`platforms` — comma list or `gating`/`all` alias), **what runs** (`run-integration` and/or `run-examples`), against **which RouterOS** (`routeros-target`), on **which branch** (the ref in the "Run workflow" dropdown). Use `test-filter` to narrow integration to specific files and `example-filter` to narrow the smoke harness.
+The single owner of integration-test execution ([#29](https://github.com/tikoci/quickchr/issues/29)) — no other workflow defines its own CHR runner logic. Two faces: `workflow_call` for wrapper workflows, and `workflow_dispatch` as the manual/lab face. **One dispatch runs a full platforms × targets matrix**: `platforms` (comma list or `gating`/`all` alias) crossed with `routeros-targets` (comma list of channels and/or pinned versions) — e.g. `platforms=gating` + `routeros-targets=stable,long-term,7.24rc1` is nine legs in one run, no wrapper jobs or repeat dispatches. `run-integration`/`run-examples` choose what runs (examples default **ON** — they are part of the flow); the ref in the "Run workflow" dropdown chooses the branch. Use `test-filter`/`example-filter` to narrow.
 
 **Agents: dispatch this to ground a hypothesis on a platform you don't have locally**, instead of guessing from training data or waiting for a full verification cycle:
 
 ```bash
 gh workflow run integration.yml --ref <branch> \
-  -f platforms=macos-arm64 -f test-filter=exec.test.ts -f routeros-target=7.24beta2
+  -f platforms=macos-arm64 -f test-filter=exec.test.ts \
+  -f routeros-targets=7.24beta2 -f run-examples=false
 gh run list --workflow integration.yml --limit 1   # grab the run id
 gh run watch <run-id> --exit-status                # wait for the verdict
 ```
 
-A `plan` job resolves `platforms` into one cross-OS matrix job (unknown platform ids **fail the plan** — a typo never produces an empty green run). **There is no `continue-on-error` anywhere**: TCG platforms (macos-x86, windows-x86) default to a curated smoke subset (`anchor.test.ts`) that reliably completes instead of being green-washed; an explicit `test-filter` overrides the subset. **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
+A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix job (unknown platform ids or malformed targets **fail the plan** — a typo never produces an empty green run). **There is no `continue-on-error` anywhere**: TCG platforms (macos-x86, windows-x86) default to a curated smoke subset (`anchor.test.ts`) that reliably completes instead of being green-washed; an explicit `test-filter` overrides the subset. **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
 
 Every integration job records per-file wall-clock timing to `integration-timing.txt` and assembles `metrics.ndjson` (both in the artifact) — see "CI metrics (ci-data)" below ([#30](https://github.com/tikoci/quickchr/issues/30)).
 
@@ -115,7 +117,11 @@ never a second run, never affecting pass/fail:
    into `tested-versions.json` (`{version: {platform: {run_id, date, conclusion}}}`).
    Only `scope=full` runs mark a version tested; fails are recorded so the scheduler
    re-flags them. Callers must grant `contents: write` (reusable-workflow permissions are
-   capped by the calling job).
+   capped by the calling job). **The aggregate job is best-effort by contract**: a
+   fold/push failure emits a `::warning::` and the job stays green — the one deliberate
+   exception to "red is red", because a metrics hiccup redding main.yml would make the
+   PR freshness gate block every PR over side-band data. The raw metrics remain in the
+   run's artifacts either way.
 
 The ci-data branch README documents the schema + `gh`/jq/SQLite query recipes. Agents
 debugging "why is this platform slow" should read `tested-versions.json` and the recent
@@ -154,12 +160,13 @@ PRs. If the gate blocks a release, fix `main` — do not bypass the gate.
 
 Daily (04:17 UTC) or `gh workflow run ros-versions.yml`: fetches the newest version per
 release channel from `upgrade.mikrotik.com/routeros/NEWESTa7.<channel>`, checks each
-against `ci-data/tested-versions.json`, and dispatches a **full linux/x86_64 integration
-run** (`collect-metrics: true`) for any version with **no linux-x86 record at all**.
+against `ci-data/tested-versions.json`, and fires **one** integration dispatch covering
+**all** versions with no linux-x86 record (they ride the `routeros-targets` matrix of a
+single run, `collect-metrics: true`).
 
 - A version that ran and **failed is not re-dispatched** — the fail is recorded in
   tested-versions.json and the red run stays visible. After investigating/fixing, re-run
-  manually: `gh workflow run integration.yml -f platforms=linux-x86 -f routeros-target=<version> -f collect-metrics=true`
+  manually: `gh workflow run integration.yml -f platforms=linux-x86 -f routeros-targets=<version> -f collect-metrics=true`
 - Known-broken betas: `-f skip-versions=7.24beta3,...` on a manual dispatch.
 - Successful dispatched runs fold into tested-versions.json via the normal aggregate
   path, so the next day's check is a no-op for that version.
@@ -189,16 +196,16 @@ To run locally on Windows: `bun test test/unit/`
 
 ## Integration — Dispatch Inputs
 
-Inputs split into **platforms** (where), **modes** (what to run), and **scope/target**. Each selected platform runs integration (if `run-integration`) and/or the examples smoke harness (if `run-examples`). (Windows **unit** tests aren't here; they run on every push in the main CI pipeline.)
+Inputs split into **platforms** (where), **targets** (which RouterOS), **modes** (what to run), and **scope**. The matrix is platforms × targets; each leg runs integration (if `run-integration`) and/or the examples smoke harness (if `run-examples`). (Windows **unit** tests aren't here; they run on every push in the main CI pipeline.)
 
 | Input | Type | Default | Effect |
 |-------|------|---------|--------|
 | `platforms` | string | `linux-x86` | Comma-separated platform ids, or alias `gating` (= linux-x86,linux-arm64,macos-arm64) / `all`. Unknown ids fail the plan job. |
 | `run-integration` | boolean | **true** | Run `test/integration/` on each selected platform. |
-| `run-examples` | boolean | false | Run the examples smoke harness on each selected platform + `lint-powershell`. |
+| `run-examples` | boolean | **true** | Run the examples smoke harness on each matrix leg + `lint-powershell`. Default ON — pass `false` for narrow/lab dispatches. |
 | `test-filter` | string | "" | Integration: comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all (TCG platforms: smoke subset `anchor.test.ts`) |
 | `example-filter` | string | "" | Examples: comma-separated example names — e.g. `"quickstart,rollback"`; empty = curated subset. A typo fails fast (the harness validates against known names). |
-| `routeros-target` | string | "" | RouterOS channel (`stable`/`long-term`/`testing`/`development`) **or** a pinned version (`7.22.1`, `7.24beta2`); empty = stable. Feeds both integration and examples. |
+| `routeros-targets` | string | "" | Comma-separated RouterOS targets — channels (`stable`/`long-term`/`testing`/`development`) and/or pinned versions (`7.22.1`, `7.24beta2`). **Each target crosses with each platform** (matrix legs). Empty = stable. Feeds both integration and examples. |
 
 (`workflow_call` adds `artifact-prefix` so parallel callers don't collide on artifact names.)
 
@@ -216,7 +223,7 @@ Inputs split into **platforms** (where), **modes** (what to run), and **scope/ta
 
 **The examples smoke harness** (`test/integration/examples-smoke.test.ts`) runs a curated subset of runnable examples end-to-end — one representative per language *for the current OS* (`.ts` everywhere; `.sh`/`.py`-via-`uv` on POSIX; `.ps1` on Windows) — plus an intentional failure-path case that asserts teardown fires on error. `trial-license` is excluded (MikroTik rate-limits). Double-gated by `QUICKCHR_INTEGRATION` + `EXAMPLES_SMOKE` so the integration jobs don't pay for example boots; the `examples-smoke` job sets both via `bun run smoke:examples`.
 
-**`routeros-target`** is exported to each job as `QUICKCHR_TEST_TARGET` and consumed by
+**Each matrix leg's target** is exported as `QUICKCHR_TEST_TARGET` and consumed by
 integration tests via `test/integration/image-target.ts`: a channel name resolves to
 `{ channel }`, anything else to `{ version }`, empty/unset → `stable` (so push CI, publish,
 and local runs are unchanged). Tests that deliberately pin a version (provisioning's
@@ -239,7 +246,7 @@ Each runner boots a CHR matching its **native architecture** — `detectAccel()`
 **x86 cross-arch on aarch64 is NOT tested** — TCG I/O port emulation makes it impractical.
 aarch64 on x86_64 TCG is significantly slower than native but works.
 
-Each runner boots the `routeros-target` (default `stable`) for its native arch — the
+Each matrix leg boots its target (default `stable`) for its native arch — the
 target selects the RouterOS *release*, never the *architecture*.
 
 ## arm64 Status Notes
@@ -336,7 +343,7 @@ bun test test/unit/ --coverage
 QUICKCHR_INTEGRATION=1 bun test test/integration/
 
 # Same, but boot a specific RouterOS target (channel or pinned version) —
-# mirrors the integration.yml `routeros-target` dispatch input:
+# mirrors the integration.yml `routeros-targets` dispatch input:
 QUICKCHR_TEST_TARGET=long-term QUICKCHR_INTEGRATION=1 bun test test/integration/
 
 # Release (one-click, runs in CI — see "Release Process"):
