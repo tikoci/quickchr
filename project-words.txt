@@ -26,8 +26,8 @@ armvirt
 askpass
 authless
 awk
-bak
 backoff
+bak
 basicauth
 bavail
 bigsnap
@@ -55,6 +55,8 @@ cifs
 cleanuser
 cli
 cloudbase
+coderabbit
+coderabbitai
 compdef
 compgen
 compinit
@@ -110,9 +112,9 @@ fguser
 figcaption
 fmt
 fpath
+freemem
 fsfreeze
 funcs
-freemem
 gbps
 getaddrinfo
 getent
@@ -190,12 +192,12 @@ netdev
 netdevs
 netfs
 netinstall
-nodefaults
 networkd
 networksetup
 nic
 nlevel
 noauth
+nodefaults
 nographic
 noninteractive
 nopasswd
@@ -258,10 +260,10 @@ ros
 rosetta
 routerboard
 routeros
-runspace
-runspaces
 rsc
 rta
+runspace
+runspaces
 savevm
 scp
 scriptable
@@ -271,10 +273,9 @@ sendall
 setcap
 setmode
 settimeout
-shellcheck
-srand
 setuid
 sfc
+shellcheck
 sidegrade
 skyfi
 slirp
@@ -286,6 +287,7 @@ snapname
 sni
 snmp
 socat
+srand
 sshfs
 sshpass
 statfs
@@ -307,8 +309,8 @@ tikbook
 tikoci
 tlv
 toctou
-totalmem
 tonistiigi
+totalmem
 tsc
 tshark
 ttl
