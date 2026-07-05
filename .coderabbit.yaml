@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Staged review to conserve the org's prepaid CodeRabbit credits (the default —
+# review every PR + every incremental push — exhausts them). Policy:
+#   - review only when a PR is marked ready-for-review (skip drafts)
+#   - one review per ready PR; no automatic per-commit incremental re-reviews
+#   - re-review on demand with an `@coderabbitai review` PR comment
+# If the OSS rate limit becomes painful again, the next step is to set
+# reviews.auto_review.enabled=false and have a workflow_run job comment
+# `@coderabbitai review` only after the CI workflow succeeds for the PR head SHA.
+# Terse/no-decoration policy (issue #143): both reviews.poem and
+# reviews.in_progress_fortune default to true (per CodeRabbit's own docs and
+# live evidence — see below), so both `false` settings here are load-bearing,
+# not redundant. The maintainer's original "art" complaint was
+# in_progress_fortune specifically.
+#
+# CodeRabbit ignores .coderabbit.yaml changes made *within* an open-source PR
+# ("only the configuration from the base branch is applied") — confirmed on
+# PR #167, which still got a poem despite this file disabling it, because the
+# review ran against `main`'s pre-#167 config (which never touched `poem`,
+# yet still produced one — live proof `poem` defaults `true`). Any edit here
+# only takes effect starting with the PR opened *after* this file's change
+# merges to `main` — never trust "the PR that adds the setting" as the
+# setting's own verification.
+language: en-US
+tone_instructions: >
+  Terse and actionable. No poems, jokes, or decorative filler. State the
+  finding, the file/line, and the fix. Skip praise and preamble.
+reviews:
+  profile: assertive
+  review_details: true
+  enable_prompt_for_ai_agents: true
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: false
+    ignore_usernames:
+      - dependabot[bot]
+  tools:
+    github-checks:
+      enabled: true
+      timeout_ms: 420000
+  poem: false
+  in_progress_fortune: false
+  path_filters:
+    - "!.scratch/**"
