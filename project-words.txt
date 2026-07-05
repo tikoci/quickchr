@@ -78,6 +78,7 @@ demux
 desynced
 devtmpfs
 dgram
+dispatchable
 dnf
 donny
 dotenv
