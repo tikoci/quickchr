@@ -703,15 +703,18 @@ function createInstance(state: MachineState): ChrInstance {
 					throw new QuickCHRError("PROCESS_FAILED", `savevm failed: ${out.trim()}`);
 				}
 
-				// Read back the snapshot list to return the new entry
+				// Read back the snapshot list — the new entry MUST be there. A
+				// fabricated fallback here once masked savevm failing outright on
+				// arm64 (#31): the example printed a snapshot that never existed.
 				const snaps = await this.list();
-				return snaps.find((s) => s.name === snapName) ?? {
-					id: "0",
-					name: snapName,
-					vmStateSize: 0,
-					date: new Date().toISOString(),
-					vmClock: "0000:00:00.000",
-				};
+				const created = snaps.find((s) => s.name === snapName);
+				if (!created) {
+					throw new QuickCHRError(
+						"PROCESS_FAILED",
+						`savevm reported no error but snapshot "${snapName}" is absent from 'info snapshots' — treat as failed (monitor said: "${out.trim() || "(empty)"}")`,
+					);
+				}
+				return created;
 			},
 
 			async load(name: string): Promise<void> {
@@ -725,6 +728,11 @@ function createInstance(state: MachineState): ChrInstance {
 
 				const out = await monitorCommand(state.machineDir, `loadvm ${name}`, undefined, state.portBase);
 				if (/^error[:\s]/i.test(out)) {
+					// A failed loadvm leaves the VM in "paused (restore-vm)" — resume
+					// it so the guest isn't wedged (REST dead) on top of the error.
+					try {
+						await monitorCommand(state.machineDir, "cont", undefined, state.portBase);
+					} catch { /* best effort — the throw below is the real signal */ }
 					throw new QuickCHRError("PROCESS_FAILED", `loadvm failed: ${out.trim()}`);
 				}
 			},

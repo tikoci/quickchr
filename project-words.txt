@@ -199,6 +199,7 @@ noninteractive
 nopasswd
 npk
 nsec
+nvram
 oci
 oneshot
 oob

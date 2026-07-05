@@ -9,7 +9,7 @@ import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSy
 import { join } from "node:path";
 import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
-import { detectAccel, requireQemu, requireFirmware } from "./platform.ts";
+import { detectAccel, requireQemu, requireFirmware, requireQemuImg } from "./platform.ts";
 import { buildHostfwdString } from "./network.ts";
 import { ensureDir } from "./state.ts";
 import { restGet } from "./rest.ts";
@@ -80,16 +80,19 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 	// UEFI firmware (arm64 only)
 	if (arch === "arm64") {
 		const fw = requireFirmware();
-		const varsPath = join(machineDir, "efi-vars.fd");
-
-		// Copy and size-match the vars file if not already done
+		// The per-machine EFI vars pflash is qcow2, NOT raw: QEMU refuses
+		// savevm/loadvm while any writable block device is non-qcow2 ("Device
+		// 'pflash1' is writable but does not support snapshots"), which made
+		// snapshots impossible on arm64 (#31). Legacy raw efi-vars.fd machines
+		// are converted in place, preserving their NVRAM state.
+		const varsPath = join(machineDir, "efi-vars.qcow2");
 		if (!existsSync(varsPath)) {
-			prepareEfiVars(fw.code, fw.vars, varsPath);
+			prepareEfiVars(fw.code, fw.vars, varsPath, join(machineDir, "efi-vars.fd"));
 		}
 
 		args.push(
 			"-drive", `if=pflash,format=raw,readonly=on,unit=0,file=${fw.code}`,
-			"-drive", `if=pflash,format=raw,unit=1,file=${varsPath}`,
+			"-drive", `if=pflash,format=qcow2,unit=1,file=${varsPath}`,
 		);
 	}
 
@@ -248,26 +251,42 @@ function buildChannelArgs(
 	}
 }
 
-/** Copy and size-match EFI vars file to match code ROM size. */
-function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: string): void {
+/** Build the per-machine qcow2 EFI vars pflash: start from the legacy raw
+ *  vars file if the machine has one (preserves NVRAM state), else from the
+ *  firmware template; size-match to the code ROM; convert raw → qcow2 so
+ *  savevm/loadvm work (see the pflash comment at the call site / #31). */
+function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: string, legacyRawPath: string): void {
 	ensureDir(join(destPath, ".."));
-	copyFileSync(varsTemplatePath, destPath);
 
-	// pflash units must be identical size — pad/truncate vars to match code
+	// Stage the raw image (legacy per-machine file wins over the template).
+	const rawStage = `${destPath}.raw-stage`;
+	copyFileSync(existsSync(legacyRawPath) ? legacyRawPath : varsTemplatePath, rawStage);
+
+	// pflash units must be identical size — pad/truncate vars to match code.
+	// truncateSync extends with zero bytes when target is larger.
 	const codeSize = statSync(codePath).size;
-	const varsSize = statSync(destPath).size;
+	try {
+		if (statSync(rawStage).size !== codeSize) truncateSync(rawStage, codeSize);
+	} catch (e) {
+		try { unlinkSync(rawStage); } catch { /* best effort */ }
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`Failed to size-match EFI vars: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
 
-	if (varsSize !== codeSize) {
-		// Pad or truncate vars to match code ROM size — truncateSync extends with
-		// zero bytes when target is larger, and truncates when smaller.
-		try {
-			truncateSync(destPath, codeSize);
-		} catch (e) {
-			throw new QuickCHRError(
-				"PROCESS_FAILED",
-				`Failed to size-match EFI vars: ${e instanceof Error ? e.message : String(e)}`,
-			);
-		}
+	const qemuImg = requireQemuImg();
+	const convertResult = Bun.spawnSync([qemuImg, "convert", "-f", "raw", "-O", "qcow2", rawStage, destPath]);
+	try { unlinkSync(rawStage); } catch { /* best effort */ }
+	if (convertResult.exitCode !== 0) {
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`qemu-img convert of EFI vars failed: ${new TextDecoder().decode(convertResult.stderr).trim()}`,
+		);
+	}
+	// Legacy raw file is superseded — remove so nothing boots the stale copy.
+	if (existsSync(legacyRawPath)) {
+		try { unlinkSync(legacyRawPath); } catch { /* best effort */ }
 	}
 }
 

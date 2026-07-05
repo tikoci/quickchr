@@ -8,6 +8,18 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Fixed
+
+- **arm64 snapshots never worked — savevm failed silently, loadvm wedged the guest**
+  (issue #31). QEMU refuses `savevm` while the EFI-vars pflash is a writable raw file;
+  the per-machine vars are now a qcow2 pflash (legacy machines migrate in place, NVRAM
+  preserved), so `snapshot.save()/load()` genuinely work on arm64. Three masking layers
+  fixed alongside: monitor responses are cleaned of command echo/ANSI so `Error:` lines
+  reach the error checks, `snapshot.save()` throws instead of fabricating an entry when
+  the snapshot is absent from `info snapshots`, and a failed `loadvm` issues `cont` so
+  the guest is never stranded in `paused (restore-vm)`. Full evidence chain in
+  `test/lab/arm64-rollback/REPORT.md`.
+
 ### Added
 
 - **Boot-history log + boot timing fields** (issue #30) — every successful boot appends
