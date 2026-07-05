@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bun run scripts/ci-freshness.ts
 
-      - name: Unit-test the release commit
+      - name: Unit-test main before releasing
         run: |
           set -eo pipefail
           bun test test/unit/ 2>&1 | tee /tmp/release-unit.txt | tail -5
@@ -103,8 +103,12 @@ jobs:
           [ "$DRY_RUN" = "true" ] && FLAGS="--dry-run"
           bun scripts/release-prep.ts "$ARG" $FLAGS --notes-out /tmp/release-notes.md \
             | tee /tmp/release-prep.txt
-          VERSION=$(grep '^version=' /tmp/release-prep.txt | cut -d= -f2)
-          NPM_TAG=$(grep '^npm-tag=' /tmp/release-prep.txt | cut -d= -f2)
+          VERSION=$(grep -m1 '^version=' /tmp/release-prep.txt | cut -d= -f2)
+          NPM_TAG=$(grep -m1 '^npm-tag=' /tmp/release-prep.txt | cut -d= -f2)
+          if [ -z "$VERSION" ] || [ -z "$NPM_TAG" ]; then
+            echo "::error::release-prep did not emit version/npm-tag — aborting"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "npm-tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
           {

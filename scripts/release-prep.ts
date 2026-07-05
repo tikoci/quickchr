@@ -39,8 +39,9 @@ export function nextVersion(current: string, bump: string): string {
 }
 
 export function npmTag(version: string): "next" | "latest" {
-	const minor = Number(version.split(".")[1]);
-	return minor % 2 !== 0 ? "next" : "latest";
+	const m = version.match(/^\d+\.(\d+)\.\d+$/);
+	if (!m) throw new Error(`version "${version}" is not X.Y.Z`);
+	return Number(m[1]) % 2 !== 0 ? "next" : "latest";
 }
 
 export interface Rollover {
@@ -82,6 +83,10 @@ async function main(): Promise<void> {
 	const dryRun = args.includes("--dry-run");
 	const notesOutIdx = args.indexOf("--notes-out");
 	const notesOut = notesOutIdx >= 0 ? args[notesOutIdx + 1] : undefined;
+	if (notesOutIdx >= 0 && (!notesOut || notesOut.startsWith("--"))) {
+		console.error("--notes-out requires a file path");
+		process.exit(2);
+	}
 	if (!bump) {
 		console.error("usage: bun scripts/release-prep.ts <patch|minor|major|X.Y.Z> [--dry-run] [--notes-out <file>]");
 		process.exit(2);

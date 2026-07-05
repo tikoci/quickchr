@@ -56,6 +56,13 @@ jobs:
               echo "::warning::could not fetch channel ${ch} — skipping"
               continue
             }
+            # The response is untrusted input headed for shell loops and workflow
+            # dispatch inputs — accept only RouterOS-version-shaped strings
+            # (7.23.1, 7.24beta3, 7.24rc1) and drop anything else.
+            if ! printf '%s' "$ver" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?((beta|rc)[0-9]+)?$'; then
+              echo "::warning::channel ${ch} returned non-version-shaped '${ver}' — skipping"
+              continue
+            fi
             rows="${rows}${ch}=${ver}\n"
             seen["$ver"]=1
           done
