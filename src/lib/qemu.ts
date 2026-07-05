@@ -279,9 +279,14 @@ function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: st
 	const convertResult = Bun.spawnSync([qemuImg, "convert", "-f", "raw", "-O", "qcow2", rawStage, destPath]);
 	try { unlinkSync(rawStage); } catch { /* best effort */ }
 	if (convertResult.exitCode !== 0) {
+		// A failed convert can leave a partial destPath behind — remove it so the
+		// next launch regenerates instead of booting (and re-failing on) the stub.
+		try { unlinkSync(destPath); } catch { /* best effort */ }
+		const stderr = new TextDecoder().decode(convertResult.stderr).trim();
+		const stdout = new TextDecoder().decode(convertResult.stdout).trim();
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`qemu-img convert of EFI vars failed: ${new TextDecoder().decode(convertResult.stderr).trim()}`,
+			`qemu-img convert of EFI vars failed: ${stderr || stdout || `exit ${convertResult.exitCode}`}`,
 		);
 	}
 	// Legacy raw file is superseded — remove so nothing boots the stale copy.
