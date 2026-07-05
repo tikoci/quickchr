@@ -19,8 +19,8 @@
  *             branch + the downloaded per-platform artifacts:
  *               bun scripts/ci-metrics.ts aggregate --data <ci-data-dir> --artifacts <dir>
  *             Copies every metrics.ndjson found under <artifacts> to
- *             <ci-data-dir>/runs/<run_id>-<platform>.ndjson and folds suite
- *             records into <ci-data-dir>/tested-versions.json:
+ *             <ci-data-dir>/runs/<run_id>-<platform>-<target>.ndjson and folds
+ *             suite records into <ci-data-dir>/tested-versions.json:
  *               { "<version>": { "<platform>": { run_id, date, conclusion } } }
  *             Only scope="full" suite records count — a filtered/smoke run never
  *             marks a version "tested" — and each run marks exactly ONE version:
