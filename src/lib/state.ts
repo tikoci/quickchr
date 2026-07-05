@@ -51,9 +51,10 @@ export function bootLogPath(): string {
  *
  *  Append-first (single appendFileSync call, atomic for one-line writes on
  *  every platform we run on) so concurrent boots — parallel bun test workers
- *  each booting a CHR — never clobber each other's entries. Only the rare
- *  rotation does a read-rewrite; a lost race there trims a few extra old
- *  lines at worst, never a fresh append. */
+ *  each booting a CHR — never clobber each other's entries in the common path.
+ *  Only the rare rotation (once per ~500 boots) does a read-rewrite; an append
+ *  racing that millisecond window CAN be lost. Accepted: this is a boot-history
+ *  metrics log, not a ledger, and a lockfile is not worth the complexity. */
 export function appendBootLog(entry: BootLogEntry): void {
 	const path = bootLogPath();
 	ensureDir(getDataDir());
