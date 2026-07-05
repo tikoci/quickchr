@@ -135,7 +135,8 @@ with a layered design:
   because a 25-minute CHR suite per PR push bought little signal per minute; the quality
   bar moved to main.
 - **`main.yml`** — full integration suite + examples smoke (+ PowerShell lint) on
-  linux/x86_64 + linux/aarch64 (KVM) on every push to `main`; examples are part of the
+  linux/x86_64 + linux/aarch64 (KVM when available; hosted arm64 may fall back to TCG)
+  on every push to `main`; examples are part of the
   default flow, not a weekly extra. The **freshness gate** (`scripts/ci-freshness.ts`) makes this honest:
   PRs merge only while the latest completed main run is green, so a red main visibly
   blocks everything instead of rotting in the Actions list. Superseded push runs cancel;

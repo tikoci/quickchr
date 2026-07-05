@@ -225,7 +225,7 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 | Platform id | Runner | CHR arch | Accel | Full-suite timeout |
 |-------------|--------|----------|-------|--------------------|
 | `linux-x86` | ubuntu-latest | x86 | KVM | 60 min |
-| `linux-arm64` | ubuntu-24.04-arm | arm64 | KVM | 60 min |
+| `linux-arm64` | ubuntu-24.04-arm | arm64 | KVM if available; hosted runners may fall back to TCG | 60 min |
 | `macos-arm64` | macos-15 | arm64 | HVF | 60 min |
 | `macos-x86` | macos-15-intel | x86 | TCG | 300 min (90 with `tcg-smoke`/`test-filter`) |
 | `windows-x86` | windows-latest | x86 | TCG | 300 min (90 with `tcg-smoke`/`test-filter`) |
@@ -295,17 +295,20 @@ a new tracked issue.
 - **Artifact** (7-day retention) — one per job:
   - `integration.yml` dispatches: `integration-logs-{linux-x86|linux-arm64|macos-arm64|macos-x86|windows-x86}`
   - `main.yml` runs: `main-logs-{linux-x86|linux-arm64}`; `sweep.yml` runs: `sweep-logs-<platform>` (the `artifact-prefix` call input)
+  - `platform-info.txt` — matrix id, runner arch, process arch, CPU model/count, memory, QEMU versions, `/dev/kvm` state, quickchr accel detection, and Linux KVM open probe
   - `integration-output.txt` — full `bun test` output including error messages
   - `integration-timing.txt` — per-file wall-clock seconds + pass/fail (integration.yml only)
+  - `issue69-*.ndjson` — only when `issue69-settling.probe.ts` is dispatched; per-iteration port probes, REST probe attempts/retries, QEMU load, and console diagnostics
   - `machines/**/*.json` — `machine.json` with last-known state, ports, config
   - `machines/**/*.log` — `qemu.log` with QEMU stdout/stderr (boot messages, panics)
 - **Step summary**: `integration.yml` shows failing lines + per-file timing + boot-timing table (full log in the artifact)
 
 ### Boot failure diagnosis checklist
 1. Open `qemu.log` from the artifact — look for `Panic`, `Error`, `EFI` failures
-2. Check `machine.json` — verify `status`, `arch`, `ports`, `version` fields
-3. Check `integration-output.txt` — find the specific test that timed out or errored
-4. Look for `::notice::KVM not available` in logs — TCG is significantly slower than KVM/HVF and per-probe HTTP timeouts may need to be larger
+2. Check `platform-info.txt` — verify runner/process arch, CPU/memory, QEMU version, `/dev/kvm`, and whether the KVM open probe failed
+3. Check `machine.json` — verify `status`, `arch`, `ports`, `version`, `lastAccel`, and `lastBootMs` fields
+4. Check `integration-output.txt` — find the specific test that timed out or errored
+5. Look for `::notice::KVM not available` and `KVM open probe` in logs — TCG is significantly slower than KVM/HVF and per-probe HTTP timeouts may need to be larger
 
 ### Common failure signatures
 | Symptom | Likely cause | Where to look |

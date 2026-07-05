@@ -112,6 +112,7 @@ fmt
 fpath
 fsfreeze
 funcs
+freemem
 gbps
 getaddrinfo
 getent
@@ -189,6 +190,7 @@ netdev
 netdevs
 netfs
 netinstall
+nodefaults
 networkd
 networksetup
 nic
@@ -214,6 +216,7 @@ patchless
 pci
 pflash
 pgrep
+pidfile
 pingable
 pipefail
 pkgs
@@ -304,6 +307,7 @@ tikbook
 tikoci
 tlv
 toctou
+totalmem
 tonistiigi
 tsc
 tshark

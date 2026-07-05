@@ -21,7 +21,7 @@ name: Integration
 #
 # Platform ids (comma-separate to combine, or use a group alias):
 #   linux-x86    ubuntu-latest      x86 CHR    KVM
-#   linux-arm64  ubuntu-24.04-arm   arm64 CHR  KVM
+#   linux-arm64  ubuntu-24.04-arm   arm64 CHR  KVM if available; hosted runners may fall back to TCG
 #   macos-arm64  macos-15           arm64 CHR  HVF
 #   macos-x86    macos-15-intel     x86 CHR    TCG (no hw accel — slow)
 #   windows-x86  windows-latest     x86 CHR    TCG (no hw accel — slow)
@@ -134,7 +134,8 @@ jobs:
           TCG_SMOKE: ${{ inputs.tcg-smoke }}
         run: |
           set -eo pipefail
-          # id → label | runner | tcg (no hw accel on hosted runner)
+          # id → label | runner | tcg (forced/no hw accel on hosted runner;
+          # Linux KVM may still fall back dynamically and is logged at runtime)
           table() {
             case "$1" in
               linux-x86)   echo 'linux/x86_64|ubuntu-latest|false' ;;
@@ -262,21 +263,49 @@ jobs:
 
       - name: Log platform
         run: |
+          guest_arch=x86
+          case "${{ matrix.id }}" in
+            linux-arm64|macos-arm64) guest_arch=arm64 ;;
+          esac
           {
             echo "### Platform: ${{ matrix.label }} — target ${{ matrix.target }}"
+            echo "- Matrix: id=${{ matrix.id }} runner=${{ matrix.os }} runner.os=${{ runner.os }} runner.arch=${{ runner.arch }}"
             echo "- OS: $(uname -s 2>/dev/null || echo Windows) $(uname -m 2>/dev/null || echo x86_64)"
             echo "- Bun: $(bun --version)"
+            bun --eval 'const os = await import("node:os"); const c = os.cpus(); console.log(`- Process: platform=${process.platform} arch=${process.arch} cpuCount=${c.length} cpuModel=${c[0]?.model ?? "unknown"} totalMemMiB=${Math.round(os.totalmem() / 1048576)} freeMemMiB=${Math.round(os.freemem() / 1048576)}`);'
             qemu-system-x86_64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
             qemu-system-aarch64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
             echo "- RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
+            QUICKCHR_LOG_ARCH="$guest_arch" bun --eval 'const { detectAccel, isCrossArchEmulation, accelTimeoutFactor } = await import("./src/lib/platform.ts"); const arch = process.env.QUICKCHR_LOG_ARCH; const accel = await detectAccel(arch); const cross = isCrossArchEmulation(arch); console.log(`- quickchr detectAccel(${arch}): ${accel} (crossArch=${cross}, timeoutFactor=${accelTimeoutFactor(accel, cross)})`);'
             if [ "${{ runner.os }}" = "Linux" ]; then
-              if [ -w /dev/kvm ] 2>/dev/null; then echo "- Accel: KVM"; else echo "- Accel: TCG (no /dev/kvm)"; fi
+              if [ -e /dev/kvm ]; then
+                echo "- /dev/kvm: $(ls -l /dev/kvm)"
+              else
+                echo "- /dev/kvm: absent"
+              fi
+              if [ -w /dev/kvm ] 2>/dev/null; then echo "- /dev/kvm writable: yes"; else echo "- /dev/kvm writable: no"; fi
+              qemu_bin=qemu-system-x86_64
+              [ "$guest_arch" = "arm64" ] && qemu_bin=qemu-system-aarch64
+              if command -v "$qemu_bin" >/dev/null 2>&1; then
+                probe_pid="${RUNNER_TEMP:-/tmp}/quickchr-kvm-probe.pid"
+                probe_log="${RUNNER_TEMP:-/tmp}/quickchr-kvm-probe.log"
+                rm -f "$probe_pid" "$probe_log"
+                if "$qemu_bin" -machine none -accel kvm -display none -nodefaults -daemonize -pidfile "$probe_pid" >"$probe_log" 2>&1; then
+                  echo "- KVM open probe: ok ($qemu_bin)"
+                  if [ -s "$probe_pid" ]; then kill "$(cat "$probe_pid")" 2>/dev/null || true; fi
+                else
+                  rc=$?
+                  echo "- KVM open probe: failed rc=$rc ($qemu_bin)"
+                  sed 's/^/  /' "$probe_log" | head -20 || true
+                fi
+              fi
+              if [ -w /dev/kvm ] 2>/dev/null; then echo "- Accel hint: KVM"; else echo "- Accel hint: TCG (no writable /dev/kvm)"; fi
             elif [ "${{ matrix.tcg }}" = "true" ]; then
-              echo "- Accel: TCG (no hardware acceleration on this hosted runner)"
+              echo "- Accel hint: TCG (no hardware acceleration on this hosted runner)"
             else
-              echo "- Accel: HVF (expected)"
+              echo "- Accel hint: HVF (expected)"
             fi
-          } | tee -a "$GITHUB_STEP_SUMMARY"
+          } | tee "$HOME/platform-info.txt" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cache CHR images (POSIX)
         if: ${{ runner.os != 'Windows' }}
@@ -358,7 +387,7 @@ jobs:
             echo "::notice::Running $f"
             t0=$(date +%s)
             status=pass
-            if ! QUICKCHR_INTEGRATION=1 bun test "$f" 2>&1 | tee -a "$HOME/integration-output.txt"; then
+            if ! QUICKCHR_INTEGRATION=1 bun test "./$f" 2>&1 | tee -a "$HOME/integration-output.txt"; then
               fail=1
               status=fail
             fi
@@ -457,9 +486,11 @@ jobs:
           name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
           path: |
+            ~/platform-info.txt
             ~/integration-output.txt
             ~/integration-timing.txt
             ~/metrics.ndjson
+            ~/issue69-*.ndjson
             ~/arm64-rest-repro.txt
             ~/.local/share/quickchr/boot-log.ndjson
             ~/.local/share/quickchr/machines/**/*.json
@@ -473,9 +504,11 @@ jobs:
           name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
           path: |
+            ~/platform-info.txt
             ~/integration-output.txt
             ~/integration-timing.txt
             ~/metrics.ndjson
+            ~/issue69-*.ndjson
             ~/AppData/Local/quickchr/boot-log.ndjson
             ~/AppData/Local/quickchr/machines/**/*.json
             ~/AppData/Local/quickchr/machines/**/*.log
