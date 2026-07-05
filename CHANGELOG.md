@@ -45,6 +45,15 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Changed
 
+- **CI system refactored end-to-end** (issue #29) — one reusable integration workflow
+  (`integration.yml`, dispatchable per platform × RouterOS target × test filter) replaces
+  the old `verify-extended.yml`/`publish.yml` duplication. Integration tests moved off
+  PRs onto every push to `main`, with a required PR "Integration freshness" gate; weekly
+  all-platform sweep; daily new-RouterOS-version check that auto-tests never-seen
+  versions; boot/test timing collected to the `ci-data` branch; releases are now a
+  one-click `release.yml` dispatch (replacing `bun run release`/`scripts/release.ts` —
+  the `release` package script is gone). Repo is squash-merge-only. Contributor-facing:
+  see CONTRIBUTING.md "Pull Requests & Merging" and "Releasing".
 - **Wizard channel default** (issue #46) now resolves the same way `add`/`start` do (`stable`
   when not configured, or the `default-channel` setting) instead of a hardcoded `long-term`,
   fixing a pre-existing inconsistency between the two entry points. The "recommended for
