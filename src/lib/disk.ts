@@ -260,8 +260,11 @@ export function parseSnapshotList(monitorOutput: string): SnapshotInfo[] {
 		// Match snapshot data lines: ID, TAG, VM SIZE, DATE (YYYY-MM-DD HH:MM:SS), VM CLOCK, ICOUNT
 		// Example: "--      test              113 MiB 2026-04-14 00:47:19  0000:01:17.163         --"
 		// Example: "1       snap1             113 MiB 2026-04-14 00:47:19  0000:01:17.163         --"
+		// VM CLOCK hour width varies by QEMU version (2-digit on 8.x runners,
+		// 4-digit on 11.x brew builds) and the ICOUNT column may be absent —
+		// accept both so list() doesn't silently return [] on older QEMU.
 		const match = line.match(
-			/^\s*(\S+)\s+(\S+)\s+(\d+(?:\.\d+)?\s*(?:[KMGT]i?B|bytes?))\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\d{4}:\d{2}:\d{2}\.\d+)\s+(\S+)/i,
+			/^\s*(\S+)\s+(\S+)\s+(\d+(?:\.\d+)?\s*(?:[KMGT]i?B|bytes?))\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\d{2,4}:\d{2}:\d{2}\.\d+)(?:\s+(\S+))?/i,
 		);
 		if (!match) continue;
 
@@ -274,7 +277,7 @@ export function parseSnapshotList(monitorOutput: string): SnapshotInfo[] {
 			vmStateSize: parseVmSize(vmSizeStr),
 			date: dateStr.replace(" ", "T") + "Z",
 			vmClock: vmClock,
-			icount: icountStr === "--" ? undefined : Number(icountStr),
+			icount: icountStr && icountStr !== "--" ? Number(icountStr) : undefined,
 		});
 	}
 

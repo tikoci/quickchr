@@ -709,9 +709,17 @@ function createInstance(state: MachineState): ChrInstance {
 				const snaps = await this.list();
 				const created = snaps.find((s) => s.name === snapName);
 				if (!created) {
+					// Self-grounding error: include the raw monitor listing so a CI
+					// failure carries the evidence (QEMU output formats vary by version
+					// and a parse gap here looks identical to a real savevm failure).
+					let rawList = "(unavailable)";
+					try {
+						rawList = await monitorCommand(state.machineDir, "info snapshots", undefined, state.portBase);
+					} catch { /* keep placeholder */ }
 					throw new QuickCHRError(
 						"PROCESS_FAILED",
-						`savevm reported no error but snapshot "${snapName}" is absent from 'info snapshots' — treat as failed (monitor said: "${out.trim() || "(empty)"}")`,
+						`savevm reported no error but snapshot "${snapName}" is absent from the parsed list — ` +
+							`treat as failed. savevm said: "${out.trim() || "(empty)"}"; raw 'info snapshots': "${rawList}"`,
 					);
 				}
 				return created;
