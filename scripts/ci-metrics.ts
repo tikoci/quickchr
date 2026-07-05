@@ -19,11 +19,16 @@
  *             branch + the downloaded per-platform artifacts:
  *               bun scripts/ci-metrics.ts aggregate --data <ci-data-dir> --artifacts <dir>
  *             Copies every metrics.ndjson found under <artifacts> to
- *             <ci-data-dir>/runs/<run_id>-<platform>.ndjson and folds suite
- *             records into <ci-data-dir>/tested-versions.json:
+ *             <ci-data-dir>/runs/<run_id>-<platform>-<target>.ndjson and folds
+ *             suite records into <ci-data-dir>/tested-versions.json:
  *               { "<version>": { "<platform>": { run_id, date, conclusion } } }
  *             Only scope="full" suite records count — a filtered/smoke run never
- *             marks a version "tested". The ros-versions scheduler reads this.
+ *             marks a version "tested" — and each run marks exactly ONE version:
+ *             its target's resolution. The ros-versions scheduler reads this.
+ *
+ * refold    — rebuild tested-versions.json from every runs/*.ndjson already on
+ *             the ci-data branch (heals the rollup after a fold-logic fix):
+ *               bun scripts/ci-metrics.ts refold --data <ci-data-dir>
  *
  * Schema doc lives on the ci-data branch README; keep the two in sync.
  */
@@ -165,29 +170,59 @@ interface SuiteRecord {
 
 export type TestedVersions = Record<string, Record<string, { run_id: string; date: string; conclusion: string }>>;
 
+/** RouterOS version shape (7.22.1, 7.24beta2, 7.24rc1) — anything else is a channel alias. */
+const VERSION_SHAPE = /^[0-9]+\.[0-9]+(\.[0-9]+)?((beta|rc)[0-9]+)?$/;
+
+/** The RouterOS version a suite run actually tested. A version-shaped target is
+ *  itself; a channel alias (stable/testing/…) resolves to the run's MODAL boot
+ *  version — tests boot the leg's target by default, so the majority of boots
+ *  are the channel's resolution, while pinned-version tests (upgrade paths,
+ *  provisioning baselines) stay in the minority. */
+export function resolvedTargetVersion(records: Array<{ kind: string; [k: string]: unknown }>): string | undefined {
+	const suite = records.find((r) => r.kind === "suite") as SuiteRecord | undefined;
+	if (!suite) return undefined;
+	if (VERSION_SHAPE.test(suite.target)) return suite.target;
+	const counts = new Map<string, number>();
+	for (const r of records) {
+		if (r.kind !== "boot") continue;
+		const v = (r as { version?: unknown }).version;
+		if (typeof v !== "string" || v === "") continue;
+		counts.set(v, (counts.get(v) ?? 0) + 1);
+	}
+	let best: string | undefined;
+	let bestCount = 0;
+	for (const [v, n] of counts) {
+		if (n > bestCount) {
+			best = v;
+			bestCount = n;
+		}
+	}
+	return best;
+}
+
 /** Fold one metrics file's records into the tested-versions rollup.
- *  Only full-scope suite runs count; version comes from the run's boot records
- *  (the actually-booted RouterOS, not the channel alias it was requested by). */
+ *  Only full-scope suite runs count, and a run marks exactly ONE version — its
+ *  target's resolution — never every version it happened to boot. Upgrade and
+ *  pinned-channel tests boot other versions incidentally; crediting those would
+ *  suppress the ros-versions scheduler for versions no full suite ever targeted
+ *  (observed: run 28748268691 targeted 7.20.8 but credited 7.23.1). */
 export function foldTestedVersions(tested: TestedVersions, ndjson: string): TestedVersions {
 	const records = ndjson.split("\n").filter(Boolean).map((l) => JSON.parse(l));
 	const suite = records.find((r) => r.kind === "suite") as SuiteRecord | undefined;
 	if (!suite || suite.scope !== "full") return tested;
-	const versions = new Set(
-		records.filter((r) => r.kind === "boot").map((r) => (r as { version: string }).version),
-	);
-	for (const version of versions) {
-		const platforms = tested[version] ?? {};
-		const prior = platforms[suite.platform];
-		// A later run supersedes; never let a pass be overwritten by nothing.
-		if (!prior || prior.date <= suite.ts) {
-			platforms[suite.platform] = {
-				run_id: suite.run_id,
-				date: suite.ts,
-				conclusion: suite.conclusion,
-			};
-		}
-		tested[version] = platforms;
+	const version = resolvedTargetVersion(records);
+	if (!version) return tested;
+	const platforms = tested[version] ?? {};
+	const prior = platforms[suite.platform];
+	// A later run supersedes; never let a pass be overwritten by nothing.
+	if (!prior || prior.date <= suite.ts) {
+		platforms[suite.platform] = {
+			run_id: suite.run_id,
+			date: suite.ts,
+			conclusion: suite.conclusion,
+		};
 	}
+	tested[version] = platforms;
 	return tested;
 }
 
@@ -246,12 +281,41 @@ function aggregate(): void {
 	console.log(`ci-metrics: aggregated ${files.length} metrics file(s) into ${dataDir}`);
 }
 
+/** Rebuild tested-versions.json from scratch out of every runs/*.ndjson on a
+ *  ci-data checkout — the healing path after a fold-logic change (the per-run
+ *  files are the source of truth; the rollup is derived). */
+function refold(): void {
+	const dataDir = arg("--data");
+	if (!dataDir) {
+		console.error("usage: ci-metrics refold --data <ci-data-dir>");
+		process.exit(2);
+	}
+	const runsDir = join(dataDir, "runs");
+	const files = existsSync(runsDir)
+		? [...readdirSync(runsDir)].sort().filter((f) => f.endsWith(".ndjson"))
+		: [];
+	// Unlike aggregate (which folds into the existing rollup), refold rebuilds
+	// from {} — so an empty/missing runs/ means a mistyped --data, and writing
+	// would wipe the rollup. Refuse instead.
+	if (files.length === 0) {
+		console.error(`ci-metrics refold: no runs/*.ndjson under ${runsDir} — refusing to overwrite tested-versions.json (wrong --data path?)`);
+		process.exit(1);
+	}
+	let tested: TestedVersions = {};
+	for (const f of files) {
+		tested = foldTestedVersions(tested, readFileSync(join(runsDir, f), "utf-8"));
+	}
+	writeFileSync(join(dataDir, "tested-versions.json"), `${JSON.stringify(sortKeysDeep(tested), null, "\t")}\n`);
+	console.log(`ci-metrics: refolded ${files.length} run file(s) into tested-versions.json`);
+}
+
 if (import.meta.main) {
 	const mode = process.argv[2];
 	if (mode === "assemble") assemble();
 	else if (mode === "aggregate") aggregate();
+	else if (mode === "refold") refold();
 	else {
-		console.error("usage: ci-metrics <assemble|aggregate> …");
+		console.error("usage: ci-metrics <assemble|aggregate|refold> …");
 		process.exit(2);
 	}
 }
