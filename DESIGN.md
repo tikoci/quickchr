@@ -89,7 +89,7 @@ Current consumers are all first-party tikoci projects (centrs, donny, restraml),
 │   └── 7.22.1-arm64-1/
 │       ├── machine.json       # Config + state
 │       ├── disk.img           # Working copy
-│       ├── efi-vars.fd        # UEFI vars (arm64)
+│       ├── efi-vars.qcow2     # UEFI vars (arm64; qcow2 so savevm works — #31)
 │       ├── monitor.sock       # QEMU monitor
 │       ├── serial.sock        # Serial console
 │       ├── qga.sock           # QGA (x86 only)

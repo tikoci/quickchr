@@ -7,11 +7,16 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 ## ARM64 CHR (qemu-system-aarch64)
 
 - Machine: `-M virt`
-- UEFI firmware: two pflash drives (unit=0 code readonly, unit=1 vars writable)
+- UEFI firmware: two pflash drives (unit=0 code readonly raw, unit=1 vars writable)
+- **Vars pflash MUST be qcow2** (`efi-vars.qcow2`, built via `qemu-img convert`) —
+  QEMU refuses `savevm`/`loadvm` while ANY writable block device is non-qcow2
+  ("Device 'pflash1' is writable but does not support snapshots"), which silently
+  broke all arm64 snapshots (#31, `test/lab/arm64-rollback/REPORT.md`). Legacy raw
+  `efi-vars.fd` is migrated in place at next launch (NVRAM preserved).
 - Disk: `-drive file=...,format=raw,if=none,id=drive0 -device virtio-blk-pci,drive=drive0`
 - **NEVER use `if=virtio`** on virt — it maps to MMIO, causing silent boot failures
 - CPU: `-cpu host` when using HVF, `-cpu cortex-a710` for TCG
-- pflash sizes must match (dd to pad/truncate vars copy)
+- pflash virtual sizes must match the code ROM (pad/truncate the raw stage before converting)
 
 ## x86 CHR (qemu-system-x86_64)
 

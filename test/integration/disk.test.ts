@@ -145,7 +145,10 @@ describe.skipIf(SKIP)("disk support", () => {
 		}
 	}, 300_000);
 
-	test.skipIf(process.arch === "arm64")("monitor savevm/loadvm restores guest state on qcow2 boot disk", async () => {
+	// Runs on ALL arches — arm64 savevm was broken until the qcow2 EFI-vars
+	// pflash fix (#31, test/lab/arm64-rollback/REPORT.md); this test is the
+	// end-to-end regression guard for it.
+	test("monitor savevm/loadvm restores guest state on qcow2 boot disk", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
 		const arch = process.arch === "arm64" ? "arm64" : "x86";

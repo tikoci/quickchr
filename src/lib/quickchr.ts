@@ -703,15 +703,26 @@ function createInstance(state: MachineState): ChrInstance {
 					throw new QuickCHRError("PROCESS_FAILED", `savevm failed: ${out.trim()}`);
 				}
 
-				// Read back the snapshot list to return the new entry
+				// Read back the snapshot list — the new entry MUST be there. A
+				// fabricated fallback here once masked savevm failing outright on
+				// arm64 (#31): the example printed a snapshot that never existed.
 				const snaps = await this.list();
-				return snaps.find((s) => s.name === snapName) ?? {
-					id: "0",
-					name: snapName,
-					vmStateSize: 0,
-					date: new Date().toISOString(),
-					vmClock: "0000:00:00.000",
-				};
+				const created = snaps.find((s) => s.name === snapName);
+				if (!created) {
+					// Self-grounding error: include the raw monitor listing so a CI
+					// failure carries the evidence (QEMU output formats vary by version
+					// and a parse gap here looks identical to a real savevm failure).
+					let rawList = "(unavailable)";
+					try {
+						rawList = await monitorCommand(state.machineDir, "info snapshots", undefined, state.portBase);
+					} catch { /* keep placeholder */ }
+					throw new QuickCHRError(
+						"PROCESS_FAILED",
+						`savevm reported no error but snapshot "${snapName}" is absent from the parsed list — ` +
+							`treat as failed. savevm said: "${out.trim() || "(empty)"}"; raw 'info snapshots': "${rawList}"`,
+					);
+				}
+				return created;
 			},
 
 			async load(name: string): Promise<void> {
@@ -725,6 +736,17 @@ function createInstance(state: MachineState): ChrInstance {
 
 				const out = await monitorCommand(state.machineDir, `loadvm ${name}`, undefined, state.portBase);
 				if (/^error[:\s]/i.test(out)) {
+					// A failed loadvm leaves the VM in "paused (restore-vm)" — resume
+					// it so the guest isn't wedged (REST dead) on top of the error.
+					try {
+						await monitorCommand(state.machineDir, "cont", undefined, state.portBase);
+					} catch (contErr) {
+						// Best effort — the throw below is the real signal, but a failed
+						// resume means the VM may still be paused; say so.
+						console.warn(
+							`quickchr: 'cont' after failed loadvm also failed (${contErr instanceof Error ? contErr.message : String(contErr)}) — machine "${state.name}" may be paused`,
+						);
+					}
 					throw new QuickCHRError("PROCESS_FAILED", `loadvm failed: ${out.trim()}`);
 				}
 			},

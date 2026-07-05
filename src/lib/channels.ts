@@ -54,7 +54,22 @@ export function channelFileExists(path: string): boolean {
 	return existsSync(path);
 }
 
-/** Send a command to the QEMU monitor and return the response. */
+/** Strip ANSI escapes and the monitor's per-character command echo, leaving
+ *  just the response body. The echo hid real errors from callers: QEMU renders
+ *  the typed command as incremental `cmd\x1b[K\x1b[D…` fragments before the
+ *  first newline, so an `Error: …` response never appeared at string start and
+ *  `savevm`/`loadvm` failures were silently swallowed (#31). */
+export function cleanMonitorResponse(raw: string): string {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escapes are the point
+	const noAnsi = raw.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+	const lines = noAnsi.split(/\r?\n/);
+	// Everything before the first newline is the echoed command; the response
+	// (possibly multi-line, possibly empty) follows.
+	return lines.slice(1).join("\n").trim();
+}
+
+/** Send a command to the QEMU monitor and return the cleaned response
+ *  (command echo and ANSI control sequences stripped — see cleanMonitorResponse). */
 export async function monitorCommand(
 	machineDir: string,
 	command: string,
@@ -92,9 +107,9 @@ export async function monitorCommand(
 				buffer = "";
 				socket.write(command + "\n");
 			} else if (sentCommand && buffer.includes("(qemu)")) {
-				// Got response — strip the prompt
+				// Got response — strip the prompt, the command echo, and ANSI noise
 				clearTimeout(timeout);
-				const response = buffer.replace(/\(qemu\)\s*/g, "").trim();
+				const response = cleanMonitorResponse(buffer.replace(/\(qemu\)\s*/g, ""));
 				socket.destroy();
 				resolve(response);
 			}
@@ -105,7 +120,7 @@ export async function monitorCommand(
 		socket.on("close", () => {
 			clearTimeout(timeout);
 			if (sentCommand) {
-				resolve(buffer.replace(/\(qemu\)\s*/g, "").trim());
+				resolve(cleanMonitorResponse(buffer.replace(/\(qemu\)\s*/g, "")));
 			} else {
 				reject(new QuickCHRError("MACHINE_STOPPED", "Monitor socket closed before command could be sent"));
 			}

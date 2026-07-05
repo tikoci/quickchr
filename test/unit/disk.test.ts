@@ -198,6 +198,29 @@ describe("parseSnapshotList", () => {
 		expect(snaps).toHaveLength(1);
 		expect(snaps[0]?.vmStateSize).toBeGreaterThan(2 * 1024 ** 3);
 	});
+
+	// QEMU version drift guards (#31 follow-up): the runner's QEMU 8.x prints
+	// 2-digit VM CLOCK hours (and ICOUNT may be absent entirely); 11.x brew
+	// builds print 4-digit hours. A parser gap here returns [] and makes a
+	// SUCCESSFUL savevm look failed.
+	test("parses 2-digit VM CLOCK hours (QEMU 8.x)", () => {
+		const output = [
+			"List of snapshots present on all disks:",
+			"ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT",
+			"--        baseline           47 MiB 2026-07-05 04:37:01    00:00:41.532         --",
+		].join("\n");
+		const snaps = parseSnapshotList(output);
+		expect(snaps).toHaveLength(1);
+		expect(snaps[0]?.name).toBe("baseline");
+		expect(snaps[0]?.vmClock).toBe("00:00:41.532");
+	});
+
+	test("parses rows without an ICOUNT column", () => {
+		const output = "--        baseline           47 MiB 2026-07-05 04:37:01    00:00:41.532";
+		const snaps = parseSnapshotList(output);
+		expect(snaps).toHaveLength(1);
+		expect(snaps[0]?.icount).toBeUndefined();
+	});
 });
 
 describe("formatDiskSize", () => {
