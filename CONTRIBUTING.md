@@ -34,6 +34,32 @@ Every issue states a **Done-when** so the finish line is explicit. Label each wi
 
 Open a Pull Request against a filed issue for review (PRs are wired to automated review).
 
+## Pull Requests & Merging
+
+- **Squash-only** — the repo offers no other merge method. The **PR title becomes the
+  `main` commit subject**, so write it as a conventional commit (`feat: …`, `fix: …`,
+  `ci: …`); the PR body becomes the commit body. Branches auto-delete on merge.
+- **PR checks are fast (~3-5 min)** — lint, unit tests (Linux + Windows), and the
+  required `Integration freshness` check: the latest completed integration run on `main`
+  (`main.yml`, full suite on linux/x86_64 + linux/aarch64) must be green. A red `main`
+  blocks all PRs until fixed — that is the design, not an accident.
+- **Need integration signal for your branch before merging?** Dispatch the reusable unit:
+  `gh workflow run integration.yml --ref <branch> -f platforms=linux-x86 -f test-filter=<file>`
+  (see `.github/instructions/ci.instructions.md` for platforms/targets/filters).
+- **Keep `CHANGELOG.md` `[Unreleased]` current** for user-facing changes — it is the
+  direct input to releases: `release.yml` refuses to release an empty `[Unreleased]`
+  and turns it into the release notes.
+
+## Releasing
+
+One-click, maintainer-triggered (see "Release Process" in
+`.github/instructions/ci.instructions.md`):
+
+```bash
+gh workflow run release.yml -f version-bump=patch -f dry-run=true  # preview
+gh workflow run release.yml -f version-bump=patch                  # release
+```
+
 ## Development Setup
 
 ### Prerequisites

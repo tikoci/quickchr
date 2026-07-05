@@ -122,37 +122,47 @@ See MANUAL.md's CLI reference and environment-variables sections for the full su
 
 ## CI System
 
-**Workflows**: `.github/workflows/{ci,integration,publish}.yml`. Full artifact map and
-failure-diagnosis guide live in `.github/instructions/ci.instructions.md` — this section is
-the high-level rationale only.
+**Workflows**: `.github/workflows/{ci,main,sweep,integration,release,ros-versions}.yml`.
+Full artifact map, dispatch recipes, and failure-diagnosis guide live in
+`.github/instructions/ci.instructions.md` — this section is the high-level rationale only.
 
-**`ci.yml`** — core quality gate on every push/PR to `main`:
+**The 2026-07 refactor (#29)** replaced the organically-grown scheme (integration on every
+PR push, three parallel copies of the runner logic, `continue-on-error` green-washing)
+with a layered design:
 
-```text
-lint (ubuntu)  ──┐
-unit-tests (ubuntu, --coverage) ──┴→ integration-x86 (ubuntu) → windows-unit-tests (windows-latest)
-```
+- **`ci.yml`** — fast PR/push gate (~3-5 min, no QEMU): lint ∥ unit+coverage ∥ Windows
+  unit ∥ `Integration freshness` (PR-only, required). Integration left the PR path
+  because a 25-minute CHR suite per PR push bought little signal per minute; the quality
+  bar moved to main.
+- **`main.yml`** — full integration suite on linux/x86_64 + linux/aarch64 (KVM) on every
+  push to `main`. The **freshness gate** (`scripts/ci-freshness.ts`) makes this honest:
+  PRs merge only while the latest completed main run is green, so a red main visibly
+  blocks everything instead of rotting in the Actions list. Superseded push runs cancel;
+  cancelled runs carry no signal (the gate skips them).
+- **`sweep.yml`** — weekly all-platform sweep (+ examples smoke). A separate file from
+  main.yml *by design*: its TCG legs (macos-x86, windows-x86, smoke subset) may red
+  without blocking PRs, but are never green-washed — red is red.
+- **`integration.yml`** — the single reusable integration unit (`workflow_call` +
+  `workflow_dispatch`). A plan job resolves `platforms` (ids or `gating`/`all` aliases)
+  into one cross-OS matrix job; `test-filter`/`routeros-target` narrow the run. Each
+  runner boots its native CHR arch — `detectAccel()` picks KVM/HVF/TCG. Agents dispatch
+  this to ground platform hypotheses without waiting for a PR cycle.
+- **`release.yml`** — one-click release: freshness gate (no suite re-run — main is kept
+  continuously release-able) + non-empty CHANGELOG `[Unreleased]` →
+  `scripts/release-prep.ts` bump/rollover → tag + GitHub Release + `npm publish
+  --provenance` (odd minor → `next`, even → `latest`).
+- **`ros-versions.yml`** — daily: new RouterOS versions (per channel) with no linux-x86
+  record in `ci-data/tested-versions.json` get a full integration dispatch.
 
-`lint` and `unit-tests` run in parallel. `integration-x86` boots an x86 CHR (KVM if
-available, else TCG) and gates on both. `windows-unit-tests` runs last — if the core is
-broken, Windows runner minutes add no signal. Only x86 integration runs on every push;
-cross-arch and macOS are too slow/fragile for the per-push gate.
+**Metrics as byproduct (#30)**: the library appends every successful boot to
+`<dataDir>/boot-log.ndjson` (and stamps `lastAccel`/`lastBootMs` into machine.json);
+integration jobs assemble that + per-file timing into `metrics.ndjson`
+(`scripts/ci-metrics.ts`); collect-metrics callers push per-run files + the
+`tested-versions.json` rollup to the orphan **`ci-data`** branch. Never a second test
+run; never affects pass/fail.
 
-**`integration.yml`** — the single reusable integration unit (`workflow_call` +
-`workflow_dispatch`, issue #29). A plan job resolves the `platforms` input
-(linux-x86 / linux-arm64 / macos-arm64 / macos-x86 / windows-x86, or `gating`/`all`
-aliases) into one cross-OS matrix job; `test-filter` narrows to specific test files for
-fast iteration and `routeros-target` points boots at any channel or pinned version. Each
-runner boots a CHR matching its native arch — `detectAccel()` selects KVM/HVF/TCG
-automatically, no per-runner overrides. TCG platforms (macos-x86, windows-x86) default to
-a curated smoke subset instead of `continue-on-error` — green means the selected tests
-passed ("green should be green").
-
-**`release.yml`** — one-click `workflow_dispatch` release: gates on the PR freshness check
-(latest `main.yml` integration run green — no suite re-run) + a non-empty CHANGELOG
-`[Unreleased]`, then bumps/rolls over via `scripts/release-prep.ts`, tags, creates the
-GitHub Release, and runs `npm publish --provenance` (`--tag next` for odd/pre-release
-minors, `--tag latest` for even/stable). See "Release Process" in `ci.instructions.md`.
+**Merge policy**: squash-only, PR title → main commit subject (write PR titles as
+conventional commits), PR body → commit body, branches auto-delete.
 
 **Coverage**: `unit-tests` parses `bun test --coverage` output and compares against thresholds
 (default 75% functions, 60% lines). Failures emit `::warning::` annotations but do NOT block
@@ -161,7 +171,8 @@ merges (`continue-on-error: true`). Thresholds are overridable via dispatch inpu
 
 **Artifacts**:
 - `coverage-report` — full per-file coverage table (14 days)
-- `integration-logs-{platform}` — bun test output + machine.json + qemu.log (7 days)
+- `{integration|main|sweep}-logs-<platform>` — bun test output + timing + metrics.ndjson +
+  machine.json + qemu.log (7 days); durable timing lives on the `ci-data` branch
 
 ## Design Principles
 
