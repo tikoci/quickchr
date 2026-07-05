@@ -740,7 +740,13 @@ function createInstance(state: MachineState): ChrInstance {
 					// it so the guest isn't wedged (REST dead) on top of the error.
 					try {
 						await monitorCommand(state.machineDir, "cont", undefined, state.portBase);
-					} catch { /* best effort — the throw below is the real signal */ }
+					} catch (contErr) {
+						// Best effort — the throw below is the real signal, but a failed
+						// resume means the VM may still be paused; say so.
+						console.warn(
+							`quickchr: 'cont' after failed loadvm also failed (${contErr instanceof Error ? contErr.message : String(contErr)}) — machine "${state.name}" may be paused`,
+						);
+					}
 					throw new QuickCHRError("PROCESS_FAILED", `loadvm failed: ${out.trim()}`);
 				}
 			},

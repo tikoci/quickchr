@@ -87,7 +87,7 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 		// are converted in place, preserving their NVRAM state.
 		const varsPath = join(machineDir, "efi-vars.qcow2");
 		if (!existsSync(varsPath)) {
-			prepareEfiVars(fw.code, fw.vars, varsPath, join(machineDir, "efi-vars.fd"));
+			await prepareEfiVars(fw.code, fw.vars, varsPath, join(machineDir, "efi-vars.fd"));
 		}
 
 		args.push(
@@ -255,7 +255,7 @@ function buildChannelArgs(
  *  vars file if the machine has one (preserves NVRAM state), else from the
  *  firmware template; size-match to the code ROM; convert raw → qcow2 so
  *  savevm/loadvm work (see the pflash comment at the call site / #31). */
-function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: string, legacyRawPath: string): void {
+async function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: string, legacyRawPath: string): Promise<void> {
 	ensureDir(join(destPath, ".."));
 
 	// Stage the raw image (legacy per-machine file wins over the template).
@@ -276,17 +276,23 @@ function prepareEfiVars(codePath: string, varsTemplatePath: string, destPath: st
 	}
 
 	const qemuImg = requireQemuImg();
-	const convertResult = Bun.spawnSync([qemuImg, "convert", "-f", "raw", "-O", "qcow2", rawStage, destPath]);
+	const conversion = Bun.spawn([qemuImg, "convert", "-f", "raw", "-O", "qcow2", rawStage, destPath], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const exitCode = await conversion.exited;
+	const [stderr, stdout] = await Promise.all([
+		new Response(conversion.stderr).text(),
+		new Response(conversion.stdout).text(),
+	]);
 	try { unlinkSync(rawStage); } catch { /* best effort */ }
-	if (convertResult.exitCode !== 0) {
+	if (exitCode !== 0) {
 		// A failed convert can leave a partial destPath behind — remove it so the
 		// next launch regenerates instead of booting (and re-failing on) the stub.
 		try { unlinkSync(destPath); } catch { /* best effort */ }
-		const stderr = new TextDecoder().decode(convertResult.stderr).trim();
-		const stdout = new TextDecoder().decode(convertResult.stdout).trim();
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`qemu-img convert of EFI vars failed: ${stderr || stdout || `exit ${convertResult.exitCode}`}`,
+			`qemu-img convert of EFI vars failed: ${stderr.trim() || stdout.trim() || `exit ${exitCode}`}`,
 		);
 	}
 	// Legacy raw file is superseded — remove so nothing boots the stale copy.
