@@ -193,12 +193,27 @@ export function foldTestedVersions(tested: TestedVersions, ndjson: string): Test
 
 function findMetricsFiles(dir: string): string[] {
 	const out: string[] = [];
-	for (const name of readdirSync(dir)) {
+	// Sorted traversal → deterministic fold order → stable rollup output
+	// (readdir's native order varies run-to-run and would churn ci-data diffs).
+	for (const name of [...readdirSync(dir)].sort()) {
 		const p = join(dir, name);
 		if (statSync(p).isDirectory()) out.push(...findMetricsFiles(p));
 		else if (name === "metrics.ndjson") out.push(p);
 	}
 	return out;
+}
+
+/** Deep-sort object keys so tested-versions.json is byte-stable for equal data. */
+export function sortKeysDeep<T>(value: T): T {
+	if (Array.isArray(value)) return value.map(sortKeysDeep) as T;
+	if (value !== null && typeof value === "object") {
+		const out: Record<string, unknown> = {};
+		for (const k of Object.keys(value as object).sort()) {
+			out[k] = sortKeysDeep((value as Record<string, unknown>)[k]);
+		}
+		return out as T;
+	}
+	return value;
 }
 
 function aggregate(): void {
@@ -217,13 +232,17 @@ function aggregate(): void {
 	const files = existsSync(artifactsDir) ? findMetricsFiles(artifactsDir) : [];
 	for (const file of files) {
 		const ndjson = readFileSync(file, "utf-8");
-		const first = ndjson.split("\n").find(Boolean);
+		const records = ndjson.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+		const first = records[0] as { run_id: string; platform: string } | undefined;
 		if (!first) continue;
-		const { run_id, platform } = JSON.parse(first) as { run_id: string; platform: string };
-		writeFileSync(join(dataDir, "runs", `${run_id}-${platform}.ndjson`), ndjson);
+		// One run may cover the same platform under several RouterOS targets —
+		// the target is part of the per-run filename so legs never collide.
+		const suite = records.find((r) => r.kind === "suite") as { target?: string } | undefined;
+		const target = (suite?.target ?? "unknown").replace(/[^A-Za-z0-9.-]/g, "-");
+		writeFileSync(join(dataDir, "runs", `${first.run_id}-${first.platform}-${target}.ndjson`), ndjson);
 		tested = foldTestedVersions(tested, ndjson);
 	}
-	writeFileSync(testedPath, `${JSON.stringify(tested, null, "\t")}\n`);
+	writeFileSync(testedPath, `${JSON.stringify(sortKeysDeep(tested), null, "\t")}\n`);
 	console.log(`ci-metrics: aggregated ${files.length} metrics file(s) into ${dataDir}`);
 }
 

@@ -3,8 +3,10 @@ name: Main Integration
 # The continuous integration-test signal for main (the CI quality bar lives
 # here, not on PRs — see ci.yml "integration-freshness" and ci.instructions.md).
 #
-#   push to main      → full suite on the KVM platforms: linux/x86_64 + linux/aarch64
-#                       (the same bar releases require — kept continuously green)
+#   push to main      → full suite + examples smoke (+ PowerShell lint) on the
+#                       KVM platforms: linux/x86_64 + linux/aarch64 — the same
+#                       bar releases require, kept continuously green. Examples
+#                       are part of the flow, not an optional extra.
 #   workflow_dispatch → same (manual freshness refresh)
 #
 # The broader weekly platform sweep lives in sweep.yml — deliberately a separate
@@ -40,5 +42,6 @@ jobs:
       contents: write
     with:
       platforms: linux-x86,linux-arm64
+      run-examples: true
       collect-metrics: true
       artifact-prefix: main

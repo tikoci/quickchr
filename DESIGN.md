@@ -122,7 +122,7 @@ See MANUAL.md's CLI reference and environment-variables sections for the full su
 
 ## CI System
 
-**Workflows**: `.github/workflows/{ci,main,sweep,integration,release,ros-versions}.yml`.
+**Workflows**: `.github/workflows/{ci,main,sweep,integration,release,ros-versions,lint-powershell}.yml`.
 Full artifact map, dispatch recipes, and failure-diagnosis guide live in
 `.github/instructions/ci.instructions.md` — this section is the high-level rationale only.
 
@@ -134,8 +134,9 @@ with a layered design:
   unit ∥ `Integration freshness` (PR-only, required). Integration left the PR path
   because a 25-minute CHR suite per PR push bought little signal per minute; the quality
   bar moved to main.
-- **`main.yml`** — full integration suite on linux/x86_64 + linux/aarch64 (KVM) on every
-  push to `main`. The **freshness gate** (`scripts/ci-freshness.ts`) makes this honest:
+- **`main.yml`** — full integration suite + examples smoke (+ PowerShell lint) on
+  linux/x86_64 + linux/aarch64 (KVM) on every push to `main`; examples are part of the
+  default flow, not a weekly extra. The **freshness gate** (`scripts/ci-freshness.ts`) makes this honest:
   PRs merge only while the latest completed main run is green, so a red main visibly
   blocks everything instead of rotting in the Actions list. Superseded push runs cancel;
   cancelled runs carry no signal (the gate skips them).
@@ -143,26 +144,33 @@ with a layered design:
   main.yml *by design*: its TCG legs (macos-x86, windows-x86, smoke subset) may red
   without blocking PRs, but are never green-washed — red is red.
 - **`integration.yml`** — the single reusable integration unit (`workflow_call` +
-  `workflow_dispatch`). A plan job resolves `platforms` (ids or `gating`/`all` aliases)
-  into one cross-OS matrix job; `test-filter`/`routeros-target` narrow the run. Each
-  runner boots its native CHR arch — `detectAccel()` picks KVM/HVF/TCG. Agents dispatch
-  this to ground platform hypotheses without waiting for a PR cycle.
+  `workflow_dispatch`). A plan job resolves **`platforms` × `routeros-targets`** (both
+  comma lists; `gating`/`all` platform aliases) into one cross-OS matrix — one dispatch
+  can cover e.g. gating platforms × three RouterOS versions, no wrapper jobs or repeat
+  dispatches. `test-filter` narrows; `run-examples` defaults ON. Each runner boots its
+  native CHR arch — `detectAccel()` picks KVM/HVF/TCG. Agents dispatch this to ground
+  platform hypotheses without waiting for a PR cycle.
 - **`release.yml`** — one-click release: freshness gate (no suite re-run — main is kept
   continuously release-able) + non-empty CHANGELOG `[Unreleased]` →
   `scripts/release-prep.ts` bump/rollover → tag + GitHub Release + `npm publish
   --provenance` (odd minor → `next`, even → `latest`).
 - **`ros-versions.yml`** — daily: new RouterOS versions (per channel) with no linux-x86
-  record in `ci-data/tested-versions.json` get a full integration dispatch.
+  record in `ci-data/tested-versions.json` ride the `routeros-targets` matrix of a
+  single integration dispatch.
 
 **Metrics as byproduct (#30)**: the library appends every successful boot to
 `<dataDir>/boot-log.ndjson` (and stamps `lastAccel`/`lastBootMs` into machine.json);
 integration jobs assemble that + per-file timing into `metrics.ndjson`
 (`scripts/ci-metrics.ts`); collect-metrics callers push per-run files + the
 `tested-versions.json` rollup to the orphan **`ci-data`** branch. Never a second test
-run; never affects pass/fail.
+run; never affects pass/fail — the aggregate job is best-effort by contract (fold/push
+failures warn and stay green, because a red there would trip the PR freshness gate over
+side-band data).
 
 **Merge policy**: squash-only, PR title → main commit subject (write PR titles as
-conventional commits), PR body → commit body, branches auto-delete.
+conventional commits), PR body → commit body, branches auto-delete. Review threads must
+be resolved before merge (`required_conversation_resolution`) and automated reviews must
+have actually posted — see CONTRIBUTING.md "Pull Requests & Merging".
 
 **Coverage**: `unit-tests` parses `bun test --coverage` output and compares against thresholds
 (default 75% functions, 60% lines). Failures emit `::warning::` annotations but do NOT block

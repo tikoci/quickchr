@@ -2,7 +2,7 @@
  * Machine state persistence — JSON files in ~/.local/share/quickchr/machines/.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { join, } from "node:path";
 import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -47,17 +47,21 @@ export function bootLogPath(): string {
 }
 
 /** Append a boot record; rotates to the newest BOOT_LOG_KEEP_LINES when the
- *  log exceeds BOOT_LOG_MAX_LINES. */
+ *  log exceeds BOOT_LOG_MAX_LINES.
+ *
+ *  Append-first (single appendFileSync call, atomic for one-line writes on
+ *  every platform we run on) so concurrent boots — parallel bun test workers
+ *  each booting a CHR — never clobber each other's entries. Only the rare
+ *  rotation does a read-rewrite; a lost race there trims a few extra old
+ *  lines at worst, never a fresh append. */
 export function appendBootLog(entry: BootLogEntry): void {
 	const path = bootLogPath();
 	ensureDir(getDataDir());
-	let lines: string[] = [];
-	if (existsSync(path)) {
-		lines = readFileSync(path, "utf-8").split("\n").filter(Boolean);
+	appendFileSync(path, `${JSON.stringify(entry)}\n`);
+	const lines = readFileSync(path, "utf-8").split("\n").filter(Boolean);
+	if (lines.length > BOOT_LOG_MAX_LINES) {
+		writeFileSync(path, `${lines.slice(-BOOT_LOG_KEEP_LINES).join("\n")}\n`);
 	}
-	lines.push(JSON.stringify(entry));
-	if (lines.length > BOOT_LOG_MAX_LINES) lines = lines.slice(-BOOT_LOG_KEEP_LINES);
-	writeFileSync(path, `${lines.join("\n")}\n`);
 }
 
 /** Get the cache directory. */

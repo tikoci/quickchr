@@ -11,7 +11,7 @@ name: RouterOS Versions
 # tested-versions.json and the red run stays visible) — investigate, fix, then
 # re-run manually:
 #   gh workflow run integration.yml -f platforms=linux-x86 \
-#     -f routeros-target=<version> -f collect-metrics=true
+#     -f routeros-targets=<version> -f collect-metrics=true
 #
 # Manual check with extra knobs:
 #   gh workflow run ros-versions.yml -f skip-versions=7.23beta5
@@ -113,24 +113,24 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # ── dispatch: one full linux-x86 run per untested version ────────────────────
+  # ── dispatch: ONE integration run covering every untested version ────────────
+  # integration.yml takes a platforms × targets matrix, so all untested versions
+  # ride in a single dispatch (one run to find in the Actions list, one aggregate
+  # push) instead of one run per version.
   dispatch:
-    name: Dispatch integration (${{ matrix.version }})
+    name: Dispatch integration (all untested versions)
     needs: check
     if: ${{ fromJSON(needs.check.outputs.versions)[0] != null }}
     permissions:
       actions: write
-    strategy:
-      matrix:
-        version: ${{ fromJSON(needs.check.outputs.versions) }}
-      max-parallel: 1
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v8
         env:
-          VERSION: ${{ matrix.version }}
+          VERSIONS: ${{ needs.check.outputs.versions }}
         with:
           script: |
+            const targets = JSON.parse(process.env.VERSIONS).join(",");
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -138,8 +138,8 @@ jobs:
               ref: "main",
               inputs: {
                 platforms: "linux-x86",
-                "routeros-target": process.env.VERSION,
+                "routeros-targets": targets,
                 "collect-metrics": "true",
               },
             });
-            core.notice(`dispatched integration.yml for RouterOS ${process.env.VERSION}`);
+            core.notice(`dispatched integration.yml for RouterOS ${targets}`);

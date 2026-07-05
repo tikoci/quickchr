@@ -5,12 +5,19 @@ name: Integration
 # there are no parallel copies of the runner logic anywhere else.
 #
 # Two faces:
-#   workflow_call     — wrappers (main.yml push/schedule, release checks) reuse it.
+#   workflow_call     — wrappers (main.yml push, sweep.yml, release checks) reuse it.
 #   workflow_dispatch — the manual/lab face. Agents: this is how you ground a
 #                       hypothesis on a platform you don't have locally, e.g.
 #
 #     gh workflow run integration.yml --ref <branch> \
-#       -f platforms=macos-arm64 -f test-filter=exec.test.ts -f routeros-target=7.24beta2
+#       -f platforms=macos-arm64 -f test-filter=exec.test.ts \
+#       -f routeros-targets=7.24beta2 -f run-examples=false
+#
+# The run is a full PLATFORMS × TARGETS matrix: one dispatch can cover, say,
+# gating platforms × "stable,long-term,7.24rc1" — no wrapper jobs or repeat
+# dispatches needed. The default run includes the examples smoke harness and
+# PowerShell lint (run-examples defaults ON — examples are part of the flow,
+# not an optional extra); narrow/lab dispatches turn it off explicitly.
 #
 # Platform ids (comma-separate to combine, or use a group alias):
 #   linux-x86    ubuntu-latest      x86 CHR    KVM       full suite by default
@@ -48,8 +55,8 @@ on:
         default: true
       run-examples:
         type: boolean
-        description: "Run the examples smoke harness on the selected platforms (+ PowerShell lint)"
-        default: false
+        description: "Run the examples smoke harness (+ PowerShell lint) on each matrix leg. Default ON — turn off for narrow/lab dispatches."
+        default: true
       test-filter:
         type: string
         description: "Integration: comma-separated test file names (e.g. 'exec.test.ts,anchor.test.ts'). Empty = all files (TCG platforms: smoke subset)."
@@ -58,13 +65,13 @@ on:
         type: string
         description: "Examples: comma-separated example names for the smoke harness (e.g. 'quickstart,rollback'). Empty = the curated subset."
         default: ""
-      routeros-target:
+      routeros-targets:
         type: string
-        description: "RouterOS target: a channel (stable/long-term/testing/development) or a pinned version (e.g. 7.22.1, 7.24beta2). Empty = stable."
+        description: "Comma-separated RouterOS targets — channels (stable/long-term/testing/development) and/or pinned versions (7.22.1, 7.24beta2). Each combines with each platform. Empty = stable."
         default: ""
       collect-metrics:
         type: boolean
-        description: "Append this run's boot/test timing to the ci-data branch (runs/<run_id>-<platform>.ndjson + tested-versions.json)"
+        description: "Append this run's boot/test timing to the ci-data branch (runs/*.ndjson + tested-versions.json)"
         default: false
   workflow_call:
     inputs:
@@ -76,14 +83,14 @@ on:
         default: true
       run-examples:
         type: boolean
-        default: false
+        default: true
       test-filter:
         type: string
         default: ""
       example-filter:
         type: string
         default: ""
-      routeros-target:
+      routeros-targets:
         type: string
         default: ""
       collect-metrics:
@@ -100,12 +107,13 @@ permissions:
   contents: read
 
 jobs:
-  # ── plan: resolve the platforms input into a job matrix ──────────────────────
-  # One place defines the platform table (runner, CHR arch, accel, smoke default).
-  # Unknown platform ids FAIL the plan — a typo must never produce a silently
-  # empty (falsely green) run.
+  # ── plan: resolve platforms × targets into one job matrix ────────────────────
+  # One place defines the platform table (runner, CHR arch, accel, smoke default)
+  # and crosses it with the RouterOS targets list. Unknown platform ids or
+  # malformed targets FAIL the plan — a typo must never produce a silently empty
+  # (falsely green) run.
   plan:
-    name: Plan platform matrix
+    name: Plan matrix (platforms × targets)
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
@@ -113,6 +121,7 @@ jobs:
       - id: gen
         env:
           PLATFORMS: ${{ inputs.platforms }}
+          TARGETS: ${{ inputs.routeros-targets }}
         run: |
           set -eo pipefail
           # id → label | runner | tcg (no hw accel on hosted runner) | smoke-default
@@ -131,6 +140,17 @@ jobs:
             gating) LIST="linux-x86,linux-arm64,macos-arm64" ;;
             all)    LIST="linux-x86,linux-arm64,macos-arm64,macos-x86,windows-x86" ;;
           esac
+          TARGET_LIST="${TARGETS// /}"
+          [ -z "$TARGET_LIST" ] && TARGET_LIST="stable"
+          # Validate each target: a channel name or a RouterOS version string.
+          IFS=',' read -ra TARGET_ARR <<< "$TARGET_LIST"
+          for t in "${TARGET_ARR[@]}"; do
+            [ -z "$t" ] && continue
+            if ! printf '%s' "$t" | grep -qE '^(stable|long-term|testing|development|[0-9]+\.[0-9]+(\.[0-9]+)?((beta|rc)[0-9]+)?)$'; then
+              echo "::error::Invalid routeros-target '$t' (channel or version like 7.22.1 / 7.24beta2)"
+              exit 1
+            fi
+          done
           inc='[]'
           IFS=',' read -ra IDS <<< "$LIST"
           for id in "${IDS[@]}"; do
@@ -140,21 +160,25 @@ jobs:
               exit 1
             fi
             IFS='|' read -r label runner tcg smoke <<< "$row"
-            inc=$(printf '%s' "$inc" | jq -c \
-              --arg id "$id" --arg label "$label" --arg os "$runner" \
-              --argjson tcg "$tcg" --argjson smoke "$smoke" \
-              '. + [{id:$id, label:$label, os:$os, tcg:$tcg, smoke:$smoke}]')
+            for t in "${TARGET_ARR[@]}"; do
+              [ -z "$t" ] && continue
+              inc=$(printf '%s' "$inc" | jq -c \
+                --arg id "$id" --arg label "$label" --arg os "$runner" \
+                --arg target "$t" \
+                --argjson tcg "$tcg" --argjson smoke "$smoke" \
+                '. + [{id:$id, label:$label, os:$os, tcg:$tcg, smoke:$smoke, target:$target}]')
+            done
           done
           if [ "$inc" = "[]" ]; then
-            echo "::error::platforms input resolved to an empty list — nothing would run"
+            echo "::error::platforms × targets resolved to an empty matrix — nothing would run"
             exit 1
           fi
           echo "matrix={\"include\":$inc}" >> "$GITHUB_OUTPUT"
-          echo "Resolved platform matrix: $inc"
+          echo "Resolved matrix: $inc"
 
   # ── integration suite (platform matrix) ──────────────────────────────────────
   integration:
-    name: Integration (${{ matrix.label }})
+    name: Integration (${{ matrix.label }} · ${{ matrix.target }})
     needs: plan
     if: ${{ inputs.run-integration }}
     strategy:
@@ -166,7 +190,7 @@ jobs:
       run:
         shell: bash
     env:
-      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
+      QUICKCHR_TEST_TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
@@ -217,7 +241,7 @@ jobs:
       - name: Log platform
         run: |
           {
-            echo "### Platform: ${{ matrix.label }}"
+            echo "### Platform: ${{ matrix.label }} — target ${{ matrix.target }}"
             echo "- OS: $(uname -s 2>/dev/null || echo Windows) $(uname -m 2>/dev/null || echo x86_64)"
             echo "- Bun: $(bun --version)"
             qemu-system-x86_64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
@@ -374,7 +398,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Integration — ${{ matrix.label }}"
+            echo "## Integration — ${{ matrix.label }} · ${{ matrix.target }}"
             if [ ! -s "$HOME/integration-output.txt" ]; then
               echo "❌ no test output captured — the run step likely failed before bun test"
             elif grep -qE '\(fail\)' "$HOME/integration-output.txt"; then
@@ -408,7 +432,7 @@ jobs:
         if: ${{ always() && runner.os != 'Windows' }}
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}
+          name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
           path: |
             ~/integration-output.txt
@@ -424,7 +448,7 @@ jobs:
         if: ${{ always() && runner.os == 'Windows' }}
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}
+          name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
           path: |
             ~/integration-output.txt
@@ -442,6 +466,12 @@ jobs:
   # must grant `contents: write` (reusable-workflow perms are capped by the
   # calling job). Per-run filenames avoid push conflicts; the rebase-retry loop
   # covers the shared tested-versions.json rollup.
+  #
+  # BEST-EFFORT BY CONTRACT: metrics are side-band. This job goes green with a
+  # loud ::warning:: + summary note when folding/pushing fails, because a red
+  # here would red main.yml and the PR freshness gate would then block every PR
+  # over a metrics hiccup. That is the one deliberate exception to "red is red" —
+  # the warning IS the honest signal, and the raw metrics stay in the artifacts.
   aggregate:
     name: Aggregate metrics → ci-data
     needs: [plan, integration]
@@ -465,11 +495,17 @@ jobs:
           path: artifacts
 
       - name: Fold into ci-data
-        run: bun scripts/ci-metrics.ts aggregate --data ci-data --artifacts artifacts
-
-      - name: Commit and push (rebase-retry)
+        id: fold
         run: |
-          set -eo pipefail
+          if ! bun scripts/ci-metrics.ts aggregate --data ci-data --artifacts artifacts; then
+            echo "::warning title=ci-data::metrics fold failed — this run's timing is only in the artifacts (see job log)"
+            echo "failed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push (rebase-retry, best-effort)
+        if: ${{ steps.fold.outputs.failed != 'true' }}
+        run: |
+          set -o pipefail
           cd ci-data
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -484,9 +520,12 @@ jobs:
               exit 0
             fi
             echo "push attempt $attempt failed — rebasing onto remote ci-data"
-            git pull --rebase origin ci-data
+            git pull --rebase origin ci-data || true
           done
-          git push origin ci-data
+          if ! git push origin ci-data; then
+            echo "::warning title=ci-data::could not push metrics after 4 attempts — this run's timing is only in the artifacts"
+          fi
+          exit 0
 
       - name: Write aggregate summary
         if: always()
@@ -505,7 +544,7 @@ jobs:
   # trial-license is excluded (MikroTik rate limits). No continue-on-error: a
   # broken example is red on every platform it was asked to run on.
   examples-smoke:
-    name: Examples smoke (${{ matrix.label }})
+    name: Examples smoke (${{ matrix.label }} · ${{ matrix.target }})
     needs: plan
     if: ${{ inputs.run-examples }}
     strategy:
@@ -517,7 +556,7 @@ jobs:
       run:
         shell: bash
     env:
-      QUICKCHR_TEST_TARGET: ${{ inputs.routeros-target }}
+      QUICKCHR_TEST_TARGET: ${{ matrix.target }}
       EXAMPLE_FILTER: ${{ inputs.example-filter }}
     steps:
       - uses: actions/checkout@v5
@@ -586,7 +625,7 @@ jobs:
       - name: Log platform
         run: |
           {
-            echo "### Examples smoke: ${{ matrix.label }}"
+            echo "### Examples smoke: ${{ matrix.label }} — target ${{ matrix.target }}"
             echo "- OS: $(uname -s 2>/dev/null || echo Windows) / ${{ runner.arch }}"
             echo "- Bun: $(bun --version)"
             echo "- RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
@@ -617,7 +656,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Examples smoke — ${{ matrix.label }}"
+            echo "## Examples smoke — ${{ matrix.label }} · ${{ matrix.target }}"
             if [ ! -s "$HOME/smoke-output.txt" ]; then
               echo "❌ no output captured — the harness likely failed before running"
             elif grep -qE '\(fail\)' "$HOME/smoke-output.txt"; then

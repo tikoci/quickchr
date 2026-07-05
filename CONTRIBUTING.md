@@ -39,6 +39,14 @@ Open a Pull Request against a filed issue for review (PRs are wired to automated
 - **Squash-only** — the repo offers no other merge method. The **PR title becomes the
   `main` commit subject**, so write it as a conventional commit (`feat: …`, `fix: …`,
   `ci: …`); the PR body becomes the commit body. Branches auto-delete on merge.
+- **Reviews are part of the gate, not decoration.** PRs are wired to automated review
+  (Copilot, CodeRabbit). Before merging: (1) **wait for the automated reviews to actually
+  post** — a PR with zero review activity has not been reviewed, do not merge it on CI
+  green alone; (2) **answer every finding** — either fix it or reply with a *grounded*
+  dismissal (evidence, not opinion); (3) **resolve every conversation thread** — branch
+  protection enforces this (`required_conversation_resolution`), so an unresolved thread
+  blocks the merge button. A dismissed finding with a good paper trail is fine; a
+  finding merged past in silence is not.
 - **PR checks are fast (~3-5 min)** — lint, unit tests (Linux + Windows), and the
   required `Integration freshness` check: the latest completed integration run on `main`
   (`main.yml`, full suite on linux/x86_64 + linux/aarch64) must be green. A red `main`
