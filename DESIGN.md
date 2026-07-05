@@ -141,8 +141,11 @@ with a layered design:
   blocks everything instead of rotting in the Actions list. Superseded push runs cancel;
   cancelled runs carry no signal (the gate skips them).
 - **`sweep.yml`** — weekly all-platform sweep (+ examples smoke). A separate file from
-  main.yml *by design*: its TCG legs (macos-x86, windows-x86, smoke subset) may red
-  without blocking PRs, but are never green-washed — red is red.
+  main.yml *by design*: its TCG legs (macos-x86, windows-x86 — bounded to the anchor
+  smoke subset via `tcg-smoke: true` to cap weekly cost) may red without blocking PRs,
+  but are never green-washed — red is red. On manual `integration.yml` dispatches TCG
+  legs run the FULL suite by default (`tcg-smoke` defaults off): `platforms=all` means
+  all platforms, full set — smoke is opt-in, never an implicit narrowing.
 - **`integration.yml`** — the single reusable integration unit (`workflow_call` +
   `workflow_dispatch`). A plan job resolves **`platforms` × `routeros-targets`** (both
   comma lists; `gating`/`all` platform aliases) into one cross-OS matrix — one dispatch
@@ -165,7 +168,11 @@ integration jobs assemble that + per-file timing into `metrics.ndjson`
 `tested-versions.json` rollup to the orphan **`ci-data`** branch. Never a second test
 run; never affects pass/fail — the aggregate job is best-effort by contract (fold/push
 failures warn and stay green, because a red there would trip the PR freshness gate over
-side-band data).
+side-band data). A full run marks exactly **its target's resolved version** tested —
+never every version it happened to boot (upgrade/pinned-channel tests boot others
+incidentally; crediting those suppressed the scheduler for versions no full suite ever
+targeted). The per-run files are the source of truth; `ci-metrics refold` rebuilds the
+rollup after fold-logic changes.
 
 **Merge policy**: squash-only, PR title → main commit subject (write PR titles as
 conventional commits), PR body → commit body, branches auto-delete. Review threads must

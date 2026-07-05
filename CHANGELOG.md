@@ -54,6 +54,13 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   one-click `release.yml` dispatch (replacing `bun run release`/`scripts/release.ts` —
   the `release` package script is gone). Repo is squash-merge-only. Contributor-facing:
   see CONTRIBUTING.md "Pull Requests & Merging" and "Releasing".
+  Follow-up round: TCG platforms (windows-x86, macos-x86) now run the **full suite by
+  default** on dispatches — `platforms=all` really means everything (the old implicit
+  anchor-smoke narrowing reported green on ~2-minute legs); smoke is opt-in via the new
+  `tcg-smoke` input (the weekly sweep uses it to cap cost). `tested-versions.json` now
+  credits exactly a run's target version — never versions booted incidentally by
+  upgrade/pinned-channel tests — and `ci-metrics refold` rebuilds the rollup from the
+  per-run files. Manual dispatches collect metrics by default.
 - **Wizard channel default** (issue #46) now resolves the same way `add`/`start` do (`stable`
   when not configured, or the `default-channel` setting) instead of a hardcoded `long-term`,
   fixing a pre-existing inconsistency between the two entry points. The "recommended for
@@ -69,14 +76,6 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   `NetworkSpecifier`, `PortMapping`, `tzspGatewayIp`) — maps specifiers to goals, documents
   UDP/range forwards, and notes the CLI↔library equivalence, so consumers don't have to read
   `network.ts` to discover capabilities (issue #18).
-- **Extended Verification CI** — the Windows integration-log upload now writes the test
-  log under `$HOME` (same drive as `~/AppData/Local/quickchr/machines`) so
-  `upload-artifact` stops failing on the cross-drive least-common-ancestor (`C:` state dir
-  vs `D:` workspace). The macOS-x86 job is now `continue-on-error` with a job-level timeout
-  and relabeled best-effort/non-gating: hosted macOS runners have no HVF, so x86 CHR boots
-  under TCG and the full suite starves the runner. The job now defaults to a smoke subset
-  (`anchor.test.ts`) that completes under TCG — an explicit `test-filter` still runs more —
-  and `continue-on-error` keeps any TCG stall from turning the dispatch red.
 - Tightened `qemu-args` anchor assertions (single `-M`, `-m`/`-smp` values, `-drive` +
   headless `-display none`, indexed `-netdev`/`-drive` lookup, TCG-branch coverage) and added
   an empty-body `resolveVersion` → `INVALID_VERSION` case. Folds in the sound parts of the

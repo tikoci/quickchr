@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { foldTestedVersions, parseTimingFile, type TestedVersions } from "../../scripts/ci-metrics.ts";
+import {
+	foldTestedVersions,
+	parseTimingFile,
+	resolvedTargetVersion,
+	type TestedVersions,
+} from "../../scripts/ci-metrics.ts";
 
 // Anchor tests for the CI metrics pipeline (scripts/ci-metrics.ts, issue #30):
 // the timing-file parser and the tested-versions rollup the ros-versions
@@ -19,6 +24,8 @@ describe("parseTimingFile", () => {
 
 function metricsNdjson(over: {
 	version?: string;
+	boots?: string[]; // boot versions, in order — overrides `version`
+	target?: string;
 	platform?: string;
 	scope?: string;
 	conclusion?: string;
@@ -28,17 +35,20 @@ function metricsNdjson(over: {
 	const platform = over.platform ?? "linux-x86";
 	const run_id = over.run_id ?? "100";
 	const ts = over.ts ?? "2026-07-04T10:00:00Z";
+	const boots = over.boots ?? [over.version ?? "7.22.1"];
 	return [
-		JSON.stringify({
-			kind: "boot",
-			run_id,
-			ts,
-			platform,
-			version: over.version ?? "7.22.1",
-			arch: "x86",
-			accel: "kvm",
-			boot_ms: 61000,
-		}),
+		...boots.map((version) =>
+			JSON.stringify({
+				kind: "boot",
+				run_id,
+				ts,
+				platform,
+				version,
+				arch: "x86",
+				accel: "kvm",
+				boot_ms: 61000,
+			}),
+		),
 		JSON.stringify({
 			kind: "suite",
 			run_id,
@@ -46,7 +56,7 @@ function metricsNdjson(over: {
 			platform,
 			scope: over.scope ?? "full",
 			conclusion: over.conclusion ?? "pass",
-			target: "stable",
+			target: over.target ?? "stable",
 			files: 8,
 			failed: 0,
 		}),
@@ -85,5 +95,48 @@ describe("foldTestedVersions", () => {
 		tested = foldTestedVersions(tested, metricsNdjson({ platform: "linux-x86" }));
 		tested = foldTestedVersions(tested, metricsNdjson({ platform: "linux-arm64", run_id: "101" }));
 		expect(Object.keys(tested["7.22.1"] ?? {}).sort()).toEqual(["linux-arm64", "linux-x86"]);
+	});
+
+	// Attribution guard: a run marks ONLY its target's version. Upgrade and
+	// pinned-channel tests boot other versions incidentally; crediting those
+	// suppressed the scheduler for versions no full suite ever targeted
+	// (run 28748268691 targeted 7.20.8 but credited 7.23.1 and 7.20.7).
+	test("incidental boots of other versions are never credited", () => {
+		const tested = foldTestedVersions(
+			{},
+			metricsNdjson({ target: "7.20.8", boots: ["7.20.8", "7.20.8", "7.20.7", "7.23.1"] }),
+		);
+		expect(Object.keys(tested)).toEqual(["7.20.8"]);
+	});
+
+	test("a channel target resolves to the modal boot version", () => {
+		const tested = foldTestedVersions(
+			{},
+			metricsNdjson({ target: "stable", boots: ["7.20.8", "7.20.8", "7.20.8", "7.20.7"] }),
+		);
+		expect(Object.keys(tested)).toEqual(["7.20.8"]);
+	});
+
+	test("a channel target with no boot records marks nothing", () => {
+		const suiteOnly = metricsNdjson({ target: "stable", boots: [] });
+		expect(foldTestedVersions({}, suiteOnly)).toEqual({});
+	});
+});
+
+describe("resolvedTargetVersion", () => {
+	const parse = (ndjson: string) =>
+		ndjson
+			.split("\n")
+			.filter(Boolean)
+			.map((l) => JSON.parse(l) as { kind: string });
+
+	test("a version-shaped target is itself, regardless of boots", () => {
+		const records = parse(metricsNdjson({ target: "7.24beta2", boots: ["7.20.7", "7.20.7"] }));
+		expect(resolvedTargetVersion(records)).toBe("7.24beta2");
+	});
+
+	test("a channel target is the modal boot version", () => {
+		const records = parse(metricsNdjson({ target: "testing", boots: ["7.23.1", "7.20.7", "7.23.1"] }));
+		expect(resolvedTargetVersion(records)).toBe("7.23.1");
 	});
 });

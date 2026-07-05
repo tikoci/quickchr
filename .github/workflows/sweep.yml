@@ -1,8 +1,10 @@
 name: Weekly Sweep
 
 # Weekly all-platform verification: everything main.yml's per-push run does NOT
-# cover — macos/arm64 (full suite, HVF), macos/x86 + windows/x86 (TCG smoke
-# subset) — plus the examples smoke harness on every platform.
+# cover — macos/arm64 (full suite, HVF), macos/x86 + windows/x86 (TCG, bounded
+# to the anchor smoke subset here to cap weekly cost) — plus the examples smoke
+# harness on every platform. The full-suite-on-TCG "find out" path is a manual
+# integration.yml dispatch (where tcg-smoke defaults OFF).
 #
 # Deliberately a SEPARATE workflow from main.yml: the PR freshness gate reads
 # main.yml runs only, so a red TCG leg here never blocks PRs. A red sweep is
@@ -35,5 +37,6 @@ jobs:
     with:
       platforms: all
       run-examples: true
+      tcg-smoke: true
       collect-metrics: true
       artifact-prefix: sweep

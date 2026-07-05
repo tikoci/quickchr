@@ -20,19 +20,20 @@ name: Integration
 # not an optional extra); narrow/lab dispatches turn it off explicitly.
 #
 # Platform ids (comma-separate to combine, or use a group alias):
-#   linux-x86    ubuntu-latest      x86 CHR    KVM       full suite by default
-#   linux-arm64  ubuntu-24.04-arm   arm64 CHR  KVM       full suite by default
-#   macos-arm64  macos-15           arm64 CHR  HVF       full suite by default
-#   macos-x86    macos-15-intel     x86 CHR    TCG       smoke subset by default*
-#   windows-x86  windows-latest     x86 CHR    TCG       smoke subset by default*
+#   linux-x86    ubuntu-latest      x86 CHR    KVM
+#   linux-arm64  ubuntu-24.04-arm   arm64 CHR  KVM
+#   macos-arm64  macos-15           arm64 CHR  HVF
+#   macos-x86    macos-15-intel     x86 CHR    TCG (no hw accel — slow)
+#   windows-x86  windows-latest     x86 CHR    TCG (no hw accel — slow)
 #   gating  = linux-x86,linux-arm64,macos-arm64      all = every platform
 #
-# * TCG platforms default to the curated smoke subset (anchor.test.ts) because the
-#   full suite starves hosted runners without hardware acceleration (observed:
-#   macos-x86 "runner lost communication" ~64 min). An explicit test-filter
-#   overrides the subset. There is NO continue-on-error anywhere in this file:
-#   green means the selected tests passed, red means they didn't (see
-#   ci.instructions.md "green should be green").
+# Every platform runs the FULL suite by default — including the TCG ones, which
+# is the honest "find out where windows/mac break" path (they just get a much
+# larger timeout). Pass tcg-smoke=true to bound TCG legs to the curated
+# anchor.test.ts subset instead (the weekly sweep does, to cap its cost).
+# There is NO continue-on-error anywhere in this file: green means the selected
+# tests passed, red means they didn't (see ci.instructions.md "green should be
+# green").
 #
 # Per-file timing is always captured (integration-timing.txt in the artifact) —
 # boot/test duration by platform × accel × RouterOS version is the raw feed for
@@ -59,8 +60,12 @@ on:
         default: true
       test-filter:
         type: string
-        description: "Integration: comma-separated test file names (e.g. 'exec.test.ts,anchor.test.ts'). Empty = all files (TCG platforms: smoke subset)."
+        description: "Integration: comma-separated test file names (e.g. 'exec.test.ts,anchor.test.ts'). Empty = all files."
         default: ""
+      tcg-smoke:
+        type: boolean
+        description: "Bound TCG platforms (macos-x86, windows-x86) to the anchor smoke subset when test-filter is empty. Off = full suite everywhere (TCG legs are slow — extended timeout)."
+        default: false
       example-filter:
         type: string
         description: "Examples: comma-separated example names for the smoke harness (e.g. 'quickstart,rollback'). Empty = the curated subset."
@@ -71,8 +76,8 @@ on:
         default: ""
       collect-metrics:
         type: boolean
-        description: "Append this run's boot/test timing to the ci-data branch (runs/*.ndjson + tested-versions.json)"
-        default: false
+        description: "Append this run's boot/test timing to the ci-data branch (runs/*.ndjson + tested-versions.json). Default ON — a run without recorded results is a wasted run."
+        default: true
   workflow_call:
     inputs:
       platforms:
@@ -87,6 +92,9 @@ on:
       test-filter:
         type: string
         default: ""
+      tcg-smoke:
+        type: boolean
+        default: false
       example-filter:
         type: string
         default: ""
@@ -122,16 +130,18 @@ jobs:
         env:
           PLATFORMS: ${{ inputs.platforms }}
           TARGETS: ${{ inputs.routeros-targets }}
+          TEST_FILTER: ${{ inputs.test-filter }}
+          TCG_SMOKE: ${{ inputs.tcg-smoke }}
         run: |
           set -eo pipefail
-          # id → label | runner | tcg (no hw accel on hosted runner) | smoke-default
+          # id → label | runner | tcg (no hw accel on hosted runner)
           table() {
             case "$1" in
-              linux-x86)   echo 'linux/x86_64|ubuntu-latest|false|false' ;;
-              linux-arm64) echo 'linux/aarch64|ubuntu-24.04-arm|false|false' ;;
-              macos-arm64) echo 'macos/arm64|macos-15|false|false' ;;
-              macos-x86)   echo 'macos/x86_64|macos-15-intel|true|true' ;;
-              windows-x86) echo 'windows/x86_64|windows-latest|true|true' ;;
+              linux-x86)   echo 'linux/x86_64|ubuntu-latest|false' ;;
+              linux-arm64) echo 'linux/aarch64|ubuntu-24.04-arm|false' ;;
+              macos-arm64) echo 'macos/arm64|macos-15|false' ;;
+              macos-x86)   echo 'macos/x86_64|macos-15-intel|true' ;;
+              windows-x86) echo 'windows/x86_64|windows-latest|true' ;;
               *) return 1 ;;
             esac
           }
@@ -151,6 +161,7 @@ jobs:
               exit 1
             fi
           done
+          FILTER="${TEST_FILTER// /}"
           inc='[]'
           IFS=',' read -ra IDS <<< "$LIST"
           for id in "${IDS[@]}"; do
@@ -159,14 +170,25 @@ jobs:
               echo "::error::Unknown platform id '$id' (valid: linux-x86, linux-arm64, macos-arm64, macos-x86, windows-x86, gating, all)"
               exit 1
             fi
-            IFS='|' read -r label runner tcg smoke <<< "$row"
+            IFS='|' read -r label runner tcg <<< "$row"
+            # smoke is OPT-IN (tcg-smoke input), never an implicit narrowing: an
+            # explicit platforms=all/windows-x86 dispatch means the full suite.
+            smoke=false
+            [ "$tcg" = "true" ] && [ "$TCG_SMOKE" = "true" ] && smoke=true
+            # Full suite under TCG is slow but real (the "find out" path) — give
+            # it a generous cap. Smoke/filtered TCG legs and accelerated legs
+            # stay tight so a hang is caught quickly.
+            timeout=60
+            if [ "$tcg" = "true" ]; then
+              if [ "$smoke" = "true" ] || [ -n "$FILTER" ]; then timeout=90; else timeout=300; fi
+            fi
             for t in "${TARGET_ARR[@]}"; do
               [ -z "$t" ] && continue
               inc=$(printf '%s' "$inc" | jq -c \
                 --arg id "$id" --arg label "$label" --arg os "$runner" \
                 --arg target "$t" \
-                --argjson tcg "$tcg" --argjson smoke "$smoke" \
-                '. + [{id:$id, label:$label, os:$os, tcg:$tcg, smoke:$smoke, target:$target}]')
+                --argjson tcg "$tcg" --argjson smoke "$smoke" --argjson timeout "$timeout" \
+                '. + [{id:$id, label:$label, os:$os, tcg:$tcg, smoke:$smoke, timeout:$timeout, target:$target}]')
             done
           done
           if [ "$inc" = "[]" ]; then
@@ -185,7 +207,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.tcg && 90 || 60 }}
+    timeout-minutes: ${{ matrix.timeout }}
     defaults:
       run:
         shell: bash
@@ -281,15 +303,15 @@ jobs:
         id: files
         env:
           TEST_FILTER: ${{ inputs.test-filter }}
-          SMOKE_DEFAULT: ${{ matrix.smoke }}
+          SMOKE: ${{ matrix.smoke }}
         run: |
           set -eo pipefail
           FILTER="${TEST_FILTER// /}"
-          if [ -z "$FILTER" ] && [ "$SMOKE_DEFAULT" = "true" ]; then
-            # TCG platforms: full suite starves the runner — default to the curated
-            # smoke subset that exercises boot + REST end-to-end and completes.
+          if [ -z "$FILTER" ] && [ "$SMOKE" = "true" ]; then
+            # tcg-smoke was requested: run the curated subset that exercises
+            # boot + REST end-to-end in minutes instead of hours.
             FILTER="anchor.test.ts"
-            echo "::notice::TCG platform smoke default: $FILTER (override via the test-filter input)"
+            echo "::notice::TCG smoke subset: $FILTER (tcg-smoke input; omit it for the full suite)"
           fi
           if [ -z "$FILTER" ]; then
             ALL=""

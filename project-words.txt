@@ -352,6 +352,7 @@ winbox
 winget
 winsock
 wintun
+worktree
 wrappable
 writability
 wsl
