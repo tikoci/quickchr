@@ -1,59 +1,59 @@
 {
-	"7.23.1": {
-		"linux-arm64": {
-			"run_id": "28727737748",
-			"date": "2026-07-05T03:33:35.922Z",
-			"conclusion": "pass"
-		},
-		"linux-x86": {
-			"run_id": "28727737748",
-			"date": "2026-07-05T03:25:31.231Z",
-			"conclusion": "pass"
-		}
-	},
 	"7.20.7": {
 		"linux-arm64": {
-			"run_id": "28727737748",
-			"date": "2026-07-05T03:33:35.922Z",
-			"conclusion": "pass"
+			"conclusion": "fail",
+			"date": "2026-07-05T04:01:43.443Z",
+			"run_id": "28728342669"
 		},
 		"linux-x86": {
-			"run_id": "28727737748",
-			"date": "2026-07-05T03:25:31.231Z",
-			"conclusion": "pass"
+			"conclusion": "pass",
+			"date": "2026-07-05T03:53:51.472Z",
+			"run_id": "28728342669"
 		}
 	},
 	"7.20.8": {
 		"linux-arm64": {
-			"run_id": "28727737748",
-			"date": "2026-07-05T03:33:35.922Z",
-			"conclusion": "pass"
+			"conclusion": "fail",
+			"date": "2026-07-05T04:01:43.443Z",
+			"run_id": "28728342669"
 		},
 		"linux-x86": {
-			"run_id": "28727737748",
-			"date": "2026-07-05T03:25:31.231Z",
-			"conclusion": "pass"
-		}
-	},
-	"7.24rc1": {
-		"linux-x86": {
-			"run_id": "28727548584",
-			"date": "2026-07-05T03:16:42.488Z",
-			"conclusion": "pass"
+			"conclusion": "pass",
+			"date": "2026-07-05T03:53:51.472Z",
+			"run_id": "28728342669"
 		}
 	},
 	"7.21.4": {
 		"linux-x86": {
-			"run_id": "28727550832",
+			"conclusion": "pass",
 			"date": "2026-07-05T03:17:01.620Z",
-			"conclusion": "pass"
+			"run_id": "28727550832"
+		}
+	},
+	"7.23.1": {
+		"linux-arm64": {
+			"conclusion": "fail",
+			"date": "2026-07-05T04:01:43.443Z",
+			"run_id": "28728342669"
+		},
+		"linux-x86": {
+			"conclusion": "pass",
+			"date": "2026-07-05T03:53:51.472Z",
+			"run_id": "28728342669"
 		}
 	},
 	"7.24beta3": {
 		"linux-x86": {
-			"run_id": "28727545681",
+			"conclusion": "pass",
 			"date": "2026-07-05T03:19:54.891Z",
-			"conclusion": "pass"
+			"run_id": "28727545681"
+		}
+	},
+	"7.24rc1": {
+		"linux-x86": {
+			"conclusion": "pass",
+			"date": "2026-07-05T03:16:42.488Z",
+			"run_id": "28727548584"
 		}
 	}
 }
