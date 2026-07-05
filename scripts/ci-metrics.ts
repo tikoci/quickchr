@@ -294,6 +294,13 @@ function refold(): void {
 	const files = existsSync(runsDir)
 		? [...readdirSync(runsDir)].sort().filter((f) => f.endsWith(".ndjson"))
 		: [];
+	// Unlike aggregate (which folds into the existing rollup), refold rebuilds
+	// from {} — so an empty/missing runs/ means a mistyped --data, and writing
+	// would wipe the rollup. Refuse instead.
+	if (files.length === 0) {
+		console.error(`ci-metrics refold: no runs/*.ndjson under ${runsDir} — refusing to overwrite tested-versions.json (wrong --data path?)`);
+		process.exit(1);
+	}
 	let tested: TestedVersions = {};
 	for (const f of files) {
 		tested = foldTestedVersions(tested, readFileSync(join(runsDir, f), "utf-8"));
