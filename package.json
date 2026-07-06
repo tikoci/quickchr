@@ -17,7 +17,8 @@
   "files": [
     "src",
     "README.md",
-    "DESIGN.md"
+    "DESIGN.md",
+    "MANUAL.md"
   ],
   "scripts": {
     "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown && bun run lint:cspell && bun run lint:examples && bun run lint:shell",
