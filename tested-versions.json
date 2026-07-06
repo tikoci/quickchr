@@ -40,8 +40,8 @@
 	},
 	"7.23.1": {
 		"linux-arm64": {
-			"conclusion": "fail",
-			"date": "2026-07-06T03:05:16.266Z",
+			"conclusion": "pass",
+			"date": "2026-07-06T03:47:55.842Z",
 			"run_id": "28764156035"
 		},
 		"linux-x86": {
