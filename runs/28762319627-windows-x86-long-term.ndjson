@@ -1,0 +1,4 @@
+{"kind":"boot","ts":"2026-07-06T01:39:08.987Z","run_id":"28762319627","sha":"9006c7adb143c93a2cb95808898e47a8cb2382ca","platform":"windows-x86","host":"win32","name":"integration-disk-add-start","version":"7.21.4","arch":"x86","accel":"tcg","boot_ms":33993}
+{"kind":"boot","ts":"2026-07-06T01:39:47.306Z","run_id":"28762319627","sha":"9006c7adb143c93a2cb95808898e47a8cb2382ca","platform":"windows-x86","host":"win32","name":"integration-snapshot-savevm","version":"7.21.4","arch":"x86","accel":"tcg","boot_ms":34511}
+{"kind":"test-file","ts":"2026-07-06T01:39:54.008Z","run_id":"28762319627","sha":"9006c7adb143c93a2cb95808898e47a8cb2382ca","platform":"windows-x86","host":"win32","file":"disk.test.ts","duration_s":95,"status":"pass"}
+{"kind":"suite","ts":"2026-07-06T01:39:54.008Z","run_id":"28762319627","sha":"9006c7adb143c93a2cb95808898e47a8cb2382ca","platform":"windows-x86","host":"win32","scope":"filtered","conclusion":"pass","target":"long-term","files":1,"failed":0}
