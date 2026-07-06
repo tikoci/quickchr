@@ -8,6 +8,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-07-06
+
 ### Added
 
 - **Boot-history log + boot timing fields** (issue #30) — every successful boot appends
