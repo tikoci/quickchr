@@ -469,6 +469,35 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			const keys = await resp.json() as Array<{ user: string; key: string }>;
 			const userKey = keys.find((k: { user: string }) => k.user === "quickchr");
 			expect(userKey).toBeDefined();
+
+			// The managed-key fact must be persisted on state AND in machine.json so the
+			// #71 descriptor can read it — with batchVerified=true (issue #74).
+			const { loadMachine } = await import("../../src/lib/state.ts");
+			for (const mk of [instance.state.managedSshKey, loadMachine("integration-ssh-key")?.managedSshKey]) {
+				expect(mk).toBeDefined();
+				expect(mk?.algorithm).toBe("ed25519");
+				expect(mk?.privateKeyPath).toBe(join(sshDir, "id_ed25519"));
+				expect(mk?.batchVerified).toBe(true);
+			}
+
+			// Independent grounding of that flag: a real host-OpenSSH batch login
+			// (BatchMode=yes, PasswordAuthentication=no) with the managed key must work.
+			const login = Bun.spawnSync(
+				[
+					"ssh",
+					"-o", "StrictHostKeyChecking=no",
+					"-o", "UserKnownHostsFile=/dev/null",
+					"-o", "PasswordAuthentication=no",
+					"-o", "BatchMode=yes",
+					"-o", "ConnectTimeout=10",
+					"-i", join(sshDir, "id_ed25519"),
+					`quickchr@127.0.0.1`, "-p", String(instance.ports.ssh),
+					':put "managed-key-login-ok"',
+				],
+				{ stdout: "pipe", stderr: "pipe", timeout: 20_000 },
+			);
+			const loginOut = new TextDecoder().decode(login.stdout);
+			expect(loginOut).toContain("managed-key-login-ok");
 		} finally {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }

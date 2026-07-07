@@ -174,9 +174,12 @@ centrs may still meet.
   fallback only. Landed this round: `installSshKey()` now **captures and surfaces
   the console `add` output on failure** (previously discarded → a real RouterOS
   rejection masqueraded as a blind 10s REST-listing timeout).
-- **#71** — unblocked: `services.ssh.auth.privateKeyPath` is reportable as usable
-  because a cell-A batch login is known-good on the floor; `MachineState` can gain a
-  verified-key field with real grounding behind it.
+- **#71** — unblocked and the data source landed: `installSshKey` now does a real
+  host-OpenSSH batch login after install and persists
+  `MachineState.managedSshKey = { privateKeyPath, algorithm, batchVerified }` (to
+  `machine.json`). #71's descriptor advertises `services.ssh.auth.privateKeyPath` /
+  batch key auth as usable **only when `batchVerified` is true**. Verified live on the
+  floor (7.20.8) and stable (7.23.2) via `test/integration/provisioning.test.ts`.
 - **centrs #176** — the §2 password-policy field rename + the §3 error strings are
   the grounded distinctions `check`'s error/warn/tip taxonomy needs; ed25519 row-4
   result is the recipe for `--add-ssh-key-if-missing`.
