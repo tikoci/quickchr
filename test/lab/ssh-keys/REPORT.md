@@ -16,9 +16,9 @@ taxonomy + `--add-ssh-key-if-missing`; [#147](https://github.com/tikoci/centrs/i
 grounding here is deliberately broader than the one `descriptor()` field #71 needs.
 
 Every install cell is gated on a **real host-OpenSSH batch login**
-(`ssh -o BatchMode=yes -o PasswordAuthentication=no -i <key>`), never on "the key
-appears in the REST listing" — that listing-only check is exactly the gap #71 must
-close and the gap the shipped `installSshKey()` verification left open.
+(`ssh -o BatchMode=yes -o PasswordAuthentication=no -o IdentitiesOnly=yes -i <key>`),
+never on "the key appears in the REST listing" — that listing-only check is exactly the
+gap #71 must close and the gap the shipped `installSshKey()` verification left open.
 
 ## 1. "ed25519 support" is four features at four versions
 
@@ -109,8 +109,10 @@ to accept either field). Measured field-by-field across the boot sweep:
 | `info` (the comment) | — | — | — | ✓ | …**between 7.20.8 and 7.23.1** |
 
 Tooling that reads `/rest/user/ssh-keys` must therefore match the comment on
-`info ?? key-owner` and must not depend on `RSA`. quickchr's `installSshKey()` keys
-off `user` (stable across all versions), so it is unaffected; the runner was fixed.
+`info ?? key-owner` and must not depend on `RSA`. quickchr's `installSshKey()` matches
+the generated key comment plus fingerprint when RouterOS exposes it (normalizing
+optional trailing base64 padding), so an older key for the same user cannot satisfy the
+managed-key verification; the runner uses the same comment-field fallback.
 
 ## 4. Verified install matrix (every cell = real batch login)
 
@@ -173,7 +175,8 @@ centrs may still meet.
   cells A/A′ on both 7.20.8 and 7.23.1). RSA-2048 documented as the sub-boundary
   fallback only. Landed this round: `installSshKey()` now **captures and surfaces
   the console `add` output on failure** (previously discarded → a real RouterOS
-  rejection masqueraded as a blind 10s REST-listing timeout).
+  rejection masqueraded as a blind 10s REST-listing timeout), matches the generated key
+  row by comment/fingerprint, and verifies batch login with `IdentitiesOnly=yes`.
 - **#71** — unblocked and the data source landed: `installSshKey` now does a real
   host-OpenSSH batch login after install and persists
   `MachineState.managedSshKey = { privateKeyPath, algorithm, batchVerified }` (to

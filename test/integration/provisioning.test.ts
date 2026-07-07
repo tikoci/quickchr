@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll } from "bun:test";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
@@ -20,6 +21,28 @@ async function cleanupMachine(name: string): Promise<void> {
 	if (!existing) return;
 	try { await existing.stop(); } catch { /* ignore */ }
 	try { await existing.remove(); } catch { /* ignore */ }
+}
+
+type SshKeyListRow = {
+	user?: string;
+	info?: string;
+	"key-owner"?: string;
+	fingerprint?: string;
+};
+
+function sshKeyOwner(row: SshKeyListRow): string {
+	return row.info ?? row["key-owner"] ?? "";
+}
+
+function opensshSha256Fingerprint(publicKey: string): string {
+	const keyBlob = publicKey.trim().split(/\s+/)[1];
+	if (!keyBlob) throw new Error("OpenSSH public key is missing its key blob");
+	const digest = createHash("sha256").update(Buffer.from(keyBlob, "base64")).digest("base64").replace(/=+$/, "");
+	return `SHA256:${digest}`;
+}
+
+function normalizeSshFingerprint(fingerprint: string): string {
+	return fingerprint.replace(/=+$/, "");
 }
 
 describe.skipIf(SKIP)("user provisioning", () => {
@@ -461,13 +484,22 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 				? `Basic ${btoa(`${creds.user}:${creds.password}`)}`
 				: `Basic ${btoa("admin:")}`;
 
-			const resp = await fetch(`http://127.0.0.1:${instance.ports.http}/rest/user/ssh-keys`, {
-				headers: { Authorization: auth },
-				signal: AbortSignal.timeout(10_000),
-			});
-			expect(resp.status).toBe(200);
-			const keys = await resp.json() as Array<{ user: string; key: string }>;
-			const userKey = keys.find((k: { user: string }) => k.user === "quickchr");
+			const { restGet } = await import("../../src/lib/rest.ts");
+			const { status, body } = await restGet(
+				`http://127.0.0.1:${instance.ports.http}/rest/user/ssh-keys`,
+				auth,
+				10_000,
+			);
+			expect(status).toBe(200);
+			const keys = JSON.parse(body) as SshKeyListRow[];
+			const expectedKeyComment = "quickchr@integration-ssh-key";
+			const expectedFingerprint = opensshSha256Fingerprint(await Bun.file(join(sshDir, "id_ed25519.pub")).text());
+			const userKey = keys.find((k) => (
+				k.user === "quickchr"
+				&& sshKeyOwner(k) === expectedKeyComment
+				&& k.fingerprint != null
+				&& normalizeSshFingerprint(k.fingerprint) === expectedFingerprint
+			));
 			expect(userKey).toBeDefined();
 
 			// The managed-key fact must be persisted on state AND in machine.json so the
@@ -488,6 +520,7 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 					"-o", "StrictHostKeyChecking=no",
 					"-o", "UserKnownHostsFile=/dev/null",
 					"-o", "PasswordAuthentication=no",
+					"-o", "IdentitiesOnly=yes",
 					"-o", "BatchMode=yes",
 					"-o", "ConnectTimeout=10",
 					"-i", join(sshDir, "id_ed25519"),

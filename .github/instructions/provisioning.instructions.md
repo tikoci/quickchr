@@ -160,8 +160,12 @@ so quickchr defaults `ed25519` outright. ECDSA is rejected by RouterOS.
 **Verified, persisted fact (`installSshKey` → `MachineState.managedSshKey`).** Presence in
 RouterOS's `/user/ssh-keys` listing is necessary but not sufficient — `installSshKey`
 follows it with a real host-OpenSSH batch login (`BatchMode=yes`,
-`PasswordAuthentication=no`) and records `{ privateKeyPath, algorithm, batchVerified }` on
-`MachineState` (persisted to `machine.json`). The batch login is **best-effort** — a
-failed probe records `batchVerified: false` and never aborts provisioning. This is the
-data source the #71 descriptor consumes: advertise SSH private-key batch auth as usable
-**only when `batchVerified` is true**.
+`PasswordAuthentication=no`, `IdentitiesOnly=yes`) and records
+`{ privateKeyPath, algorithm, batchVerified }` on `MachineState` (persisted to
+`machine.json`). The REST listing check must match the generated key's comment
+(`info ?? key-owner`) and fingerprint when available, not only the user, so stale keys
+cannot stand in for the managed key; normalize optional trailing base64 padding in the
+RouterOS fingerprint. The batch login is **best-effort** — a failed probe records
+`batchVerified: false` and never aborts provisioning. This is the data source the #71
+descriptor consumes: advertise SSH private-key batch auth as usable **only when
+`batchVerified` is true**.

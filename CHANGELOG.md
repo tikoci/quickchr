@@ -20,6 +20,9 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 - `installSshKey` failures now surface RouterOS's console rejection output and throw a
   typed `QuickCHRError` instead of a plain `Error`.
+- Managed SSH key verification now matches the generated key's RouterOS row by
+  comment/fingerprint and runs OpenSSH with `IdentitiesOnly=yes`, preventing older
+  user keys or agent/config identities from producing a false verified result.
 
 ## [0.4.3] — 2026-07-06
 

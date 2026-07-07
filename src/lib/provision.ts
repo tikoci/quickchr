@@ -3,6 +3,7 @@
  * with a console transport fallback when REST is unavailable.
  */
 
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { QuickCHRError, type ManagedSshKey } from "./types.ts";
@@ -276,6 +277,41 @@ export const SSH_KEY_REJECTION_PATTERN = /failure:|syntax error|no such item|bad
  *  provisioning floor (7.20.8) and current stable in REPORT.md — issue #74. */
 const MANAGED_SSH_KEY_ALGORITHM = "ed25519";
 
+type SshKeyListRow = {
+	user?: string;
+	info?: string;
+	"key-owner"?: string;
+	"key-type"?: string;
+	fingerprint?: string;
+};
+
+function sshKeyOwner(row: SshKeyListRow): string {
+	return row.info ?? row["key-owner"] ?? "";
+}
+
+function opensshSha256Fingerprint(publicKey: string): string | undefined {
+	const keyBlob = publicKey.trim().split(/\s+/)[1];
+	if (!keyBlob) return undefined;
+	try {
+		const digest = createHash("sha256").update(Buffer.from(keyBlob, "base64")).digest("base64").replace(/=+$/, "");
+		return `SHA256:${digest}`;
+	} catch {
+		return undefined;
+	}
+}
+
+function normalizeSshFingerprint(fingerprint: string): string {
+	return fingerprint.replace(/=+$/, "");
+}
+
+function matchesManagedSshKey(row: SshKeyListRow, username: string, keyComment: string, fingerprint?: string): boolean {
+	if (row.user !== username) return false;
+	if (sshKeyOwner(row) !== keyComment) return false;
+	if (row["key-type"] && row["key-type"] !== MANAGED_SSH_KEY_ALGORITHM) return false;
+	if (fingerprint && row.fingerprint && normalizeSshFingerprint(row.fingerprint) !== normalizeSshFingerprint(fingerprint)) return false;
+	return true;
+}
+
 /** Attempt a real host-OpenSSH batch login with the managed private key — the
  *  exact mode (`BatchMode=yes`, `PasswordAuthentication=no`) that centrs and the
  *  #71 descriptor need. Returns true only on a clean passwordless login. Best-
@@ -290,6 +326,7 @@ async function verifyBatchLogin(sshPort: number, username: string, privateKeyPat
 				"-o", "StrictHostKeyChecking=no",
 				"-o", "UserKnownHostsFile=/dev/null",
 				"-o", "PasswordAuthentication=no",
+				"-o", "IdentitiesOnly=yes",
 				"-o", "BatchMode=yes",
 				"-o", "ConnectTimeout=10",
 				"-i", privateKeyPath,
@@ -335,9 +372,10 @@ export async function installSshKey(
 	mkdirSync(sshDir, { recursive: true });
 
 	const privateKeyPath = join(sshDir, "id_ed25519");
+	const keyComment = `quickchr@${machineName}`;
 
 	const keygen = Bun.spawnSync(
-		["ssh-keygen", "-t", MANAGED_SSH_KEY_ALGORITHM, "-f", privateKeyPath, "-N", "", "-C", `quickchr@${machineName}`],
+		["ssh-keygen", "-t", MANAGED_SSH_KEY_ALGORITHM, "-f", privateKeyPath, "-N", "", "-C", keyComment],
 		{ stdout: "pipe", stderr: "pipe" },
 	);
 	if (keygen.exitCode !== 0) {
@@ -345,6 +383,7 @@ export async function installSshKey(
 	}
 
 	const pubKey = (await Bun.file(`${privateKeyPath}.pub`).text()).trim();
+	const expectedFingerprint = opensshSha256Fingerprint(pubKey);
 
 	// Install via serial console — commits synchronously unlike the REST endpoint
 	// which may return 200 OK before the key is durable in RouterOS storage.
@@ -365,7 +404,9 @@ export async function installSshKey(
 		throw new QuickCHRError("EXEC_FAILED", `RouterOS rejected the SSH key for ${username}: ${addOutput.trim()}`);
 	}
 
-	// Verify the key appears in the REST listing.
+	// Verify the generated key appears in the REST listing. Match the public-key
+	// comment (`key-owner` on older 7.x, `info` on newer 7.x) rather than just the
+	// user, so an older key for the same user cannot satisfy this check.
 	const auth = `Basic ${btoa("admin:")}`;
 	const deadline = Date.now() + 10_000;
 	let lastListBody = "";
@@ -379,8 +420,8 @@ export async function installSshKey(
 			);
 			if (status >= 200 && status < 300) {
 				lastListBody = listBody;
-				const keys = JSON.parse(listBody) as Array<{ user?: string }>;
-				if (Array.isArray(keys) && keys.some((k) => k.user === username)) { listed = true; break; }
+				const keys = JSON.parse(listBody) as SshKeyListRow[];
+				if (Array.isArray(keys) && keys.some((k) => matchesManagedSshKey(k, username, keyComment, expectedFingerprint))) { listed = true; break; }
 			} else {
 				lastListBody = `HTTP ${status}`;
 			}
