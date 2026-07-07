@@ -55,6 +55,18 @@
 			"run_id": "28782180390"
 		}
 	},
+	"7.23.2": {
+		"linux-arm64": {
+			"conclusion": "pass",
+			"date": "2026-07-07T04:00:57.634Z",
+			"run_id": "28839487071"
+		},
+		"linux-x86": {
+			"conclusion": "pass",
+			"date": "2026-07-07T03:55:12.383Z",
+			"run_id": "28839487071"
+		}
+	},
 	"7.24beta3": {
 		"linux-x86": {
 			"conclusion": "pass",
