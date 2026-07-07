@@ -43,10 +43,15 @@ Open a Pull Request against a filed issue for review (PRs are wired to automated
   (Copilot, CodeRabbit). Before merging: (1) **wait for the automated reviews to actually
   post** — a PR with zero review activity has not been reviewed, do not merge it on CI
   green alone; (2) **answer every finding** — either fix it or reply with a *grounded*
-  dismissal (evidence, not opinion); (3) **resolve every conversation thread** — branch
-  protection enforces this (`required_conversation_resolution`), so an unresolved thread
-  blocks the merge button. A dismissed finding with a good paper trail is fine; a
-  finding merged past in silence is not.
+  dismissal (evidence, not opinion); (3) **resolve every conversation thread** — this is a
+  **separate action from replying**: fixing the code or posting a reply does *not* resolve
+  the thread, you must explicitly mark it resolved ("Resolve conversation" in the UI, or the
+  `resolveReviewThread` GraphQL mutation — see `.github/instructions/general.instructions.md`
+  End-of-Session Review step 4 for the exact `gh api graphql` commands). Branch protection
+  enforces this (`required_conversation_resolution`), so **an unresolved thread silently
+  blocks the merge button even with all-green CI and every finding answered** — confirm
+  `gh pr view <n> --json mergeStateStatus` reads `CLEAN`. A dismissed finding with a good
+  paper trail is fine; a finding merged past in silence is not.
 - **PR checks are fast (~3-5 min)** — lint, unit tests (Linux + Windows), and the
   required `Integration freshness` check: the latest completed integration run on `main`
   (`main.yml`, full suite on linux/x86_64 + linux/aarch64) must be green. A red `main`
