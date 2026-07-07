@@ -115,14 +115,17 @@ describe.skipIf(!process.env.QUICKCHR_INTEGRATION)(
 			expect(status).toBe(201);
 			const result = JSON.parse(body);
 			expect(result[".id"]).toBeDefined();
-			expect(result["key-owner"]).toBe("lab-rsa-add");
+			// The key comment lands in `key-owner` on ≤7.20.x, renamed to `info` on
+			// 7.23.x (grounded in REPORT.md §3). Accept either.
+			expect(result.info ?? result["key-owner"]).toBe("lab-rsa-add");
 			expect(result.user).toBe("admin");
 			expect(result.bits).toBe("2048");
 			keyIds.push(result[".id"]);
 		});
 
-		test("ed25519 key fails on add (< 7.16)", async () => {
-			// ed25519 support was added around 7.16
+		test("ed25519 key add (rejected < 7.12, accepted ≥ 7.12)", async () => {
+			// Row-4 boundary measured at 7.12 (REPORT.md §1): a CHR < 7.12 rejects an
+			// ed25519 user public key with "wrong format"; 7.12+ accepts it.
 			const keyPath = join(tmpDir, "test-ed25519");
 			execSync(
 				`ssh-keygen -t ed25519 -f ${keyPath} -N "" -C "lab-ed25519"`,
@@ -201,7 +204,8 @@ describe.skipIf(!process.env.QUICKCHR_INTEGRATION)(
 			const listResult = await restCall("GET", "/rest/user/ssh-keys");
 			const keys = JSON.parse(listResult.body);
 			const imported = keys.find(
-				(k: { "key-owner": string }) => k["key-owner"] === "lab-rsa-import",
+				(k: { "key-owner"?: string; info?: string }) =>
+					(k.info ?? k["key-owner"]) === "lab-rsa-import",
 			);
 			expect(imported).toBeDefined();
 			expect(imported.user).toBe("admin");
@@ -289,13 +293,14 @@ describe.skipIf(!process.env.QUICKCHR_INTEGRATION)(
 
 			if (keys.length > 0) {
 				const key = keys[0];
-				// Verify expected fields exist
+				// Verify expected fields exist. Schema drifts across 7.x (REPORT.md §3):
+				// the comment is `key-owner` (≤7.20) or `info` (7.23+); the always-"false"
+				// `RSA` field was dropped at 7.15 and replaced by explicit `key-type`.
 				expect(key[".id"]).toBeDefined();
 				expect(key.user).toBeDefined();
-				expect(key["key-owner"]).toBeDefined();
+				expect(key.info ?? key["key-owner"]).toBeDefined();
 				expect(key.bits).toBeDefined();
-				// RSA field exists (meaning unclear — always "false" in our tests)
-				expect(key.RSA).toBeDefined();
+				expect(key["key-type"]).toBeDefined();
 			}
 		});
 	},
