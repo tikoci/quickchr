@@ -289,7 +289,7 @@ export async function installSshKey(
 
 	// Install via serial console — commits synchronously unlike the REST endpoint
 	// which may return 200 OK before the key is durable in RouterOS storage.
-	await consoleExec(
+	const { output: addOutput } = await consoleExec(
 		machineDir,
 		`/user/ssh-keys/add user="${username}" key="${pubKey}"`,
 		"admin",
@@ -297,6 +297,14 @@ export async function installSshKey(
 		30_000,
 		portBase,
 	);
+
+	// RouterOS reports key rejection (e.g. an unsupported algorithm on the running
+	// version, or a malformed key) inline on the console rather than by any status
+	// code. Surface it immediately so the failure is diagnosable, instead of letting
+	// it masquerade as the generic "did not appear in REST listing" timeout below.
+	if (/failure:|no such item|syntax error|expected|bad command|invalid/i.test(addOutput)) {
+		throw new Error(`RouterOS rejected the SSH key for ${username}: ${addOutput.trim()}`);
+	}
 
 	// Verify the key appears in the REST listing.
 	const auth = `Basic ${btoa("admin:")}`;
@@ -321,7 +329,7 @@ export async function installSshKey(
 		}
 		await Bun.sleep(500);
 	}
-	throw new Error(`SSH key for ${username} installed via console but did not appear in REST listing within 10s (last: ${lastListBody})`);
+	throw new Error(`SSH key for ${username} installed via console but did not appear in REST listing within 10s (console output: ${addOutput.trim() || "<empty>"}; last REST attempt: ${lastListBody})`);
 }
 
 /** Run all provisioning steps based on the config.
