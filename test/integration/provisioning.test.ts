@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
+import { matchesManagedSshKey, opensshSha256Fingerprint, SSH_NULL_DEVICE, type SshKeyListRow } from "../../src/lib/provision.ts";
 
 /**
  * Integration tests — user provisioning and admin management.
@@ -461,13 +462,18 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 				? `Basic ${btoa(`${creds.user}:${creds.password}`)}`
 				: `Basic ${btoa("admin:")}`;
 
-			const resp = await fetch(`http://127.0.0.1:${instance.ports.http}/rest/user/ssh-keys`, {
-				headers: { Authorization: auth },
-				signal: AbortSignal.timeout(10_000),
-			});
-			expect(resp.status).toBe(200);
-			const keys = await resp.json() as Array<{ user: string; key: string }>;
-			const userKey = keys.find((k: { user: string }) => k.user === "quickchr");
+			const { restGet } = await import("../../src/lib/rest.ts");
+			const { status, body } = await restGet(
+				`http://127.0.0.1:${instance.ports.http}/rest/user/ssh-keys`,
+				auth,
+				10_000,
+			);
+			expect(status).toBe(200);
+			const keys = JSON.parse(body) as SshKeyListRow[];
+			const expectedKeyComment = "quickchr@integration-ssh-key";
+			const expectedFingerprint = opensshSha256Fingerprint(await Bun.file(join(sshDir, "id_ed25519.pub")).text());
+			expect(expectedFingerprint).toBeDefined();
+			const userKey = keys.find((k) => matchesManagedSshKey(k, "quickchr", expectedKeyComment, expectedFingerprint));
 			expect(userKey).toBeDefined();
 
 			// The managed-key fact must be persisted on state AND in machine.json so the
@@ -485,9 +491,11 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			const login = Bun.spawnSync(
 				[
 					"ssh",
+					"-F", SSH_NULL_DEVICE,
 					"-o", "StrictHostKeyChecking=no",
-					"-o", "UserKnownHostsFile=/dev/null",
+					"-o", `UserKnownHostsFile=${SSH_NULL_DEVICE}`,
 					"-o", "PasswordAuthentication=no",
+					"-o", "IdentitiesOnly=yes",
 					"-o", "BatchMode=yes",
 					"-o", "ConnectTimeout=10",
 					"-i", join(sshDir, "id_ed25519"),
