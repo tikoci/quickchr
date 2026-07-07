@@ -1,6 +1,7 @@
 /**
  * Post-boot provisioning — user creation, admin disable via REST API,
  * with a console transport fallback when REST is unavailable.
+ * cspell:ignore NUL
  */
 
 import { createHash } from "node:crypto";
@@ -276,6 +277,7 @@ export const SSH_KEY_REJECTION_PATTERN = /failure:|syntax error|no such item|bad
 /** Managed-key algorithm quickchr generates. Grounded as accepted across the
  *  provisioning floor (7.20.8) and current stable in REPORT.md — issue #74. */
 const MANAGED_SSH_KEY_ALGORITHM = "ed25519";
+export const SSH_NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
 
 export type SshKeyListRow = {
 	user?: string;
@@ -324,9 +326,9 @@ async function verifyBatchLogin(sshPort: number, username: string, privateKeyPat
 		const proc = Bun.spawn(
 			[
 				"ssh",
-				"-F", "/dev/null",
+				"-F", SSH_NULL_DEVICE,
 				"-o", "StrictHostKeyChecking=no",
-				"-o", "UserKnownHostsFile=/dev/null",
+				"-o", `UserKnownHostsFile=${SSH_NULL_DEVICE}`,
 				"-o", "PasswordAuthentication=no",
 				"-o", "IdentitiesOnly=yes",
 				"-o", "BatchMode=yes",
@@ -386,6 +388,9 @@ export async function installSshKey(
 
 	const pubKey = (await Bun.file(`${privateKeyPath}.pub`).text()).trim();
 	const expectedFingerprint = opensshSha256Fingerprint(pubKey);
+	if (!expectedFingerprint) {
+		throw new QuickCHRError("PROCESS_FAILED", "Could not compute fingerprint for quickchr-generated SSH public key");
+	}
 
 	// Install via serial console — commits synchronously unlike the REST endpoint
 	// which may return 200 OK before the key is durable in RouterOS storage.

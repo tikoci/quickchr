@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
-import { matchesManagedSshKey, opensshSha256Fingerprint, type SshKeyListRow } from "../../src/lib/provision.ts";
+import { matchesManagedSshKey, opensshSha256Fingerprint, SSH_NULL_DEVICE, type SshKeyListRow } from "../../src/lib/provision.ts";
 
 /**
  * Integration tests — user provisioning and admin management.
@@ -491,9 +491,9 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			const login = Bun.spawnSync(
 				[
 					"ssh",
-					"-F", "/dev/null",
+					"-F", SSH_NULL_DEVICE,
 					"-o", "StrictHostKeyChecking=no",
-					"-o", "UserKnownHostsFile=/dev/null",
+					"-o", `UserKnownHostsFile=${SSH_NULL_DEVICE}`,
 					"-o", "PasswordAuthentication=no",
 					"-o", "IdentitiesOnly=yes",
 					"-o", "BatchMode=yes",

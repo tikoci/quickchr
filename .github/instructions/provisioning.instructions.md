@@ -160,7 +160,7 @@ so quickchr defaults `ed25519` outright. ECDSA is rejected by RouterOS.
 **Verified, persisted fact (`installSshKey` → `MachineState.managedSshKey`).** Presence in
 RouterOS's `/user/ssh-keys` listing is necessary but not sufficient — `installSshKey`
 follows it with a real host-OpenSSH batch login (`BatchMode=yes`,
-`PasswordAuthentication=no`, `IdentitiesOnly=yes`, `-F /dev/null`) and records
+`PasswordAuthentication=no`, `IdentitiesOnly=yes`, `-F <null-device>`) and records
 `{ privateKeyPath, algorithm, batchVerified }` on `MachineState` (persisted to
 `machine.json`). The REST listing check must match the generated key's comment
 (`info ?? key-owner`) and fingerprint when available, not only the user, so stale keys
