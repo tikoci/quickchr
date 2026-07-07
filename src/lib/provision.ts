@@ -277,7 +277,7 @@ export const SSH_KEY_REJECTION_PATTERN = /failure:|syntax error|no such item|bad
  *  provisioning floor (7.20.8) and current stable in REPORT.md — issue #74. */
 const MANAGED_SSH_KEY_ALGORITHM = "ed25519";
 
-type SshKeyListRow = {
+export type SshKeyListRow = {
 	user?: string;
 	info?: string;
 	"key-owner"?: string;
@@ -289,7 +289,7 @@ function sshKeyOwner(row: SshKeyListRow): string {
 	return row.info ?? row["key-owner"] ?? "";
 }
 
-function opensshSha256Fingerprint(publicKey: string): string | undefined {
+export function opensshSha256Fingerprint(publicKey: string): string | undefined {
 	const keyBlob = publicKey.trim().split(/\s+/)[1];
 	if (!keyBlob) return undefined;
 	try {
@@ -304,7 +304,7 @@ function normalizeSshFingerprint(fingerprint: string): string {
 	return fingerprint.replace(/=+$/, "");
 }
 
-function matchesManagedSshKey(row: SshKeyListRow, username: string, keyComment: string, fingerprint?: string): boolean {
+export function matchesManagedSshKey(row: SshKeyListRow, username: string, keyComment: string, fingerprint?: string): boolean {
 	if (row.user !== username) return false;
 	if (sshKeyOwner(row) !== keyComment) return false;
 	if (row["key-type"] && row["key-type"] !== MANAGED_SSH_KEY_ALGORITHM) return false;
@@ -313,9 +313,10 @@ function matchesManagedSshKey(row: SshKeyListRow, username: string, keyComment: 
 }
 
 /** Attempt a real host-OpenSSH batch login with the managed private key — the
- *  exact mode (`BatchMode=yes`, `PasswordAuthentication=no`) that centrs and the
- *  #71 descriptor need. Returns true only on a clean passwordless login. Best-
- *  effort: never throws, and is killed after 15s rather than hanging provisioning. */
+ *  exact mode (`BatchMode=yes`, `PasswordAuthentication=no`, `IdentitiesOnly=yes`,
+ *  ignoring ssh_config) that centrs and the #71 descriptor need. Returns true only
+ *  on a clean passwordless login. Best-effort: never throws, and is killed after
+ *  15s rather than hanging provisioning. */
 async function verifyBatchLogin(sshPort: number, username: string, privateKeyPath: string): Promise<boolean> {
 	// No SSH port forwarded (or not passed in) → can't prove batch auth from the host.
 	if (!sshPort || sshPort <= 0) return false;
@@ -323,6 +324,7 @@ async function verifyBatchLogin(sshPort: number, username: string, privateKeyPat
 		const proc = Bun.spawn(
 			[
 				"ssh",
+				"-F", "/dev/null",
 				"-o", "StrictHostKeyChecking=no",
 				"-o", "UserKnownHostsFile=/dev/null",
 				"-o", "PasswordAuthentication=no",

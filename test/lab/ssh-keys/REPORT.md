@@ -15,10 +15,12 @@ taxonomy + `--add-ssh-key-if-missing`; [#147](https://github.com/tikoci/centrs/i
 **`routeros-ssh`** skill. quickchr is TIKOCI's research arm (`test/lab/*`), so the
 grounding here is deliberately broader than the one `descriptor()` field #71 needs.
 
-Every install cell is gated on a **real host-OpenSSH batch login**
-(`ssh -o BatchMode=yes -o PasswordAuthentication=no -o IdentitiesOnly=yes -i <key>`),
-never on "the key appears in the REST listing" — that listing-only check is exactly the
-gap #71 must close and the gap the shipped `installSshKey()` verification left open.
+Every install cell is gated on a **real host-OpenSSH batch login** (not only "the key
+appears in the REST listing") — that listing-only check is exactly the gap #71 must close
+and the gap the shipped `installSshKey()` verification left open. quickchr's managed
+probe now tightens that batch login with `PasswordAuthentication=no`,
+`IdentitiesOnly=yes`, and `-F /dev/null` so host ssh_config or agent identities cannot
+satisfy the check.
 
 ## 1. "ed25519 support" is four features at four versions
 
@@ -176,7 +178,8 @@ centrs may still meet.
   fallback only. Landed this round: `installSshKey()` now **captures and surfaces
   the console `add` output on failure** (previously discarded → a real RouterOS
   rejection masqueraded as a blind 10s REST-listing timeout), matches the generated key
-  row by comment/fingerprint, and verifies batch login with `IdentitiesOnly=yes`.
+  row by comment/fingerprint, and verifies batch login with `IdentitiesOnly=yes` while
+  ignoring ssh_config (`-F /dev/null`).
 - **#71** — unblocked and the data source landed: `installSshKey` now does a real
   host-OpenSSH batch login after install and persists
   `MachineState.managedSshKey = { privateKeyPath, algorithm, batchVerified }` (to

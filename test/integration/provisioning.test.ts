@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeAll } from "bun:test";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
+import { matchesManagedSshKey, opensshSha256Fingerprint, type SshKeyListRow } from "../../src/lib/provision.ts";
 
 /**
  * Integration tests — user provisioning and admin management.
@@ -21,28 +21,6 @@ async function cleanupMachine(name: string): Promise<void> {
 	if (!existing) return;
 	try { await existing.stop(); } catch { /* ignore */ }
 	try { await existing.remove(); } catch { /* ignore */ }
-}
-
-type SshKeyListRow = {
-	user?: string;
-	info?: string;
-	"key-owner"?: string;
-	fingerprint?: string;
-};
-
-function sshKeyOwner(row: SshKeyListRow): string {
-	return row.info ?? row["key-owner"] ?? "";
-}
-
-function opensshSha256Fingerprint(publicKey: string): string {
-	const keyBlob = publicKey.trim().split(/\s+/)[1];
-	if (!keyBlob) throw new Error("OpenSSH public key is missing its key blob");
-	const digest = createHash("sha256").update(Buffer.from(keyBlob, "base64")).digest("base64").replace(/=+$/, "");
-	return `SHA256:${digest}`;
-}
-
-function normalizeSshFingerprint(fingerprint: string): string {
-	return fingerprint.replace(/=+$/, "");
 }
 
 describe.skipIf(SKIP)("user provisioning", () => {
@@ -494,12 +472,8 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			const keys = JSON.parse(body) as SshKeyListRow[];
 			const expectedKeyComment = "quickchr@integration-ssh-key";
 			const expectedFingerprint = opensshSha256Fingerprint(await Bun.file(join(sshDir, "id_ed25519.pub")).text());
-			const userKey = keys.find((k) => (
-				k.user === "quickchr"
-				&& sshKeyOwner(k) === expectedKeyComment
-				&& k.fingerprint != null
-				&& normalizeSshFingerprint(k.fingerprint) === expectedFingerprint
-			));
+			expect(expectedFingerprint).toBeDefined();
+			const userKey = keys.find((k) => matchesManagedSshKey(k, "quickchr", expectedKeyComment, expectedFingerprint));
 			expect(userKey).toBeDefined();
 
 			// The managed-key fact must be persisted on state AND in machine.json so the
@@ -517,6 +491,7 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			const login = Bun.spawnSync(
 				[
 					"ssh",
+					"-F", "/dev/null",
 					"-o", "StrictHostKeyChecking=no",
 					"-o", "UserKnownHostsFile=/dev/null",
 					"-o", "PasswordAuthentication=no",
