@@ -17,7 +17,7 @@ A red job tells you *something changed*, not *what is true*. Before acting on it
 
 ## Workflow Overview
 
-Four workflows, each with a distinct purpose:
+The repo has several workflows, each with a distinct purpose:
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
@@ -28,6 +28,7 @@ Four workflows, each with a distinct purpose:
 | **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1` or `PSScriptAnalyzerSettings.psd1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
 | **Release** | `release.yml` | `workflow_dispatch` only | One-click gate → version bump → tag → GitHub Release → npm publish |
 | **RouterOS Versions** | `ros-versions.yml` | schedule (daily 04:17 UTC), `workflow_dispatch` | New-version check → dispatches integration on never-tested versions |
+| **Lab** | `lab.yml` | `workflow_dispatch` (pick a lab or `all`), push touching `test/lab/**` | One job per `test/lab/*` grounding experiment that needs a real CI toolchain (e.g. host-OS OpenSSH/OpenSSL defaults). **Non-gating, must NOT be a required check** — findings go to the job summary + artifact and are written up in the lab's REPORT.md. Add a lab job per the framework header in the file |
 
 ### CI pipeline (ci.yml)
 

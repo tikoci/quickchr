@@ -49,5 +49,16 @@ After completing significant work (new features, design changes, bug fixes with 
 1. **GitHub issue** — Close the issue this work resolved, or open one for follow-up work you uncovered. Work is tracked in Issues, not BACKLOG.md — see CONTRIBUTING.md "Tracking work".
 2. **Durable knowledge** — Record any new design decision or discovered constraint in **DESIGN.md**, and any grounded RouterOS/QEMU behaviour fact in the narrowest scoped doc (`.github/instructions/*.md`, `docs/`, or `test/lab/<topic>/REPORT.md`). Review the git diff for "added but undocumented" behavior. Do not re-grow BACKLOG.md.
 3. **CHANGELOG.md** — Add an entry if the change is user-facing.
+4. **If the work landed on a PR — resolve every review conversation thread.** This one *is* a hard merge gate (`required_conversation_resolution`), not a habit. **Replying to a finding does NOT resolve its thread** — resolving is a separate, explicit action, and an unresolved thread silently blocks the merge button even with all-green CI and every finding answered. After you fix or grounded-dismiss each finding, resolve the threads — in the UI ("Resolve conversation") or in bulk:
 
-This is a lightweight habit, not a gate. Skip for trivial changes.
+   ```sh
+   # PR = the PR number. List still-unresolved threads:
+   gh api graphql -f query='query{repository(owner:"tikoci",name:"quickchr"){pullRequest(number:PR){reviewThreads(first:50){nodes{id isResolved path line}}}}}' \
+     --jq '.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)|"\(.id)\t\(.path):\(.line)"'
+   # Resolve one (repeat per id above):
+   gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id=THREAD_ID
+   ```
+
+   Then confirm `gh pr view PR --json mergeStateStatus` reads `CLEAN`. Do NOT resolve a *human* reviewer's thread on their behalf without addressing it — bot threads (Copilot/CodeRabbit) you own once the finding is handled.
+
+Steps 1–3 are a lightweight habit — skip for trivial changes. Step 4 is a gate whenever a PR exists.
