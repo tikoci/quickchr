@@ -1,0 +1,135 @@
+# Lab CI — grounds `test/lab/*` experiments that need a real CI toolchain.
+#
+# quickchr is TIKOCI's "research arm": `test/lab/*` runs live experiments whose
+# *findings* land in each lab's REPORT.md. Some findings can only be grounded on
+# hardware/OSes we don't have locally (e.g. the Windows/Ubuntu OpenSSH + OpenSSL
+# defaults that quickchr and centrs shell out to). This workflow is the home for
+# those grounding jobs — one job per lab.
+#
+# ── FRAMEWORK: adding a new lab grounding job ──────────────────────────────────
+#   1. Add a job below, named after its `test/lab/<name>/` directory.
+#   2. Guard it with the shared dispatch pattern so a run can target just it:
+#        if: ${{ github.event_name != 'workflow_dispatch'
+#                || inputs.lab == 'all' || inputs.lab == '<job-name>' }}
+#   3. Add '<job-name>' to the workflow_dispatch `lab` choice options.
+#   4. Keep it NON-GATING. A lab job must never block a PR and is intentionally
+#      NOT a required branch-protection check (see ci.instructions.md). Publish
+#      findings to the job summary + an uploaded artifact; write them up in the
+#      lab's REPORT.md. CI is the evidence source here, not a pass/fail gate.
+# ───────────────────────────────────────────────────────────────────────────────
+#
+# Triggers: manual dispatch (pick one lab or `all`), or a push touching lab files.
+# Low-noise by design — path-filtered, and never a required check.
+name: lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      lab:
+        description: "Which lab grounding job to run"
+        type: choice
+        default: all
+        options:
+          - all
+          - ssh-os-baseline
+  push:
+    paths:
+      - ".github/workflows/lab.yml"
+      - "test/lab/**"
+
+permissions:
+  contents: read
+
+jobs:
+  # test/lab/ssh-keys — host-OS SSH/OpenSSL baseline (issue #74).
+  # quickchr and centrs invoke the *host's* OpenSSH client, so the host's defaults
+  # — ssh-keygen's default key type, the negotiated KEX / host-key / cipher sets,
+  # and the TLS library OpenSSH links against — decide whether a RouterOS-side key
+  # or algorithm actually connects. This grounds those facts on the three runner
+  # OSes for test/lab/ssh-keys/REPORT.md §5 instead of a remembered prior.
+  ssh-os-baseline:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lab == 'all' || inputs.lab == 'ssh-os-baseline' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Probe SSH / OpenSSL baseline
+        shell: bash
+        run: |
+          set -u
+          out=probe.txt
+          : > "$out"
+
+          section() { printf '\n### %s\n' "$1" | tee -a "$out"; }
+          line()    { printf '%s\n' "$1" | tee -a "$out"; }
+
+          line "runner-os: ${{ matrix.os }}"
+          line "uname: $(uname -a 2>/dev/null || echo n/a)"
+
+          section "OpenSSH client"
+          # ssh -V prints to stderr, and includes the linked TLS library.
+          ssh -V 2>&1 | tee -a "$out" || line "ssh: not found"
+
+          section "OpenSSL / TLS"
+          openssl version 2>&1 | tee -a "$out" || line "openssl: not found"
+
+          section "ssh-keygen default key type"
+          # Omit -t entirely: whatever type OpenSSH was compiled to default to is
+          # what a user gets from a bare 'ssh-keygen'. This is the fact that decides
+          # which algorithm centrs' 'reuse the user's key' path will hand RouterOS.
+          rm -f def_key def_key.pub
+          if ssh-keygen -q -N "" -f def_key </dev/null 2>>"$out"; then
+            fp=$(ssh-keygen -l -f def_key.pub 2>/dev/null || echo "?")
+            line "default key fingerprint line: $fp"
+            # The trailing "(TYPE)" token is the algorithm.
+            line "default key type: $(printf '%s' "$fp" | grep -oE '\([A-Z0-9]+\)$' || echo '?')"
+          else
+            line "ssh-keygen default generation failed"
+          fi
+
+          section "ssh-keygen ed25519 + rsa availability"
+          rm -f ed25519_key rsa_key
+          if ssh-keygen -q -t ed25519 -N "" -f ed25519_key </dev/null 2>>"$out"; then
+            line "ed25519: OK"
+          else
+            line "ed25519: FAILED"
+          fi
+          if ssh-keygen -q -t rsa -b 2048 -N "" -f rsa_key </dev/null 2>>"$out"; then
+            line "rsa-2048: OK"
+          else
+            line "rsa-2048: FAILED"
+          fi
+
+          section "Negotiable algorithms (ssh -Q)"
+          for q in kex key key-sig cipher; do
+            line "-- $q --"
+            ssh -Q "$q" 2>>"$out" | tee -a "$out" || line "ssh -Q $q: unsupported"
+          done
+
+          # Machine-readable one-liner other tooling / the report can lift verbatim.
+          section "SUMMARY-JSON"
+          ssh_v=$(ssh -V 2>&1 | head -1)
+          openssl_line=$(openssl version 2>&1 | head -1)
+          default_type=$(ssh-keygen -l -f def_key.pub 2>/dev/null | grep -oE '\([A-Z0-9]+\)$' | tr -d '()')
+          printf '{"os":"%s","ssh":"%s","openssl":"%s","default_key_type":"%s"}\n' \
+            "${{ matrix.os }}" "$ssh_v" "$openssl_line" "${default_type:-unknown}" | tee summary.json | tee -a "$out"
+
+          # Publish to the GitHub job summary so results are readable without
+          # downloading the artifact.
+          {
+            echo "## SSH/OpenSSL baseline — ${{ matrix.os }}"
+            echo '```text'
+            cat "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload probe artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: ssh-os-baseline-${{ matrix.os }}
+          path: |
+            probe.txt
+            summary.json
+          if-no-files-found: warn
