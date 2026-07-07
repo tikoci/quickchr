@@ -215,6 +215,26 @@ export interface MachineConfig {
 	bootDiskFormat?: BootDiskFormat;
 }
 
+/**
+ * Facts about the SSH keypair quickchr generated and installed for its managed
+ * user during provisioning. Persisted on {@link MachineState} so consumers (the
+ * #71 descriptor contract) can advertise SSH private-key batch auth as usable —
+ * but only when `batchVerified` is true. See `test/lab/ssh-keys/REPORT.md`.
+ */
+export interface ManagedSshKey {
+	/** Absolute path to the private key on the host (public key is `${path}.pub`). */
+	privateKeyPath: string;
+	/** Key algorithm. Currently always `ed25519` — grounded across quickchr's
+	 *  provisioning floor and current stable in REPORT.md (issue #74). */
+	algorithm: string;
+	/** True only when a host-OpenSSH `BatchMode=yes` / `PasswordAuthentication=no`
+	 *  login with this key actually succeeded — not merely that the key appears in
+	 *  RouterOS's `/user/ssh-keys` listing. This is the signal #71 gates on. */
+	batchVerified: boolean;
+	/** ISO timestamp of the successful batch verification, when one happened. */
+	verifiedAt?: string;
+}
+
 export interface MachineState extends MachineConfig {
 	createdAt: string;
 	lastStartedAt?: string;
@@ -226,6 +246,8 @@ export interface MachineState extends MachineConfig {
 	lastAccel?: string;
 	/** Wall-clock ms from QEMU spawn to REST-ready for the most recent boot. */
 	lastBootMs?: number;
+	/** Managed SSH key installed during provisioning, if any (issue #74). */
+	managedSshKey?: ManagedSshKey;
 }
 
 // --- Start Options ---

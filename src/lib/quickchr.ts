@@ -1643,14 +1643,25 @@ export class QuickCHR {
 		}
 
 		if (opts.user || opts.disableAdmin || opts.secureLogin === true) {
-			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log, machineState.machineDir, machineState.portBase);
-			if (result.user) {
-				// Persist user info in state (password placeholder — real password in secret store)
+			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log, machineState.machineDir, machineState.portBase, chrPorts.ssh);
+			if (result.user || result.managedSshKey) {
+				// Persist user info + managed SSH key fact in state (password placeholder —
+				// real password in secret store). The managedSshKey fact is what the #71
+				// descriptor reads to advertise SSH private-key batch auth (only when verified).
 				const current = loadMachine(machineState.name);
 				if (current) {
-					current.user = { name: result.user.name, password: STORED_IN_SECRETS_PASSWORD };
+					if (result.user) current.user = { name: result.user.name, password: STORED_IN_SECRETS_PASSWORD };
+					if (result.managedSshKey) current.managedSshKey = result.managedSshKey;
 					saveMachine(current);
 				}
+			}
+			if (result.managedSshKey) {
+				machineState.managedSshKey = result.managedSshKey;
+				if (!result.managedSshKey.batchVerified) {
+					log.warn("  SSH key installed but batch login could not be verified — SSH transport may fall back to password");
+				}
+			}
+			if (result.user) {
 				machineState.user = { name: result.user.name, password: result.user.password };
 				if (!opts.user) {
 					// Auto-created quickchr account — credential display is handled by the caller (wizard/CLI)

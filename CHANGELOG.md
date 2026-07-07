@@ -8,6 +8,19 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Added
+
+- Provisioning now verifies the managed SSH key with a real host-OpenSSH batch login
+  (`BatchMode=yes`, `PasswordAuthentication=no`) and persists the result on the machine
+  as `managedSshKey` (`{ privateKeyPath, algorithm, batchVerified }`). Best-effort: a
+  failed verification never aborts provisioning. Settles the managed-key algorithm as
+  `ed25519` (grounded from RouterOS 7.12+; issue #74).
+
+### Changed
+
+- `installSshKey` failures now surface RouterOS's console rejection output and throw a
+  typed `QuickCHRError` instead of a plain `Error`.
+
 ## [0.4.3] — 2026-07-06
 
 ### Added

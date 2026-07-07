@@ -5,7 +5,7 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { QuickCHRError } from "./types.ts";
+import { QuickCHRError, type ManagedSshKey } from "./types.ts";
 import { saveInstanceCredentials } from "./credentials.ts";
 import { generatePassword } from "./password.ts";
 import { waitForBoot } from "./qemu.ts";
@@ -19,6 +19,9 @@ export const QUICKCHR_USER = "quickchr";
 export interface ProvisionResult {
 	/** The user that was created (or null if none). */
 	user: { name: string; password: string } | null;
+	/** The managed SSH key installed for that user, if provisioning installed one
+	 *  (issue #74). Absent when no key was installed. */
+	managedSshKey?: ManagedSshKey;
 }
 
 async function readUser(httpPort: number, auth: string, name: string): Promise<Record<string, unknown> | undefined> {
@@ -269,25 +272,72 @@ async function consoleProvision(
  */
 export const SSH_KEY_REJECTION_PATTERN = /failure:|syntax error|no such item|bad command name|expected end of/i;
 
+/** Managed-key algorithm quickchr generates. Grounded as accepted across the
+ *  provisioning floor (7.20.8) and current stable in REPORT.md — issue #74. */
+const MANAGED_SSH_KEY_ALGORITHM = "ed25519";
+
+/** Attempt a real host-OpenSSH batch login with the managed private key — the
+ *  exact mode (`BatchMode=yes`, `PasswordAuthentication=no`) that centrs and the
+ *  #71 descriptor need. Returns true only on a clean passwordless login. Best-
+ *  effort: never throws, and is killed after 15s rather than hanging provisioning. */
+async function verifyBatchLogin(sshPort: number, username: string, privateKeyPath: string): Promise<boolean> {
+	// No SSH port forwarded (or not passed in) → can't prove batch auth from the host.
+	if (!sshPort || sshPort <= 0) return false;
+	try {
+		const proc = Bun.spawn(
+			[
+				"ssh",
+				"-o", "StrictHostKeyChecking=no",
+				"-o", "UserKnownHostsFile=/dev/null",
+				"-o", "PasswordAuthentication=no",
+				"-o", "BatchMode=yes",
+				"-o", "ConnectTimeout=10",
+				"-i", privateKeyPath,
+				`${username}@127.0.0.1`, "-p", String(sshPort),
+				':put "quickchr-ssh-batch-ok"',
+			],
+			{ stdout: "pipe", stderr: "pipe", stdin: "ignore" },
+		);
+		const timer = setTimeout(() => { try { proc.kill(); } catch { /* already gone */ } }, 15_000);
+		try {
+			const [out, err] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+			]);
+			await proc.exited;
+			return (out + err).includes("quickchr-ssh-batch-ok");
+		} finally {
+			clearTimeout(timer);
+		}
+	} catch {
+		return false;
+	}
+}
+
 /**
- * Generate an ed25519 SSH keypair and install the public key on the CHR for `username`.
+ * Generate an ed25519 SSH keypair and install the public key on the CHR for `username`,
+ * then verify it works for a host-OpenSSH batch login.
  * Keys are stored in `<machineDir>/ssh/id_ed25519` (private) and `.pub` (public).
  * This enables SSH transport without passwords for the quickchr managed user.
+ *
+ * Returns the {@link ManagedSshKey} fact (key path, algorithm, and whether a real
+ * `BatchMode=yes` login succeeded) so callers can persist it for the #71 descriptor.
  */
 export async function installSshKey(
 	httpPort: number,
+	sshPort: number,
 	username: string,
 	machineName: string,
 	machineDir: string,
 	portBase?: number,
-): Promise<void> {
+): Promise<ManagedSshKey> {
 	const sshDir = join(machineDir, "ssh");
 	mkdirSync(sshDir, { recursive: true });
 
 	const privateKeyPath = join(sshDir, "id_ed25519");
 
 	const keygen = Bun.spawnSync(
-		["ssh-keygen", "-t", "ed25519", "-f", privateKeyPath, "-N", "", "-C", `quickchr@${machineName}`],
+		["ssh-keygen", "-t", MANAGED_SSH_KEY_ALGORITHM, "-f", privateKeyPath, "-N", "", "-C", `quickchr@${machineName}`],
 		{ stdout: "pipe", stderr: "pipe" },
 	);
 	if (keygen.exitCode !== 0) {
@@ -319,6 +369,7 @@ export async function installSshKey(
 	const auth = `Basic ${btoa("admin:")}`;
 	const deadline = Date.now() + 10_000;
 	let lastListBody = "";
+	let listed = false;
 	while (Date.now() < deadline) {
 		try {
 			const { status, body: listBody } = await restGet(
@@ -329,7 +380,7 @@ export async function installSshKey(
 			if (status >= 200 && status < 300) {
 				lastListBody = listBody;
 				const keys = JSON.parse(listBody) as Array<{ user?: string }>;
-				if (Array.isArray(keys) && keys.some((k) => k.user === username)) return;
+				if (Array.isArray(keys) && keys.some((k) => k.user === username)) { listed = true; break; }
 			} else {
 				lastListBody = `HTTP ${status}`;
 			}
@@ -338,7 +389,21 @@ export async function installSshKey(
 		}
 		await Bun.sleep(500);
 	}
-	throw new QuickCHRError("PROCESS_FAILED", `SSH key for ${username} installed via console but did not appear in REST listing within 10s (console output: ${addOutput.trim() || "<empty>"}; last REST attempt: ${lastListBody})`);
+	if (!listed) {
+		throw new QuickCHRError("PROCESS_FAILED", `SSH key for ${username} installed via console but did not appear in REST listing within 10s (console output: ${addOutput.trim() || "<empty>"}; last REST attempt: ${lastListBody})`);
+	}
+
+	// Presence in the listing is necessary but not sufficient — prove the key
+	// actually authenticates a host-OpenSSH batch client. Non-fatal: an unverified
+	// key is still installed, we just record batchVerified=false so the #71
+	// descriptor won't advertise batch key auth it can't stand behind.
+	const batchVerified = await verifyBatchLogin(sshPort, username, privateKeyPath);
+	return {
+		privateKeyPath,
+		algorithm: MANAGED_SSH_KEY_ALGORITHM,
+		batchVerified,
+		verifiedAt: batchVerified ? new Date().toISOString() : undefined,
+	};
 }
 
 /** Run all provisioning steps based on the config.
@@ -362,6 +427,7 @@ export async function provision(
 	logger?: ProgressLogger,
 	machineDir?: string,
 	portBase?: number,
+	sshPort?: number,
 ): Promise<ProvisionResult> {
 	const log = logger ?? createLogger();
 
@@ -392,7 +458,7 @@ export async function provision(
 			if (secureLogin && !user && effectiveUser) {
 				try {
 					await waitForRest(httpPort, 30_000);
-					await installSshKey(httpPort, effectiveUser.name, machineName, machineDir, portBase);
+					result.managedSshKey = await installSshKey(httpPort, sshPort ?? 0, effectiveUser.name, machineName, machineDir, portBase);
 				} catch (keyErr) {
 					log.warn(`SSH key install failed after console provisioning (SSH transport will fall back to password): ${keyErr}`);
 				}
@@ -410,12 +476,13 @@ export async function provision(
 		saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
 	}
 
+	let managedSshKey: ManagedSshKey | undefined;
 	if (secureLogin && !user && effectiveUser && machineDir) {
 		// Brief pause so RouterOS propagates the new user to all subsystems
 		// (including the SSH key store) before we attempt key installation.
 		await Bun.sleep(1000);
 		try {
-			await installSshKey(httpPort, effectiveUser.name, machineName, machineDir, portBase);
+			managedSshKey = await installSshKey(httpPort, sshPort ?? 0, effectiveUser.name, machineName, machineDir, portBase);
 		} catch (e) {
 			log.warn(`SSH key install failed (SSH transport will fall back to password): ${e}`);
 		}
@@ -433,5 +500,5 @@ export async function provision(
 		await disableAdmin(httpPort, verifyAuth);
 	}
 
-	return { user: effectiveUser };
+	return { user: effectiveUser, managedSshKey };
 }

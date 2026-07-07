@@ -146,7 +146,22 @@ Testing approach for failure modes:
 
 For `exec --via=ssh` to work securely without passwords:
 - The `quickchr` managed user path should include SSH key generation
-- Store keys in the machine directory alongside other state
+- Store keys in the machine directory alongside other state (`<machineDir>/ssh/id_ed25519`)
 - Install the public key on the CHR during provisioning
 - This makes SSH work even if the password is later changed
 - Important: SSH key auth means `exec` always has a reliable path to the CHR
+
+**Algorithm: `ed25519`** — grounded as accepted by `/user/ssh-keys/add|import` from
+RouterOS **7.12** onward, and login-verified on quickchr's provisioning floor (7.20.8)
+and current stable (issue #74; evidence in `test/lab/ssh-keys/REPORT.md`). RSA-2048 is
+the only fallback for sub-7.12 devices, which quickchr never provisions (floor 7.20.8),
+so quickchr defaults `ed25519` outright. ECDSA is rejected by RouterOS.
+
+**Verified, persisted fact (`installSshKey` → `MachineState.managedSshKey`).** Presence in
+RouterOS's `/user/ssh-keys` listing is necessary but not sufficient — `installSshKey`
+follows it with a real host-OpenSSH batch login (`BatchMode=yes`,
+`PasswordAuthentication=no`) and records `{ privateKeyPath, algorithm, batchVerified }` on
+`MachineState` (persisted to `machine.json`). The batch login is **best-effort** — a
+failed probe records `batchVerified: false` and never aborts provisioning. This is the
+data source the #71 descriptor consumes: advertise SSH private-key batch auth as usable
+**only when `batchVerified` is true**.
