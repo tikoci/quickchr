@@ -137,22 +137,28 @@ Both floor (7.20.8) and stable (7.23.1): identical results.
 
 quickchr and centrs shell out to the **host** OpenSSH, so the host's defaults
 decide whether a RouterOS-side key/algorithm connects. Grounded by
-`.github/workflows/lab.yml` job `ssh-os-baseline` (ubuntu/windows/macos runners: `ssh -V`,
-`openssl version`, `ssh-keygen` default type, `ssh -Q` algorithm sets). See that
-workflow's run summary for the authoritative per-runner values; the local Intel-Mac
-data point:
+`.github/workflows/lab.yml` job `ssh-os-baseline` (`ssh -V`, `openssl version`,
+`ssh-keygen` default type, `ssh -Q` algorithm sets). Measured on the GitHub-hosted
+runners (run of 2026-07-06) plus the local Intel Mac:
 
-| OS | `ssh -V` | `ssh-keygen` default type | OpenSSL/TLS note |
-| -- | -------- | ------------------------- | ---------------- |
-| macOS (local Intel) | OpenSSH_10.2p1 | **ed25519** | `ssh` links **LibreSSL 3.3.6**; standalone `openssl` is OpenSSL 3.6.2 — different libs |
-| ubuntu-latest | *(CI)* | *(CI)* | *(CI)* |
-| windows-latest | *(CI)* | *(CI)* | *(CI)* |
-| macos-latest | *(CI)* | *(CI)* | *(CI)* |
+| OS | `ssh -V` | `ssh-keygen` default type | TLS lib OpenSSH links | `openssl` binary |
+| -- | -------- | ------------------------- | --------------------- | ---------------- |
+| ubuntu-latest | OpenSSH_9.6p1 | **ed25519** | OpenSSL 3.0.13 | OpenSSL 3.0.13 (same) |
+| windows-latest | OpenSSH_10.3p1 | **ed25519** | OpenSSL 3.5.6 | OpenSSL 3.5.6 (same) |
+| macos-latest | OpenSSH_10.2p1 | **ed25519** | **LibreSSL 3.3.6** | OpenSSL 3.6.2 (**different**) |
+| macOS (local Intel) | OpenSSH_10.2p1 | **ed25519** | **LibreSSL 3.3.6** | OpenSSL 3.6.2 (**different**) |
 
-The `ssh -V` "OpenSSL vs LibreSSL" split matters: on macOS the SSH client is linked
-against LibreSSL even though a separate OpenSSL is installed — so "what `openssl
-version` prints" is *not* what OpenSSH negotiates with. The CI workflow captures
-both per runner so the report reflects the actual toolchain, not a remembered prior.
+**All three runner OSes default `ssh-keygen` to ed25519** — so the key a user
+already has, and the key a bare `ssh-keygen` mints, is ed25519 on every platform
+quickchr/centrs run on. That is the empirical backing for ed25519 as the aligned
+default across both tools.
+
+The `ssh -V` "OpenSSL vs LibreSSL" split matters and is **macOS-specific**: on both
+macOS runners the SSH client links **LibreSSL**, even though a separate OpenSSL
+binary is installed — so "what `openssl version` prints" is *not* what OpenSSH
+negotiates with. Ubuntu and Windows link the same OpenSSL their `openssl` binary
+reports. Tooling that infers SSH crypto support from `openssl version` will be wrong
+on macOS only.
 
 **Alignment conclusion:** where the host mints an ed25519 key by default (as the
 local host does), RouterOS ≥ the row-4 boundary accepts that exact public key via
