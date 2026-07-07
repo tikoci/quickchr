@@ -198,7 +198,7 @@ centrs may still meet.
 >
 > - Live testing against CHR 7.11/7.20.8/7.23.1 (x86_64, HVF) on 2026-07-06 via
 >   `quickchr` + `test/lab/ssh-keys/run-matrix.ts`.
-> - Host-OS axis: `.github/workflows/lab.yml` job `ssh-os-baseline` (ubuntu/windows/macos).
+> - Host-OS axis: `.github/workflows/lab.yml` job `ssh-os-baseline` (Ubuntu/Windows/macOS runners).
 > - rosetta changelog `category:ssh` for the ed25519 feature timeline (rows 1–3).
 > - Manual: <https://help.mikrotik.com/docs/spaces/ROS/pages/132350014/SSH>.
 > - Cross-refs: quickchr #71/#74, centrs #176/#147.

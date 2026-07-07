@@ -261,6 +261,15 @@ async function consoleProvision(
 }
 
 /**
+ * Console markers that mean RouterOS rejected a `/user/ssh-keys/add`. RouterOS
+ * reports rejection inline (no status code) — these are the parser/command error
+ * prefixes it emits. Kept deliberately specific (not bare "expected"/"invalid",
+ * which appear in benign output) so it doesn't false-positive. Exported so the
+ * ssh-keys lab runner classifies rejections identically instead of duplicating it.
+ */
+export const SSH_KEY_REJECTION_PATTERN = /failure:|syntax error|no such item|bad command name|expected end of/i;
+
+/**
  * Generate an ed25519 SSH keypair and install the public key on the CHR for `username`.
  * Keys are stored in `<machineDir>/ssh/id_ed25519` (private) and `.pub` (public).
  * This enables SSH transport without passwords for the quickchr managed user.
@@ -282,7 +291,7 @@ export async function installSshKey(
 		{ stdout: "pipe", stderr: "pipe" },
 	);
 	if (keygen.exitCode !== 0) {
-		throw new Error(`ssh-keygen failed: ${new TextDecoder().decode(keygen.stderr)}`);
+		throw new QuickCHRError("SPAWN_FAILED", `ssh-keygen failed: ${new TextDecoder().decode(keygen.stderr)}`);
 	}
 
 	const pubKey = (await Bun.file(`${privateKeyPath}.pub`).text()).trim();
@@ -302,8 +311,8 @@ export async function installSshKey(
 	// version, or a malformed key) inline on the console rather than by any status
 	// code. Surface it immediately so the failure is diagnosable, instead of letting
 	// it masquerade as the generic "did not appear in REST listing" timeout below.
-	if (/failure:|no such item|syntax error|expected|bad command|invalid/i.test(addOutput)) {
-		throw new Error(`RouterOS rejected the SSH key for ${username}: ${addOutput.trim()}`);
+	if (SSH_KEY_REJECTION_PATTERN.test(addOutput)) {
+		throw new QuickCHRError("EXEC_FAILED", `RouterOS rejected the SSH key for ${username}: ${addOutput.trim()}`);
 	}
 
 	// Verify the key appears in the REST listing.
@@ -329,7 +338,7 @@ export async function installSshKey(
 		}
 		await Bun.sleep(500);
 	}
-	throw new Error(`SSH key for ${username} installed via console but did not appear in REST listing within 10s (console output: ${addOutput.trim() || "<empty>"}; last REST attempt: ${lastListBody})`);
+	throw new QuickCHRError("PROCESS_FAILED", `SSH key for ${username} installed via console but did not appear in REST listing within 10s (console output: ${addOutput.trim() || "<empty>"}; last REST attempt: ${lastListBody})`);
 }
 
 /** Run all provisioning steps based on the config.

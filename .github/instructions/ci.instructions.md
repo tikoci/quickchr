@@ -17,7 +17,7 @@ A red job tells you *something changed*, not *what is true*. Before acting on it
 
 ## Workflow Overview
 
-The workflows, each with a distinct purpose:
+The repo has several workflows, each with a distinct purpose:
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|

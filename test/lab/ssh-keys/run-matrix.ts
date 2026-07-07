@@ -16,11 +16,12 @@
  *   bun run test/lab/ssh-keys/run-matrix.ts
  */
 
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { consoleExec } from "../../../src/lib/console.ts";
+import { restRequest } from "../../../src/lib/rest.ts";
+import { SSH_KEY_REJECTION_PATTERN } from "../../../src/lib/provision.ts";
 
 const HTTP_PORT = Number(process.env.CHR_HTTP_PORT ?? "9100");
 const SSH_PORT = Number(process.env.CHR_SSH_PORT ?? "9102");
@@ -30,15 +31,13 @@ const AUTH = `Basic ${Buffer.from("admin:").toString("base64")}`;
 const BASE = `http://127.0.0.1:${HTTP_PORT}`;
 
 const tmp = mkdtempSync(join(tmpdir(), "ssh-matrix-"));
+const dec = new TextDecoder();
 
-async function rest(method: string, path: string, body?: object) {
-	const res = await fetch(`${BASE}${path}`, {
-		method,
-		headers: { Authorization: AUTH, "Content-Type": "application/json" },
-		body: body ? JSON.stringify(body) : undefined,
-	});
-	const text = await res.text();
-	return { status: res.status, body: text };
+// All CHR REST goes through src/lib/rest.ts (node:http + agent:false), NOT bare
+// fetch — Bun pools TCP connections by host:port and can return stale responses
+// after a CHR restarts on the same port (rest.ts header documents the root cause).
+function rest(method: string, path: string, body?: Record<string, unknown>) {
+	return restRequest(`${BASE}${path}`, method, AUTH, body);
 }
 
 type Algo = "ed25519" | "rsa" | "ecdsa";
@@ -50,16 +49,16 @@ function keygen(algo: Algo, tag: string): { priv: string; pub: string } {
 			: algo === "ecdsa"
 				? ["-t", "ecdsa", "-b", "256"]
 				: ["-t", "ed25519"];
-	const r = spawnSync("ssh-keygen", [...args, "-f", priv, "-N", "", "-C", tag], { encoding: "utf-8" });
-	if (r.status !== 0) throw new Error(`ssh-keygen ${algo}: ${r.stderr}`);
+	const r = Bun.spawnSync(["ssh-keygen", ...args, "-f", priv, "-N", "", "-C", tag], { stdout: "pipe", stderr: "pipe" });
+	if (r.exitCode !== 0) throw new Error(`ssh-keygen ${algo}: ${dec.decode(r.stderr)}`);
 	return { priv, pub: readFileSync(`${priv}.pub`, "utf-8").trim() };
 }
 
 /** Real host-OpenSSH batch login — the load-bearing pass criterion. */
 function batchLogin(priv: string, tag: string): { ok: boolean; detail: string } {
-	const r = spawnSync(
-		"ssh",
+	const r = Bun.spawnSync(
 		[
+			"ssh",
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "UserKnownHostsFile=/dev/null",
 			"-o", "PasswordAuthentication=no",
@@ -69,9 +68,9 @@ function batchLogin(priv: string, tag: string): { ok: boolean; detail: string } 
 			"admin@127.0.0.1", "-p", String(SSH_PORT),
 			`:put "LOGIN-OK-${tag}"`,
 		],
-		{ timeout: 20_000, encoding: "utf-8" },
+		{ timeout: 20_000, stdout: "pipe", stderr: "pipe" },
 	);
-	const out = (r.stdout ?? "") + (r.stderr ?? "");
+	const out = dec.decode(r.stdout) + dec.decode(r.stderr);
 	return { ok: out.includes(`LOGIN-OK-${tag}`), detail: out.trim().split("\n").slice(-1)[0] ?? "" };
 }
 
@@ -159,7 +158,7 @@ async function consoleAdd(algo: Algo, cell: string) {
 	let note = "";
 	try {
 		const { output } = await consoleExec(MACHINE_DIR, `/user/ssh-keys/add user="admin" key="${pub}"`, "admin", "", 30_000, PORT_BASE);
-		if (/failure:|no such item|syntax error|expected|bad command|invalid/i.test(output)) {
+		if (SSH_KEY_REJECTION_PATTERN.test(output)) {
 			note = output.trim().slice(0, 120);
 			installStatus = "rejected";
 		} else {
@@ -185,22 +184,33 @@ async function main() {
 	const ssh = JSON.parse((await rest("GET", "/rest/ip/ssh")).body);
 
 	console.log(`\n=== CHR ${ver} — SSH key install matrix ===`);
-	console.log(`host: ${spawnSync("ssh", ["-V"], { encoding: "utf-8" }).stderr.trim()}`);
+	console.log(`host: ${dec.decode(Bun.spawnSync(["ssh", "-V"], { stderr: "pipe" }).stderr).trim()}`);
 	console.log(`/ip/ssh: ${JSON.stringify(ssh)}`);
 
 	// host key type actually offered on the wire (drives known_hosts / TOFU)
-	const scan = spawnSync("ssh-keyscan", ["-p", String(SSH_PORT), "127.0.0.1"], { encoding: "utf-8", timeout: 15_000 });
-	const hostKeyTypes = (scan.stdout ?? "").split("\n").filter(Boolean).map((l) => l.split(" ")[1]).filter(Boolean);
+	const scan = Bun.spawnSync(["ssh-keyscan", "-p", String(SSH_PORT), "127.0.0.1"], { stdout: "pipe", stderr: "pipe", timeout: 15_000 });
+	const hostKeyTypes = dec.decode(scan.stdout).split("\n").filter(Boolean).map((l) => l.split(" ")[1]).filter(Boolean);
 	console.log(`host keys offered (ssh-keyscan): ${[...new Set(hostKeyTypes)].join(", ") || "none"}`);
 
-	// Cells A–D + ed25519/ecdsa on REST add for the boundary picture
-	await consoleAdd("ed25519", "A");
-	await restImport("ed25519", "B");
-	await consoleAdd("rsa", "C");
-	await restImport("rsa", "D");
-	await restAdd("ed25519", "A'"); // REST-add ed25519 (row-4 accept on this version)
-	await restAdd("rsa", "C'");     // REST-add rsa
-	await restAdd("ecdsa", "F");    // ecdsa comparison
+	// Cells A–D + ed25519/ecdsa on REST add for the boundary picture. Each cell is
+	// isolated: a transient failure in one records/logs and continues so the summary
+	// table and JSON_RESULTS still print for every completed cell.
+	const plan: Array<[() => Promise<void>, string]> = [
+		[() => consoleAdd("ed25519", "A"), "A console-add ed25519"],
+		[() => restImport("ed25519", "B"), "B rest-import ed25519"],
+		[() => consoleAdd("rsa", "C"), "C console-add rsa"],
+		[() => restImport("rsa", "D"), "D rest-import rsa"],
+		[() => restAdd("ed25519", "A'"), "A' rest-add ed25519"],
+		[() => restAdd("rsa", "C'"), "C' rest-add rsa"],
+		[() => restAdd("ecdsa", "F"), "F rest-add ecdsa"],
+	];
+	for (const [run, label] of plan) {
+		try {
+			await run();
+		} catch (e) {
+			console.error(`cell ${label} threw (continuing): ${e}`);
+		}
+	}
 
 	console.log("\ncell | method       | algo    | install         | login | note");
 	console.log("-----+--------------+---------+-----------------+-------+-----");

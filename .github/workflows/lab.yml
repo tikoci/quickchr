@@ -40,6 +40,12 @@ on:
 permissions:
   contents: read
 
+# Collapse redundant runs: rapid pushes to lab files (or repeated dispatches on
+# the same ref) supersede in-flight ones instead of stacking 3-OS legs each.
+concurrency:
+  group: lab-${{ github.ref }}-${{ github.event.inputs.lab || 'push' }}
+  cancel-in-progress: true
+
 jobs:
   # test/lab/ssh-keys — host-OS SSH/OpenSSL baseline (issue #74).
   # quickchr and centrs invoke the *host's* OpenSSH client, so the host's defaults
@@ -57,15 +63,19 @@ jobs:
     steps:
       - name: Probe SSH / OpenSSL baseline
         shell: bash
+        # matrix.os is routed through env (not interpolated into the script body)
+        # to avoid the template-injection pattern, even though it's a fixed label.
+        env:
+          RUNNER_OS_LABEL: ${{ matrix.os }}
         run: |
-          set -u
+          set -uo pipefail
           out=probe.txt
           : > "$out"
 
           section() { printf '\n### %s\n' "$1" | tee -a "$out"; }
           line()    { printf '%s\n' "$1" | tee -a "$out"; }
 
-          line "runner-os: ${{ matrix.os }}"
+          line "runner-os: $RUNNER_OS_LABEL"
           line "uname: $(uname -a 2>/dev/null || echo n/a)"
 
           section "OpenSSH client"
@@ -114,12 +124,12 @@ jobs:
           openssl_line=$(openssl version 2>&1 | head -1)
           default_type=$(ssh-keygen -l -f def_key.pub 2>/dev/null | grep -oE '\([A-Z0-9]+\)$' | tr -d '()')
           printf '{"os":"%s","ssh":"%s","openssl":"%s","default_key_type":"%s"}\n' \
-            "${{ matrix.os }}" "$ssh_v" "$openssl_line" "${default_type:-unknown}" | tee summary.json | tee -a "$out"
+            "$RUNNER_OS_LABEL" "$ssh_v" "$openssl_line" "${default_type:-unknown}" | tee summary.json | tee -a "$out"
 
           # Publish to the GitHub job summary so results are readable without
           # downloading the artifact.
           {
-            echo "## SSH/OpenSSL baseline — ${{ matrix.os }}"
+            echo "## SSH/OpenSSL baseline — $RUNNER_OS_LABEL"
             echo '```text'
             cat "$out"
             echo '```'

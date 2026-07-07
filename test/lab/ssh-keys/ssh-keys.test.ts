@@ -138,8 +138,7 @@ describe.skipIf(!process.env.QUICKCHR_INTEGRATION)(
 				key: pubKey,
 			});
 
-			// On 7.10: fails with 400 "wrong format"
-			// On newer versions: may succeed — update this test when testing on 7.18+
+			// < 7.12: 400 "wrong format"; ≥ 7.12: 201 accepted (boundary in REPORT.md §1).
 			const result = JSON.parse(body);
 			if (status === 400) {
 				expect(result.detail).toContain("unable to load key file");
