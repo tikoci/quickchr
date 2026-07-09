@@ -263,12 +263,20 @@ function createInstance(state: MachineState): ChrInstance {
 		const auth = resolveAuth(state);
 		const creds = resolveCreds(state);
 		const basic = `${creds.user}:${creds.password}`;
+		const storedCreds = getInstanceCredentials(state.name);
 		// resolveAuth/resolveCreds never throw — when disableAdmin is true and no
 		// provisioned/stored user exists, they still fall back to the meaningless
 		// admin:"" tuple (auth.ts docstring: "the caller will get a 401"). Don't
 		// report a service available:true off that fallback alone.
-		const hasWorkingCredentials = Boolean(state.user) || Boolean(getInstanceCredentials(state.name));
-		const credentialsAvailable = !(state.disableAdmin === true && !hasWorkingCredentials);
+		const disableAdminLockout = state.disableAdmin === true && !state.user && !storedCreds;
+		// A provisioned user whose password is the STORED_IN_SECRETS_PASSWORD sentinel
+		// only resolves a real password when the per-instance credential store actually
+		// has an entry — otherwise resolveAuth/resolveCreds fall through to returning the
+		// literal sentinel string as the "password". Don't report available:true (or leak
+		// the sentinel as a usable password) off that unresolvable case either, regardless
+		// of disableAdmin.
+		const sentinelUnresolvable = state.user?.password === STORED_IN_SECRETS_PASSWORD && !storedCreds;
+		const credentialsAvailable = !disableAdminLockout && !sentinelUnresolvable;
 
 		const buildHttpService = (
 			securePM: PortMapping | undefined,

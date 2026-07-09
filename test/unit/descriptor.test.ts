@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import packageJson from "../../package.json";
+import { STORED_IN_SECRETS_PASSWORD } from "../../src/lib/credentials.ts";
 import { QuickCHR } from "../../src/lib/quickchr.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 import { QUICKCHR_DESCRIPTOR_VERSION } from "../../src/lib/types.ts";
@@ -69,7 +70,9 @@ describe("descriptor() — v1 shape", () => {
 		const descriptor = await instance?.descriptor();
 		expect(descriptor?.descriptorVersion).toBe(QUICKCHR_DESCRIPTOR_VERSION);
 		expect(descriptor?.quickchr).toEqual({ packageVersion: packageJson.version });
-		expect(descriptor).not.toHaveProperty("apiVersion");
+		// apiVersion would live under quickchr (not the descriptor root) if it were ever
+		// reintroduced — assert at that nesting level, not just the root.
+		expect(descriptor?.quickchr).not.toHaveProperty("apiVersion");
 		expect(descriptor?.status).toBe("running");
 	});
 
@@ -166,6 +169,20 @@ describe("descriptor() — v1 shape", () => {
 		const descriptor = await QuickCHR.get("router")?.descriptor();
 		expect(descriptor?.services["rest-api"].available).toBe(true);
 		expect(descriptor?.services["native-api"].available).toBe(true);
+	});
+
+	test("unresolvable STORED_IN_SECRETS_PASSWORD sentinel: available:false, no leaked sentinel password", async () => {
+		// state.user.password is the sentinel but the per-instance credential store has
+		// no matching entry (deleted/corrupted out-of-band) — resolveCreds() would
+		// otherwise fall through to returning the literal sentinel string as "password".
+		const state = baseState("router", { user: { name: "quickchr", password: STORED_IN_SECRETS_PASSWORD } });
+		writeMachine(state);
+		const descriptor = await QuickCHR.get("router")?.descriptor();
+		expect(descriptor?.services["rest-api"].available).toBe(false);
+		expect(descriptor?.services["native-api"].available).toBe(false);
+		const ssh = descriptor?.services.ssh;
+		expect(ssh?.available).toBe(true);
+		if (ssh?.available) expect(ssh.auth.passwordAvailable).toBe(false);
 	});
 
 	test("ssh: verified managed key advertises private-key batch auth", async () => {
