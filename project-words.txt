@@ -71,6 +71,7 @@ cpus
 creds
 credtest
 csi
+cutover
 cword
 datagram
 datagrams
@@ -80,6 +81,7 @@ demux
 desynced
 devtmpfs
 dgram
+dialable
 dispatchable
 dnf
 donny
@@ -310,6 +312,7 @@ tgz
 tib
 tikbook
 tikoci
+tiktoml
 tlv
 toctou
 tonistiigi
