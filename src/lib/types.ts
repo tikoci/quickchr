@@ -383,36 +383,138 @@ export interface ChrPorts {
 	[key: string]: number;
 }
 
-export interface MachineDescriptor {
+// --- Descriptor v1 (centrs interface contract) ---
+//
+// Live, credential-bearing connection-handoff shape for a *running* CHR instance —
+// the quickchr <-> centrs interface contract (issue #71). Full contract, per-service
+// mapping rules, and scope boundaries: docs/centrs-interface.md.
+
+/** Canonical service IDs for {@link Descriptor.services}, matching centrs' `--via`
+ *  values verbatim. Exported as constants for TS ergonomics
+ *  (`SERVICE_IDS.nativeApi === "native-api"`) while the serialized JSON key stays the
+ *  canonical string. See docs/centrs-interface.md "Service naming decision". */
+export const SERVICE_IDS = {
+	restApi: "rest-api",
+	nativeApi: "native-api",
+	ssh: "ssh",
+} as const;
+
+/** Schema compatibility boundary for {@link Descriptor}. Changes within a version are
+ *  additive-only (new optional fields/keys); bump only for a breaking restructure.
+ *  See docs/centrs-interface.md "Forward-compat policy". */
+export const QUICKCHR_DESCRIPTOR_VERSION = 1 as const;
+
+/** Per-service endpoint shape, deliberately shared with centrs' internal
+ *  `ServiceEndpoint` (tikoci/centrs#174) for `rest-api`/`native-api`. A consumer must
+ *  gate on `available` before dialing — the `available: false` variant's extra fields
+ *  are best-effort echoes, not a promise the endpoint is reachable.
+ *  See docs/centrs-interface.md "ServiceEndpoint (rest-api, native-api)". */
+export type ServiceEndpoint =
+	| {
+			available: true;
+			/** Hostname/IP — always `"127.0.0.1"` for quickchr's SLiRP-forwarded loopback
+			 *  ports. NOT a port; see the `PortMapping.host` naming-collision note in
+			 *  docs/centrs-interface.md. */
+			host: string;
+			port: number;
+			guestPort?: number;
+			transport: "tcp" | "udp";
+			/** true for https/apiSsl-backed endpoints, false otherwise. */
+			tls: boolean;
+			url?: string;
+			source?: { provider: "quickchr"; portMappingName?: string };
+			auth?: { username: string; password?: string; basic?: string; header?: string };
+	  }
+	| {
+			available: false;
+			unavailableReason: string;
+			host?: string;
+			port?: number;
+			guestPort?: number;
+			transport?: "tcp" | "udp";
+			tls?: boolean;
+			url?: string;
+			source?: { provider: "quickchr"; portMappingName?: string };
+	  };
+
+/** SSH's per-endpoint shape. Extends the generic {@link ServiceEndpoint}'s
+ *  available/host/port/transport/source discriminated union with an SSH-specific
+ *  `auth` sub-shape substituted for the REST/native-api auth object — NOT an
+ *  independent type. See docs/centrs-interface.md "SshServiceEndpoint". */
+export type SshServiceEndpoint =
+	| ({ available: true } & Omit<Extract<ServiceEndpoint, { available: true }>, "auth"> & {
+				auth: {
+					/** `state.user?.name ?? "admin"`. */
+					username: string;
+					/** `managedSshKey.privateKeyPath` — ONLY set when `batchVerified === true`.
+					 *  Never emit an unverified path. */
+					privateKeyPath?: string;
+					/** Modes centrs *may* try (broader, not all vouched-for). */
+					modes: Array<"private-key" | "agent-or-config" | "password">;
+					/** The gate centrs enforces for `--via ssh` / `transfer --via sftp` — only
+					 *  modes quickchr actually vouches for. */
+					batchModes: Array<"private-key" | "agent-or-config">;
+					passwordAvailable?: boolean;
+				};
+	  })
+	| Extract<ServiceEndpoint, { available: false }>;
+
+/** Generic extra port-forward listing beyond the three canonical `services` keys
+ *  (e.g. `winbox`, or a user's `extraPorts`). Descriptor-specific shape — do not leak
+ *  internal `PortMapping` field names (there, `host` is a port number; here it's a
+ *  hostname). See docs/centrs-interface.md "CustomForward". */
+export interface CustomForward {
 	name: string;
+	transport: "tcp" | "udp";
+	host: string;
+	hostPort: number;
+	guestPort: number;
+}
+
+/** Topology-only awareness of a machine's network interfaces — declarative, not a
+ *  resolved connection fact. Do not add `available`/`host`/`port` here; that would
+ *  imply a resolved-connection promise quickchr can't keep for DHCP-assigned segments.
+ *  See docs/centrs-interface.md "Multi-network awareness". */
+export interface NetworkTopologyEntry {
+	/** Matches `NetworkConfig.id` / boot order (`"net0"` = ether1). */
+	id: string;
+	/** Verbatim declared intent from `state.networks[].specifier`. */
+	specifier: NetworkSpecifier;
+}
+
+/** Live, credential-bearing connection-handoff descriptor for a *running* CHR
+ *  instance — the quickchr <-> centrs interface contract (issue #71).
+ *  `descriptor()` only ever returns this running shape; stopped machines throw
+ *  `MACHINE_STOPPED` as today. A missing machine name never reaches this type —
+ *  `QuickCHR.get(name)` returns `undefined` for that case (a typed absent value;
+ *  no separate `MACHINE_NOT_FOUND` throw from this surface).
+ *  See docs/centrs-interface.md "Descriptor v1 shape". */
+export interface Descriptor {
+	descriptorVersion: 1;
+	quickchr: { packageVersion: string };
 	status: "running";
+
+	name: string;
 	version: string;
 	arch: Arch;
 	cpu: number;
 	mem: number;
 	pid: number | null;
-	ports: ChrPorts;
-	portMappings: Record<string, PortMapping>;
-	urls: {
-		http: string;
-		rest: string;
-		restBase: string;
-		https?: string;
-		ssh?: string;
-		api?: string;
-		apiSsl?: string;
-		winbox?: string;
-	};
-	auth: {
-		user: string;
-		password: string;
-		basic: string;
-		header: string;
-	};
-	env: Record<string, string>;
 	machineDir: string;
 	createdAt: string;
 	lastStartedAt: string | null;
+
+	services: {
+		"rest-api": ServiceEndpoint;
+		"native-api": ServiceEndpoint;
+		ssh: SshServiceEndpoint;
+	};
+
+	/** Only present when quickchr has forwards beyond the three `services` keys
+	 *  above (e.g. `winbox`, or a user's `extraPorts`). */
+	customForwards?: CustomForward[];
+	/** Topology-only; SLiRP-forwarded connection facts stay in `services`. */
+	networks?: NetworkTopologyEntry[];
 }
 
 /** Return value of ChrInstance.queryLoad(). */
@@ -571,8 +673,9 @@ export interface ChrInstance {
 	 *  Bun.spawn(["bun", "my-script.ts"], { env: { ...process.env, ...await chr.subprocessEnv() } })
 	 */
 	subprocessEnv(): Promise<Record<string, string>>;
-	/** Build a stable machine-readable connection descriptor for a running instance. */
-	descriptor(): Promise<MachineDescriptor>;
+	/** Build a stable machine-readable connection descriptor for a running instance —
+	 *  the quickchr <-> centrs interface contract (issue #71, docs/centrs-interface.md). */
+	descriptor(): Promise<Descriptor>;
 
 	/** Sample QEMU guest load from the monitor. Returns null when the monitor is
 	 *  unavailable (machine stopped or running in foreground mode). */

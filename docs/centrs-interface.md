@@ -95,7 +95,7 @@ interface Descriptor {
   descriptorVersion: 1;
   quickchr: { packageVersion: string };   // no apiVersion — see "Dropped fields"
   status: "running";                       // descriptor() only ever returns a running shape;
-                                           // stopped/missing throw MACHINE_STOPPED / MACHINE_NOT_FOUND as today
+                                           // stopped machines throw MACHINE_STOPPED as today
 
   // machine identity — carried over from the current MachineDescriptor as top-level fields
   name: string;
@@ -118,6 +118,15 @@ interface Descriptor {
   networks?: NetworkTopologyEntry[];       // topology-only; see "Multi-network awareness"
 }
 ```
+
+**Missing-machine semantics:** a missing machine name never reaches this type at all —
+`QuickCHR.get(name)` returns `undefined` for that case, which is already a typed (TS)
+absent-value signal. There is no separate `MACHINE_NOT_FOUND` throw from `descriptor()`
+or anywhere else reachable from it; a consumer should treat `QuickCHR.get(name) ===
+undefined` as its own not-found case rather than expecting a thrown error. (Confirmed
+during implementation: no code path existed that threw `MACHINE_NOT_FOUND` for a missing
+name before this work, and none was added — inventing a `getOrThrow`-style method for
+this wasn't asked for and isn't needed.)
 
 ### `ServiceEndpoint` (rest-api, native-api)
 
@@ -248,17 +257,19 @@ Mapping rules:
   emit an unverified path.
 - `auth.batchModes` = `["private-key"]` when `batchVerified === true`, else `[]`.
   Never advertise `"private-key"` in `batchModes` off an absent/unverified key.
-- `"agent-or-config"` may appear in `batchModes` independent of `managedSshKey` — that
-  is host `ssh-agent` / `~/.ssh/config` policy, which quickchr cannot verify. Include
-  it as a mode centrs *may* try, not one quickchr vouches for.
+- `"agent-or-config"` reflects host `ssh-agent` / `~/.ssh/config` policy, which
+  quickchr cannot verify either way — it is always included in `modes` (a mode centrs
+  *may* try) but **never** added to `batchModes` (implemented: `batchModes` only ever
+  contains `"private-key"` when `batchVerified === true`, or is empty — matching this
+  doc's own Done-when example for the unverified/absent case, `batchModes: []`).
 - `auth.username` = `state.user?.name` (the managed/provisioned user, e.g.
   `"quickchr"`) when a managed user exists, else `"admin"`.
 - `auth.passwordAvailable` = whether the credential store has a resolvable password for
   that user today (same source `resolveAuth`/`resolveCreds` use — `src/lib/auth.ts`).
 - **Absent `managedSshKey`** (machine started with `--no-secure-login`, or an explicit
   `--user`/`--password` override that skips managed-key install per
-  `provision.ts:396`): no key path, `batchModes: []`, and `modes` still includes
-  `"password"` when `passwordAvailable`.
+  `provision.ts:484-489` / `:506` / `:528`): no key path, `batchModes: []`, and `modes`
+  still includes `"password"` when `passwordAvailable`.
 - Algorithm/version grounding: `test/lab/ssh-keys/REPORT.md`.
 
 ### TLS
@@ -267,10 +278,23 @@ Mapping rules:
 quickchr already tracks plain/TLS pairs separately (`ChrPorts.http`/`https`,
 `.api`/`.apiSsl` — `src/lib/types.ts:376`). Populate:
 
-- `services["rest-api"]` → pick `https`/`http` per the existing REST-URL preference
-  logic; set `tls` to match which was chosen.
+- `services["rest-api"]` → pick `https`/`http`; set `tls` to match which was chosen.
 - `services["native-api"]` → pick `apiSsl`/`api`; set `tls` to match.
 - `services.ssh` → always `tls: false`.
+
+**Implementation note:** there was no pre-existing "REST-URL preference logic" to reuse
+here — before this issue, `restUrl` (used for every REST call, and for the old flat
+descriptor's `urls.http`/`rest`/`restBase`) was unconditionally built from `ports.http`;
+`https`/`apiSsl` were just additive fields, never preferred. The secure-preferred,
+plain-fallback logic above was written fresh as part of implementing this contract. As a
+side effect it also closes a latent bug: `excludePorts` had no guard against excluding
+`"http"` while keeping `"https"`, which previously left the REST base pointing at a port
+that didn't exist — `services["rest-api"]` now falls back to the surviving port instead.
+
+`services["rest-api"].url` includes the `/rest` path suffix (e.g.
+`https://127.0.0.1:19101/rest`) since that's the actual base a consumer dials for
+RouterOS's REST endpoints; `services["native-api"].url` has no such suffix (it's a raw
+TCP/TLS socket, not an HTTP path).
 
 Consumer scope note (do **not** build this into quickchr): centrs auto-preferring the
 secure variant when both are open is a centrs-side (`tikoci/centrs#134`) decision.
@@ -309,6 +333,13 @@ name. In the new shapes, `host` is always the literal `"127.0.0.1"` string;
   one for this issue.
 - **Old flat `ports` / `urls` / top-level `auth`** — replaced by `services`. (The
   restructure is allowed; see below.)
+- **`env` — dropped, not carried into `Descriptor` at all.** The old `MachineDescriptor`
+  embedded a subprocess-env map (`env: Record<string,string>`, built the same way as
+  `ChrInstance.subprocessEnv()`) and the CLI's `quickchr env` command read it via
+  `descriptor().env` instead of calling `subprocessEnv()` directly. Fixed as part of
+  this implementation: `quickchr env` now calls `instance.subprocessEnv()` directly,
+  matching what `README.md` already documented. `subprocessEnv()` itself is unchanged
+  and remains the one place to get env-var-shaped connection facts.
 
 ---
 

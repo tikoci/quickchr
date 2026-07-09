@@ -486,6 +486,17 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 				expect(mk?.batchVerified).toBe(true);
 			}
 
+			// Close the #71 loop: descriptor() must surface the same batchVerified fact
+			// as a usable private-key batch mode, not just the raw managedSshKey state.
+			const descriptor = await instance.descriptor();
+			const sshService = descriptor.services.ssh;
+			expect(sshService.available).toBe(true);
+			if (sshService.available) {
+				expect(sshService.auth.batchModes).toEqual(["private-key"]);
+				expect(sshService.auth.privateKeyPath).toBe(join(sshDir, "id_ed25519"));
+				expect(sshService.auth.username).toBe("quickchr");
+			}
+
 			// Independent grounding of that flag: a real host-OpenSSH batch login
 			// (BatchMode=yes, PasswordAuthentication=no) with the managed key must work.
 			const login = Bun.spawnSync(

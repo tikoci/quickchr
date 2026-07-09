@@ -7,7 +7,7 @@
  * read `machine.json`. Use the stable connection surface:
  *
  *   - `instance.subprocessEnv()` → env vars (`URLBASE`, `BASICAUTH`, …) for a child
- *   - `instance.descriptor()`    → a structured `{ urls, auth, ports, status, … }`
+ *   - `instance.descriptor()`    → a structured `{ services, status, … }` (issue #71)
  *
  * Both are **secret-bearing** (real credentials) — treat their output like a
  * password: don't log it, don't write it to artifacts. `BASICAUTH` is the raw
@@ -38,7 +38,9 @@ if (import.meta.main) {
 		// The structured descriptor — what a harness records instead of machine.json.
 		const desc = await chr.descriptor();
 		check(desc.status === "running", "descriptor status should be running");
-		check(desc.urls.rest.includes("/rest"), "descriptor REST url should contain /rest");
+		const restApi = desc.services["rest-api"];
+		check(restApi.available, "rest-api service should be available");
+		check(restApi.available && restApi.url?.includes("/rest") === true, "descriptor REST url should contain /rest");
 
 		// Hand the connection env to a separate process; let it talk to the CHR.
 		const env = await chr.subprocessEnv();
