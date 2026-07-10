@@ -72,6 +72,16 @@
 			"conclusion": "pass",
 			"date": "2026-07-10T01:30:49.260Z",
 			"run_id": "29061764384"
+		},
+		"macos-arm64": {
+			"conclusion": "pass",
+			"date": "2026-07-10T01:37:07.554Z",
+			"run_id": "29061855653"
+		},
+		"windows-x86": {
+			"conclusion": "fail",
+			"date": "2026-07-10T01:40:34.208Z",
+			"run_id": "29061855653"
 		}
 	},
 	"7.24beta3": {
