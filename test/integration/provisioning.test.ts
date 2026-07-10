@@ -499,8 +499,16 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 
 			// Independent grounding of that flag: a real host-OpenSSH batch login
 			// (BatchMode=yes, PasswordAuthentication=no) with the managed key must work.
+			//
+			// Uses the same async Bun.spawn + manual-kill-timer shape as
+			// verifyBatchLogin() (src/lib/provision.ts) rather than Bun.spawnSync's
+			// `timeout` option. On windows-x86, Bun.spawnSync here reproduced 3/3 as an
+			// instant, undiagnosable `exitCode: null` with empty stdout+stderr (~400ms
+			// after account creation — nowhere near any real timeout), while the async
+			// form used by verifyBatchLogin() has never failed that way in the same CI
+			// runs. This is that hypothesis under direct test.
 			const emptyConfig = await ensureEmptySshConfig(sshDir);
-			const login = Bun.spawnSync(
+			const loginProc = Bun.spawn(
 				[
 					"ssh",
 					"-F", emptyConfig,
@@ -514,10 +522,30 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 					`quickchr@127.0.0.1`, "-p", String(instance.ports.ssh),
 					':put "managed-key-login-ok"',
 				],
-				{ stdout: "pipe", stderr: "pipe", timeout: 20_000 },
+				{ stdout: "pipe", stderr: "pipe", stdin: "ignore" },
 			);
-			const loginOut = new TextDecoder().decode(login.stdout);
-			expect(loginOut).toContain("managed-key-login-ok");
+			const loginTimer = setTimeout(() => {
+				try { loginProc.kill(); } catch { /* already gone */ }
+			}, 20_000);
+			// Initialized up front (not `let x: string` assigned only on the happy path) and
+			// matched against combined stdout+stderr like verifyBatchLogin() does, not stdout
+			// alone — makes the failure mode deterministic and avoids missing a success message
+			// ssh happened to emit on stderr (review: github.com/tikoci/quickchr/pull/93).
+			let combined = "";
+			try {
+				const [out, err] = await Promise.all([
+					new Response(loginProc.stdout).text(),
+					new Response(loginProc.stderr).text(),
+				]);
+				const exitCode = await loginProc.exited;
+				combined = (out + err).trim();
+				if (!combined.includes("managed-key-login-ok")) {
+					console.error(`[ssh probe] exit ${exitCode}: ${combined || "<no output>"}`);
+				}
+			} finally {
+				clearTimeout(loginTimer);
+			}
+			expect(combined).toContain("managed-key-login-ok");
 		} finally {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }
