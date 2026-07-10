@@ -56,11 +56,6 @@ an agent hitting the symptom should fetch the issue before concluding anything:
 - **[#40](https://github.com/tikoci/quickchr/issues/40) — Windows support (umbrella)**.
   Carries the grounded findings (TCG suite green; `scp` without `sshpass`) + the open
   gaps. Read it before claiming "X doesn't work on Windows".
-- **[#71](https://github.com/tikoci/quickchr/issues/71) — centrs `--quickchr` descriptor
-  contract** (`consumer:centrs`, `P1`). The agent-ready spec lives in
-  [`docs/centrs-interface.md`](./docs/centrs-interface.md), not the issue thread — read
-  the doc (descriptor v1 shape, per-service semantics, staged plan) before implementing;
-  the doc supersedes the long #71 comment history.
 - **Decisions owed** (direction is the maintainer's; rationale in
   [DESIGN.md](./DESIGN.md)): [#56](https://github.com/tikoci/quickchr/issues/56)
   port-base randomness · [#57](https://github.com/tikoci/quickchr/issues/57) fixed

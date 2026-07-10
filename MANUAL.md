@@ -218,10 +218,16 @@ Live REST query. Hits the running CHR and returns the requested group
 
 #### `inspect <name> [--json]`
 
-Stable machine-readable connection descriptor for a **running** CHR. The
-descriptor includes status, ports, original port mappings, URLs, auth, env
-vars, and the machine directory. `--json` is accepted for symmetry with other
-read commands; output is always JSON.
+Stable, versioned (`descriptorVersion: 1`) connection descriptor for a
+**running** CHR — the quickchr ↔ centrs interface contract (issue #71,
+[`docs/centrs-interface.md`](docs/centrs-interface.md)). Machine identity
+(name, version, arch, cpu, mem, pid, machineDir, timestamps) plus a
+per-service `services` map (`rest-api`, `native-api`, `ssh`), each entry
+giving its host, port, transport, `tls` flag, availability, and auth; plus
+optional `customForwards` (e.g. `winbox`) and topology-only `networks`.
+`--json` is accepted for symmetry with other read commands; output is
+always JSON. Does not include subprocess env vars — use `quickchr env` for
+those.
 
 Stopped machines fail with `MACHINE_STOPPED` instead of returning stale
 connection details. Use `quickchr start <name>` first.
@@ -523,7 +529,7 @@ interface ChrInstance {
 
   queryLoad(): Promise<ChrLoadSample | null>;
   subprocessEnv(): Promise<Record<string, string>>;
-  descriptor(): Promise<MachineDescriptor>;
+  descriptor(): Promise<Descriptor>;
 }
 ```
 
@@ -536,15 +542,21 @@ transiently resets connections post-boot/reboot). HTTP errors and
 `QUICKCHR_AUTH`, plus legacy `URLBASE`/`BASICAUTH`) so child processes
 can hit the CHR without re-resolving auth.
 
-`descriptor()` returns the stable JSON shape used by `quickchr inspect`:
-machine identity, status, ports, port mappings, URLs, auth, env, and
-timestamps. It is intentionally **running-only** and throws
-`MACHINE_STOPPED` for stopped machines.
+`descriptor()` returns the stable, versioned JSON shape used by `quickchr
+inspect` — the quickchr ↔ centrs interface contract (issue #71,
+[`docs/centrs-interface.md`](docs/centrs-interface.md)): machine identity,
+status, a per-service `services` map (`rest-api`, `native-api`, `ssh` — each
+with host/port/transport/`tls`/availability/auth), optional
+`customForwards`/`networks`, and timestamps. It is intentionally
+**running-only** and throws `MACHINE_STOPPED` for stopped machines. It has
+no `env` field — use `subprocessEnv()` for env-var-shaped connection facts.
 
-Both `subprocessEnv()` and `descriptor()` expose auth material by design
-(`QUICKCHR_AUTH`, `BASICAUTH`, `auth.password`, `auth.basic`,
-`auth.header`). Treat their output as credentials and redact before
-logging or attaching to bug reports.
+Both `subprocessEnv()` and `descriptor()` expose auth material by design —
+`subprocessEnv()`'s `QUICKCHR_AUTH`/`BASICAUTH` env vars, and `descriptor()`'s
+own per-service auth fields (`services["rest-api"].auth.password`/`.basic`/
+`.header`; `services["native-api"].auth.password`, no basic/header;
+`services.ssh.auth.privateKeyPath`). Treat their output as credentials and
+redact before logging or attaching to bug reports.
 
 ### `StartOptions` (selected)
 
