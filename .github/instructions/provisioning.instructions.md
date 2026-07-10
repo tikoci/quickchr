@@ -160,15 +160,24 @@ so quickchr defaults `ed25519` outright. ECDSA is rejected by RouterOS.
 **Verified, persisted fact (`installSshKey` → `MachineState.managedSshKey`).** Presence in
 RouterOS's `/user/ssh-keys` listing is necessary but not sufficient — `installSshKey`
 follows it with a real host-OpenSSH batch login (`BatchMode=yes`,
-`PasswordAuthentication=no`, `IdentitiesOnly=yes`, `-F <null-device>`) and records
+`PasswordAuthentication=no`, `IdentitiesOnly=yes`, `-F <empty config file>`) and records
 `{ privateKeyPath, algorithm, batchVerified }` on `MachineState` (persisted to
 `machine.json`). The REST listing check must match the generated key's comment
 (`info ?? key-owner`) and fingerprint when available, not only the user, so stale keys
 cannot stand in for the managed key; normalize optional trailing base64 padding in the
 RouterOS fingerprint. The batch login is **best-effort** — a failed probe records
-`batchVerified: false` and never aborts provisioning. This is the data source the #71
-descriptor consumes: advertise SSH private-key batch auth as usable **only when
-`batchVerified` is true**.
+`batchVerified: false`, logs the ssh client's actual diagnostic, and never aborts
+provisioning. This is the data source the #71 descriptor consumes: advertise SSH
+private-key batch auth as usable **only when `batchVerified` is true**.
+
+**`-F` needs a real file, not the null device.** `ensureEmptySshConfig()` writes a
+genuinely empty file and passes its path to `-F` to suppress `ssh_config`
+(so agent/config identities can't produce a false-positive `batchVerified`, per
+#83). `-F <SSH_NULL_DEVICE>` looked equivalent and passed on Linux/macOS, but
+Win32-OpenSSH's config-file loader doesn't special-case `NUL` and fails to open
+it (`Can't open user config file NUL: No such file or directory`, exit 255) —
+grounded on `windows-latest` CI, issue #87. `SSH_NULL_DEVICE` is still correct
+for `UserKnownHostsFile`, which is a different code path.
 
 **Cold listing latency under TCG.** The first `/rest/user/ssh-keys` GET on a fresh
 Linux/arm64 TCG CHR took 5.2–17.8s across 15 CI artifacts (median 7.6s); local

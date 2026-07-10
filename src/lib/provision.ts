@@ -6,7 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { QuickCHRError, type ManagedSshKey } from "./types.ts";
 import { saveInstanceCredentials } from "./credentials.ts";
 import { generatePassword } from "./password.ts";
@@ -279,6 +279,19 @@ export const SSH_KEY_REJECTION_PATTERN = /failure:|syntax error|no such item|bad
 const MANAGED_SSH_KEY_ALGORITHM = "ed25519";
 export const SSH_NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
 
+/** OpenSSH's `-F <config>` needs a file it can actually open — Win32-OpenSSH's
+ *  config-file loader rejects the null device itself ("Can't open user config
+ *  file NUL: No such file or directory", exit 255; grounded on windows-latest
+ *  OpenSSH_10.3p1 in issue #87), unlike POSIX where /dev/null opens fine as an
+ *  empty config. A real empty file on disk is the config-suppression trick
+ *  that works identically on every platform, so `-F` always gets one of these
+ *  instead of {@link SSH_NULL_DEVICE}. */
+export async function ensureEmptySshConfig(dir: string): Promise<string> {
+	const path = join(dir, "empty_ssh_config");
+	await Bun.write(path, "");
+	return path;
+}
+
 export type SshKeyListRow = {
 	user?: string;
 	info?: string;
@@ -377,19 +390,32 @@ export async function waitForManagedSshKeyListing(
 	return { listed: false, attempts, elapsedMs: Date.now() - startedAt, lastDiagnostic };
 }
 
+/** Cap on the diagnostic text surfaced from a failed batch-login probe — enough
+ *  to see the ssh client's actual error, not so much a noisy client fills logs. */
+const BATCH_LOGIN_DIAGNOSTIC_LIMIT = 2000;
+
+interface BatchLoginResult {
+	verified: boolean;
+	/** ssh's combined stdout+stderr (or the spawn error), truncated. Always
+	 *  populated so a failure is diagnosable instead of collapsing to a bool
+	 *  (issue #87 — this was the missing piece on the first Windows CI run). */
+	diagnostic: string;
+}
+
 /** Attempt a real host-OpenSSH batch login with the managed private key — the
  *  exact mode (`BatchMode=yes`, `PasswordAuthentication=no`, `IdentitiesOnly=yes`,
- *  ignoring ssh_config) that centrs and the #71 descriptor need. Returns true only
+ *  ignoring ssh_config) that centrs and the #71 descriptor need. Verified only
  *  on a clean passwordless login. Best-effort: never throws, and is killed after
  *  15s rather than hanging provisioning. */
-async function verifyBatchLogin(sshPort: number, username: string, privateKeyPath: string): Promise<boolean> {
+async function verifyBatchLogin(sshPort: number, username: string, privateKeyPath: string): Promise<BatchLoginResult> {
 	// No SSH port forwarded (or not passed in) → can't prove batch auth from the host.
-	if (!sshPort || sshPort <= 0) return false;
+	if (!sshPort || sshPort <= 0) return { verified: false, diagnostic: "no SSH port forwarded" };
 	try {
+		const emptyConfig = await ensureEmptySshConfig(dirname(privateKeyPath));
 		const proc = Bun.spawn(
 			[
 				"ssh",
-				"-F", SSH_NULL_DEVICE,
+				"-F", emptyConfig,
 				"-o", "StrictHostKeyChecking=no",
 				"-o", `UserKnownHostsFile=${SSH_NULL_DEVICE}`,
 				"-o", "PasswordAuthentication=no",
@@ -408,13 +434,18 @@ async function verifyBatchLogin(sshPort: number, username: string, privateKeyPat
 				new Response(proc.stdout).text(),
 				new Response(proc.stderr).text(),
 			]);
-			await proc.exited;
-			return (out + err).includes("quickchr-ssh-batch-ok");
+			const exitCode = await proc.exited;
+			const combined = (out + err).trim();
+			const verified = combined.includes("quickchr-ssh-batch-ok");
+			const diagnostic = verified
+				? "ok"
+				: `exit ${exitCode}: ${(combined || "<no output>").slice(0, BATCH_LOGIN_DIAGNOSTIC_LIMIT)}`;
+			return { verified, diagnostic };
 		} finally {
 			clearTimeout(timer);
 		}
-	} catch {
-		return false;
+	} catch (e) {
+		return { verified: false, diagnostic: `ssh spawn failed: ${String(e)}` };
 	}
 }
 
@@ -501,7 +532,10 @@ export async function installSshKey(
 	// actually authenticates a host-OpenSSH batch client. Non-fatal: an unverified
 	// key is still installed, we just record batchVerified=false so the #71
 	// descriptor won't advertise batch key auth it can't stand behind.
-	const batchVerified = await verifyBatchLogin(sshPort, username, privateKeyPath);
+	const { verified: batchVerified, diagnostic: batchDiagnostic } = await verifyBatchLogin(sshPort, username, privateKeyPath);
+	if (!batchVerified) {
+		logger?.status(`  SSH batch login not verified: ${batchDiagnostic}`);
+	}
 	return {
 		privateKeyPath,
 		algorithm: MANAGED_SSH_KEY_ALGORITHM,

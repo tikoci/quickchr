@@ -43,6 +43,12 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   failure when the first `/rest/user/ssh-keys` listing takes longer than 5 seconds.
   The listing check now has one 30-second convergence budget and reports its attempt
   count and elapsed time when the cold path is slow.
+- Windows: the managed SSH key's batch-login verification (`batchVerified`) no longer
+  fails 100% of the time. `ssh -F <null-device>`, used to suppress `ssh_config`,
+  isn't honored by Win32-OpenSSH's config-file loader (`Can't open user config file
+  NUL`); it now points `-F` at a real empty file instead, which works identically on
+  every platform. The failed probe's `ssh` output is also now logged instead of
+  collapsing to a bare `false` (issue #87).
 
 ## [0.4.3] — 2026-07-06
 
