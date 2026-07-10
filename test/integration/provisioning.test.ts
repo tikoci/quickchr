@@ -517,6 +517,16 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 				{ stdout: "pipe", stderr: "pipe", timeout: 20_000 },
 			);
 			const loginOut = new TextDecoder().decode(login.stdout);
+			if (!loginOut.includes("managed-key-login-ok")) {
+				// Diagnostic-blind otherwise: this probe only asserted on stdout, so a
+				// fast connection-refused/reset or a Windows file-locking error on the
+				// shared empty_ssh_config path (see #87's verifyBatchLogin diagnostic)
+				// would surface as a bare "" with no trace of why.
+				const loginErr = new TextDecoder().decode(login.stderr);
+				console.error(
+					`[ssh probe] exit ${login.exitCode}: ${(loginOut + loginErr).trim() || "<no output>"}`,
+				);
+			}
 			expect(loginOut).toContain("managed-key-login-ok");
 		} finally {
 			if (instance) {
