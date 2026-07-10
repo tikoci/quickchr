@@ -1,0 +1,2 @@
+{"kind":"test-file","ts":"2026-07-10T20:10:11.324Z","run_id":"29120354873","sha":"8af3cbad8ace9edf2bf255e2c154f67c8de30e43","platform":"windows-x86","host":"win32","file":"lab-spawnsync-timeout-repro.test.ts","duration_s":5,"status":"pass"}
+{"kind":"suite","ts":"2026-07-10T20:10:11.325Z","run_id":"29120354873","sha":"8af3cbad8ace9edf2bf255e2c154f67c8de30e43","platform":"windows-x86","host":"win32","scope":"filtered","conclusion":"pass","target":"stable","files":1,"failed":0}
