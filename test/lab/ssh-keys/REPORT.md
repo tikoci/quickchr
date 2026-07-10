@@ -229,6 +229,45 @@ TCG amplifies it beyond quickchr's former request budget. `installSshKey` now us
 single 30s convergence budget, tracks attempts/elapsed time, and does not kill a live
 cold request after 5s.
 
+## 9. Windows: `ssh -F` rejects the null device
+
+A `workflow_dispatch` full-suite run on 2026-07-10 (run `29061855653`) was the
+first time CI exercised a real host-OpenSSH batch login on `windows-x86` since
+`batchVerified` landed (#74/#82/#83) — and it failed **4/4**, deterministically,
+across both RouterOS 7.20.8 and 7.23.2. `verifyBatchLogin()` at the time
+discarded the ssh client's stdout/stderr into a bare boolean, so the failure
+had no diagnosable trace beyond "false" (tracked as issue #87).
+
+Teaching `verifyBatchLogin()` to capture and log ssh's actual output and
+re-dispatching the same narrow run (`windows-x86` + `provisioning.test.ts`,
+run `29073690122`) surfaced the real cause immediately:
+
+```text
+SSH batch login not verified: exit 255: Can't open user config file NUL: No such file or directory
+```
+
+**Root cause:** the `-F <null-device>` idiom used to suppress `ssh_config`
+(so agent/config identities can't produce a false-positive `batchVerified`,
+per #83) relies on the null device opening as an empty, readable file.
+`/dev/null` does exactly that on POSIX, so Linux/macOS were never affected —
+but Win32-OpenSSH's config-file loader (`OpenSSH_10.3p1`, `windows-latest`)
+does not special-case `NUL` and fails to open it, erroring out of the whole
+invocation (exit 255) before any `-o` override is even applied.
+
+**Fix:** `ensureEmptySshConfig()` writes a real empty file to disk and hands
+its path to `-F` instead of the null device — a genuinely empty config file
+suppresses `ssh_config` identically on every platform without depending on
+null-device semantics. Applied to both `verifyBatchLogin()` and the
+integration test's independent login probe (`test/integration/provisioning.test.ts`),
+which carried the same pattern. `UserKnownHostsFile=<null device>` was left
+unchanged — the failing run never reached that check, so there was no
+evidence it needed the same treatment.
+
+Re-dispatching the identical narrow run (`windows-x86` + `provisioning.test.ts`,
+run `29094443958`) with the fix went green: 11/11 pass, `batchVerified: true`,
+no diagnostic warning logged. First real grounding of Windows batch-key login
+working end to end.
+
 > **Sources**
 >
 > - Live testing against CHR 7.11/7.20.8/7.23.1 (x86_64, HVF) on 2026-07-06 via
@@ -236,6 +275,8 @@ cold request after 5s.
 > - Linux/arm64 follow-up on 2026-07-09: 15 Actions artifacts plus focused local
 >   RouterOS 7.23.1 arm64/TCG and x86/HVF controls (§8).
 > - Host-OS axis: `.github/workflows/lab.yml` job `ssh-os-baseline` (Ubuntu/Windows/macOS runners).
+> - Windows `-F NUL` finding: issue #87, `integration.yml` narrow dispatches
+>   `29073690122` (repro) and `29094443958` (fix confirmation), 2026-07-10.
 > - rosetta changelog `category:ssh` for the ed25519 feature timeline (rows 1–3).
 > - Manual: <https://help.mikrotik.com/docs/spaces/ROS/pages/132350014/SSH>.
-> - Cross-refs: quickchr #71/#74, centrs #176/#147.
+> - Cross-refs: quickchr #71/#74/#83/#87, centrs #176/#147.
