@@ -107,4 +107,31 @@ describe("managed SSH key helpers", () => {
 			await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
 		}
 	});
+
+	test("preserves HTTP status and body when a 2xx listing response isn't valid JSON", async () => {
+		const server = createServer((_req, res) => {
+			res.writeHead(200, { "Content-Type": "text/html" });
+			res.end("<html>not json</html>");
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string") throw new Error("Expected TCP server address");
+			const result = await waitForManagedSshKeyListing(
+				address.port,
+				"Basic test",
+				"quickchr",
+				"quickchr@test",
+				ED25519_FINGERPRINT,
+				300,
+			);
+
+			expect(result.listed).toBe(false);
+			expect(result.lastDiagnostic).toContain("HTTP 200");
+			expect(result.lastDiagnostic).toContain("not json");
+		} finally {
+			await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+		}
+	});
 });

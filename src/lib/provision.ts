@@ -349,13 +349,18 @@ export async function waitForManagedSshKeyListing(
 				remainingMs,
 			);
 			if (status >= 200 && status < 300) {
-				const keys = JSON.parse(body) as SshKeyListRow[];
+				let keys: SshKeyListRow[] | undefined;
+				try {
+					keys = JSON.parse(body) as SshKeyListRow[];
+				} catch (parseErr) {
+					lastDiagnostic = `HTTP ${status}: non-JSON body (${String(parseErr)}): ${body}`;
+				}
 				if (Array.isArray(keys)) {
 					if (keys.some((key) => matchesManagedSshKey(key, username, keyComment, fingerprint))) {
 						return { listed: true, attempts, elapsedMs: Date.now() - startedAt, lastDiagnostic: body };
 					}
 					lastDiagnostic = `HTTP ${status}: no matching key in ${keys.length} row(s)`;
-				} else {
+				} else if (keys !== undefined) {
 					lastDiagnostic = `HTTP ${status}: expected an array, received ${body}`;
 				}
 			} else {
