@@ -6,7 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { QuickCHRError, type ManagedSshKey } from "./types.ts";
 import { saveInstanceCredentials } from "./credentials.ts";
 import { generatePassword } from "./password.ts";
@@ -279,6 +279,19 @@ export const SSH_KEY_REJECTION_PATTERN = /failure:|syntax error|no such item|bad
 const MANAGED_SSH_KEY_ALGORITHM = "ed25519";
 export const SSH_NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
 
+/** OpenSSH's `-F <config>` needs a file it can actually open — Win32-OpenSSH's
+ *  config-file loader rejects the null device itself ("Can't open user config
+ *  file NUL: No such file or directory", exit 255; grounded on windows-latest
+ *  OpenSSH_10.3p1 in issue #87), unlike POSIX where /dev/null opens fine as an
+ *  empty config. A real empty file on disk is the config-suppression trick
+ *  that works identically on every platform, so `-F` always gets one of these
+ *  instead of {@link SSH_NULL_DEVICE}. */
+export async function ensureEmptySshConfig(dir: string): Promise<string> {
+	const path = join(dir, "empty_ssh_config");
+	await Bun.write(path, "");
+	return path;
+}
+
 export type SshKeyListRow = {
 	user?: string;
 	info?: string;
@@ -398,10 +411,11 @@ async function verifyBatchLogin(sshPort: number, username: string, privateKeyPat
 	// No SSH port forwarded (or not passed in) → can't prove batch auth from the host.
 	if (!sshPort || sshPort <= 0) return { verified: false, diagnostic: "no SSH port forwarded" };
 	try {
+		const emptyConfig = await ensureEmptySshConfig(dirname(privateKeyPath));
 		const proc = Bun.spawn(
 			[
 				"ssh",
-				"-F", SSH_NULL_DEVICE,
+				"-F", emptyConfig,
 				"-o", "StrictHostKeyChecking=no",
 				"-o", `UserKnownHostsFile=${SSH_NULL_DEVICE}`,
 				"-o", "PasswordAuthentication=no",

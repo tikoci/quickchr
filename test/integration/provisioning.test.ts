@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
-import { matchesManagedSshKey, opensshSha256Fingerprint, SSH_NULL_DEVICE, type SshKeyListRow } from "../../src/lib/provision.ts";
+import { ensureEmptySshConfig, matchesManagedSshKey, opensshSha256Fingerprint, SSH_NULL_DEVICE, type SshKeyListRow } from "../../src/lib/provision.ts";
 
 /**
  * Integration tests — user provisioning and admin management.
@@ -499,10 +499,11 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 
 			// Independent grounding of that flag: a real host-OpenSSH batch login
 			// (BatchMode=yes, PasswordAuthentication=no) with the managed key must work.
+			const emptyConfig = await ensureEmptySshConfig(sshDir);
 			const login = Bun.spawnSync(
 				[
 					"ssh",
-					"-F", SSH_NULL_DEVICE,
+					"-F", emptyConfig,
 					"-o", "StrictHostKeyChecking=no",
 					"-o", `UserKnownHostsFile=${SSH_NULL_DEVICE}`,
 					"-o", "PasswordAuthentication=no",
