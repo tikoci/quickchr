@@ -314,6 +314,64 @@ export function matchesManagedSshKey(row: SshKeyListRow, username: string, keyCo
 	return true;
 }
 
+const SSH_KEY_LIST_BUDGET_MS = 30_000;
+
+export interface SshKeyListingVerification {
+	listed: boolean;
+	attempts: number;
+	elapsedMs: number;
+	lastDiagnostic: string;
+}
+
+/** Wait for RouterOS to expose the generated key through `/user/ssh-keys`.
+ *  A request receives the full remaining convergence budget because the first
+ *  read of this endpoint can itself take many seconds under TCG. */
+export async function waitForManagedSshKeyListing(
+	httpPort: number,
+	auth: string,
+	username: string,
+	keyComment: string,
+	fingerprint: string,
+	timeoutMs = SSH_KEY_LIST_BUDGET_MS,
+): Promise<SshKeyListingVerification> {
+	const startedAt = Date.now();
+	const deadline = startedAt + timeoutMs;
+	let attempts = 0;
+	let lastDiagnostic = "no REST attempt completed";
+
+	while (Date.now() < deadline) {
+		attempts++;
+		const remainingMs = Math.max(1, deadline - Date.now());
+		try {
+			const { status, body } = await restGet(
+				`http://127.0.0.1:${httpPort}/rest/user/ssh-keys`,
+				auth,
+				remainingMs,
+			);
+			if (status >= 200 && status < 300) {
+				const keys = JSON.parse(body) as SshKeyListRow[];
+				if (Array.isArray(keys)) {
+					if (keys.some((key) => matchesManagedSshKey(key, username, keyComment, fingerprint))) {
+						return { listed: true, attempts, elapsedMs: Date.now() - startedAt, lastDiagnostic: body };
+					}
+					lastDiagnostic = `HTTP ${status}: no matching key in ${keys.length} row(s)`;
+				} else {
+					lastDiagnostic = `HTTP ${status}: expected an array, received ${body}`;
+				}
+			} else {
+				lastDiagnostic = `HTTP ${status}: ${body}`;
+			}
+		} catch (e) {
+			lastDiagnostic = String(e);
+		}
+
+		const sleepMs = Math.min(500, Math.max(0, deadline - Date.now()));
+		if (sleepMs > 0) await Bun.sleep(sleepMs);
+	}
+
+	return { listed: false, attempts, elapsedMs: Date.now() - startedAt, lastDiagnostic };
+}
+
 /** Attempt a real host-OpenSSH batch login with the managed private key — the
  *  exact mode (`BatchMode=yes`, `PasswordAuthentication=no`, `IdentitiesOnly=yes`,
  *  ignoring ssh_config) that centrs and the #71 descriptor need. Returns true only
@@ -371,6 +429,7 @@ export async function installSshKey(
 	machineName: string,
 	machineDir: string,
 	portBase?: number,
+	logger?: ProgressLogger,
 ): Promise<ManagedSshKey> {
 	const sshDir = join(machineDir, "ssh");
 	mkdirSync(sshDir, { recursive: true });
@@ -414,31 +473,23 @@ export async function installSshKey(
 	// Verify the generated key appears in the REST listing. Match the public-key
 	// comment (`key-owner` on older 7.x, `info` on newer 7.x) rather than just the
 	// user, so an older key for the same user cannot satisfy this check.
-	const auth = `Basic ${btoa("admin:")}`;
-	const deadline = Date.now() + 10_000;
-	let lastListBody = "";
-	let listed = false;
-	while (Date.now() < deadline) {
-		try {
-			const { status, body: listBody } = await restGet(
-				`http://127.0.0.1:${httpPort}/rest/user/ssh-keys`,
-				auth,
-				5_000,
-			);
-			if (status >= 200 && status < 300) {
-				lastListBody = listBody;
-				const keys = JSON.parse(listBody) as SshKeyListRow[];
-				if (Array.isArray(keys) && keys.some((k) => matchesManagedSshKey(k, username, keyComment, expectedFingerprint))) { listed = true; break; }
-			} else {
-				lastListBody = `HTTP ${status}`;
-			}
-		} catch (e) {
-			lastListBody = String(e);
-		}
-		await Bun.sleep(500);
+	const listResult = await waitForManagedSshKeyListing(
+		httpPort,
+		`Basic ${btoa("admin:")}`,
+		username,
+		keyComment,
+		expectedFingerprint,
+	);
+	if (!listResult.listed) {
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`SSH key for ${username} installed via console but did not appear in REST listing within 30s ` +
+				`after ${listResult.attempts} attempt(s) and ${listResult.elapsedMs}ms ` +
+				`(console output: ${addOutput.trim() || "<empty>"}; last REST attempt: ${listResult.lastDiagnostic})`,
+		);
 	}
-	if (!listed) {
-		throw new QuickCHRError("PROCESS_FAILED", `SSH key for ${username} installed via console but did not appear in REST listing within 10s (console output: ${addOutput.trim() || "<empty>"}; last REST attempt: ${lastListBody})`);
+	if (listResult.attempts > 1 || listResult.elapsedMs > 5_000) {
+		logger?.status(`  SSH key listing verified after ${listResult.attempts} attempt(s) in ${listResult.elapsedMs}ms`);
 	}
 
 	// Presence in the listing is necessary but not sufficient — prove the key
@@ -506,7 +557,7 @@ export async function provision(
 			if (secureLogin && !user && effectiveUser) {
 				try {
 					await waitForRest(httpPort, 30_000);
-					result.managedSshKey = await installSshKey(httpPort, sshPort ?? 0, effectiveUser.name, machineName, machineDir, portBase);
+					result.managedSshKey = await installSshKey(httpPort, sshPort ?? 0, effectiveUser.name, machineName, machineDir, portBase, log);
 				} catch (keyErr) {
 					log.warn(`SSH key install failed after console provisioning (SSH transport will fall back to password): ${keyErr}`);
 				}
@@ -530,7 +581,7 @@ export async function provision(
 		// (including the SSH key store) before we attempt key installation.
 		await Bun.sleep(1000);
 		try {
-			managedSshKey = await installSshKey(httpPort, sshPort ?? 0, effectiveUser.name, machineName, machineDir, portBase);
+			managedSshKey = await installSshKey(httpPort, sshPort ?? 0, effectiveUser.name, machineName, machineDir, portBase, log);
 		} catch (e) {
 			log.warn(`SSH key install failed (SSH transport will fall back to password): ${e}`);
 		}

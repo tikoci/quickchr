@@ -37,6 +37,13 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   ssh_config (`-F` to the platform null device), preventing older user keys or
   agent/config identities from producing a false verified result.
 
+### Fixed
+
+- Linux/arm64 TCG managed SSH key provisioning no longer reports a false install
+  failure when the first `/rest/user/ssh-keys` listing takes longer than 5 seconds.
+  The listing check now has one 30-second convergence budget and reports its attempt
+  count and elapsed time when the cold path is slow.
+
 ## [0.4.3] — 2026-07-06
 
 ### Added
