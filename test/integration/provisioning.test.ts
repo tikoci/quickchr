@@ -499,8 +499,16 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 
 			// Independent grounding of that flag: a real host-OpenSSH batch login
 			// (BatchMode=yes, PasswordAuthentication=no) with the managed key must work.
+			//
+			// Uses the same async Bun.spawn + manual-kill-timer shape as
+			// verifyBatchLogin() (src/lib/provision.ts) rather than Bun.spawnSync's
+			// `timeout` option. On windows-x86, Bun.spawnSync here reproduced 3/3 as an
+			// instant, undiagnosable `exitCode: null` with empty stdout+stderr (~400ms
+			// after account creation — nowhere near any real timeout), while the async
+			// form used by verifyBatchLogin() has never failed that way in the same CI
+			// runs. This is that hypothesis under direct test.
 			const emptyConfig = await ensureEmptySshConfig(sshDir);
-			const login = Bun.spawnSync(
+			const loginProc = Bun.spawn(
 				[
 					"ssh",
 					"-F", emptyConfig,
@@ -514,18 +522,24 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 					`quickchr@127.0.0.1`, "-p", String(instance.ports.ssh),
 					':put "managed-key-login-ok"',
 				],
-				{ stdout: "pipe", stderr: "pipe", timeout: 20_000 },
+				{ stdout: "pipe", stderr: "pipe", stdin: "ignore" },
 			);
-			const loginOut = new TextDecoder().decode(login.stdout);
-			if (!loginOut.includes("managed-key-login-ok")) {
-				// Diagnostic-blind otherwise: this probe only asserted on stdout, so a
-				// fast connection-refused/reset or a Windows file-locking error on the
-				// shared empty_ssh_config path (see #87's verifyBatchLogin diagnostic)
-				// would surface as a bare "" with no trace of why.
-				const loginErr = new TextDecoder().decode(login.stderr);
-				console.error(
-					`[ssh probe] exit ${login.exitCode}: ${(loginOut + loginErr).trim() || "<no output>"}`,
-				);
+			const loginTimer = setTimeout(() => {
+				try { loginProc.kill(); } catch { /* already gone */ }
+			}, 20_000);
+			let loginOut: string;
+			try {
+				const [out, err] = await Promise.all([
+					new Response(loginProc.stdout).text(),
+					new Response(loginProc.stderr).text(),
+				]);
+				const exitCode = await loginProc.exited;
+				loginOut = out;
+				if (!out.includes("managed-key-login-ok")) {
+					console.error(`[ssh probe] exit ${exitCode}: ${(out + err).trim() || "<no output>"}`);
+				}
+			} finally {
+				clearTimeout(loginTimer);
 			}
 			expect(loginOut).toContain("managed-key-login-ok");
 		} finally {
