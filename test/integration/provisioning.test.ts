@@ -527,21 +527,25 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			const loginTimer = setTimeout(() => {
 				try { loginProc.kill(); } catch { /* already gone */ }
 			}, 20_000);
-			let loginOut: string;
+			// Initialized up front (not `let x: string` assigned only on the happy path) and
+			// matched against combined stdout+stderr like verifyBatchLogin() does, not stdout
+			// alone — makes the failure mode deterministic and avoids missing a success message
+			// ssh happened to emit on stderr (review: github.com/tikoci/quickchr/pull/93).
+			let combined = "";
 			try {
 				const [out, err] = await Promise.all([
 					new Response(loginProc.stdout).text(),
 					new Response(loginProc.stderr).text(),
 				]);
 				const exitCode = await loginProc.exited;
-				loginOut = out;
-				if (!out.includes("managed-key-login-ok")) {
-					console.error(`[ssh probe] exit ${exitCode}: ${(out + err).trim() || "<no output>"}`);
+				combined = (out + err).trim();
+				if (!combined.includes("managed-key-login-ok")) {
+					console.error(`[ssh probe] exit ${exitCode}: ${combined || "<no output>"}`);
 				}
 			} finally {
 				clearTimeout(loginTimer);
 			}
-			expect(loginOut).toContain("managed-key-login-ok");
+			expect(combined).toContain("managed-key-login-ok");
 		} finally {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }
