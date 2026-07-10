@@ -169,3 +169,10 @@ RouterOS fingerprint. The batch login is **best-effort** — a failed probe reco
 `batchVerified: false` and never aborts provisioning. This is the data source the #71
 descriptor consumes: advertise SSH private-key batch auth as usable **only when
 `batchVerified` is true**.
+
+**Cold listing latency under TCG.** The first `/rest/user/ssh-keys` GET on a fresh
+Linux/arm64 TCG CHR took 5.2–17.8s across 15 CI artifacts (median 7.6s); local
+arm64/TCG reproduced a 5s timeout followed by a 200 response containing the exact key.
+`installSshKey` therefore gives the listing check one 30s convergence budget and lets
+each request use the full remaining budget. Do not restore a shorter per-request cap:
+repeatedly aborting the cold request recreates the false install failure.

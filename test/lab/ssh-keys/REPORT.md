@@ -203,10 +203,38 @@ centrs may still meet.
 - ◻️ Exact 7.23 `import` PEM/DER format handling (only OpenSSH pubkey format tested).
 - ◻️ `strong-crypto=yes` negotiation against host OpenSSH (named in §2, not yet run).
 
+## 8. Linux/arm64 cold listing latency
+
+Follow-up investigation on 2026-07-09 covered 15 Linux/arm64 integration artifacts
+from runs `28722381545` through `29061764384`. The first
+`/rest/user/ssh-keys` GET in the post-suite ordering probe took **5.2–17.8s**
+(median **7.6s**); all 15 exceeded the old 5s per-request timeout.
+
+The resulting `SSH key install failed ... did not appear in REST listing within
+10s` warning occurred in **12/15** arm64 artifacts (17 occurrences), versus
+**0/10** matching Linux/x86 artifacts. Before `managedSshKey` persistence became
+an assertion, the integration test immediately found the exact key after this warning,
+showing that the failure was in readiness verification rather than key installation.
+
+A focused local control used RouterOS 7.23.1:
+
+| Host/guest path | First console add | First 5s listing | Immediate follow-up | Later listings |
+| --------------- | ----------------: | ---------------- | ------------------- | --------------: |
+| Intel macOS → arm64 CHR, TCG | 11.5s | timeout | 200 in 1.1s, exact key present | 50–56ms |
+| Intel macOS → x86 CHR, HVF | 11.5s | 200 in 1.6s | not needed | 2ms |
+
+The identical console timing/output rules out the RouterOS terminal redraw as the
+architecture-specific cause. The first SSH-key REST listing is the slow cold path;
+TCG amplifies it beyond quickchr's former request budget. `installSshKey` now uses a
+single 30s convergence budget, tracks attempts/elapsed time, and does not kill a live
+cold request after 5s.
+
 > **Sources**
 >
 > - Live testing against CHR 7.11/7.20.8/7.23.1 (x86_64, HVF) on 2026-07-06 via
 >   `quickchr` + `test/lab/ssh-keys/run-matrix.ts`.
+> - Linux/arm64 follow-up on 2026-07-09: 15 Actions artifacts plus focused local
+>   RouterOS 7.23.1 arm64/TCG and x86/HVF controls (§8).
 > - Host-OS axis: `.github/workflows/lab.yml` job `ssh-os-baseline` (Ubuntu/Windows/macOS runners).
 > - rosetta changelog `category:ssh` for the ed25519 feature timeline (rows 1–3).
 > - Manual: <https://help.mikrotik.com/docs/spaces/ROS/pages/132350014/SSH>.
