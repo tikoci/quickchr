@@ -1490,7 +1490,7 @@ function shellQuoteEnv(value: string): string {
 	return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-async function getRunningDescriptor(name: string) {
+async function getRunningInstance(name: string) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { machineNotFoundMessage } = await import("./format.ts");
 	const instance = QuickCHR.get(name);
@@ -1498,6 +1498,18 @@ async function getRunningDescriptor(name: string) {
 		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
+	if (instance.state.status !== "running") {
+		const { QuickCHRError } = await import("../lib/types.ts");
+		throw new QuickCHRError(
+			"MACHINE_STOPPED",
+			`Machine "${name}" must be running to inspect its connection environment (current status: ${instance.state.status}).`,
+		);
+	}
+	return instance;
+}
+
+async function getRunningDescriptor(name: string) {
+	const instance = await getRunningInstance(name);
 	return instance.descriptor();
 }
 
@@ -1520,12 +1532,13 @@ async function cmdEnv(argv: string[] = []) {
 		console.error("Usage: quickchr env <name> [--json]");
 		process.exit(1);
 	}
-	const descriptor = await getRunningDescriptor(name);
+	const instance = await getRunningInstance(name);
+	const env = await instance.subprocessEnv();
 	if (asJson) {
-		console.log(JSON.stringify(descriptor.env, null, 2));
+		console.log(JSON.stringify(env, null, 2));
 		return;
 	}
-	for (const [key, value] of Object.entries(descriptor.env)) {
+	for (const [key, value] of Object.entries(env)) {
 		console.log(`${key}=${shellQuoteEnv(value)}`);
 	}
 }
@@ -2846,8 +2859,9 @@ List all CHR instances or show detailed info for one.
 		case "inspect":
 			console.log(`quickchr inspect <name> [--json]
 
-Print a stable JSON descriptor for a running CHR instance: ports, URLs,
-credentials, status, and subprocess env vars.
+Print a stable JSON descriptor for a running CHR instance: status, machine
+identity, and per-service connection facts (rest-api, native-api, ssh).
+Use 'quickchr env' for subprocess env vars.
 
   <name>      Name of a running CHR instance.
   --json      Accepted for parity; output is always JSON.`);

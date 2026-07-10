@@ -7,19 +7,25 @@ import type {
 	Channel,
 	ChrInstance,
 	ChrLoadSample,
+	CustomForward,
+	Descriptor,
 	DeviceModeOptions,
 	DoctorResult,
 	ExecOptions,
 	ExecResult,
 	LicenseInput,
 	LicenseLevel,
-	MachineDescriptor,
 	MachineState,
+	NetworkTopologyEntry,
+	PortMapping,
 	QgaCommand,
+	ServiceEndpoint,
 	SnapshotInfo,
+	SshServiceEndpoint,
 	StartOptions,
 } from "./types.ts";
-import { QuickCHRError, ARCHES, CHANNELS } from "./types.ts";
+import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./types.ts";
+import packageJson from "../../package.json";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
 	resolveVersion,
@@ -56,7 +62,7 @@ import { provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
 import { resolveAuth, resolveCreds } from "./auth.ts";
 import { scpPush, scpPull } from "./scp.ts";
-import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
+import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec } from "./console.ts";
@@ -242,46 +248,151 @@ function createInstance(state: MachineState): ChrInstance {
 			BASICAUTH: rawCreds,
 		};
 	};
-	const buildDescriptor = (): MachineDescriptor => {
+	// Service keys beyond these five are surfaced as `customForwards` (winbox, plus
+	// any user-added extraPorts) — see docs/centrs-interface.md "CustomForward".
+	const CANONICAL_PORT_NAMES = new Set(["http", "https", "api", "api-ssl", "ssh"]);
+
+	const buildDescriptor = (): Descriptor => {
 		if (state.status !== "running") {
 			throw new QuickCHRError(
 				"MACHINE_STOPPED",
 				`Machine "${state.name}" must be running to inspect its connection environment (current status: ${state.status}).`,
 			);
 		}
+
 		const auth = resolveAuth(state);
-		const env = buildEnv();
-		const basic = env.QUICKCHR_AUTH ?? `${auth.user}:`;
+		const creds = resolveCreds(state);
+		const basic = `${creds.user}:${creds.password}`;
+		const storedCreds = getInstanceCredentials(state.name);
+		// resolveAuth/resolveCreds never throw — when disableAdmin is true and no
+		// provisioned/stored user exists, they still fall back to the meaningless
+		// admin:"" tuple (auth.ts docstring: "the caller will get a 401"). Don't
+		// report a service available:true off that fallback alone.
+		const disableAdminLockout = state.disableAdmin === true && !state.user && !storedCreds;
+		// A provisioned user whose password is the STORED_IN_SECRETS_PASSWORD sentinel
+		// only resolves a real password when the per-instance credential store actually
+		// has an entry — otherwise resolveAuth/resolveCreds fall through to returning the
+		// literal sentinel string as the "password". Don't report available:true (or leak
+		// the sentinel as a usable password) off that unresolvable case either, regardless
+		// of disableAdmin.
+		const sentinelUnresolvable = state.user?.password === STORED_IN_SECRETS_PASSWORD && !storedCreds;
+		const credentialsAvailable = !disableAdminLockout && !sentinelUnresolvable;
+
+		const buildHttpService = (
+			securePM: PortMapping | undefined,
+			plainPM: PortMapping | undefined,
+			serviceLabel: string,
+			scheme: { secure: string; plain: string },
+			authObj: { username: string; password?: string; basic?: string; header?: string },
+			urlSuffix = "",
+		): ServiceEndpoint => {
+			const chosen = securePM ?? plainPM;
+			if (!chosen) {
+				return { available: false, unavailableReason: `no forwarded port for ${serviceLabel}` };
+			}
+			const tls = chosen === securePM;
+			const echo = {
+				host: "127.0.0.1",
+				port: chosen.host,
+				guestPort: chosen.guest,
+				transport: chosen.proto,
+				tls,
+				url: `${tls ? scheme.secure : scheme.plain}://127.0.0.1:${chosen.host}${urlSuffix}`,
+				source: { provider: "quickchr" as const, portMappingName: chosen.name },
+			};
+			if (!credentialsAvailable) {
+				return { available: false, unavailableReason: "admin disabled, no user provisioned", ...echo };
+			}
+			return { available: true, ...echo, auth: authObj };
+		};
+
+		// TLS preference is new logic (no pre-existing REST-URL preference to "keep" —
+		// see docs/centrs-interface.md's TLS section): prefer the secure port when its
+		// forward exists, fall back to plain, `available:false` only if neither does.
+		// This also closes a latent bug where excluding "http" while keeping "https"
+		// left restUrl pointing at a port that doesn't exist.
+		const restApi = buildHttpService(
+			state.ports.https,
+			state.ports.http,
+			"rest-api",
+			{ secure: "https", plain: "http" },
+			{ username: creds.user, password: creds.password, basic, header: auth.header },
+			"/rest",
+		);
+		const nativeApi = buildHttpService(
+			state.ports["api-ssl"],
+			state.ports.api,
+			"native-api",
+			{ secure: "tls", plain: "tcp" },
+			{ username: creds.user, password: creds.password },
+		);
+
+		const sshPM = state.ports.ssh;
+		const sshUsername = state.user?.name ?? "admin";
+		const managedKey = state.managedSshKey;
+		const batchVerified = managedKey?.batchVerified === true;
+		const sshModes: Array<"private-key" | "agent-or-config" | "password"> = [];
+		if (managedKey) sshModes.push("private-key");
+		sshModes.push("agent-or-config");
+		if (credentialsAvailable) sshModes.push("password");
+
+		const sshService: SshServiceEndpoint = !sshPM
+			? { available: false, unavailableReason: "no forwarded port for ssh" }
+			: {
+					available: true,
+					host: "127.0.0.1",
+					port: sshPM.host,
+					guestPort: sshPM.guest,
+					transport: sshPM.proto,
+					tls: false,
+					url: `ssh://${sshUsername}@127.0.0.1:${sshPM.host}`,
+					source: { provider: "quickchr" as const, portMappingName: "ssh" },
+					auth: {
+						username: sshUsername,
+						...(batchVerified && managedKey ? { privateKeyPath: managedKey.privateKeyPath } : {}),
+						modes: sshModes,
+						// Only "private-key" is ever vouched for here, and only once verified —
+						// "agent-or-config" is host ssh-agent/~/.ssh/config policy quickchr has
+						// no way to check, so it stays out of batchModes (Done-when's own
+						// unverified/absent-key example expects batchModes: [], not
+						// ["agent-or-config"]).
+						batchModes: batchVerified ? ["private-key"] : [],
+						passwordAvailable: credentialsAvailable,
+					},
+				};
+
+		const customForwards: CustomForward[] = Object.entries(state.ports)
+			.filter(([name]) => !CANONICAL_PORT_NAMES.has(name))
+			.map(([name, pm]) => ({
+				name,
+				transport: pm.proto,
+				host: "127.0.0.1",
+				hostPort: pm.host,
+				guestPort: pm.guest,
+			}));
+
+		const networks: NetworkTopologyEntry[] = state.networks.map((n) => ({ id: n.id, specifier: n.specifier }));
+
 		return {
-			name: state.name,
+			descriptorVersion: QUICKCHR_DESCRIPTOR_VERSION,
+			quickchr: { packageVersion: packageJson.version },
 			status: "running",
+			name: state.name,
 			version: state.version,
 			arch: state.arch,
 			cpu: state.cpu,
 			mem: state.mem,
 			pid: state.pid ?? null,
-			ports,
-			portMappings: state.ports,
-			urls: {
-				http: restUrl,
-				rest: `${restUrl}/rest`,
-				restBase: `${restUrl}/rest`,
-				https: ports.https ? `https://127.0.0.1:${ports.https}` : undefined,
-				ssh: ports.ssh ? `ssh://${auth.user}@127.0.0.1:${ports.ssh}` : undefined,
-				api: ports.api ? `tcp://127.0.0.1:${ports.api}` : undefined,
-				apiSsl: ports.apiSsl ? `tls://127.0.0.1:${ports.apiSsl}` : undefined,
-				winbox: ports.winbox ? `tcp://127.0.0.1:${ports.winbox}` : undefined,
-			},
-			auth: {
-				user: auth.user,
-				password: basic.slice(auth.user.length + 1),
-				basic,
-				header: auth.header,
-			},
-			env,
 			machineDir: state.machineDir,
 			createdAt: state.createdAt,
 			lastStartedAt: state.lastStartedAt ?? null,
+			services: {
+				[SERVICE_IDS.restApi]: restApi,
+				[SERVICE_IDS.nativeApi]: nativeApi,
+				[SERVICE_IDS.ssh]: sshService,
+			},
+			...(customForwards.length > 0 ? { customForwards } : {}),
+			networks,
 		};
 	};
 
@@ -636,7 +747,7 @@ function createInstance(state: MachineState): ChrInstance {
 			return buildEnv();
 		},
 
-		async descriptor(): Promise<MachineDescriptor> {
+		async descriptor(): Promise<Descriptor> {
 			return buildDescriptor();
 		},
 

@@ -80,7 +80,7 @@ afterEach(() => {
 });
 
 describe("CLI env/inspect descriptors", () => {
-	test("inspect --json prints stable running machine descriptor", async () => {
+	test("inspect --json prints the v1 descriptor via the CLI binary", async () => {
 		writeMachine(machineState("router", "running"));
 
 		const result = await runQuickchr(["inspect", "router", "--json"]);
@@ -89,45 +89,25 @@ describe("CLI env/inspect descriptors", () => {
 		expect(result.stderr).toBe("");
 		const descriptor = JSON.parse(result.stdout);
 		expect(descriptor).toMatchObject({
+			descriptorVersion: 1,
 			name: "router",
 			status: "running",
 			version: "7.22.1",
 			arch: "x86",
-			ports: {
-				http: 19100,
-				ssh: 19102,
-				apiSsl: 19104,
-				winbox: 19105,
-			},
-			urls: {
-				http: "http://127.0.0.1:19100",
-				rest: "http://127.0.0.1:19100/rest",
-				restBase: "http://127.0.0.1:19100/rest",
-				ssh: "ssh://api-user@127.0.0.1:19102",
-			},
-			auth: {
-				user: "api-user",
-				password: "secret",
-				basic: "api-user:secret",
-			},
-			env: {
-				QUICKCHR_NAME: "router",
-				QUICKCHR_REST_URL: "http://127.0.0.1:19100",
-				QUICKCHR_REST_BASE: "http://127.0.0.1:19100/rest",
-				QUICKCHR_SSH_PORT: "19102",
-				QUICKCHR_AUTH: "api-user:secret",
-				URLBASE: "http://127.0.0.1:19100/rest",
-				BASICAUTH: "api-user:secret",
-			},
-			portMappings: {
-				http: { host: 19100, guest: 80, proto: "tcp" },
+			services: {
+				"rest-api": { available: true, tls: true, port: 19101 },
+				"native-api": { available: true, tls: true, port: 19104 },
+				ssh: { available: true, tls: false, port: 19102 },
 			},
 		});
-		expect(descriptor.auth.header).toMatch(/^Basic /);
+		expect(descriptor.quickchr).toHaveProperty("packageVersion");
+		expect(descriptor.services["rest-api"].auth.basic).toBe("api-user:secret");
+		expect(descriptor.services["rest-api"].auth.header).toMatch(/^Basic /);
+		expect(descriptor.customForwards).toEqual([{ name: "winbox", transport: "tcp", host: "127.0.0.1", hostPort: 19105, guestPort: 8291 }]);
 		expect(descriptor.lastStartedAt).toBe("2026-01-01T00:01:00.000Z");
 	});
 
-	test("env prints subprocess environment for a running machine", async () => {
+	test("env prints subprocess environment for a running machine (decoupled from descriptor())", async () => {
 		writeMachine(machineState("router", "running"));
 
 		const result = await runQuickchr(["env", "router"]);
@@ -150,14 +130,10 @@ describe("CLI env/inspect descriptors", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.stderr).toBe("");
 		const descriptor = JSON.parse(result.stdout);
-		expect(descriptor.auth).toMatchObject({
-			user: "api-user",
+		expect(descriptor.services["rest-api"].auth).toMatchObject({
+			username: "api-user",
 			password: "from-store",
 			basic: "api-user:from-store",
-		});
-		expect(descriptor.env).toMatchObject({
-			QUICKCHR_AUTH: "api-user:from-store",
-			BASICAUTH: "api-user:from-store",
 		});
 	});
 
@@ -171,5 +147,16 @@ describe("CLI env/inspect descriptors", () => {
 		expect(result.stderr).toContain("Error [MACHINE_STOPPED]");
 		expect(result.stderr).toContain("must be running");
 		expect(result.stderr).toContain("current status: stopped");
+	});
+
+	test("env also refuses stopped machines (subprocessEnv() has no guard of its own)", async () => {
+		writeMachine(machineState("stopped-router", "stopped"));
+
+		const result = await runQuickchr(["env", "stopped-router"]);
+
+		expect(result.exitCode).toBe(1);
+		expect(result.stdout).toBe("");
+		expect(result.stderr).toContain("Error [MACHINE_STOPPED]");
+		expect(result.stderr).toContain("must be running");
 	});
 });

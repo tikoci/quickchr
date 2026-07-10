@@ -32,6 +32,8 @@ export type {
 	Channel,
 	ChrInstance,
 	ChrPorts,
+	CustomForward,
+	Descriptor,
 	DeviceModeOptions,
 	DoctorCheck,
 	DoctorResult,
@@ -44,11 +46,11 @@ export type {
 	LicenseLevel,
 	LicenseOptions,
 	MachineConfig,
-	MachineDescriptor,
 	MachineState,
 	NetworkConfig,
 	NetworkMode,
 	NetworkSpecifier,
+	NetworkTopologyEntry,
 	PackageManager,
 	PlatformInfo,
 	PortMapping,
@@ -59,12 +61,14 @@ export type {
 	QgaNetworkIpAddress,
 	QgaOsInfo,
 	QgaTimezone,
+	ServiceEndpoint,
 	ServiceName,
 	SnapshotInfo,
+	SshServiceEndpoint,
 	StartOptions,
 } from "./lib/types.ts";
 
-export { QuickCHRError } from "./lib/types.ts";
+export { QuickCHRError, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./lib/types.ts";
 export type { ErrorCode, HostInterface } from "./lib/types.ts";
 
 // Interface detection
