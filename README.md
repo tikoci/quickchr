@@ -302,20 +302,28 @@ host port for the machine. Existing machines keep the mapping stored in
 
 ### Machine Descriptors and Subprocess Environments
 
-`quickchr inspect <name> [--json]` emits a stable JSON descriptor for a
-**running** machine: status, ports, URLs, auth, env vars, and the machine
-directory. `--json` is accepted for parity; inspect output is always JSON.
+`quickchr inspect <name> [--json]` emits a stable, versioned
+(`descriptorVersion: 1`) JSON descriptor for a **running** machine — the
+quickchr ↔ centrs interface contract
+([issue #71](https://github.com/tikoci/quickchr/issues/71),
+[`docs/centrs-interface.md`](docs/centrs-interface.md)): status, machine
+identity, and a per-service `services` map (`rest-api`, `native-api`, `ssh`)
+giving host/port/transport/`tls`/availability/auth for each, plus optional
+`customForwards` and `networks`. `--json` is accepted for parity; inspect
+output is always JSON. It has no `env` field — use `quickchr env` for
+subprocess env vars.
 
 `quickchr env <name> [--json]` prints the same subprocess environment as
 `ChrInstance.subprocessEnv()`: shell `KEY=value` lines by default, or a JSON
 map with `--json`.
 
 > **Credential caveat:** descriptor/env output includes connection secrets
-> (`auth.password`, `auth.basic`, `auth.header`, `QUICKCHR_AUTH`, `BASICAUTH`)
-> so child processes can connect without reading quickchr's secret store. Treat
-> it like a password: do not commit it, paste it into public issues, or leave it
-> in CI logs. Stopped machines fail with `MACHINE_STOPPED`; start the machine
-> before requesting a descriptor or env map.
+> (each service's `auth.password`/`auth.basic`/`auth.header`, `QUICKCHR_AUTH`,
+> `BASICAUTH`) so child processes can connect without reading quickchr's
+> secret store. Treat it like a password: do not commit it, paste it into
+> public issues, or leave it in CI logs. Stopped machines fail with
+> `MACHINE_STOPPED`; start the machine before requesting a descriptor or env
+> map.
 
 ### Library Usage
 

@@ -18,6 +18,18 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Changed
 
+- **`ChrInstance.descriptor()` / `quickchr inspect` restructured to descriptor v1**
+  (issue #71) — **breaking change** to the `MachineDescriptor` public type, accepted
+  pre-1.0 since no external consumers depend on the old shape yet. The flat
+  `ports`/`urls`/`auth`/`env` blob is replaced by `Descriptor`: a versioned
+  (`descriptorVersion: 1`), per-service `services` map (`rest-api`, `native-api`, `ssh`)
+  with `tls`, availability, and provenance, plus optional `customForwards` (e.g.
+  `winbox`) and topology-only `networks`. This is the structured contract
+  `tikoci/centrs#134` (`--quickchr <name>`) resolves connection facts through — full
+  shape and mapping rules in [`docs/centrs-interface.md`](docs/centrs-interface.md).
+  The `env` field is dropped from the descriptor entirely: `quickchr env` now calls
+  `ChrInstance.subprocessEnv()` directly instead of reading `descriptor().env`
+  (`subprocessEnv()` itself is unchanged).
 - `installSshKey` failures now surface RouterOS's console rejection output and throw a
   typed `QuickCHRError` instead of a plain `Error`.
 - Managed SSH key verification now matches the generated key's RouterOS row by
