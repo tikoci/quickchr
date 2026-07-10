@@ -317,13 +317,15 @@ subprocess env vars.
 `ChrInstance.subprocessEnv()`: shell `KEY=value` lines by default, or a JSON
 map with `--json`.
 
-> **Credential caveat:** descriptor/env output includes connection secrets
-> (each service's `auth.password`/`auth.basic`/`auth.header`, `QUICKCHR_AUTH`,
-> `BASICAUTH`) so child processes can connect without reading quickchr's
-> secret store. Treat it like a password: do not commit it, paste it into
-> public issues, or leave it in CI logs. Stopped machines fail with
-> `MACHINE_STOPPED`; start the machine before requesting a descriptor or env
-> map.
+> **Credential caveat:** descriptor/env output includes connection secrets —
+> `subprocessEnv()`/`quickchr env`'s `QUICKCHR_AUTH`/`BASICAUTH`, and each
+> `descriptor()` service's own auth fields (`services["rest-api"].auth.password`/
+> `.basic`/`.header`; `services["native-api"].auth.password`, no basic/header;
+> `services.ssh.auth.privateKeyPath`) — so child processes can connect without
+> reading quickchr's secret store. Treat it like a password: do not commit it,
+> paste it into public issues, or leave it in CI logs. Stopped machines fail
+> with `MACHINE_STOPPED`; start the machine before requesting a descriptor or
+> env map.
 
 ### Library Usage
 
