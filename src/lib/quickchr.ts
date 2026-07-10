@@ -92,7 +92,7 @@ function defaultMem(arch: Arch, override?: number): number {
 }
 
 /** Default boot timeout — accel mode and cross-arch emulation affect how slow the VM boots. */
-function defaultBootTimeout(arch: Arch, withPackages?: boolean, accel?: string): number {
+export function defaultBootTimeout(arch: Arch, withPackages?: boolean, accel?: string): number {
 	const cross = isCrossArchEmulation(arch);
 	const factor = accelTimeoutFactor(accel ?? "tcg", cross);
 	// Base: 120s for native, scaled by factor (TCG cross-arch = 15× = 1800s max)

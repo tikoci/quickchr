@@ -1,7 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { QuickCHR } from "../../src/index.ts";
+import { defaultBootTimeout } from "../../src/lib/quickchr.ts";
 import { runExample } from "../../examples/lib.ts";
+import { detectAccel } from "../../src/lib/platform.ts";
 
 /**
  * examples-smoke — runs a CURATED SUBSET of the runnable examples end-to-end.
@@ -22,6 +24,21 @@ const SKIP = !process.env.QUICKCHR_INTEGRATION || !process.env.EXAMPLES_SMOKE;
 const REPO = resolve(import.meta.dir, "..", "..");
 // CLI scripts resolve $QUICKCHR — point them at THIS checkout's source CLI.
 const QUICKCHR_ENV = { QUICKCHR: `bun run ${resolve(REPO, "src/cli/index.ts")}` };
+
+// Per-test timeout must never be shorter than what QuickCHR.start() itself budgets
+// for a boot (defaultBootTimeout, reused directly below to avoid drifting out of
+// sync with it) — otherwise bun's own test timeout SIGTERMs the harness process
+// before QuickCHR's internal BOOT_TIMEOUT + cleanup path ever runs, turning a
+// diagnosable failure into a bare exit-143 and leaking the QEMU process (#89).
+// Examples run host-native arch, so this never hits the (much larger) cross-arch
+// TCG factor — guestArch names what defaultBootTimeout/detectAccel actually take.
+const guestArch: "x86" | "arm64" = process.arch === "arm64" ? "arm64" : "x86";
+const accel = SKIP ? "tcg" : await detectAccel(guestArch);
+const bootBudgetMs = defaultBootTimeout(guestArch, false, accel);
+// Floor at the prior flat constant (tuned for kvm/hvf: 180s boot + 180s of
+// post-boot REST/exec headroom) so accelerated platforms are unaffected; TCG
+// platforms scale up with their own larger boot budget instead of undershooting it.
+const PER_TEST_TIMEOUT = Math.max(360_000, bootBudgetMs + 150_000);
 
 interface Runnable {
 	name: string;
@@ -121,7 +138,7 @@ describe.skipIf(SKIP)("examples smoke", () => {
 				expect(code).toBe(0);
 				expect(out.length).toBeGreaterThan(0);
 			},
-			360_000,
+			PER_TEST_TIMEOUT,
 		);
 	}
 
@@ -145,7 +162,7 @@ describe.skipIf(SKIP)("examples smoke", () => {
 			// The machine must be gone despite the thrown error.
 			expect(QuickCHR.get(name)).toBeNull();
 		},
-		360_000,
+		PER_TEST_TIMEOUT,
 	);
 
 	// After the curated runs, no example machines should remain.
