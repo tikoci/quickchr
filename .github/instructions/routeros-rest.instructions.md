@@ -84,6 +84,15 @@ until the effective RouterOS/HTTP timeout behavior is reconciled with lab eviden
 normal REST, `/rest/execute`, `/console/inspect`, `license/renew`, and `device-mode/update`,
 and any endpoint-specific exceptions are documented here.
 
+The ~60s figure now has independent corroboration: `tikoci/lsp-routeros-ts`'s inspect
+research measured a blocking `/console/inspect` call on old RouterOS resolve at
+**RouterOS's own internal ~60s timeout** (`docs/inspect-shapes.md` §3, captured on 7.9.2).
+That is a server-side RouterOS behavior, not a client policy, so it applies to any long
+RouterOS REST operation — it raises the centrs assumption from "borrowed guess" to
+"cross-project-grounded" for the reconciliation above. (quickchr does not itself call
+`/console/inspect` — that endpoint appears in the list only because the ceiling is a
+property of the shared RouterOS REST server, which restraml/lsp exercise via inspect.)
+
 ## device-mode/update — The Oddball
 
 `/system/device-mode/update` is unique in RouterOS:
