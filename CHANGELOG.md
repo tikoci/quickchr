@@ -8,6 +8,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.4] — 2026-07-18
+
 ### Added
 
 - Provisioning now verifies the managed SSH key with a real host-OpenSSH batch login
