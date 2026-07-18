@@ -286,7 +286,14 @@ function createInstance(state: MachineState): ChrInstance {
 			authObj: { username: string; password?: string; basic?: string; header?: string },
 			urlSuffix = "",
 		): ServiceEndpoint => {
-			const chosen = securePM ?? plainPM;
+			// Plain-first (#95): on a stock CHR the TLS services are not dialable —
+			// `www-ssl` is disabled and `api-ssl` is certificate-less (TLS alert 40) —
+			// so preferring the secure forward advertised dead endpoints. Prefer the
+			// plain forward `restUrl` has always used; the secure forward remains the
+			// fallback so the `excludePorts` http-excluded case still resolves (with
+			// `tls: true`). Secure preference can return once boot provisioning
+			// installs a certificate and enables www-ssl.
+			const chosen = plainPM ?? securePM;
 			if (!chosen) {
 				return { available: false, unavailableReason: `no forwarded port for ${serviceLabel}` };
 			}
@@ -306,11 +313,10 @@ function createInstance(state: MachineState): ChrInstance {
 			return { available: true, ...echo, auth: authObj };
 		};
 
-		// TLS preference is new logic (no pre-existing REST-URL preference to "keep" —
-		// see docs/centrs-interface.md's TLS section): prefer the secure port when its
-		// forward exists, fall back to plain, `available:false` only if neither does.
-		// This also closes a latent bug where excluding "http" while keeping "https"
-		// left restUrl pointing at a port that doesn't exist.
+		// Preference order lives in buildHttpService (plain-first, #95); this also
+		// keeps the excludePorts fix: excluding "http" while keeping "https" now
+		// resolves rest-api onto the surviving secure port instead of a port that
+		// doesn't exist.
 		const restApi = buildHttpService(
 			state.ports.https,
 			state.ports.http,

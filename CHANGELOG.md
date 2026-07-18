@@ -8,6 +8,17 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Fixed
+
+- **Descriptor v1 now advertises the plain forwards (plain-first), not the TLS ones**
+  (issue #95). 0.4.4's secure-preferred order pointed `services["rest-api"]` /
+  `services["native-api"]` at endpoints that are not dialable on a stock CHR:
+  `www-ssl` is disabled by default and `api-ssl` is certificate-less (TLS handshake
+  alert 40; grounded on CHR 7.23.2). The descriptor now picks `http`/`api` — the same
+  ports `restUrl` has always used — falling back to `https`/`api-ssl` (with
+  `tls: true`) only when the plain forward is excluded. First surfaced by the first
+  real consumer, `tikoci/centrs#134` `--quickchr` CHR acceptance.
+
 ## [0.4.4] — 2026-07-18
 
 ### Added
