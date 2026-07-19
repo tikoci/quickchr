@@ -154,10 +154,11 @@ with a layered design:
   dispatches. `test-filter` narrows; `run-examples` defaults ON. Each runner boots its
   native CHR arch — `detectAccel()` picks KVM/HVF/TCG. Agents dispatch this to ground
   platform hypotheses without waiting for a PR cycle.
-- **`release.yml`** — one-click release: freshness gate (no suite re-run — main is kept
-  continuously release-able) + non-empty CHANGELOG `[Unreleased]` →
-  `scripts/release-prep.ts` bump/rollover → tag + GitHub Release + `npm publish
-  --provenance` (odd minor → `next`, even → `latest`).
+- **`release.yml`** — one-click publish from committed release state: freshness gate
+  (no suite re-run — main is kept continuously release-able) + `package.json` version
+  with a matching non-empty CHANGELOG section → tag + GitHub Release + `npm publish
+  --provenance` (odd minor → `next`, even → `latest`). CI never bumps versions or pushes
+  to protected `main`.
 - **`ros-versions.yml`** — daily: new RouterOS versions (per channel) with no linux-x86
   record in `ci-data/tested-versions.json` ride the `routeros-targets` matrix of a
   single integration dispatch.

@@ -59,9 +59,9 @@ Open a Pull Request against a filed issue for review (PRs are wired to automated
 - **Need integration signal for your branch before merging?** Dispatch the reusable unit:
   `gh workflow run integration.yml --ref <branch> -f platforms=linux-x86 -f test-filter=<file>`
   (see `.github/instructions/ci.instructions.md` for platforms/targets/filters).
-- **Keep `CHANGELOG.md` `[Unreleased]` current** for user-facing changes — it is the
-  direct input to releases: `release.yml` refuses to release an empty `[Unreleased]`
-  and turns it into the release notes.
+- **Keep `CHANGELOG.md` `[Unreleased]` current** for user-facing changes. Before a
+  release, promote it to `## [X.Y.Z]` and bump `package.json`; `release.yml` publishes
+  that committed version and uses the matching changelog section as release notes.
 
 ## Releasing
 
@@ -69,8 +69,8 @@ One-click, maintainer-triggered (see "Release Process" in
 `.github/instructions/ci.instructions.md`):
 
 ```bash
-gh workflow run release.yml -f version-bump=patch -f dry-run=true  # preview
-gh workflow run release.yml -f version-bump=patch                  # release
+gh workflow run release.yml -f dry-run=true  # preview package.json version
+gh workflow run release.yml                  # release package.json version
 ```
 
 ## Development Setup

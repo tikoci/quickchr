@@ -86,7 +86,7 @@ bun add @tikoci/quickchr            # stable channel (latest)
 bun add @tikoci/quickchr@next       # pre-release channel
 ```
 
-Channel policy (see `scripts/release-prep.ts`): **even** minor versions (`0.2.x`,
+Channel policy (see `.github/workflows/release.yml`): **even** minor versions (`0.2.x`,
 `0.4.x`, …) publish to npm tag `latest` (stable); **odd** minors (`0.3.x`, …)
 publish to `next` (pre-release).
 

@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
 /**
  * release-prep — compute the next version, roll CHANGELOG.md's [Unreleased]
- * section over to it, and bump package.json. The mutation half of release.yml
- * (see ci.instructions.md "Release Process"); the workflow does the git/npm side.
+ * section over to it, and bump package.json for a local/manual release-prep PR.
+ * The CI release workflow uses --from-package instead: it reads committed
+ * package.json + CHANGELOG.md and never mutates tracked files.
  *
  * Usage: bun scripts/release-prep.ts <patch|minor|major|X.Y.Z> [--dry-run] [--notes-out <file>]
+ *        bun scripts/release-prep.ts --from-package [--notes-out <file>]
  *
  * - Fails if CHANGELOG.md's [Unreleased] section is empty — a release must say
  *   what changed. (The end-of-session checklist keeps [Unreleased] current.)
@@ -44,6 +46,10 @@ export function npmTag(version: string): "next" | "latest" {
 	return Number(m[1]) % 2 !== 0 ? "next" : "latest";
 }
 
+function escapeRegex(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export interface Rollover {
 	changelog: string;
 	notes: string;
@@ -77,9 +83,40 @@ export function rolloverChangelog(text: string, version: string, date: string): 
 	return { changelog: out.join("\n"), notes };
 }
 
+/** Extract the already-promoted changelog section for package.json's version. */
+export function releaseNotesForVersion(text: string, version: string): string {
+	const lines = text.split("\n");
+	const heading = new RegExp(`^## \\[${escapeRegex(version)}\\](?:\\s|$)`);
+	const versionIdx = lines.findIndex((l) => heading.test(l));
+	if (versionIdx < 0) {
+		throw new Error(`CHANGELOG.md has no '## [${version}]' heading`);
+	}
+	let nextIdx = lines.findIndex((l, i) => i > versionIdx && /^## /.test(l));
+	if (nextIdx < 0) nextIdx = lines.length;
+	const notes = lines.slice(versionIdx + 1, nextIdx).join("\n").trim();
+	if (!notes) {
+		throw new Error(`CHANGELOG.md section '## [${version}]' is empty`);
+	}
+	return notes;
+}
+
+function positionals(args: string[]): string[] {
+	const out: string[] = [];
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i] ?? "";
+		if (arg === "--notes-out") {
+			i += 1;
+			continue;
+		}
+		if (!arg.startsWith("--")) out.push(arg);
+	}
+	return out;
+}
+
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
-	const bump = args.find((a) => !a.startsWith("--"));
+	const fromPackage = args.includes("--from-package");
+	const [bump] = positionals(args);
 	const dryRun = args.includes("--dry-run");
 	const notesOutIdx = args.indexOf("--notes-out");
 	const notesOut = notesOutIdx >= 0 ? args[notesOutIdx + 1] : undefined;
@@ -87,15 +124,38 @@ async function main(): Promise<void> {
 		console.error("--notes-out requires a file path");
 		process.exit(2);
 	}
-	if (!bump) {
-		console.error("usage: bun scripts/release-prep.ts <patch|minor|major|X.Y.Z> [--dry-run] [--notes-out <file>]");
+	if (fromPackage && bump) {
+		console.error("--from-package does not accept a bump argument");
+		process.exit(2);
+	}
+	if (!fromPackage && !bump) {
+		console.error(
+			"usage: bun scripts/release-prep.ts <patch|minor|major|X.Y.Z> [--dry-run] [--notes-out <file>]\n" +
+				"       bun scripts/release-prep.ts --from-package [--notes-out <file>]",
+		);
 		process.exit(2);
 	}
 
 	const pkgPath = join(ROOT, "package.json");
 	const clPath = join(ROOT, "CHANGELOG.md");
 	const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-	const version = nextVersion(pkg.version, bump);
+	if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
+		throw new Error(`package.json version "${pkg.version}" is not X.Y.Z`);
+	}
+
+	if (fromPackage) {
+		const version = pkg.version;
+		const tag = npmTag(version);
+		const notes = releaseNotesForVersion(readFileSync(clPath, "utf-8"), version);
+		if (notesOut) writeFileSync(notesOut, `${notes}\n`);
+		console.log(`version=${version}`);
+		console.log(`npm-tag=${tag}`);
+		console.log("from-package=true");
+		console.log(`\n--- release notes (${version}) ---\n${notes}`);
+		return;
+	}
+
+	const version = nextVersion(pkg.version, bump ?? "");
 	const tag = npmTag(version);
 	const date = new Date().toISOString().slice(0, 10);
 

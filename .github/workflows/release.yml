@@ -2,45 +2,35 @@ name: Release
 
 # The one-click release path (replaces publish.yml + scripts/release.ts):
 #
-#   gh workflow run release.yml -f version-bump=patch              # release now
-#   gh workflow run release.yml -f version-bump=patch -f dry-run=true   # preview
+#   gh workflow run release.yml                         # release package.json version
+#   gh workflow run release.yml -f dry-run=true         # preview
 #
 # What it does (prepare job → publish job):
-#   1. Refuses to run off main; refuses a dirty [Unreleased] gate:
+#   1. Refuses to run off main; refuses a missing changelog promotion:
 #      - Integration freshness: latest completed main.yml run on main must be
 #        GREEN (scripts/ci-freshness.ts — same gate PRs see). No suite re-run:
 #        main is kept continuously release-able instead.
-#      - CHANGELOG.md [Unreleased] must be non-empty (it becomes the notes).
+#      - package.json's committed version is the release version.
+#      - CHANGELOG.md must already have a non-empty `## [X.Y.Z]` section for
+#        that version (it becomes the notes).
 #   2. Quick sanity re-check on the exact release commit: bun test test/unit/.
-#   3. scripts/release-prep.ts: bump package.json, roll [Unreleased] over to
-#      `## [X.Y.Z] — date`, emit release notes.
-#   4. Commit "release: vX.Y.Z", tag vX.Y.Z, push, create the GitHub Release
-#      (notes = the changelog section).
-#   5. Publish to npm with --provenance. Dist-tag from the odd/even-minor
+#   3. Create tag vX.Y.Z and the GitHub Release (notes = changelog section).
+#   4. Publish to npm with --provenance. Dist-tag from the odd/even-minor
 #      scheme: odd minor (0.5.x) → `next`, even minor (0.4.x) → `latest`.
 #
 # Dry-run mode runs every check and prints the would-be version/notes but
-# pushes nothing and publishes nothing.
+# creates no tag/release and publishes nothing.
 #
 # Required secret: NPM_TOKEN — npm automation token for @tikoci/quickchr.
-# Note: the version-bump push to main triggers ci.yml + main.yml runs on the
-# release commit as usual — the freshness gate for the NEXT release reads those.
+# Release CI never updates package.json or CHANGELOG.md. Those changes are made
+# by a human/PR before dispatch, so the workflow does not push to protected main.
 
 on:
   workflow_dispatch:
     inputs:
-      version-bump:
-        type: choice
-        description: "Version bump — or pick 'exact' and fill exact-version"
-        options: [patch, minor, major, exact]
-        default: patch
-      exact-version:
-        type: string
-        description: "Exact X.Y.Z (only used when version-bump = exact)"
-        default: ""
       dry-run:
         type: boolean
-        description: "Dry run — run all checks, push nothing, publish nothing"
+        description: "Dry run — run all checks, create no release, publish nothing"
         default: false
 
 permissions:
@@ -52,9 +42,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── prepare: gates, version bump, tag, GitHub Release ────────────────────────
+  # ── prepare: gates, tag, GitHub Release ──────────────────────────────────────
   prepare:
-    name: Gate, bump, tag
+    name: Gate, tag
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -83,25 +73,13 @@ jobs:
           set -eo pipefail
           bun test test/unit/ 2>&1 | tee /tmp/release-unit.txt | tail -5
 
-      - name: Bump version + roll CHANGELOG
+      - name: Resolve release metadata
         id: prep
         env:
-          BUMP: ${{ inputs.version-bump }}
-          EXACT: ${{ inputs.exact-version }}
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -eo pipefail
-          ARG="$BUMP"
-          if [ "$BUMP" = "exact" ]; then
-            if [ -z "$EXACT" ]; then
-              echo "::error::version-bump=exact requires exact-version"
-              exit 1
-            fi
-            ARG="$EXACT"
-          fi
-          FLAGS=""
-          [ "$DRY_RUN" = "true" ] && FLAGS="--dry-run"
-          bun scripts/release-prep.ts "$ARG" $FLAGS --notes-out /tmp/release-notes.md \
+          bun scripts/release-prep.ts --from-package --notes-out /tmp/release-notes.md \
             | tee /tmp/release-prep.txt
           VERSION=$(grep -m1 '^version=' /tmp/release-prep.txt | cut -d= -f2)
           NPM_TAG=$(grep -m1 '^npm-tag=' /tmp/release-prep.txt | cut -d= -f2)
@@ -120,7 +98,35 @@ jobs:
             cat /tmp/release-notes.md 2>/dev/null || sed -n '/--- release notes/,$p' /tmp/release-prep.txt
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Commit, tag, push, create GitHub Release
+      - name: Verify release targets are unused
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prep.outputs.version }}
+        run: |
+          set -eo pipefail
+          git fetch --tags --quiet origin
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error::Tag v${VERSION} already exists"
+            exit 1
+          fi
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::GitHub Release v${VERSION} already exists"
+            exit 1
+          fi
+          PKG_NAME=$(node -p "require('./package.json').name")
+          NPM_VIEW_ERR=$(mktemp)
+          trap 'rm -f "$NPM_VIEW_ERR"' EXIT
+          if npm view "${PKG_NAME}@${VERSION}" version --registry https://registry.npmjs.org/ > /dev/null 2>"$NPM_VIEW_ERR"; then
+            echo "::error::${PKG_NAME}@${VERSION} is already published"
+            exit 1
+          fi
+          if ! grep -Eq '^(npm error|npm ERR!) code E404$' "$NPM_VIEW_ERR"; then
+            cat "$NPM_VIEW_ERR" >&2
+            echo "::error::Could not verify npm availability for ${PKG_NAME}@${VERSION}"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
         if: ${{ inputs.dry-run != true }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -128,16 +134,10 @@ jobs:
           NPM_TAG: ${{ steps.prep.outputs.npm-tag }}
         run: |
           set -eo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json CHANGELOG.md
-          git commit -m "release: v${VERSION}"
-          git tag -a "v${VERSION}" -m "Release v${VERSION}"
-          git push origin main "v${VERSION}"
           PRERELEASE=""
           [ "$NPM_TAG" = "next" ] && PRERELEASE="--prerelease"
           gh release create "v${VERSION}" --title "v${VERSION}" \
-            --notes-file /tmp/release-notes.md $PRERELEASE
+            --target "$GITHUB_SHA" --notes-file /tmp/release-notes.md $PRERELEASE
 
   # ── publish: npm with provenance ─────────────────────────────────────────────
   publish:

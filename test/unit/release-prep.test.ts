@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { nextVersion, npmTag, rolloverChangelog } from "../../scripts/release-prep.ts";
+import {
+	nextVersion,
+	npmTag,
+	releaseNotesForVersion,
+	rolloverChangelog,
+} from "../../scripts/release-prep.ts";
 
-// Anchor tests for the release mutation half of release.yml
-// (scripts/release-prep.ts): version arithmetic, the odd/even-minor npm
-// dist-tag scheme, and the CHANGELOG [Unreleased] rollover.
+// Anchor tests for release metadata: version arithmetic, the odd/even-minor npm
+// dist-tag scheme, the local CHANGELOG rollover helper, and the CI read-only
+// package.json-as-truth release notes path.
 
 describe("nextVersion", () => {
 	test("patch/minor/major arithmetic", () => {
@@ -67,5 +72,21 @@ describe("rolloverChangelog", () => {
 		expect(() => rolloverChangelog("# Changelog\n\n## [0.4.2]\n", "0.4.3", "2026-07-04")).toThrow(
 			/no '## \[Unreleased\]'/,
 		);
+	});
+});
+
+describe("releaseNotesForVersion", () => {
+	test("extracts an already-promoted release section", () => {
+		const notes = releaseNotesForVersion(CHANGELOG, "0.4.2");
+		expect(notes).toBe("- old entry");
+	});
+
+	test("missing version heading is an error", () => {
+		expect(() => releaseNotesForVersion(CHANGELOG, "0.4.3")).toThrow(/no '## \[0\.4\.3\]'/);
+	});
+
+	test("empty version section is an error", () => {
+		const empty = "# Changelog\n\n## [0.4.3]\n\n## [0.4.2]\n\n- old\n";
+		expect(() => releaseNotesForVersion(empty, "0.4.3")).toThrow(/section '## \[0\.4\.3\]' is empty/);
 	});
 });

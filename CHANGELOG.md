@@ -8,6 +8,16 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.5] — 2026-07-18
+
+### Changed
+
+- Release CI now publishes from the committed `package.json` version instead of
+  bumping `package.json`/`CHANGELOG.md` and pushing a release commit to protected
+  `main` (issue #94). Maintainers promote the changelog and version before
+  dispatching `release.yml`; the workflow gates that state, creates the GitHub
+  Release/tag, and publishes npm.
+
 ### Fixed
 
 - **Descriptor v1 now advertises the plain forwards (plain-first), not the TLS ones**
