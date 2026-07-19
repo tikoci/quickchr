@@ -85,24 +85,27 @@ describe("descriptor() — v1 shape", () => {
 		expect(roundTripped.services["rest-api"].available).toBe(true);
 	});
 
-	test("rest-api and native-api prefer the secure port and report tls correctly", async () => {
+	test("rest-api and native-api prefer the PLAIN port (#95) and report tls correctly", async () => {
+		// On a stock CHR the TLS services are not dialable (www-ssl disabled,
+		// api-ssl certificate-less), so the descriptor must advertise the plain
+		// forwards restUrl has always used — never a dead secure endpoint.
 		writeMachine(baseState("router"));
 		const descriptor = await QuickCHR.get("router")?.descriptor();
 		const restApi = descriptor?.services["rest-api"];
 		const nativeApi = descriptor?.services["native-api"];
 		expect(restApi?.available).toBe(true);
 		if (restApi?.available) {
-			expect(restApi.tls).toBe(true);
-			expect(restApi.port).toBe(19101);
+			expect(restApi.tls).toBe(false);
+			expect(restApi.port).toBe(19100);
 			expect(restApi.transport).toBe("tcp");
-			expect(restApi.url).toBe("https://127.0.0.1:19101/rest");
+			expect(restApi.url).toBe("http://127.0.0.1:19100/rest");
 			expect(restApi.auth?.username).toBe("quickchr");
 		}
 		expect(nativeApi?.available).toBe(true);
 		if (nativeApi?.available) {
-			expect(nativeApi.tls).toBe(true);
-			expect(nativeApi.port).toBe(19104);
-			expect(nativeApi.url).toBe("tls://127.0.0.1:19104");
+			expect(nativeApi.tls).toBe(false);
+			expect(nativeApi.port).toBe(19103);
+			expect(nativeApi.url).toBe("tcp://127.0.0.1:19103");
 		}
 	});
 

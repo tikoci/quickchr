@@ -282,14 +282,17 @@ quickchr already tracks plain/TLS pairs separately (`ChrPorts.http`/`https`,
 - `services["native-api"]` → pick `apiSsl`/`api`; set `tls` to match.
 - `services.ssh` → always `tls: false`.
 
-**Implementation note:** there was no pre-existing "REST-URL preference logic" to reuse
-here — before this issue, `restUrl` (used for every REST call, and for the old flat
-descriptor's `urls.http`/`rest`/`restBase`) was unconditionally built from `ports.http`;
-`https`/`apiSsl` were just additive fields, never preferred. The secure-preferred,
-plain-fallback logic above was written fresh as part of implementing this contract. As a
-side effect it also closes a latent bug: `excludePorts` had no guard against excluding
-`"http"` while keeping `"https"`, which previously left the REST base pointing at a port
-that didn't exist — `services["rest-api"]` now falls back to the surviving port instead.
+**Implementation note (revised in #95):** the descriptor is **plain-first**:
+`services["rest-api"]` picks `ports.http` (falling back to `https`), and
+`services["native-api"]` picks `ports.api` (falling back to `api-ssl`), matching the
+unconditional `ports.http` base `restUrl` has always used. The 0.4.4 release briefly
+shipped the opposite (secure-preferred) order, which advertised endpoints that are
+**not dialable on a stock CHR** — `www-ssl` is disabled by default and `api-ssl` is
+certificate-less (TLS alert 40), grounded on CHR 7.23.2 in #95. Secure preference can
+return once boot provisioning installs a certificate and enables `www-ssl`. The
+fallback still closes the `excludePorts` latent bug: excluding `"http"` while keeping
+`"https"` resolves `services["rest-api"]` onto the surviving secure port (`tls: true`)
+instead of a port that doesn't exist.
 
 `services["rest-api"].url` includes the `/rest` path suffix (e.g.
 `https://127.0.0.1:19101/rest`) since that's the actual base a consumer dials for

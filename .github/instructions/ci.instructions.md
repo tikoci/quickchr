@@ -26,7 +26,7 @@ The repo has several workflows, each with a distinct purpose:
 | **Weekly Sweep** | `sweep.yml` | schedule (Mon 05:37 UTC), `workflow_dispatch` | All-platform sweep + examples smoke (separate file so a red TCG leg never blocks PRs) |
 | **Integration** | `integration.yml` | `workflow_dispatch`, `workflow_call` | THE reusable integration unit — any platform × RouterOS target × test filter |
 | **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1` or `PSScriptAnalyzerSettings.psd1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
-| **Release** | `release.yml` | `workflow_dispatch` only | One-click gate → version bump → tag → GitHub Release → npm publish |
+| **Release** | `release.yml` | `workflow_dispatch` only | One-click gate → tag/GitHub Release → npm publish from committed `package.json` |
 | **RouterOS Versions** | `ros-versions.yml` | schedule (daily 04:17 UTC), `workflow_dispatch` | New-version check → dispatches integration on never-tested versions |
 | **Lab** | `lab.yml` | `workflow_dispatch` (pick a lab or `all`), push touching `test/lab/**` | One job per `test/lab/*` grounding experiment that needs a real CI toolchain (e.g. host-OS OpenSSH/OpenSSL defaults). **Non-gating, must NOT be a required check** — findings go to the job summary + artifact and are written up in the lab's REPORT.md. Add a lab job per the framework header in the file |
 
@@ -72,17 +72,25 @@ freshness gate — but a red sweep is still a real failure to investigate, never
 
 ### Release pipeline (release.yml)
 
-One-click `workflow_dispatch` — no tag pushing, no local script, no suite re-run:
+One-click `workflow_dispatch` after the version/changelog commit has already landed on
+`main` — no tag pushing by hand, no suite re-run, and no CI push back to `main`:
 
 ```text
-prepare (gate: main-only + Integration freshness green + [Unreleased] non-empty
-         → unit re-check → release-prep.ts bump/rollover → commit+tag+GitHub Release)
+prepare (gate: main-only + Integration freshness green
+         + package.json version has a non-empty CHANGELOG section
+         + tag/GitHub Release/npm version unused
+         → unit re-check → tag+GitHub Release)
   → publish (npm publish --provenance, dist-tag from odd/even minor)
 ```
 
 The integration bar is the freshness gate: the latest completed `main.yml` run on `main`
 must be green — the same full x86+arm64 suite the old publish pipeline re-ran, but paid
 continuously on every push instead of at release time (arm64 gate lineage: #15/#16).
+
+`package.json` is the source of truth. CI reads it, extracts release notes from the
+matching `CHANGELOG.md` section via `scripts/release-prep.ts --from-package`, and never
+updates tracked files. For a bugfix release, bump `package.json` and promote
+`CHANGELOG.md` in the PR before dispatching `release.yml`.
 
 ### Integration (integration.yml)
 
@@ -139,31 +147,31 @@ debugging "why is this platform slow" should read `tested-versions.json` and the
 ## Release Process
 
 ```bash
-gh workflow run release.yml -f version-bump=patch                 # release now
-gh workflow run release.yml -f version-bump=patch -f dry-run=true # preview first
-gh workflow run release.yml -f version-bump=exact -f exact-version=0.6.0
+gh workflow run release.yml -f dry-run=true # preview package.json version
+gh workflow run release.yml                 # release package.json version
 ```
 
-`release.yml` (`workflow_dispatch` only, main-only) does everything:
+`release.yml` (`workflow_dispatch` only, main-only) publishes the committed version:
 1. **Gates**: latest `main.yml` integration run green (freshness — no suite re-run) and
-   `CHANGELOG.md` `[Unreleased]` non-empty (it becomes the release notes; the
-   end-of-session checklist keeps it current). Plus a quick `bun test test/unit/`.
-2. **Mutation** (`scripts/release-prep.ts`, unit-tested): bump `package.json`, roll
-   `[Unreleased]` over to `## [X.Y.Z] — date`.
-3. **Publish**: commit `release: vX.Y.Z` + annotated tag + GitHub Release (notes = the
-   changelog section), then `npm publish --provenance` from the tag.
+   `CHANGELOG.md` has a non-empty `## [X.Y.Z]` section matching `package.json`. Plus a
+   quick `bun test test/unit/` and checks that the tag, GitHub Release, and npm version
+   are unused.
+2. **Tag/release**: create `vX.Y.Z` and the GitHub Release from the current main commit
+   (notes = the changelog section).
+3. **Publish**: `npm publish --provenance` from the tag.
 
 **Pre-release vs stable** (from version minor — pick the version accordingly):
 - `0.1.x`, `0.3.x` — odd minor → `npm tag: next` (pre-release, GitHub Release marked pre-release)
 - `0.2.x`, `0.4.x` — even minor → `npm tag: latest` (stable release)
 
 **Dry run** (`dry-run: true`): every gate and the version/notes computation run; nothing
-is committed, tagged, or published.
+is tagged or published.
 
 **Required secret**: `NPM_TOKEN` — npm automation token with publish access to `@tikoci/quickchr`.
 
 **Main is always release-able**: that is the point of the freshness gate + squash-only
-PRs. If the gate blocks a release, fix `main` — do not bypass the gate.
+PRs. If the gate blocks a release, fix `main` — do not bypass the gate. Release CI must
+not bump versions or push to protected `main`.
 
 ## RouterOS Version Scheduler (ros-versions.yml)
 
@@ -376,7 +384,7 @@ QUICKCHR_INTEGRATION=1 bun test test/integration/
 QUICKCHR_TEST_TARGET=long-term QUICKCHR_INTEGRATION=1 bun test test/integration/
 
 # Release (one-click, runs in CI — see "Release Process"):
-gh workflow run release.yml -f version-bump=patch
+gh workflow run release.yml
 ```
 
 ## CHR Image Caching

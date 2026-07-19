@@ -95,8 +95,10 @@ describe("CLI env/inspect descriptors", () => {
 			version: "7.22.1",
 			arch: "x86",
 			services: {
-				"rest-api": { available: true, tls: true, port: 19101 },
-				"native-api": { available: true, tls: true, port: 19104 },
+				// Plain-first (#95): stock-CHR TLS services are not dialable, so the
+				// descriptor advertises the plain forwards.
+				"rest-api": { available: true, tls: false, port: 19100 },
+				"native-api": { available: true, tls: false, port: 19103 },
 				ssh: { available: true, tls: false, port: 19102 },
 			},
 		});
