@@ -1,16 +1,19 @@
 #!/usr/bin/env bun
 /**
- * release-prep — compute the next version, roll CHANGELOG.md's [Unreleased]
- * section over to it, and bump package.json for a local/manual release-prep PR.
- * The CI release workflow uses --from-package instead: it reads committed
- * package.json + CHANGELOG.md and never mutates tracked files.
+ * release-prep — release metadata helper with two modes:
+ *
+ * - Local prep mode computes the next version, rolls CHANGELOG.md's [Unreleased]
+ *   section over to it, and bumps package.json for a manual/PR-owned release prep.
+ * - CI mode (--from-package) reads the committed package.json version plus its
+ *   matching CHANGELOG.md section and never mutates tracked files.
  *
  * Usage: bun scripts/release-prep.ts <patch|minor|major|X.Y.Z> [--dry-run] [--notes-out <file>]
  *        bun scripts/release-prep.ts --from-package [--notes-out <file>]
  *
- * - Fails if CHANGELOG.md's [Unreleased] section is empty — a release must say
- *   what changed. (The end-of-session checklist keeps [Unreleased] current.)
- * - Inserts `## [X.Y.Z] — YYYY-MM-DD` below a fresh [Unreleased] heading.
+ * - Local prep mode fails if CHANGELOG.md's [Unreleased] section is empty, then
+ *   inserts `## [X.Y.Z] — YYYY-MM-DD` below a fresh [Unreleased] heading.
+ * - CI mode fails if CHANGELOG.md lacks a non-empty `## [X.Y.Z]` section matching
+ *   package.json.
  * - Prints machine-readable lines: `version=X.Y.Z` and `npm-tag=next|latest`
  *   (odd minor → next, even minor → latest — the repo's pre-release scheme).
  * - --notes-out writes just the released section body (the GitHub Release notes).

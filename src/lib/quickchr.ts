@@ -289,9 +289,9 @@ function createInstance(state: MachineState): ChrInstance {
 			// Plain-first (#95): on a stock CHR the TLS services are not dialable —
 			// `www-ssl` is disabled and `api-ssl` is certificate-less (TLS alert 40) —
 			// so preferring the secure forward advertised dead endpoints. Prefer the
-			// plain forward `restUrl` has always used; the secure forward remains the
-			// fallback so the `excludePorts` http-excluded case still resolves (with
-			// `tls: true`). Secure preference can return once boot provisioning
+			// plain forward for each service; the secure forward remains the fallback
+			// so excluded plain ports still resolve when a secure forward is available
+			// (with `tls: true`). Secure preference can return once boot provisioning
 			// installs a certificate and enables www-ssl.
 			const chosen = plainPM ?? securePM;
 			if (!chosen) {
