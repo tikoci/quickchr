@@ -1,0 +1,3 @@
+{"kind":"boot","ts":"2026-07-20T08:28:36.718Z","run_id":"29727865527","sha":"5f0fac2b9bbe9678cca3c588d8c7b1b1763b653e","platform":"windows-x86","host":"win32","name":"integration-anchor","version":"7.23.2","arch":"x86","accel":"tcg","boot_ms":34048}
+{"kind":"test-file","ts":"2026-07-20T08:28:39.599Z","run_id":"29727865527","sha":"5f0fac2b9bbe9678cca3c588d8c7b1b1763b653e","platform":"windows-x86","host":"win32","file":"anchor.test.ts","duration_s":48,"status":"pass"}
+{"kind":"suite","ts":"2026-07-20T08:28:39.599Z","run_id":"29727865527","sha":"5f0fac2b9bbe9678cca3c588d8c7b1b1763b653e","platform":"windows-x86","host":"win32","scope":"filtered","conclusion":"pass","target":"stable","files":1,"failed":0}
