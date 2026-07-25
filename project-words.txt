@@ -152,6 +152,7 @@ gsub
 haxm
 hdr
 highmem
+homecache
 hostfs
 hostfwd
 hotspot
@@ -181,6 +182,7 @@ ipc
 ipxe
 irm
 kbd
+kexec
 keygen
 keypair
 kmgt
@@ -188,6 +190,7 @@ kmod
 kvm
 lanbridge
 lastexitcode
+libc
 libexec
 libsecret
 lic
@@ -369,6 +372,8 @@ svl
 svm
 syscalls
 sysfs
+sysinit
+sysreg
 taskkill
 tcg
 tcpdump
@@ -395,6 +400,7 @@ unparseable
 unprovisioned
 unredacted
 unref
+unsquashfs
 unvalidated
 upnp
 urlbase
@@ -403,6 +409,7 @@ userspace
 usr
 utm
 validname
+vcpu
 vcs
 vda
 venv
@@ -418,6 +425,7 @@ virtfs
 virtio
 virtserialport
 virtualenv
+vmcore
 vmnet
 vms
 vnd

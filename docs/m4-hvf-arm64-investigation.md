@@ -3,16 +3,20 @@
 **Date:** 2026-07-25
 **Investigator:** quickchr / tikoci (consolidating tikoci/mikropkl#11,
 tikoci/quickchr#97, and tikoci/quickchr#98)
-**Status:** **ROOT CAUSE CONFIRMED — artifact, upstream source, *and* runtime
-evidence from the reporter's original panic line. No M4 round-trip is required;
-the verbose boot below is now confirmatory rather than decisive.**
+**Status:** **ROOT CAUSE STRONGLY ESTABLISHED — the shipped artifact, reporter's
+runtime capability bitmap, QEMU 11.0.2 source, and MikroTik's best-available GPL
+disclosure all converge on the same mechanism.** The exact `-ENOEXEC` line has
+not been observed on the reporter's M4, and MikroTik has not published source
+cryptographically tied to RouterOS 7.22.1. A verbose M4 log would close those
+last evidence-provenance gaps, but is not required to choose the mitigation.
 
-> **Runtime confirmation (2026-07-25, second review pass).** The reporter's
-> panic already printed the guest kernel's capability bitmap. Decoded against
-> Linux v5.6 `cpucaps.h`, the M4/HVF guest **lacks `ARM64_HAS_32BIT_EL0`** while
-> the booting TCG guest has it — see E15/E16 and "Runtime Confirmation". That is
-> `system_supports_32bit_el0() == false`, the exact gate that makes
-> `compat_elf_check_arch()` reject the shipped ELF32 `/init` with `-ENOEXEC`.
+> **Direct runtime evidence (2026-07-25 review).** The reporter's panic printed
+> the guest kernel's capability bitmap. Decoded against Linux v5.6
+> `cpucaps.h`—also unchanged in MikroTik's only published 5.6.3 kernel
+> patch—the M4/HVF guest **lacks `ARM64_HAS_32BIT_EL0`** while the booting TCG
+> guest has it. See E15/E16 and "Runtime Evidence". In the disclosed loader
+> source, that makes `system_supports_32bit_el0() == false`, the exact gate that
+> rejects the shipped ELF32 `/init` with `-ENOEXEC`.
 
 The failure is not currently supported as an SSBS bug, an M4 memory-map bug, or
 a missing-disk bug. The shipped arm64 CHR boot chain mixes architectures:
@@ -21,12 +25,15 @@ a missing-disk bug. The shipped arm64 CHR boot chain mixes architectures:
 64-bit arm64 Linux kernel
   └─ appended XZ-compressed initramfs
        └─ /init = 32-bit ARM EABI executable
+            └─ system package = mixed AArch64 kernel modules and ARM32 userspace
 ```
 
-TCG CPU models provide AArch32 EL0 and can execute `/init`. QEMU's arm64 HVF
-path deliberately exposes an AArch64-only guest CPU profile. Linux 5.6 therefore
-rejects the 32-bit `/init` with `-ENOEXEC` and, because the initramfs contains no
-fallback `/sbin/init`, `/etc/init`, `/bin/init`, or `/bin/sh`, panics with:
+TCG CPU models provide AArch32 EL0 and can execute `/init`. Under HVF, QEMU
+passes through the hardware-backed `ID_AA64PFR0_EL1`; on the reported M4 its
+EL0/EL1 fields are AArch64-only. The best-available Linux source therefore
+predicts rejection of the 32-bit `/init` with `-ENOEXEC` and, because the
+initramfs contains no fallback `/sbin/init`, `/etc/init`, `/bin/init`, or
+`/bin/sh`, the observed panic:
 
 ```text
 No working init found. Try passing init= option to kernel.
@@ -42,8 +49,9 @@ host, not the mechanism.
 
 ### Root-cause chain
 
-Every link below is grounded in either the actual 7.22.1 image or the exact
-Linux/QEMU version's source:
+Every link below is grounded in the actual 7.22.1 image, QEMU 11.0.2 source, or
+Linux 5.6.3 source. The Linux source is corroborated by MikroTik's published
+patch, but the disclosure is not specific to 7.22.1:
 
 1. `BOOTAA64.EFI` is a 64-bit arm64 Linux 5.6.3 kernel.
 2. At byte offset `11,739,140`, that file contains an appended XZ stream. It
@@ -52,23 +60,30 @@ Linux/QEMU version's source:
 3. `/init` is a 169,168-byte, statically linked **ELF 32-bit LSB ARM EABI5**
    executable, SHA-256
    `69859b2fcdb329580b8fdad2e1b72e29526294708f58ced413b58895af85e706`.
-4. Linux v5.6 arm64's `compat_elf_check_arch()` accepts an `EM_ARM` ELF only
+4. The 7.22.1 arm64 system package is also mixed: a filesystem scan found 101
+   ARM32 executables and 18 ARM32 shared objects. The only two AArch64
+   executables were `kexec` and `vmcore-dmesg`; the other AArch64 ELF files were
+   kernel modules. Replacing `/init` alone would not produce a usable system.
+5. Linux v5.6 arm64's `compat_elf_check_arch()` accepts an `EM_ARM` ELF only
    when `system_supports_32bit_el0()` is true. A failed architecture check
-   returns `-ENOEXEC` (`-8`).
-5. QEMU v11.0.2's HVF host-CPU probe explicitly verifies that
-   `ID_AA64PFR0_EL1.{EL1,EL0} == 0x11`, meaning AArch64-only at both exception
-   levels. Its source comment is: "Make sure we don't advertise AArch32 support
-   for EL0/EL1."
-6. Linux logs `Run /init as init process` immediately before `execve()`. If
-   `/init` returns `-ENOEXEC`, it logs `Failed to execute /init (error -8)`,
-   tries four absent fallback paths, and emits the reported panic.
-7. A local TCG control with the real 7.22.1 UEFI/ACPI boot path executes the
+   returns `-ENOEXEC` (`-8`). MikroTik's only published 5.6.3 patch does not
+   modify this gate, its capability numbering, or the init fallback logic, and
+   its arm64 config enables `CONFIG_COMPAT` and `CONFIG_COMPAT_BINFMT_ELF`.
+6. QEMU v11.0.2 reads the real HVF vCPU's `ID_AA64PFR0_EL1` and exposes it to
+   the guest. For `host`/`max`, its host probe also refuses to initialize unless
+   `{EL1,EL0} == 0x11`, meaning AArch64-only at both exception levels. This is a
+   fail-closed assertion, not a feature mask.
+7. Linux logs `Run /init as init process` immediately before `execve()`. If
+   the disclosed 5.6.3 behavior matches the shipped binary, `/init` returns
+   `-ENOEXEC`, Linux logs `Failed to execute /init (error -8)`, tries four
+   absent fallback paths, and emits the reported panic.
+8. A local TCG control with the real 7.22.1 UEFI/ACPI boot path executes the
    same 32-bit `/init`, mounts the disk from userspace, and reaches
    `MikroTik Login:`.
 
 ### What an M4 verbose boot would add (optional)
 
-The chain is closed without it (see "Runtime Confirmation"), so this is now
+The working diagnosis is strong without it (see "Runtime Evidence"), so this is
 **nice-to-have corroboration, not a blocker.** A verbose HVF boot should contain:
 
 ```text
@@ -77,15 +92,17 @@ Failed to execute /init (error -8)
 Kernel panic - not syncing: No working init found
 ```
 
-Worth collecting because it is cheap and would make the upstream MikroTik report
-airtight, and because the same bundle answers the still-open `cortex-a53`
-question (P0-3) in the same round-trip. It is no longer on the critical path.
+It is worth collecting only if preparing an upstream MikroTik report: it would
+observe the predicted errno in the actual 7.22.1 binary and reduce reliance on
+the stale GPL disclosure. The `cortex-a53` question no longer needs reporter
+testing; QEMU source establishes that the live HVF vCPU still exposes the
+hardware `ID_AA64PFR0_EL1` for named CPU models.
 
 ### Product consequence
 
-There is no QEMU flag that can make physical Apple Silicon execute AArch32
+There is no current QEMU flag that makes physical Apple Silicon execute AArch32
 guest userspace through HVF. The durable fix is for MikroTik to ship an
-AArch64 `/init` in the arm64 CHR initramfs. Until then:
+ARM32-free arm64 CHR userspace—not merely an AArch64 `/init`. Until then:
 
 - TCG is the safe accelerator for current arm64 CHR on **all** Apple Silicon.
 - A QEMU version floor is not a credible restore signal unless a future QEMU
@@ -93,6 +110,29 @@ AArch64 `/init` in the arm64 CHR initramfs. Until then:
   do today.
 - `FEAT_SSBS=0` is too narrow as a fallback predicate; it leaves M1/M2/M3
   exposed to the same artifact-level incompatibility.
+
+### Independent-review verdict and reporter follow-up
+
+The 2026-07-25 independent review agrees with the mechanism and product
+consequence. It added three qualifications/findings:
+
+1. MikroTik's published GPL source corroborates the stock Linux behavior but
+   cannot prove the exact 7.22.1 binary because the disclosure is stale and not
+   per-release.
+2. QEMU source closes the named-CPU-model question: `cortex-a53` cannot restore
+   AArch32 EL0 under HVF, even though the model advertises it internally under
+   TCG.
+3. `/init` is only the first incompatible executable. The 7.22.1 system
+   package contains extensive ARM32 runtime userspace, so changing `/init` alone
+   is not a durable fix.
+
+**Recommendation: do not send the reporter another exploratory test ladder.**
+The useful homework is complete, and none of `cortex-a53`, QEMU HEAD, a modern
+Linux guest, SSBS toggles, or more CPU models can change the artifact-level
+incompatibility. If a MikroTik report is being prepared, one optional request
+for a verbose `-accel hvf -cpu host` boot is justified to capture
+`Failed to execute /init (error -8)` from the shipped binary. Otherwise, thank
+the reporter for the existing data and avoid another round-trip.
 
 ---
 
@@ -185,6 +225,29 @@ The architecture mix is not unique to 7.22.1:
 | 7.22.1 arm64 | ELF32 ARM EABI5, static | `69859b2fcdb329580b8fdad2e1b72e29526294708f58ced413b58895af85e706` |
 | 7.23beta5 arm64 | ELF32 ARM EABI5, static | `5cf17a2e32548c0ae2a9bbabe27dcfa8a145f382abeef17bd3990d4a36064385` |
 
+### The system package also requires AArch32
+
+A fresh review extracted `/var/pdb/system/image` from the same 7.22.1 arm64
+root filesystem, unpacked its SquashFS payload, and classified every ELF with
+`file`:
+
+| ELF role | ARM32 | AArch64 |
+|----------|------:|--------:|
+| Executables | 101 | 2 |
+| Shared objects | 18 | 0 |
+| Relocatable kernel modules | 0 | 282 |
+
+The two AArch64 executables are `sbin/kexec` and `sbin/vmcore-dmesg`.
+Representative ARM32 runtime programs include `sbin/sysinit`,
+`nova/bin/user`, `nova/bin/net`, `nova/bin/route`, and `nova/bin/snmp`; the
+package's `lib/libc.so` is also ARM32.
+
+This strengthens the ownership and fix conclusion. The immediate panic is the
+kernel failing to execute the first ARM32 program, `/init`, but replacing only
+that file would merely move failure later. Apple-Silicon HVF needs a RouterOS
+arm64 artifact whose required userspace is AArch64 throughout (or a future
+mixed-execution mechanism that does not exist today).
+
 ### Successful TCG control
 
 The local control used the shipped 7.22.1 topology: UEFI, ACPI, 1024 MiB RAM,
@@ -211,10 +274,11 @@ partition.
 
 ---
 
-## Runtime Confirmation
+## Runtime Evidence
 
-The panic itself printed the proof, and it has been sitting in mikropkl#11 since
-the original report. Linux v5.6 `arch/arm64/kernel/cpufeature.c:67-71`:
+The panic itself printed the most important runtime evidence, and it has been
+sitting in mikropkl#11 since the original report. Linux v5.6
+`arch/arm64/kernel/cpufeature.c:67-71`:
 
 ```c
 static int dump_cpu_hwcaps(struct notifier_block *self, unsigned long v, void *p)
@@ -242,15 +306,61 @@ only three differences are `ARM64_HAS_32BIT_EL0`, `ARM64_SVE`, and
 stage-2 attribute feature, neither of which participates in `execve()` of a
 userspace binary.
 
-So on the M4 guest, `system_supports_32bit_el0()` → `false` →
-`compat_elf_check_arch()` fails for the `EM_ARM` `/init` → `-ENOEXEC`. Closed
-chain, no M4 round-trip needed.
+Under the published 5.6.3 mapping and loader path, the M4 guest has
+`system_supports_32bit_el0() == false`, so `compat_elf_check_arch()` rejects the
+`EM_ARM` `/init` with `-ENOEXEC`. Combined with the actual ELF32 artifact and
+the exact panic this path produces, this is a strongly established chain. It is
+not the same as observing `error -8` directly from the shipped 7.22.1 binary.
 
 **Provenance caveat:** the `cortex-a710` bitmap comes from a direct-kernel (DT)
 control boot, which is a different boot path than the shipped UEFI/ACPI one — a
 *successful* UEFI boot never panics, so it never prints a bitmap. The comparison
 is nonetheless valid for CPU capability bits, which reflect the CPU, not the
 boot path.
+
+### MikroTik GPL cross-check and provenance boundary
+
+The upstream-kernel inference was checked against
+[`tikoci/mikrotik-gpl`](https://github.com/tikoci/mikrotik-gpl), not left at
+stock Linux:
+
+- MikroTik's published `linux-5.6.3.patch` has no hunks for
+  `arch/arm64/include/asm/elf.h`,
+  `arch/arm64/include/asm/cpucaps.h`,
+  `arch/arm64/kernel/cpufeature.c`, or `fs/compat_binfmt_elf.c`.
+- Its `init/main.c` changes do not touch `/init` selection, `execve()`, the
+  fallback list, or `No working init found`.
+- Its `fs/binfmt_elf.c` changes add unrelated `CONFIG_HOMECACHE` hooks; they do
+  not alter the ELF architecture rejection path.
+- Its arm64 config has `CONFIG_COMPAT=y` and
+  `CONFIG_COMPAT_BINFMT_ELF=y`.
+- The disclosed tree assigns `ARM64_HAS_32BIT_EL0` to bit 13, prints the panic
+  bitmap with `%*pb`, and uses `system_supports_32bit_el0()` in
+  `compat_elf_check_arch()` exactly as cited above.
+
+This is strong corroboration, not exact-build proof. The repository README says
+the only received sources are internally dated 2022 and were supplied in
+response to a RouterOS 7.18.2 request. MikroTik has not provided regular
+per-build disclosure, and nothing cryptographically links that tree to the
+7.22.1 `BOOTAA64.EFI`. An unpublished later patch is therefore logically
+possible. The actual bitmap, ELF32 `/init`, matching 5.6.3 base version, and
+matching panic make such a patch an unsupported escape hatch, not a competing
+theory.
+
+### Why a named CPU model cannot restore AArch32 under HVF
+
+QEMU has two relevant layers:
+
+1. `hvf_arm_get_host_cpu_features()` copies the host feature registers for
+   `host`/`max` and fails the probe unless `ID_AA64PFR0_EL1[7:0] == 0x11`.
+2. `hvf_arch_init_vcpu()` runs for every HVF CPU model, reads the live vCPU's
+   hardware-backed `ID_AA64PFR0_EL1`, changes only the GIC-version bit, and
+   writes it back. That register is excluded from the normal modeled-register
+   synchronization list in `sysreg.c.inc`.
+
+Therefore `-cpu cortex-a53` can change QEMU's modeled metadata, but it cannot
+make the guest observe or execute AArch32 EL0 on Apple hardware that lacks it.
+The reporter does not need to test this.
 
 ### A local repro of `-ENOEXEC` is not achievable with QEMU's TCG models
 
@@ -267,8 +377,8 @@ with an AArch64-only CPU model, reproducing the M4 symptom on Intel hardware.
   `t=0.000000` on it, with `sve=off` and `sve512=off` alike — an unrelated,
   earlier incompatibility. It cannot host this experiment.
 
-Hence the runtime confirmation above rests on the bitmap decode rather than a
-local boot.
+Hence the runtime conclusion above rests on the bitmap decode rather than a
+local negative-control boot.
 
 ---
 
@@ -289,11 +399,14 @@ local boot.
 | E11 | Stock 7.22.1 `BOOTAA64.EFI` | — | appended initramfs `/init` is ELF32 ARM EABI5 | local static analysis |
 | E12 | Stock 7.20.8 and 7.23beta5 | — | appended `/init` is also ELF32 ARM EABI5 | local static analysis |
 | E13 | Linux v5.6 arm64 | — | compat ELF requires 32-bit EL0; rejection is `-ENOEXEC` | upstream source |
-| E14 | QEMU v11.0.2 arm64 HVF | — | host profile explicitly excludes AArch32 EL0/EL1 | upstream source |
+| E14 | QEMU v11.0.2 arm64 HVF | — | host features are passed through, host/max require AArch64-only EL0/EL1, and the live `ID_AA64PFR0_EL1` remains hardware-backed for named models | upstream source |
 | **E15** | Apple M4 guest kernel, CHR 7.22.1 | HVF, `-cpu host` | panic bitmap `0x20012,28000230` decodes to 8 caps, **`ARM64_HAS_32BIT_EL0` (bit 13) ABSENT** | mikropkl#11 panic line, decoded locally |
 | **E16** | Intel Mac guest kernel, CHR 7.22.1 | TCG, `cortex-a710` | panic bitmap `0x20013,28402230` decodes to 11 caps, **`ARM64_HAS_32BIT_EL0` PRESENT**; M4's set is a strict subset (only `HAS_32BIT_EL0`, `SVE`, `HAS_STAGE2_FWB` differ) | local |
 | **E17** | Stock 7.22.1 `BOOTAA64.EFI` | — | independent re-verification of E11: XZ at offset 11,739,140 → 169,984-byte `newc` archive → `/init` = ELF 32-bit LSB ARM EABI5 static, 169,168 bytes, SHA-256 `69859b2f…e706` (**exact match**) | local, second pass |
 | **E18** | QEMU v11.0.2 TCG models | — | `ID_AA64PFR0[7:0]`: `cortex-a53`/`a72` `0x22`, `a710`/`neoverse-n1`/`neoverse-v1` `0x12` — **all provide AArch32 at EL0**; only `a64fx` is `0x11` (AArch64-only) | local, `target/arm/tcg/cpu64.c` |
+| **E19** | MikroTik GPL disclosure, Linux 5.6.3 | — | published patch leaves the compat gate, cap numbering/bitmap dump, and init fallback path unchanged; arm64 config enables compat ELF | `tikoci/mikrotik-gpl`, independently audited |
+| **E20** | QEMU v11.0.2, all HVF CPU models | — | `hvf_arch_init_vcpu()` preserves the live hardware-backed `ID_AA64PFR0_EL1`; a named model cannot synthesize AArch32 EL0 | upstream source, independently audited |
+| **E21** | RouterOS 7.22.1 arm64 system package | — | 101 ARM32 executables and 18 ARM32 shared objects; the AArch64 ELF files are two maintenance executables and 282 kernel modules | local case-sensitive `unsquashfs` + `file` scan of `/var/pdb/system/image` |
 
 The earlier claim that arm64 CHR works under HVF on M1/M2/M3 had no provenance.
 The artifact/source chain predicts the opposite. Treat prior-generation
@@ -302,17 +415,16 @@ boot log demonstrates otherwise.
 
 ---
 
-## One-Shot M4 Confirmation Bundle
+## Optional One-Shot M4 Confirmation Bundle
 
-The goal is one reporter response containing all decisive evidence. Run this on
-a **copy** of the extracted `.utm` bundle. It preserves the shipped QEMU config
-(1024 MiB, two vCPUs, disk and NIC device types), changes only the kernel
-loglevel, and captures:
+**Do not request this merely to continue the investigation.** Use it only when
+an upstream MikroTik report needs the exact runtime errno from the shipped
+binary. It runs on a **copy** of the extracted `.utm` bundle, preserves the
+shipped QEMU config (1024 MiB, two vCPUs, disk and NIC device types), changes
+only the kernel loglevel, and captures:
 
 1. HVF with `-cpu host` — expected `Failed to execute /init (error -8)`.
-2. HVF with `-cpu cortex-a53` — checks whether the accepted named model changes
-   the outcome; source says it should not restore physical AArch32 execution.
-3. TCG with `-cpu cortex-a710` — same verbose image, expected to boot.
+2. TCG with `-cpu cortex-a710` — same verbose image, expected to boot.
 
 Replace only `BUNDLE=...`; paste the rest as one block:
 
@@ -383,9 +495,7 @@ run_case() {
   wait "$watchdog_pid" 2>/dev/null || true
 }
 
-# Panic cases first so the successful TCG boot cannot mutate their input.
 run_case hvf-host hvf host
-run_case hvf-a53 hvf cortex-a53
 run_case tcg-control tcg,tb-size=256 cortex-a710
 
 grep -aE \
@@ -394,7 +504,7 @@ grep -aE \
 
 tar -czf "$RESULTS/logs-only.tar.gz" \
   -C "$RESULTS" environment.txt summary.txt \
-  hvf-host.log hvf-a53.log tcg-control.log
+  hvf-host.log tcg-control.log
 
 cat "$RESULTS/summary.txt"
 echo "Attach: $RESULTS/logs-only.tar.gz"
@@ -406,8 +516,6 @@ echo "Attach: $RESULTS/logs-only.tar.gz"
 |--------|---------|
 | HVF host logs `Failed to execute /init (error -8)` | predicted root cause confirmed |
 | TCG reaches `MikroTik Login:` | verbose-image/control integrity confirmed |
-| HVF `cortex-a53` also returns `-8` | named model is accepted but does not provide usable AArch32 under HVF |
-| HVF `cortex-a53` boots | unexpected fast configuration fix; verify the log says HVF and then revise both projects |
 | HVF error is not `-8` | retain the artifact finding but re-open the immediate failure mechanism |
 | Verbose HVF log never reaches `Run /init` | failure is earlier than predicted; compare last initcall with the TCG control |
 
@@ -459,7 +567,7 @@ would not reach `Run /init`.
 Changing QEMU versions can fix CPU-feature presentation bugs, but it cannot
 make Apple hardware execute AArch32 through normal HVF virtualization. Re-test
 a newer QEMU only if its release notes explicitly add an AArch32 execution
-mechanism or after MikroTik ships an AArch64 `/init`.
+mechanism or after MikroTik ships an ARM32-free required userspace.
 
 ---
 
@@ -480,19 +588,21 @@ mechanism or after MikroTik ships an AArch64 `/init`.
    image can be tested on HVF without a code change. E12's "works through M3"
    claim is not merely unverified — the chain predicts it false.
 2. **Rewrite user-facing warnings.** They should say current arm64 CHR includes
-   32-bit ARM early userspace that HVF cannot execute, not that RouterOS
+   required 32-bit ARM userspace that HVF cannot execute, not that RouterOS
    requires SSBS.
-3. **Correct `DESIGN.md` and test comments.** Remove causal claims about SSBS
-   and the M4-only scope. Preserve the evidence boundary: the exact M4 `-8`
-   line remains pending until the reporter runs the bundle.
+3. **Correct the shipped quickchr explanation and mitigation.** `DESIGN.md`,
+   `CHANGELOG.md`, `src/lib/platform.ts`, tests, and the launch warning still
+   claim SSBS is causal and scope the fallback to M4+. The runtime policy must
+   fall back for current arm64 CHR on all Apple Silicon, while preserving the
+   evidence boundary that the exact M4 `-8` line remains unobserved.
 4. **Define a restore signal from the guest artifact.** The useful signal is a
-   future arm64 CHR release whose appended `/init` is `ELF 64-bit LSB,
-   ARM aarch64`, followed by a real HVF boot. Host SSBS and QEMU version are not
-   sufficient restore signals.
+   future arm64 CHR release whose appended `/init` and required system-package
+   executables and shared objects are AArch64, followed by a real HVF boot. Host
+   SSBS, QEMU version, and a 64-bit `/init` alone are not sufficient restore
+   signals.
 5. **Report upstream to MikroTik with a minimal artifact fact.** The narrow
-   request is: ship AArch64 early userspace in the arm64 CHR initramfs, or
-   document that the image requires AArch32 EL0 even though its kernel is
-   AArch64.
+   request is: ship an ARM32-free required userspace for arm64 CHR, or document
+   that the image requires AArch32 EL0 even though its kernel is AArch64.
 6. **Do not advertise prior-generation Apple-Silicon HVF support without a
    log.** Source predicts the same failure on M1/M2/M3.
 
@@ -502,23 +612,23 @@ flag tuning.
 
 ---
 
-## Open Questions
+## Remaining Questions
 
 1. **Downgraded to corroboration.** Does the M4 verbose log contain the
    predicted `Failed to execute /init (error -8)`? The capability-bitmap decode
-   (E15/E16) already establishes the mechanism, so this now only hardens the
-   upstream report.
-2. Does QEMU accept `-cpu cortex-a53` under HVF on that host, and if so does
-   the guest result remain `-ENOEXEC`? **Still genuinely open** — it is the only
-   remaining path to keeping HVF, and `virt_get_valid_cpu_types()` does permit
-   the model. Expected to fail: a named model cannot conjure AArch32 execution
-   that the silicon does not have, and E14 shows QEMU builds the HVF profile from
-   the host.
-3. Can anyone provide a complete successful arm64 CHR HVF log from M1/M2/M3?
+   (E15/E16), artifact, and source establish the working diagnosis; this would
+   observe the predicted loader result in the exact shipped binary and harden
+   an upstream report.
+2. Can anyone provide a complete successful arm64 CHR HVF log from M1/M2/M3?
    **The chain now predicts there is none**, which makes the current M4-only
    fallback predicate a live bug (Implications #1) rather than merely narrow.
-4. Will MikroTik change `/init` to AArch64 in a future CHR build? The static
-   archive check can become a release-time guard.
+3. Will MikroTik ship an arm64 CHR build whose required userspace, including
+   `/init`, is AArch64? The static archive and package checks can become a
+   release-time guard.
+
+`-cpu cortex-a53` is no longer an open question: E20 shows that QEMU preserves
+the hardware-backed `ID_AA64PFR0_EL1` for every HVF CPU model. A reporter run
+would be redundant.
 
 ---
 
@@ -541,9 +651,23 @@ flag tuning.
   [`fs/compat_binfmt_elf.c`](https://github.com/torvalds/linux/blob/v5.6/fs/compat_binfmt_elf.c)
   and [`fs/binfmt_elf.c`](https://github.com/torvalds/linux/blob/v5.6/fs/binfmt_elf.c) —
   compat loader and `-ENOEXEC` architecture rejection
+- [`tikoci/mikrotik-gpl`](https://github.com/tikoci/mikrotik-gpl) —
+  best-available MikroTik GPL disclosure and its per-release provenance warning
+- MikroTik-disclosed Linux 5.6.3
+  [`elf.h`](https://github.com/tikoci/mikrotik-gpl/blob/main/2025-03-19/linux-5.6.3/arch/arm64/include/asm/elf.h),
+  [`cpucaps.h`](https://github.com/tikoci/mikrotik-gpl/blob/main/2025-03-19/linux-5.6.3/arch/arm64/include/asm/cpucaps.h),
+  [`cpufeature.c`](https://github.com/tikoci/mikrotik-gpl/blob/main/2025-03-19/linux-5.6.3/arch/arm64/kernel/cpufeature.c),
+  and
+  [`init/main.c`](https://github.com/tikoci/mikrotik-gpl/blob/main/2025-03-19/linux-5.6.3/init/main.c) —
+  disclosed counterparts of the load-bearing upstream paths; the published
+  patch does not modify the relevant logic
 - QEMU v11.0.2
   [`target/arm/hvf/hvf.c`](https://github.com/qemu/qemu/blob/v11.0.2/target/arm/hvf/hvf.c) —
-  HVF host feature discovery and explicit exclusion of AArch32 EL0/EL1
+  HVF host feature discovery, fail-closed AArch64-only check, and live vCPU
+  `ID_AA64PFR0_EL1` handling
+- QEMU v11.0.2
+  [`target/arm/hvf/sysreg.c.inc`](https://github.com/qemu/qemu/blob/v11.0.2/target/arm/hvf/sysreg.c.inc) —
+  system-register synchronization list
 - QEMU v11.0.2
   [`hw/arm/virt.c`](https://github.com/qemu/qemu/blob/v11.0.2/hw/arm/virt.c)
   and [`target/arm/cpu64.c`](https://github.com/qemu/qemu/blob/v11.0.2/target/arm/cpu64.c) —
