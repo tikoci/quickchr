@@ -10,6 +10,7 @@ import {
 	getQemuInstallHint,
 	getQemuVersion,
 	hostLacksSsbs,
+	resetSsbsProbeCache,
 	qgaKvmWarning,
 	ssbsTcgWarning,
 	requireQemu,
@@ -61,6 +62,7 @@ function mockSpawnSync(
 
 afterEach(() => {
 	restoreRuntimeDetection();
+	resetSsbsProbeCache();
 	mock.restore();
 });
 
@@ -425,6 +427,16 @@ describe("hostLacksSsbs", () => {
 		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
 
 		expect(hostLacksSsbs()).toBe(false);
+	});
+
+	test("memoizes the probe — a second call does not re-spawn sysctl", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
+
+		expect(hostLacksSsbs()).toBe(true);
+		expect(hostLacksSsbs()).toBe(true);
+		expect(spawn).toHaveBeenCalledTimes(1);
 	});
 
 	test("false when the sysctl key is absent (empty output / older macOS)", () => {

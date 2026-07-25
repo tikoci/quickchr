@@ -153,8 +153,24 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
  * (no such key), while pre-M4 Apple Silicon has it and reports FEAT_SSBS=1.
  * Either way, only a clean exit reading a literal "0" counts as SSBS-less — a
  * missing key, non-zero exit, or any other value is treated as "has SSBS".
+ *
+ * Memoized: the host's capability is fixed for the process lifetime, and this is
+ * probed twice per launch (detectAccel + ssbsTcgWarning), so cache the result.
  */
+let ssbsLessMemo: boolean | undefined;
+
 export function hostLacksSsbs(): boolean {
+	if (ssbsLessMemo !== undefined) return ssbsLessMemo;
+	ssbsLessMemo = probeHostLacksSsbs();
+	return ssbsLessMemo;
+}
+
+/** @internal Test-only: clear the memoized FEAT_SSBS probe between mocked runs. */
+export function resetSsbsProbeCache(): void {
+	ssbsLessMemo = undefined;
+}
+
+function probeHostLacksSsbs(): boolean {
 	if (process.platform !== "darwin" || process.arch !== "arm64") return false;
 	try {
 		const r = Bun.spawnSync(["sysctl", "-n", "hw.optional.arm.FEAT_SSBS"], {
