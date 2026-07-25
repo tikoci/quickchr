@@ -176,8 +176,8 @@ export function ssbsTcgWarning(guestArch: "x86" | "arm64"): string | null {
 	return (
 		"This Apple CPU omits FEAT_SSBS (Apple M4+); arm64 CHR panics under HVF " +
 		"(-cpu host) because RouterOS's kernel assumes it is present — using TCG " +
-		"(slower). No QEMU release injects SSBS yet (tikoci/quickchr#97). Pass an " +
-		"explicit accelerator to override once a fixed QEMU is installed."
+		"(slower but reliable). No released QEMU injects SSBS under HVF yet, so " +
+		"TCG is currently the only accelerator that boots here (tikoci/quickchr#97)."
 	);
 }
 
@@ -217,10 +217,14 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 				// bun reports "arm64" and gets HVF. Rosetta bun reports "x64" and gets TCG
 				// (acceptable — arm64 TCG on Apple Silicon still boots in <5 min).
 				if (process.arch === "arm64") {
-					// Apple M4+ drops FEAT_SSBS; HVF `-cpu host` passes that gap
-					// to the guest and RouterOS's 5.6.3 kernel panics at init.  No
-					// QEMU release injects it yet, so fall back to TCG on an
-					// SSBS-less host (still boots in <5 min).  See tikoci/quickchr#97.
+					// Apple M4+ drops FEAT_SSBS; HVF `-cpu host` passes that gap to
+					// the guest and RouterOS's 5.6.3 kernel panics at init.  No
+					// released QEMU injects SSBS under HVF yet, so an SSBS-less host
+					// falls back to TCG unconditionally (still boots in <5 min).
+					// TODO(#97): the host sysctl stays 0 regardless of QEMU, so when a
+					// QEMU release does inject SSBS under HVF, gate this on a
+					// getQemuVersion() floor here to restore HVF on that build or newer
+					// — version is the only available restore signal.
 					if (hostLacksSsbs()) return "tcg";
 					return "hvf";
 				}

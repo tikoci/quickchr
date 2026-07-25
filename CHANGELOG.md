@@ -15,10 +15,12 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   FEAT_SSBS (Apple M4 removed it). Under HVF `-cpu host` passed that gap to RouterOS's
   Linux 5.6.3 kernel, which panics at init (`No working init found`); the `-cpu` model is
   inert under HVF, so no CPU-model tweak avoids it and no released QEMU injects SSBS yet.
-  A one-line note is printed at launch explaining the downgrade and how to override.
+  A one-line note is printed at launch explaining the downgrade.
   Confirmed on a real M4 (tikoci/mikropkl#11); latent here because CI/dev hosts are Intel.
-  Keyed on the FEAT_SSBS feature (not a CPU brand string) so it auto-restores HVF once a
-  fixed QEMU ships. Issue #97.
+  Keyed on the FEAT_SSBS feature (not a CPU brand string) so it scopes to the real host
+  condition and catches M5+. The fallback is unconditional on an SSBS-less host: the host
+  sysctl won't flip when a fixed QEMU ships, so restoring HVF will need a QEMU-version
+  guard at that point (deferred — the upstream fix is an unmerged RFC). Issue #97.
 
 ## [0.4.5] — 2026-07-18
 
