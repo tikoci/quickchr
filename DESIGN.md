@@ -54,6 +54,10 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
    **Sister-project routing.** Because `fetchResilient` already absorbs a flaky resolver, a download/version-resolve failure should not be papered over downstream with `/etc/hosts` pins or IPv6 toggles in a consuming repo's workflow — fix it (or extend the failback) here in quickchr. The historical `getent ahostsv4` `/etc/hosts` workaround was both in the wrong layer and non-functional (it hit the same broken stub resolver, returning empty). The failback is best-effort, not a guarantee: it recovers connection-class DNS failures, not arbitrary network breakage. Covered by `test/unit/net.test.ts`.
 
+10. **arm64 HVF is downgraded to TCG on FEAT_SSBS-less Apple hosts (M4+)** — `detectAccel("arm64")` probes `sysctl -n hw.optional.arm.FEAT_SSBS` before returning `hvf` on Apple Silicon and falls back to `tcg` when it reads `0` (`hostLacksSsbs()`, `src/lib/platform.ts`; launch surfaces `ssbsTcgWarning()`). Apple **M4 removes FEAT_SSBS** (an ARMv8.5 spectre-v4 control), and under HVF the guest reads the *physical* CPU ID registers — the `-cpu` model is inert — so `-cpu host` passes that gap to RouterOS's Linux 5.6.3 kernel, which assumes the standard set and panics at init (`No working init found`, t≈0.076s). Confirmed on a real M4 (tikoci/mikropkl#11): `FEAT_SSBS=0`, `-cpu max` panics identically, and `-cpu host,ssbs=on/off` errors (`Property not found`) — QEMU 11.0.2 cannot inject it. The upstream HVF SSBS shim is an **unmerged RFC** (Oct 2025, private Apple API, aimed at macOS guests), so **no released QEMU fixes this yet** — TCG is the only thing that boots today.
+
+    Why the `FEAT_SSBS=0` axis and not a `machdep.cpu.brand_string == "Apple M4"` match (as an early mikropkl PR proposed): the feature probe is the *actual* failure condition — it scopes to the real host state and catches M4/M5/any future SSBS-less Apple chip, where a brand-string gate bakes a transient QEMU-era bug into permanent policy and mishandles M5+. **The fallback is currently unconditional on an SSBS-less host** — `hw.optional.arm.FEAT_SSBS` is a host property that a future SSBS-injecting QEMU will *not* flip, so HVF cannot auto-restore from this probe alone. Restoring HVF once a fixed QEMU releases needs a **`getQemuVersion()` floor added at the fallback site** (version is the only restore signal); that guard is deliberately deferred because the upstream shim is an unmerged RFC (private Apple API) — no release exists to key on, and a speculative floor would be untestable dead code. The feature axis is nonetheless the right home for that future guard. This is a **proactive** probe (instant, no wasted boot), distinct from and complementary to the reactive respawn-once net in #8. Confirmed OK on M1/M2 (they have SSBS); M3 untested but predicted fine. **Open (needs a real M4):** does a modern arm64 Linux boot under identical HVF? (tikoci/mikropkl#11 D2) — a boot would confirm RouterOS's old kernel is specifically implicated. Covered by `test/unit/platform.test.ts`. → [#97](https://github.com/tikoci/quickchr/issues/97)
+
 ## Port Layout
 
 | Offset | Service    | Guest Port |
@@ -109,14 +113,16 @@ See MANUAL.md's CLI reference and environment-variables sections for the full su
 | Platform               | x86 CHR | arm64 CHR | Notes |
 |------------------------|---------|-----------|-------|
 | macOS x86_64           | HVF     | TCG       | Intel Mac |
-| macOS arm64 (native)   | HVF     | HVF       | Apple Silicon, bun is arm64 |
+| macOS arm64 (native)   | HVF     | HVF¹     | Apple Silicon, bun is arm64 |
 | macOS arm64 (Rosetta)  | HVF     | TCG       | bun is x86_64; arm64 HVF skipped |
 | Linux x86_64           | KVM     | TCG       | KVM requires `/dev/kvm` writable |
 | Linux aarch64          | TCG     | KVM       | x86 TCG on arm64 Linux |
 | Windows x86_64         | TCG     | TCG       | HVF/KVM not available |
 
+¹ Except FEAT_SSBS-less Apple Silicon (M4 and later): arm64 CHR falls back to **TCG**, because HVF `-cpu host` panics RouterOS's kernel there (see Design Decisions #10). x86 CHR is unaffected.
+
 **Acceleration detection** (`detectAccel`):
-- macOS: checks `kern.hv_support` via sysctl; for arm64 guest additionally checks `process.arch === "arm64"` (native bun = Apple Silicon).
+- macOS: checks `kern.hv_support` via sysctl; for arm64 guest additionally checks `process.arch === "arm64"` (native bun = Apple Silicon) and `hw.optional.arm.FEAT_SSBS` (M4+ lacks it → TCG).
 - Linux: checks `/dev/kvm` writability.
 - Falling back to TCG is always safe, just slower (~20s x86 TCG boot on Apple Silicon; ~2 min arm64 TCG on Intel).
 

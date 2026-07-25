@@ -8,6 +8,20 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Fixed
+
+- **arm64 CHR no longer kernel-panics on Apple M4+ hosts.** `detectAccel("arm64")` now
+  probes `hw.optional.arm.FEAT_SSBS` and falls back from HVF to TCG when the host omits
+  FEAT_SSBS (Apple M4 removed it). Under HVF `-cpu host` passed that gap to RouterOS's
+  Linux 5.6.3 kernel, which panics at init (`No working init found`); the `-cpu` model is
+  inert under HVF, so no CPU-model tweak avoids it and no released QEMU injects SSBS yet.
+  A one-line note is printed at launch explaining the downgrade.
+  Confirmed on a real M4 (tikoci/mikropkl#11); latent here because CI/dev hosts are Intel.
+  Keyed on the FEAT_SSBS feature (not a CPU brand string) so it scopes to the real host
+  condition and catches M5+. The fallback is unconditional on an SSBS-less host: the host
+  sysctl won't flip when a fixed QEMU ships, so restoring HVF will need a QEMU-version
+  guard at that point (deferred — the upstream fix is an unmerged RFC). Issue #97.
+
 ## [0.4.5] — 2026-07-18
 
 ### Changed

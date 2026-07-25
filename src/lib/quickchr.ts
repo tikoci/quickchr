@@ -26,7 +26,7 @@ import type {
 } from "./types.ts";
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./types.ts";
 import packageJson from "../../package.json";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, ssbsTcgWarning, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
 	resolveVersion,
 	isValidVersion,
@@ -1526,6 +1526,8 @@ export class QuickCHR {
 		// Build QEMU args and spawn
 		const platform = await detectPlatform();
 		const accel = await detectAccel(arch);
+		const ssbsNote = ssbsTcgWarning(arch);
+		if (ssbsNote) logger.warn(ssbsNote);
 		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
@@ -1838,6 +1840,8 @@ export class QuickCHR {
 
 		const platform = await detectPlatform();
 		const accel = await detectAccel(state.arch);
+		const ssbsNote = ssbsTcgWarning(state.arch);
+		if (ssbsNote) (logger ?? createLogger()).warn(ssbsNote);
 		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);

@@ -138,6 +138,67 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
 	return crossArch ? 15.0 : 4.0;
 }
 
+/**
+ * Whether this Apple host omits FEAT_SSBS (Apple M4 and later drop it).
+ *
+ * Under HVF the guest reads the *physical* CPU ID registers — the `-cpu` model
+ * is inert — so `-cpu host` passes the missing FEAT_SSBS through to the guest.
+ * RouterOS's Linux 5.6.3 kernel assumes the ARMv8.5 standard set and panics at
+ * init ("No working init found", t≈0.076s) on such a host, while TCG's fixed
+ * cortex-a710 model boots fine.  Confirmed on M4 (tikoci/mikropkl#11); no QEMU
+ * release injects SSBS yet (the upstream HVF shim is an unmerged RFC), so an
+ * SSBS-less host must fall back to TCG for arm64 guests.  See tikoci/quickchr#97.
+ *
+ * Only meaningful on darwin/arm64.  The sysctl key is absent on older macOS
+ * (no such key), while pre-M4 Apple Silicon has it and reports FEAT_SSBS=1.
+ * Either way, only a clean exit reading a literal "0" counts as SSBS-less — a
+ * missing key, non-zero exit, or any other value is treated as "has SSBS".
+ *
+ * Memoized: the host's capability is fixed for the process lifetime, and this is
+ * probed twice per launch (detectAccel + ssbsTcgWarning), so cache the result.
+ */
+let ssbsLessMemo: boolean | undefined;
+
+export function hostLacksSsbs(): boolean {
+	if (ssbsLessMemo !== undefined) return ssbsLessMemo;
+	ssbsLessMemo = probeHostLacksSsbs();
+	return ssbsLessMemo;
+}
+
+/** @internal Test-only: clear the memoized FEAT_SSBS probe between mocked runs. */
+export function resetSsbsProbeCache(): void {
+	ssbsLessMemo = undefined;
+}
+
+function probeHostLacksSsbs(): boolean {
+	if (process.platform !== "darwin" || process.arch !== "arm64") return false;
+	try {
+		const r = Bun.spawnSync(["sysctl", "-n", "hw.optional.arm.FEAT_SSBS"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (r.exitCode !== 0) return false;
+		return new TextDecoder().decode(r.stdout).trim() === "0";
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * One-line explanation for the FEAT_SSBS→TCG downgrade, or null if it doesn't
+ * apply.  Surface this at launch when detectAccel() has picked TCG on an
+ * SSBS-less host so the user understands why they're on slower emulation.
+ */
+export function ssbsTcgWarning(guestArch: "x86" | "arm64"): string | null {
+	if (guestArch !== "arm64" || !hostLacksSsbs()) return null;
+	return (
+		"This Apple CPU omits FEAT_SSBS (Apple M4+); arm64 CHR panics under HVF " +
+		"(-cpu host) because RouterOS's kernel assumes it is present — using TCG " +
+		"(slower but reliable). No released QEMU injects SSBS under HVF yet, so " +
+		"TCG is currently the only accelerator that boots here (tikoci/quickchr#97)."
+	);
+}
+
 /** Detect available QEMU acceleration for a guest architecture. */
 export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 	const hostOs = process.platform;
@@ -173,7 +234,18 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 				// which is correct (Intel can't run arm64 HVF). On Apple Silicon, native
 				// bun reports "arm64" and gets HVF. Rosetta bun reports "x64" and gets TCG
 				// (acceptable — arm64 TCG on Apple Silicon still boots in <5 min).
-				if (process.arch === "arm64") return "hvf";
+				if (process.arch === "arm64") {
+					// Apple M4+ drops FEAT_SSBS; HVF `-cpu host` passes that gap to
+					// the guest and RouterOS's 5.6.3 kernel panics at init.  No
+					// released QEMU injects SSBS under HVF yet, so an SSBS-less host
+					// falls back to TCG unconditionally (still boots in <5 min).
+					// TODO(#97): the host sysctl stays 0 regardless of QEMU, so when a
+					// QEMU release does inject SSBS under HVF, gate this on a
+					// getQemuVersion() floor here to restore HVF on that build or newer
+					// — version is the only available restore signal.
+					if (hostLacksSsbs()) return "tcg";
+					return "hvf";
+				}
 			}
 		} catch { /* fall through */ }
 	}
