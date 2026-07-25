@@ -1255,6 +1255,9 @@ prevents orphan disks accumulating across attempts.
   (MNDP) on the host via a `socket-connect` NIC.
 - **docs/qga-x86-macos-qemu10-investigation.md** — root cause for the
   QGA-on-macOS-arm64 limitation.
+- **docs/m4-hvf-arm64-investigation.md** — **open** investigation into why arm64
+  CHR panics under HVF on Apple M4 (why arm64 falls back to TCG there); evidence
+  ledger, competing theories, and the test plan to settle them.
 - **`.github/instructions/`** — agent-facing rules (testing, qemu,
   routeros-rest, provisioning, ci, bun-http, general).
 - **`examples/`** — runnable scripts (`bun run`): `quickstart` (single-CHR smoke),

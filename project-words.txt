@@ -12,8 +12,10 @@
 # here automatically (dictionaryDefinitions addWords: true). Locale variants
 # (British spellings), doc placeholders (my*), and one-off test sentinels live
 # in cspell.json `ignoreWords`, not here.
+
 aavmf
 accels
+acpi
 addrs
 aehd
 ahostsv
@@ -36,6 +38,7 @@ biome
 ble
 blockquotes
 bodyless
+bootaa
 bootptab
 borderless
 bpath
@@ -55,6 +58,7 @@ cifs
 cleanuser
 cli
 cloudbase
+cmdline
 coderabbit
 coderabbitai
 compdef
@@ -64,6 +68,7 @@ compreply
 connectionless
 consoletest
 containerregistry
+conv
 cooldown
 cpio
 cpuid
@@ -82,6 +87,7 @@ desynced
 devtmpfs
 dgram
 dialable
+diskimage
 dispatchable
 dnf
 donny
@@ -90,15 +96,23 @@ downscript
 dport
 dsls
 dsv
+dtb
 eai
+earlycon
 eax
+ecam
 econnrefused
 econnreset
 ecx
 edk
+efault
 efi
+efibootmgr
+eio
 elif
+emerg
 endgroup
+enoexec
 env
 errno
 esac
@@ -107,6 +121,7 @@ eslintcache
 ethertype
 ethertypes
 etimeout
+execve
 failable
 failback
 fflate
@@ -122,12 +137,14 @@ getaddrinfo
 getent
 getpid
 getuid
+gic
 googleable
 gre
 groupcheck
 gsub
 haxm
 hdr
+highmem
 hostfs
 hostfwd
 hotspot
@@ -147,6 +164,8 @@ ifdown
 ifname
 ifup
 ihl
+imagekey
+initcall
 initialise
 insmod
 inttest
@@ -172,6 +191,7 @@ loadvm
 localaddr
 localappdata
 longterm
+lpa
 lsp
 machdep
 mactelnet
@@ -181,16 +201,24 @@ markdownlint
 matrica
 mbps
 mcast
+mcfg
 mcp
+memmap
 mgmt
 mib
 mikropkl
 mikrotik
 misattributed
 mktemp
+mmcfg
+mmfr
 mmio
 mndp
+mountpoint
 mqtts
+mte
+mtree
+neoverse
 netboot
 netdev
 netdevs
@@ -205,8 +233,10 @@ nodefaults
 nographic
 noninteractive
 nopasswd
+notrunc
 npk
 nsec
+nsh
 nul
 nvram
 oci
@@ -218,10 +248,15 @@ ospf
 overfit
 ovmf
 pacman
+parange
 paravirt
 passwordless
 patchless
+pauth
+payam
 pci
+pdb
+perflevel
 pflash
 pgrep
 pidfile
@@ -229,6 +264,7 @@ pingable
 pipefail
 pkgs
 pkill
+pkl
 pnet
 postrouting
 powerdown
@@ -247,9 +283,13 @@ qcow
 qemu
 qga
 qmp
+qtree
 quickchr
+ramdisk
 readback
+readconfig
 recvfrom
+redists
 resolv
 respawn
 respawning
@@ -265,6 +305,7 @@ romon
 rootfs
 ros
 rosetta
+roskrnl
 routerboard
 routeros
 rsc
@@ -272,6 +313,7 @@ rta
 runspace
 runspaces
 savevm
+scaleway
 scp
 scriptable
 seabios
@@ -284,8 +326,11 @@ setuid
 sfc
 shellcheck
 sidegrade
+sigill
 skyfi
 slirp
+smccc
+sme
 smhdw
 smp
 snapafter
@@ -295,6 +340,7 @@ sni
 snmp
 socat
 srand
+ssbd
 ssbs
 sshfs
 sshpass
@@ -305,6 +351,7 @@ subcmd
 subdirs
 subshell
 subtests
+svl
 svm
 syscalls
 sysfs
@@ -320,6 +367,7 @@ tlv
 toctou
 tonistiigi
 totalmem
+tpm
 tsc
 tshark
 ttl
@@ -342,9 +390,11 @@ usr
 utm
 validname
 vcs
+vda
 venv
 ver
 veth
+vfs
 vienk
 vihl
 virsh
@@ -355,6 +405,7 @@ virtio
 virtserialport
 virtualenv
 vmnet
+vms
 vnd
 vrrp
 vxlan
