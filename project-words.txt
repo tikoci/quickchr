@@ -71,6 +71,8 @@ containerregistry
 conv
 cooldown
 cpio
+cpucaps
+cpufeature
 cpuid
 cpus
 creds
@@ -98,8 +100,8 @@ dport
 dsls
 dsv
 dtb
-eai
 eabi
+eai
 earlycon
 eax
 ecam
@@ -135,6 +137,7 @@ fpath
 freemem
 fsfreeze
 funcs
+fwb
 gbps
 getaddrinfo
 getent
@@ -155,6 +158,7 @@ hotspot
 htest
 hvf
 hwaddr
+hwcaps
 hwtype
 ics
 idx
@@ -223,8 +227,8 @@ mountpoint
 mqtts
 mte
 mtree
+ncaps
 neoverse
-newc
 netboot
 netdev
 netdevs
@@ -232,6 +236,7 @@ netfs
 netinstall
 networkd
 networksetup
+newc
 nic
 nlevel
 noauth
@@ -275,9 +280,9 @@ pnet
 postrouting
 powerdown
 poweroff
-printk
 pptp
 prereq
+printk
 proplist
 provpass
 publickey
@@ -354,10 +359,12 @@ sshpass
 statfs
 stdlib
 steamdeck
+stext
 subcmd
 subdirs
 subshell
 subtests
+sve
 svl
 svm
 syscalls
