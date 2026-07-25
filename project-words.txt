@@ -78,6 +78,7 @@ credtest
 csi
 cutover
 cword
+czf
 datagram
 datagrams
 defconf
@@ -98,6 +99,7 @@ dsls
 dsv
 dtb
 eai
+eabi
 earlycon
 eax
 ecam
@@ -112,6 +114,7 @@ eio
 elif
 emerg
 endgroup
+enoent
 enoexec
 env
 errno
@@ -139,6 +142,7 @@ getpid
 getuid
 gic
 googleable
+gpt
 gre
 groupcheck
 gsub
@@ -192,6 +196,7 @@ localaddr
 localappdata
 longterm
 lpa
+lsb
 lsp
 machdep
 mactelnet
@@ -219,6 +224,7 @@ mqtts
 mte
 mtree
 neoverse
+newc
 netboot
 netdev
 netdevs
@@ -269,6 +275,7 @@ pnet
 postrouting
 powerdown
 poweroff
+printk
 pptp
 prereq
 proplist
