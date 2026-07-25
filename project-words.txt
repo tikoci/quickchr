@@ -173,6 +173,7 @@ localaddr
 localappdata
 longterm
 lsp
+machdep
 mactelnet
 macvlan
 makefiles
@@ -294,6 +295,7 @@ sni
 snmp
 socat
 srand
+SSBS
 sshfs
 sshpass
 statfs
