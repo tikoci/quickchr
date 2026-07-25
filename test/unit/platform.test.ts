@@ -9,7 +9,9 @@ import {
 	findQemuImg,
 	getQemuInstallHint,
 	getQemuVersion,
+	hostLacksSsbs,
 	qgaKvmWarning,
+	ssbsTcgWarning,
 	requireQemu,
 	requireFirmware,
 	resolveInterfaceAlias,
@@ -373,12 +375,27 @@ describe("detectAccel", () => {
 		expect(await detectAccel("arm64")).toBe("tcg");
 	});
 
-	test("returns hvf for arm64 guest only when macOS process arch is arm64", async () => {
+	test("returns hvf for arm64 guest only when macOS process arch is arm64 and host has FEAT_SSBS", async () => {
 		setPlatform("darwin");
 		setArch("arm64");
+		// hv_support=1 and FEAT_SSBS=1 (pre-M4 Apple Silicon).
 		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
 
 		expect(await detectAccel("arm64")).toBe("hvf");
+	});
+
+	test("falls back to tcg for arm64 on Apple silicon that omits FEAT_SSBS (M4+)", async () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		// HVF is available, but the host lacks FEAT_SSBS — HVF -cpu host would
+		// pass that gap to RouterOS's 5.6.3 kernel and panic it (tikoci/quickchr#97).
+		mockSpawnSync((cmd) => {
+			if (cmd[2] === "kern.hv_support") return { exitCode: 0, stdout: "1\n" };
+			if (cmd[2] === "hw.optional.arm.FEAT_SSBS") return { exitCode: 0, stdout: "0\n" };
+			return { exitCode: 1 };
+		});
+
+		expect(await detectAccel("arm64")).toBe("tcg");
 	});
 
 	test("falls back to tcg on macOS when Hypervisor Framework is unavailable", async () => {
@@ -387,6 +404,69 @@ describe("detectAccel", () => {
 		mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
 
 		expect(await detectAccel("x86")).toBe("tcg");
+	});
+});
+
+describe("hostLacksSsbs", () => {
+	test("true only when the FEAT_SSBS sysctl reads exactly 0 on darwin/arm64", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["sysctl", "-n", "hw.optional.arm.FEAT_SSBS"]);
+			return { exitCode: 0, stdout: "0\n" };
+		});
+
+		expect(hostLacksSsbs()).toBe(true);
+	});
+
+	test("false when FEAT_SSBS reads 1 (pre-M4 silicon)", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
+
+		expect(hostLacksSsbs()).toBe(false);
+	});
+
+	test("false when the sysctl key is absent (empty output / older macOS)", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		mockSpawnSync(() => ({ exitCode: 1, stdout: "" }));
+
+		expect(hostLacksSsbs()).toBe(false);
+	});
+
+	test("false on non-darwin or non-arm64 without probing", () => {
+		setPlatform("linux");
+		setArch("arm64");
+		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
+		expect(hostLacksSsbs()).toBe(false);
+
+		setPlatform("darwin");
+		setArch("x64");
+		expect(hostLacksSsbs()).toBe(false);
+		expect(spawn).not.toHaveBeenCalled();
+	});
+});
+
+describe("ssbsTcgWarning", () => {
+	test("returns a note for an arm64 guest on an SSBS-less host", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
+
+		const note = ssbsTcgWarning("arm64");
+		expect(note).toContain("FEAT_SSBS");
+		expect(note).toContain("TCG");
+	});
+
+	test("returns null for x86 guests and for hosts that have FEAT_SSBS", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
+		expect(ssbsTcgWarning("x86")).toBeNull();
+
+		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
+		expect(ssbsTcgWarning("arm64")).toBeNull();
 	});
 });
 

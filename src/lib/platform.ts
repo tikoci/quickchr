@@ -138,6 +138,49 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
 	return crossArch ? 15.0 : 4.0;
 }
 
+/**
+ * Whether this Apple host omits FEAT_SSBS (Apple M4 and later drop it).
+ *
+ * Under HVF the guest reads the *physical* CPU ID registers — the `-cpu` model
+ * is inert — so `-cpu host` passes the missing FEAT_SSBS through to the guest.
+ * RouterOS's Linux 5.6.3 kernel assumes the ARMv8.5 standard set and panics at
+ * init ("No working init found", t≈0.076s) on such a host, while TCG's fixed
+ * cortex-a710 model boots fine.  Confirmed on M4 (tikoci/mikropkl#11); no QEMU
+ * release injects SSBS yet (the upstream HVF shim is an unmerged RFC), so an
+ * SSBS-less host must fall back to TCG for arm64 guests.  See tikoci/quickchr#97.
+ *
+ * Only meaningful on darwin/arm64.  The sysctl is absent on older macOS and on
+ * pre-M4 silicon (which report FEAT_SSBS=1), so anything but a literal "0" here
+ * — including a missing key — is treated as "has SSBS".
+ */
+export function hostLacksSsbs(): boolean {
+	if (process.platform !== "darwin" || process.arch !== "arm64") return false;
+	try {
+		const r = Bun.spawnSync(["sysctl", "-n", "hw.optional.arm.FEAT_SSBS"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		return new TextDecoder().decode(r.stdout).trim() === "0";
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * One-line explanation for the FEAT_SSBS→TCG downgrade, or null if it doesn't
+ * apply.  Surface this at launch when detectAccel() has picked TCG on an
+ * SSBS-less host so the user understands why they're on slower emulation.
+ */
+export function ssbsTcgWarning(guestArch: "x86" | "arm64"): string | null {
+	if (guestArch !== "arm64" || !hostLacksSsbs()) return null;
+	return (
+		"This Apple CPU omits FEAT_SSBS (Apple M4+); arm64 CHR panics under HVF " +
+		"(-cpu host) because RouterOS's kernel assumes it is present — using TCG " +
+		"(slower). No QEMU release injects SSBS yet (tikoci/quickchr#97). Pass an " +
+		"explicit accelerator to override once a fixed QEMU is installed."
+	);
+}
+
 /** Detect available QEMU acceleration for a guest architecture. */
 export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 	const hostOs = process.platform;
@@ -173,7 +216,14 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 				// which is correct (Intel can't run arm64 HVF). On Apple Silicon, native
 				// bun reports "arm64" and gets HVF. Rosetta bun reports "x64" and gets TCG
 				// (acceptable — arm64 TCG on Apple Silicon still boots in <5 min).
-				if (process.arch === "arm64") return "hvf";
+				if (process.arch === "arm64") {
+					// Apple M4+ drops FEAT_SSBS; HVF `-cpu host` passes that gap
+					// to the guest and RouterOS's 5.6.3 kernel panics at init.  No
+					// QEMU release injects it yet, so fall back to TCG on an
+					// SSBS-less host (still boots in <5 min).  See tikoci/quickchr#97.
+					if (hostLacksSsbs()) return "tcg";
+					return "hvf";
+				}
 			}
 		} catch { /* fall through */ }
 	}
