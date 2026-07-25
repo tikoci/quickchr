@@ -1527,7 +1527,7 @@ export class QuickCHR {
 		const platform = await detectPlatform();
 		const accel = await detectAccel(arch);
 		const ssbsNote = ssbsTcgWarning(arch);
-		if (ssbsNote) console.warn(ssbsNote);
+		if (ssbsNote) logger.warn(ssbsNote);
 		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
@@ -1841,7 +1841,7 @@ export class QuickCHR {
 		const platform = await detectPlatform();
 		const accel = await detectAccel(state.arch);
 		const ssbsNote = ssbsTcgWarning(state.arch);
-		if (ssbsNote) console.warn(ssbsNote);
+		if (ssbsNote) (logger ?? createLogger()).warn(ssbsNote);
 		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);

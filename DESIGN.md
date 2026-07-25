@@ -113,14 +113,16 @@ See MANUAL.md's CLI reference and environment-variables sections for the full su
 | Platform               | x86 CHR | arm64 CHR | Notes |
 |------------------------|---------|-----------|-------|
 | macOS x86_64           | HVF     | TCG       | Intel Mac |
-| macOS arm64 (native)   | HVF     | HVF       | Apple Silicon, bun is arm64 |
+| macOS arm64 (native)   | HVF     | HVF¹     | Apple Silicon, bun is arm64 |
 | macOS arm64 (Rosetta)  | HVF     | TCG       | bun is x86_64; arm64 HVF skipped |
 | Linux x86_64           | KVM     | TCG       | KVM requires `/dev/kvm` writable |
 | Linux aarch64          | TCG     | KVM       | x86 TCG on arm64 Linux |
 | Windows x86_64         | TCG     | TCG       | HVF/KVM not available |
 
+¹ Except FEAT_SSBS-less Apple Silicon (M4 and later): arm64 CHR falls back to **TCG**, because HVF `-cpu host` panics RouterOS's kernel there (see Design Decisions #10). x86 CHR is unaffected.
+
 **Acceleration detection** (`detectAccel`):
-- macOS: checks `kern.hv_support` via sysctl; for arm64 guest additionally checks `process.arch === "arm64"` (native bun = Apple Silicon).
+- macOS: checks `kern.hv_support` via sysctl; for arm64 guest additionally checks `process.arch === "arm64"` (native bun = Apple Silicon) and `hw.optional.arm.FEAT_SSBS` (M4+ lacks it → TCG).
 - Linux: checks `/dev/kvm` writability.
 - Falling back to TCG is always safe, just slower (~20s x86 TCG boot on Apple Silicon; ~2 min arm64 TCG on Intel).
 

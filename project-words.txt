@@ -295,7 +295,7 @@ sni
 snmp
 socat
 srand
-SSBS
+ssbs
 sshfs
 sshpass
 statfs

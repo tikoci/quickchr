@@ -149,9 +149,10 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
  * release injects SSBS yet (the upstream HVF shim is an unmerged RFC), so an
  * SSBS-less host must fall back to TCG for arm64 guests.  See tikoci/quickchr#97.
  *
- * Only meaningful on darwin/arm64.  The sysctl is absent on older macOS and on
- * pre-M4 silicon (which report FEAT_SSBS=1), so anything but a literal "0" here
- * — including a missing key — is treated as "has SSBS".
+ * Only meaningful on darwin/arm64.  The sysctl key is absent on older macOS
+ * (no such key), while pre-M4 Apple Silicon has it and reports FEAT_SSBS=1.
+ * Either way, only a clean exit reading a literal "0" counts as SSBS-less — a
+ * missing key, non-zero exit, or any other value is treated as "has SSBS".
  */
 export function hostLacksSsbs(): boolean {
 	if (process.platform !== "darwin" || process.arch !== "arm64") return false;
@@ -160,6 +161,7 @@ export function hostLacksSsbs(): boolean {
 			stdout: "pipe",
 			stderr: "pipe",
 		});
+		if (r.exitCode !== 0) return false;
 		return new TextDecoder().decode(r.stdout).trim() === "0";
 	} catch {
 		return false;
