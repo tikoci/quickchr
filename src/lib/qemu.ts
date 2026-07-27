@@ -13,6 +13,7 @@ import { detectAccel, requireQemu, requireFirmware, requireQemuImg } from "./pla
 import { buildHostfwdString } from "./network.ts";
 import { ensureDir } from "./state.ts";
 import { restGet } from "./rest.ts";
+import { classifyProbeError, recordBootProbe, serialLogEnabled, type BootProbeStats } from "./diagnostics.ts";
 
 export interface QemuLaunchConfig {
 	arch: Arch;
@@ -221,12 +222,20 @@ function buildChannelArgs(
 		qgaSock = `path=${join(machineDir, "qga.sock")}`;
 	}
 
+	// QUICKCHR_SERIAL_LOG=1 tees the serial console to <machineDir>/serial.log via
+	// the QEMU chardev `logfile=` option. Opt-in, never default: serial-console
+	// provisioning types the generated user password in cleartext (provision.ts
+	// provisionViaConsole), so this log is secret-bearing. It is the only record of
+	// what RouterOS printed when a boot never reaches REST — the socket chardev
+	// keeps no history, so connecting after the failure shows nothing (#79).
+	const serialLog = serialLogEnabled() ? `,logfile=${join(machineDir, "serial.log")},logappend=on` : "";
+
 	if (background) {
 		// Background: all channels on sockets/pipes
 		args.push(
 			"-chardev", `socket,id=monitor0,${monitorSock},server=on,wait=off`,
 			"-mon", "chardev=monitor0,mode=readline",
-			"-chardev", `socket,id=serial0,${serialSock},server=on,wait=off`,
+			"-chardev", `socket,id=serial0,${serialSock},server=on,wait=off${serialLog}`,
 			"-serial", "chardev:serial0",
 		);
 	} else {
@@ -517,9 +526,11 @@ export async function waitForBoot(
 	httpPort: number,
 	timeoutMs: number = 120_000,
 	auth: string = `Basic ${btoa("admin:")}`,
+	stats?: BootProbeStats,
 ): Promise<boolean> {
 	const url = `http://127.0.0.1:${httpPort}/rest/system/resource`;
-	const deadline = Date.now() + timeoutMs;
+	const start = Date.now();
+	const deadline = start + timeoutMs;
 	let consecutiveReady = 0;
 
 	while (Date.now() < deadline) {
@@ -530,6 +541,7 @@ export async function waitForBoot(
 				// Auth rejected — the REST layer is up and responded, even though
 				// we cannot validate the body. Count as ready.
 				consecutiveReady++;
+				recordBootProbe(stats, Date.now() - start, "unauthorized", String(status));
 			} else if (status >= 200 && status < 300) {
 				// RouterOS REST may return wrong data (array body) briefly after boot —
 				// a startup race. Only accept once the body is the expected singleton object.
@@ -537,17 +549,24 @@ export async function waitForBoot(
 				try { parsed = JSON.parse(body); } catch { /* ignore */ }
 				if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "board-name" in (parsed as object)) {
 					consecutiveReady++;
+					recordBootProbe(stats, Date.now() - start, "ready");
 				} else {
 					consecutiveReady = 0; // wrong body — REST not fully initialized yet
+					recordBootProbe(stats, Date.now() - start, "wrong-body", body.slice(0, 80));
 				}
 			} else {
 				consecutiveReady = 0;
+				recordBootProbe(stats, Date.now() - start, "http-error", String(status));
 			}
 
 			if (consecutiveReady >= 2) return true;
-		} catch {
-			// ECONNRESET, connection refused, timeout — not ready yet
+		} catch (e) {
+			// ECONNRESET, connection refused, timeout — not ready yet. Which one it
+			// was is the whole diagnosis when a boot never completes (#79), so it is
+			// classified rather than swallowed.
 			consecutiveReady = 0;
+			const { outcome, detail } = classifyProbeError(e);
+			recordBootProbe(stats, Date.now() - start, outcome, detail);
 		}
 		await Bun.sleep(2000);
 	}

@@ -201,8 +201,11 @@ llm
 loadvm
 localaddr
 localappdata
+logappend
+logfile
 longterm
 lpa
+lru
 lsb
 lsp
 machdep
@@ -343,6 +346,7 @@ sfc
 shellcheck
 sidegrade
 sigill
+signalable
 skyfi
 slirp
 smccc

@@ -180,6 +180,31 @@ describe("buildQemuArgs", () => {
 		}
 	});
 
+	// QUICKCHR_SERIAL_LOG is opt-in because serial-console provisioning types the
+	// generated password in cleartext — a default-on serial.log would write a
+	// secret to disk for every machine.
+	test("serial chardev gains logfile= only under QUICKCHR_SERIAL_LOG=1", async () => {
+		const findSerial = (args: string[]) => args.find((a) => a.includes("serial0") && a.includes("socket"));
+		try {
+			delete process.env.QUICKCHR_SERIAL_LOG;
+			expect(findSerial(await buildQemuArgs(makeConfig({ background: true })))).not.toContain("logfile=");
+
+			process.env.QUICKCHR_SERIAL_LOG = "1";
+			const enabled = findSerial(await buildQemuArgs(makeConfig({ background: true })));
+			expect(enabled).toContain("logfile=");
+			expect(enabled).toContain("serial.log");
+		} catch (e: unknown) {
+			const code = e && typeof e === "object" && "code" in e ? (e as { code: string }).code : "";
+			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") {
+				console.log(`Skipping: ${code}`);
+				return;
+			}
+			throw e;
+		} finally {
+			delete process.env.QUICKCHR_SERIAL_LOG;
+		}
+	});
+
 	test("foreground mode uses stdio and still binds monitor socket", async () => {
 		try {
 			const args = await buildQemuArgs(makeConfig({ background: false }));

@@ -309,10 +309,32 @@ a new tracked issue.
   - `integration-timing.txt` — per-file wall-clock seconds + pass/fail (integration.yml only)
   - `issue69-*.ndjson` — only when `issue69-settling.probe.ts` is dispatched; per-iteration port probes, REST probe attempts/retries, QEMU load, and console diagnostics
   - `machines/**/*.json` — `machine.json` with last-known state, ports, config
-  - `machines/**/*.log` — `qemu.log` with QEMU stdout/stderr (boot messages, panics)
+  - `machines/**/*.log` — `qemu.log` with QEMU stdout/stderr (boot messages, panics), plus `serial.log` (the guest console tee — CI sets `QUICKCHR_SERIAL_LOG=1`)
+  - `failures/boot-failure-<machine>-<iso8601>.json` — **start here for any `BOOT_TIMEOUT`**. Self-contained: REST-probe tally, hostfwd TCP probe, monitor `info status`/`info block`, QEMU liveness + argv, machine-dir listing, and the full `qemu.log`/`serial.log` text. Written under `<dataDir>/failures/`, outside the machine dir, so the test's own `finally { cleanupMachine() }` can't delete it
 - **Step summary**: `integration.yml` shows failing lines + per-file timing + boot-timing table (full log in the artifact)
 
 ### Boot failure diagnosis checklist
+0. Open `failures/boot-failure-*.json` first — it answers steps 1-3 in one file. The
+   decisive field is `restProbe`. Read it with the slirp caveat below in mind:
+   - `probe-timeout` on every attempt + `hostfwd.tcpConnect: "accepting"` → QEMU is
+     forwarding but nothing behind it answers. **Guest-side.** Read `serialLog` next.
+     This is the ordinary shape of a CHR that never finished booting.
+   - `refused` → QEMU itself is gone or never bound the port. Host-side; check
+     `host.qemuProcess` and `qemuArgs`.
+   - `reset`, or `firstHttpAtMs` set but never `ready` → the guest answered at TCP
+     and then dropped or returned the wrong body. RouterOS is mid-startup; this is
+     the #69 settling signature, not a dead boot.
+   - `monitor["info status"]` reporting `paused` (especially `paused (io-error)`)
+     is a disk/backing-file answer on its own — stop looking at timeouts.
+
+   **slirp caveat (verified locally, 2026-07-27).** With the default `user` network
+   mode, QEMU's hostfwd `listen()`s on the host port for the whole life of the
+   process and accepts connections regardless of guest state — it only then tries to
+   reach the guest. So a totally dead guest still shows `hostfwd: accepting`, and its
+   probes classify as `probe-timeout`, never `refused`. Repro: `QuickCHR.start({ mem:
+   32 })` (too little RAM for CHR) → 72/72 `probe-timeout`, `hostfwd: accepting`,
+   `info status: running`, empty `serial.log`. Do **not** read "accepting" as
+   evidence the guest is up.
 1. Open `qemu.log` from the artifact — look for `Panic`, `Error`, `EFI` failures
 2. Check `platform-info.txt` — verify runner/process arch, CPU/memory, QEMU version, `/dev/kvm`, and whether the KVM open probe failed
 3. Check `machine.json` — verify `status`, `arch`, `ports`, `version`, `lastAccel`, and `lastBootMs` fields
@@ -322,7 +344,8 @@ a new tracked issue.
 ### Common failure signatures
 | Symptom | Likely cause | Where to look |
 |---------|-------------|---------------|
-| `waitForBoot` timeout | TCG slowness or boot stall — check serial log to distinguish | `qemu.log` first 100 lines |
+| `waitForBoot` timeout | TCG slowness or boot stall — check serial log to distinguish | `failures/boot-failure-*.json` → `restProbe`, then `serialLog` |
+| `Monitor command timed out … connect=… prompt=… command-written=…` | Read the phase line: `prompt=never` = the monitor never greeted us; `command-written=<n>ms response-first-byte=never` = QEMU took the command and went quiet (#80) | the error message itself |
 | `MISSING_FIRMWARE` on arm64 | UEFI pkg not installed | `apt-get` step logs |
 | Port conflict | stale machine from prior run | `machine.json` port fields |
 | `sshpass` not found | missing dep | `apt-get`/`brew install` step |
@@ -389,11 +412,21 @@ gh workflow run release.yml
 
 ## CHR Image Caching
 
-Downloaded RouterOS images are cached in `~/.local/share/quickchr/cache/`
-using `actions/cache` with key `chr-images-{OS}-{arch}-v1`.
+Downloaded RouterOS images are cached in `~/.local/share/quickchr/cache/` using
+`actions/cache` with key
+`chr-images-{OS}-{arch}-v2-{target}-{int|ex}-{run_id}-{run_attempt}` and
+`restore-keys` falling back to `…-v2-{target}-` then `…-v2-`.
 
-Cache misses cause a fresh download (~50-100 MB).  Bump the `-v1` suffix if the
-cache needs to be invalidated (e.g. corrupted image from a partial download).
+**The primary key must keep a rotating component.** `actions/cache` skips the
+post-job save whenever the primary key hit exactly, so the previous static
+`chr-images-{OS}-{arch}-v1` key meant any RouterOS version resolved *after* the
+cache was first populated re-downloaded on every single run, forever (#91). The
+`{run_id}-{run_attempt}` tail guarantees a miss, so every run re-saves; the
+`{int|ex}` segment keeps the integration and examples-smoke jobs from colliding
+on one key within a run. Old entries age out under the repo's cache LRU cap.
+
+Cache misses cause a fresh download (~50-100 MB). Bump `-v2` to invalidate
+wholesale (e.g. a corrupted image from a partial download).
 
 ## Adding a New Runner
 

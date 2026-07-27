@@ -3,6 +3,7 @@
  */
 
 import type { ProgressLogger } from "./log.ts";
+import type { BootProbeStats } from "./diagnostics.ts";
 
 // --- Version & Architecture ---
 
@@ -598,7 +599,10 @@ export interface ChrInstance {
 	 *  After `QuickCHR.start()` with provisioning options (installAllPackages, license, etc.),
 	 *  the returned instance is already REST-reachable — this returns immediately.
 	 *  Call this only when starting without provisioning, or as a safety check after a manual stop/restart. */
-	waitForBoot(timeoutMs?: number): Promise<boolean>;
+	/** @param stats Optional out-param; each REST readiness probe is classified
+	 *  into it (see diagnostics.ts BootProbeStats) so a failed wait can explain
+	 *  whether the forwarded port ever answered. */
+	waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean>;
 	/** Poll a condition until it returns true or the timeout elapses.
 	 *  Retries every 2 s, swallowing errors from the condition function.
 	 *  Returns `true` when the condition passes, `false` on timeout.

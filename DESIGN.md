@@ -102,7 +102,10 @@ Current consumers are all first-party tikoci projects (centrs, donny, restraml),
 │       ├── serial.sock        # Serial console
 │       ├── qga.sock           # QGA (x86 only)
 │       ├── qemu.pid           # PID file
-│       └── qemu.log           # Output log
+│       ├── qemu.log           # Output log
+│       └── serial.log         # Serial console tee (only with QUICKCHR_SERIAL_LOG=1)
+└── failures/                  # Boot-failure reports (see below)
+    └── boot-failure-<machine>-<iso8601>.json
 ```
 
 **Global settings** live separately, under the XDG **config** tier (not the data tree
@@ -203,6 +206,56 @@ merges (`continue-on-error: true`). Thresholds are overridable via dispatch inpu
 - `coverage-report` — full per-file coverage table (14 days)
 - `{integration|main|sweep}-logs-<platform>` — bun test output + timing + metrics.ndjson +
   machine.json + qemu.log (7 days); durable timing lives on the `ci-data` branch
+
+### Boot-Failure Forensics (`src/lib/diagnostics.ts`)
+
+Discovered constraint from the `ci:slow-platform-flake` series (#76 #79 #80 #91):
+**a failure that cleans up after itself is unfixable.** Both `BOOT_TIMEOUT` paths
+used to `stop()` + `remove()` the machine and embed `qemu.log.slice(-1200)`, which
+on every recorded CI failure contained nothing but the cleanup SIGTERM. Four rules
+came out of that:
+
+1. **`waitForBoot()` classifies, it does not just return `false`.** A boot that
+   never becomes REST-ready is several different bugs wearing the same error:
+   `refused` = QEMU never bound the port (host-side); `probe-timeout` = it bound
+   and nothing behind it answered (guest-side); `reset`/`wrong-body` = the guest
+   answered and RouterOS is still settling (the #69 shape). Collapsing all of
+   them to a boolean is why #79 stayed open across two full CI runs. The tally
+   rides on an optional `BootProbeStats` out-param, so normal boots pay nothing.
+
+   **Do not read a live host port as "the guest is up."** Under the default
+   `user` (slirp) network mode QEMU's hostfwd `listen()`s for the process's whole
+   lifetime and accepts before it tries to reach the guest. Verified locally
+   (2026-07-27) by starting CHR with `mem: 32`: 72/72 probes `probe-timeout`,
+   `hostfwd: accepting`, `info status: running`, empty `serial.log`. So
+   `refused` is much rarer than intuition suggests, and `probe-timeout` — not
+   `refused` — is the ordinary signature of a guest that never booted.
+
+2. **The report is written outside the machine directory**, to
+   `<dataDir>/failures/`. Every integration test wraps its body in
+   `finally { cleanupMachine(name) }` → `remove()`, which deletes the machine
+   dir. A report written next to `qemu.log` is gone before CI can upload it,
+   *regardless* of `QUICKCHR_PRESERVE_ON_FAILURE`. The report therefore embeds
+   log contents rather than pointing at them, and stands alone.
+
+3. **`QUICKCHR_SERIAL_LOG=1` is opt-in, and must stay opt-in.** It adds
+   `logfile=` to the serial chardev, which is the only way to see what RouterOS
+   printed on a boot that never reaches REST — the socket chardev keeps no
+   history, so connecting *after* the failure shows nothing. But serial-console
+   provisioning types the generated user password in cleartext, so the log is
+   secret-bearing. CI turns it on because CI passwords are per-run throwaways.
+
+4. **Timeouts report where they stalled.** `monitorCommand()` records
+   connect → first byte → prompt → command written → response first byte, and
+   renders them into the timeout message. "Monitor command timed out" alone
+   cannot distinguish #80's hypotheses (monitor never greeted us vs. QEMU took
+   the command and went quiet); the phase line can, at the cost of a few
+   `Date.now()` calls on the success path.
+
+Corollary for CI cache keys: `actions/cache` only saves when the primary key
+*missed*, so a static key means a newly-resolved RouterOS version re-downloads
+every run forever (#91). Primary keys must carry a rotating component, with
+`restore-keys` doing the prefix fallback.
 
 ## Design Principles
 

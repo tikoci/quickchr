@@ -221,6 +221,14 @@ jobs:
         shell: bash
     env:
       QUICKCHR_TEST_TARGET: ${{ matrix.target }}
+      # Keep a failed machine's directory instead of remove()-ing it, so
+      # boot-failure.json / qemu.log / serial.log survive into the run artifacts.
+      # Without this every boot failure destroyed its own evidence (#79).
+      QUICKCHR_PRESERVE_ON_FAILURE: "1"
+      # Tee the guest serial console to <machineDir>/serial.log. Safe here and
+      # only here: provisioning types the generated password over serial in
+      # cleartext, but CI passwords are per-run throwaways.
+      QUICKCHR_SERIAL_LOG: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
@@ -317,21 +325,32 @@ jobs:
             fi
           } | tee "$HOME/platform-info.txt" | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The primary key MUST rotate every run. actions/cache only saves when the
+      # primary key missed; with a static key (the old `…-v1`) an exact hit meant
+      # the post-job save was skipped, so a RouterOS version resolved *after* the
+      # cache was first populated re-downloaded on every run, forever (#91).
+      # `-int-` namespaces this against the examples-smoke job, which caches the
+      # same path in the same run; restore-keys still let the two share entries
+      # across runs, newest-first. Old entries age out under the repo LRU cap.
       - name: Cache CHR images (POSIX)
         if: ${{ runner.os != 'Windows' }}
         uses: actions/cache@v5
         with:
           path: ~/.local/share/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
-          restore-keys: chr-images-${{ runner.os }}-
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-int-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-
+            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-
 
       - name: Cache CHR images (Windows)
         if: ${{ runner.os == 'Windows' }}
         uses: actions/cache@v5
         with:
           path: ~/AppData/Local/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
-          restore-keys: chr-images-${{ runner.os }}-
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-int-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-
+            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-
 
       - run: bun install --frozen-lockfile
 
@@ -503,6 +522,7 @@ jobs:
             ~/issue69-*.ndjson
             ~/arm64-rest-repro.txt
             ~/.local/share/quickchr/boot-log.ndjson
+            ~/.local/share/quickchr/failures/*.json
             ~/.local/share/quickchr/machines/**/*.json
             ~/.local/share/quickchr/machines/**/*.log
           retention-days: 7
@@ -520,6 +540,7 @@ jobs:
             ~/metrics.ndjson
             ~/issue69-*.ndjson
             ~/AppData/Local/quickchr/boot-log.ndjson
+            ~/AppData/Local/quickchr/failures/*.json
             ~/AppData/Local/quickchr/machines/**/*.json
             ~/AppData/Local/quickchr/machines/**/*.log
           retention-days: 7
@@ -623,6 +644,9 @@ jobs:
     env:
       QUICKCHR_TEST_TARGET: ${{ matrix.target }}
       EXAMPLE_FILTER: ${{ inputs.example-filter }}
+      # See the integration job's env for why these two are on in CI.
+      QUICKCHR_PRESERVE_ON_FAILURE: "1"
+      QUICKCHR_SERIAL_LOG: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
@@ -669,21 +693,28 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
+      # Rotating primary key — see the integration job's cache step for why a
+      # static key never re-saves. `-ex-` keeps this job from colliding with the
+      # integration job's key within the same run.
       - name: Cache CHR images (POSIX)
         if: ${{ runner.os != 'Windows' }}
         uses: actions/cache@v5
         with:
           path: ~/.local/share/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
-          restore-keys: chr-images-${{ runner.os }}-
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-ex-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-
+            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-
 
       - name: Cache CHR images (Windows)
         if: ${{ runner.os == 'Windows' }}
         uses: actions/cache@v5
         with:
           path: ~/AppData/Local/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v1
-          restore-keys: chr-images-${{ runner.os }}-
+          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-ex-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-
+            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-
 
       - run: bun install --frozen-lockfile
 

@@ -51,6 +51,31 @@ Unset/empty → `stable` (unchanged behavior). Version-pinned tests (provisionin
 `7.20.7`/`7.20.8`, library-api's `7.22.1`) ignore the override. An *old* pinned target will
 fail version-gated provisioning/device-mode tests by design.
 
+### Diagnosing a boot that never becomes REST-ready
+
+Turn both diagnostic knobs on when chasing a `BOOT_TIMEOUT`. `integration.yml` sets
+them for every CI leg; locally they are off by default.
+
+```bash
+QUICKCHR_PRESERVE_ON_FAILURE=1 QUICKCHR_SERIAL_LOG=1 \
+  QUICKCHR_INTEGRATION=1 bun test test/integration/start-stop.test.ts
+```
+
+- `QUICKCHR_SERIAL_LOG=1` tees the guest console to `<machineDir>/serial.log` via the
+  QEMU chardev `logfile=` option. It is the only way to see what RouterOS printed:
+  the serial socket keeps no history, so attaching *after* the failure shows nothing.
+  **It records the generated provisioning password in cleartext** — fine for
+  throwaway CI/lab machines, do not enable it against anything you care about.
+- `QUICKCHR_PRESERVE_ON_FAILURE=1` skips the `remove()` on a boot timeout (QEMU is
+  still stopped) so the machine dir survives. Note the tests' own
+  `finally { cleanupMachine(name) }` still deletes it — which is exactly why the
+  report itself is written to `<dataDir>/failures/boot-failure-<machine>-<ts>.json`,
+  outside the machine dir, with the log contents embedded. **Read that file first**;
+  its `restProbe` field says whether the forwarded port ever answered at all.
+
+Both are plain `process.env` checks (like `QUICKCHR_DEBUG`), not managed
+`settings.ts` keys — they are developer/CI knobs, not user preferences.
+
 ## Integration Test Requirements
 
 **Run integration tests before every `git commit` or PR.** They exist specifically because

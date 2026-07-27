@@ -100,7 +100,32 @@ if (!SKIP && unknownFilter.length > 0) {
 const want = (name: string) => FILTER.length === 0 || FILTER.includes(name);
 const applies = (r: Runnable) => !r.os || r.os.includes(process.platform);
 
-async function run(cmd: string[], env: Record<string, string> = {}) {
+// Live-stream when running under CI (or on demand locally). `new Response(…).text()`
+// only yields once the child exits, so an example that *hangs* until bun's
+// per-test timeout killed the test produced zero output — the run that lost the
+// quickstart output entirely (#91). Streaming means whatever the example printed
+// before it wedged is already in the job log.
+const STREAM = process.env.CI === "true" || process.env.QUICKCHR_STREAM_EXAMPLES === "1";
+
+/** Drain a stream to a string, echoing prefixed lines as they arrive. */
+async function drain(stream: ReadableStream<Uint8Array>, prefix: string): Promise<string> {
+	const decoder = new TextDecoder();
+	let text = "";
+	let pending = "";
+	for await (const chunk of stream) {
+		const piece = decoder.decode(chunk, { stream: true });
+		text += piece;
+		if (!STREAM) continue;
+		pending += piece;
+		const lines = pending.split("\n");
+		pending = lines.pop() ?? "";
+		for (const line of lines) process.stderr.write(`${prefix} ${line}\n`);
+	}
+	if (STREAM && pending) process.stderr.write(`${prefix} ${pending}\n`);
+	return text;
+}
+
+async function run(cmd: string[], env: Record<string, string> = {}, label = "example") {
 	const proc = Bun.spawn(cmd, {
 		cwd: REPO,
 		env: { ...process.env, ...env },
@@ -108,8 +133,8 @@ async function run(cmd: string[], env: Record<string, string> = {}) {
 		stderr: "pipe",
 	});
 	const [out, errOut, code] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
+		drain(proc.stdout, `[${label}:out]`),
+		drain(proc.stderr, `[${label}:err]`),
 		proc.exited,
 	]);
 	return { code, out, errOut };
@@ -133,8 +158,10 @@ describe.skipIf(SKIP)("examples smoke", () => {
 		test.skipIf(!want(r.name) || !applies(r))(
 			`${r.name} (${r.lang}) runs clean`,
 			async () => {
-				const { code, out, errOut } = await run(r.cmd, r.env);
-				if (code !== 0) console.error(`[${r.name}] exit ${code}\n${errOut}`);
+				const { code, out, errOut } = await run(r.cmd, r.env, r.name);
+				// Both streams on failure — an example that fails a REST assertion
+				// reports it on stdout, so stderr alone can be empty and useless.
+				if (code !== 0) console.error(`[${r.name}] exit ${code}\nstdout:\n${out}\nstderr:\n${errOut}`);
 				expect(code).toBe(0);
 				expect(out.length).toBeGreaterThan(0);
 			},
