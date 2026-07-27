@@ -1,0 +1,2 @@
+{"kind":"test-file","ts":"2026-07-27T09:03:46.888Z","run_id":"30251872138","sha":"3e456d34677a34937172aa32356367f086c46684","platform":"windows-x86","host":"win32","file":"anchor.test.ts","duration_s":300,"status":"fail"}
+{"kind":"suite","ts":"2026-07-27T09:03:46.888Z","run_id":"30251872138","sha":"3e456d34677a34937172aa32356367f086c46684","platform":"windows-x86","host":"win32","scope":"filtered","conclusion":"fail","target":"stable","files":1,"failed":1}
