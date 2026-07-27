@@ -8,6 +8,17 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.6] — 2026-07-27
+
+> **Apple Silicon users: we would like your help confirming this.** The arm64 HVF
+> panic below is grounded in a reporter's M4 diagnostics plus QEMU/Linux source, but
+> nobody has reproduced it on a physical Apple Silicon Mac we control, and CI cannot
+> — hosted macOS runners report `kern.hv_support=0` and never exercise HVF at all.
+> `quickchr start --arch arm64 --accel hvf` is the one-command check. Whether it
+> panics with `No working init found` **or boots**, please say so on
+> [#97](https://github.com/tikoci/quickchr/issues/97) — a successful boot would be
+> just as valuable, and would mean this fallback is scoped too broadly.
+
 ### Added
 
 - **`--accel <auto|tcg|hvf|kvm>` on `start`/`add`, plus a matching `accel` setting
