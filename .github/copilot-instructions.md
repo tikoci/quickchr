@@ -43,6 +43,7 @@ When changing QEMU/CHR behavior, update the relevant shared skill in
 
 - ARM64 (`virt` machine): NEVER use `if=virtio` for drives. Always explicit `-device virtio-blk-pci,drive=drive0`.
 - HVF acceleration: use `-cpu host` (not cortex-a710).
+- arm64 guests on macOS always get TCG (`-cpu cortex-a710`) — HVF cannot run the CHR image's 32-bit ARM userspace on Apple Silicon (DESIGN.md #10, quickchr#97). `--accel`/`QUICKCHR_ACCEL` overrides this for testing.
 - pflash units (UEFI code + vars) must be identical size.
 - QGA is x86 only (arm64 CHR doesn't start the guest agent).
 

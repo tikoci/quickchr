@@ -13,6 +13,28 @@ export const CHANNELS: readonly Channel[] = Object.freeze(["stable", "long-term"
 export type Arch = "arm64" | "x86";
 export const ARCHES: Arch[] = ["arm64", "x86"];
 
+// --- Acceleration ---
+
+/**
+ * QEMU accelerator selection. "auto" means detectAccel() picks, including its
+ * platform safety fallbacks; the other three force `-accel <mode>` verbatim and
+ * bypass detection entirely (see DESIGN.md #10).
+ */
+export type AccelMode = "auto" | "tcg" | "hvf" | "kvm";
+export const ACCEL_MODES: readonly AccelMode[] = Object.freeze(["auto", "tcg", "hvf", "kvm"] as AccelMode[]);
+
+/** Validate an accelerator name from a CLI flag, env var, or settings file. */
+export function parseAccelMode(raw: string): AccelMode {
+	const v = raw.trim().toLowerCase();
+	if (!(ACCEL_MODES as readonly string[]).includes(v)) {
+		throw new QuickCHRError(
+			"INVALID_SETTING_VALUE",
+			`Invalid value "${raw}" for accel — must be one of ${ACCEL_MODES.join(", ")}`,
+		);
+	}
+	return v as AccelMode;
+}
+
 // --- Networking ---
 
 /** @deprecated Use NetworkSpecifier instead. Kept for backward compatibility with old machine.json files. */

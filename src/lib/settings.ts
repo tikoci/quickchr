@@ -13,12 +13,16 @@
  * input resolution, never per-machine config.
  */
 
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, fsyncSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync, fsyncSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { ARCHES, CHANNELS, QuickCHRError } from "./types.ts";
-import type { Channel } from "./types.ts";
+import { ARCHES, CHANNELS, QuickCHRError, parseAccelMode } from "./types.ts";
+import type { AccelMode, Channel } from "./types.ts";
 import { parseSizeString, DEFAULT_CACHE_MAX_BYTES } from "./cache.ts";
-import { quickchrConfigDir } from "./paths.ts";
+import { loadSettingsFileDefaults, readSettingsFileLines, settingsFilePath } from "./settings-file.ts";
+
+// The quickchr.env file tier lives in the leaf module settings-file.ts (see its
+// header for why); re-exported here so settings.ts stays the single public entry.
+export { SETTINGS_FILE_NAME, loadSettingsFileDefaults, parseSettingsFileLines, readSettingsFileLines, settingsFilePath } from "./settings-file.ts";
 
 export type SettingsValue = string | number | boolean;
 export type SettingsSource = "env" | "file" | "default";
@@ -94,6 +98,17 @@ export const SETTINGS_KEYS: readonly SettingsKeyDef[] = [
 		serialize: (v) => String(v),
 	},
 	{
+		// "auto" = let detectAccel() choose, including its platform fallbacks
+		// (notably arm64-on-Apple-Silicon → TCG, see DESIGN.md #10). Any other
+		// value is passed to QEMU verbatim and skips detection entirely — the
+		// escape hatch for testing HVF against a future AArch64-only arm64 image.
+		attr: "accel",
+		envKey: "QUICKCHR_ACCEL",
+		builtinDefault: "auto" satisfies AccelMode,
+		parse: (raw) => parseAccelMode(raw),
+		serialize: (v) => String(v),
+	},
+	{
 		attr: "cache-max-size",
 		envKey: "QUICKCHR_CACHE_MAX_SIZE",
 		builtinDefault: DEFAULT_CACHE_MAX_BYTES,
@@ -123,13 +138,6 @@ export const SETTINGS_KEYS: readonly SettingsKeyDef[] = [
 	},
 ];
 
-export const SETTINGS_FILE_NAME = "quickchr.env";
-
-/** ~/.config/quickchr/quickchr.env */
-export function settingsFilePath(): string {
-	return join(quickchrConfigDir(), SETTINGS_FILE_NAME);
-}
-
 /** Accepts "default-channel" | "QUICKCHR_DEFAULT_CHANNEL" | "DEFAULT_CHANNEL" | "default_channel". */
 export function lookupSettingsKey(input: string): SettingsKeyDef | undefined {
 	let name = input.trim();
@@ -149,36 +157,6 @@ function unknownKeyError(input: string): QuickCHRError {
 }
 
 // --- File IO ---
-
-/** Raw non-empty lines, in file order. [] if the file doesn't exist. */
-export function readSettingsFileLines(): string[] {
-	const path = settingsFilePath();
-	if (!existsSync(path)) return [];
-	const text = readFileSync(path, "utf-8");
-	const lines = text.split("\n");
-	if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-	return lines;
-}
-
-/** Parse QUICKCHR_*=value lines into a flat map. Blank/comment lines ignored; later dup wins. */
-export function parseSettingsFileLines(lines: readonly string[]): Record<string, string> {
-	const result: Record<string, string> = {};
-	for (const rawLine of lines) {
-		const line = rawLine.trim();
-		if (line.length === 0 || line.startsWith("#")) continue;
-		const eq = line.indexOf("=");
-		if (eq <= 0) continue;
-		const key = line.slice(0, eq).trim();
-		if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
-		result[key] = line.slice(eq + 1).trim();
-	}
-	return result;
-}
-
-/** The `file` tier every resolver call reads. {} when the file is absent. */
-export function loadSettingsFileDefaults(): Record<string, string> {
-	return parseSettingsFileLines(readSettingsFileLines());
-}
 
 function lineEnvKey(line: string): string | undefined {
 	const trimmed = line.trim();

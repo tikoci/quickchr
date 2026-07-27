@@ -293,10 +293,10 @@ describe("settingsGet / settingsSet / settingsReset round-trip", () => {
 });
 
 describe("settingsPrint tolerance", () => {
-	test("reports all 5 keys even with a corrupted value in one", () => {
+	test("reports all 6 keys even with a corrupted value in one", () => {
 		writeSettingsFile("QUICKCHR_TIMEOUT_EXTRA=not-a-number\n");
 		const entries = settingsPrint();
-		expect(entries.length).toBe(5);
+		expect(entries.length).toBe(6);
 		const timeoutEntry = entries.find((e) => e.key === "timeout-extra");
 		expect(timeoutEntry?.value).toBe("not-a-number");
 		expect(timeoutEntry?.source).toBe("file");

@@ -8,19 +8,38 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Added
+
+- **`--accel <auto|tcg|hvf|kvm>` on `start`/`add`, plus a matching `accel` setting
+  and `QUICKCHR_ACCEL` env var.** Anything other than `auto` (the default) is passed
+  to QEMU verbatim and bypasses accelerator detection entirely — including the
+  arm64-on-Apple-Silicon TCG fallback below. Precedence follows the usual chain:
+  flag > env > `quickchr.env` > built-in. This is the escape hatch for testing HVF
+  against a future AArch64-only arm64 CHR image without a code change; forcing
+  `--accel hvf` for an arm64 guest on Apple Silicon still prints the panic caveat.
+  Issue #97.
+
 ### Fixed
 
-- **arm64 CHR no longer kernel-panics on Apple M4+ hosts.** `detectAccel("arm64")` now
-  probes `hw.optional.arm.FEAT_SSBS` and falls back from HVF to TCG when the host omits
-  FEAT_SSBS (Apple M4 removed it). Under HVF `-cpu host` passed that gap to RouterOS's
-  Linux 5.6.3 kernel, which panics at init (`No working init found`); the `-cpu` model is
-  inert under HVF, so no CPU-model tweak avoids it and no released QEMU injects SSBS yet.
-  A one-line note is printed at launch explaining the downgrade.
-  Confirmed on a real M4 (tikoci/mikropkl#11); latent here because CI/dev hosts are Intel.
-  Keyed on the FEAT_SSBS feature (not a CPU brand string) so it scopes to the real host
-  condition and catches M5+. The fallback is unconditional on an SSBS-less host: the host
-  sysctl won't flip when a fixed QEMU ships, so restoring HVF will need a QEMU-version
-  guard at that point (deferred — the upstream fix is an unmerged RFC). Issue #97.
+- **arm64 CHR no longer kernel-panics on Apple Silicon** — `detectAccel("arm64")` now
+  returns `tcg` on **every** Apple Silicon generation, and a one-line note at launch
+  explains why. The cause is the shipped CHR image, not the accelerator: arm64 CHR
+  (7.20.8 – 7.23beta5 verified) pairs an AArch64 kernel with a **32-bit ARM userspace**
+  — the appended initramfs `/init` is `ELF 32-bit LSB ARM, EABI5`, and the 7.22.1
+  `system` package holds 101 more ARM32 executables. Apple Silicon implements no
+  AArch32 at any exception level and HVF passes the hardware `ID_AA64PFR0_EL1` through
+  unmodified, so the guest kernel never sets `ARM64_HAS_32BIT_EL0`, `execve("/init")`
+  returns `-ENOEXEC`, and Linux panics at t≈0.076 s with `No working init found`.
+  TCG's emulated models do provide AArch32 EL0, so the same image boots.
+
+  This **supersedes and widens** the unreleased `FEAT_SSBS`-based fallback: SSBS was a
+  coincident marker of the M4 host that first reported the panic, not the mechanism
+  (Linux 5.6 treats SSBS as optional and boots without it). That predicate left
+  M1/M2/M3 on HVF and panicking. Because no macOS VMM can present a feature the
+  silicon lacks, a QEMU-version floor is not a valid restore signal either — the
+  restore signal is a future arm64 CHR image whose required userspace is AArch64
+  throughout. Root-cause chain in `docs/m4-hvf-arm64-investigation.md`; originally
+  reported in tikoci/mikropkl#11. Issue #97.
 
 ## [0.4.5] — 2026-07-18
 

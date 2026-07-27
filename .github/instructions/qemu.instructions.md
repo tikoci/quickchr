@@ -27,13 +27,16 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 
 ## Acceleration
 
+0. An explicit override (`--accel` flag > `QUICKCHR_ACCEL` env > `accel` in `quickchr.env`) other than `auto` → used verbatim, **skipping every check below**
 1. Linux + matching host/guest arch + /dev/kvm writable → `kvm`
-2. macOS + matching host/guest arch + `kern.hv_support=1` → `hvf`
+2. macOS + `kern.hv_support=1` + **x86 guest** → `hvf`
 3. Fallback → `tcg` (software emulation, use `tb-size=256`)
+
+macOS **arm64 guests never auto-select HVF** — see the Apple Silicon note below.
 
 > **macOS HVF — host/guest arch determines acceleration:**
 > - **x86_64 host (Intel Mac)**: `qemu-system-x86_64` uses HVF for x86 CHR — native virtualization, not Rosetta. `qemu-system-aarch64` falls back to `accel=tcg` for ARM64 CHR (cross-arch software emulation).
-> - **arm64 host (Apple Silicon)**: `qemu-system-aarch64` uses HVF for ARM64 CHR. `qemu-system-x86_64` for x86 CHR must use `accel=tcg` (x86 software emulation on ARM). **Rosetta2 does not help**: it translates QEMU's *process binary* to run natively on arm64 but cannot provide hardware acceleration for x86 *guest instructions* inside QEMU. CHR images also have known conflicts with Apple's Virtualization Framework (separate from QEMU HVF), making QEMU the only reliable hypervisor for CHR on any Mac.
+> - **arm64 host (Apple Silicon)**: `qemu-system-aarch64` must use `accel=tcg` for ARM64 CHR, **not HVF** — current arm64 CHR images require a 32-bit ARM userspace (the appended initramfs `/init` is `ELF 32-bit LSB ARM, EABI5`) and no Apple CPU implements AArch32 at any exception level, so an HVF guest panics at t≈0.076 s with `No working init found`. HVF passes the hardware `ID_AA64PFR0_EL1` straight through, so **no `-cpu` model changes this** and no QEMU version fixes it; the restore signal is a future AArch64-only CHR image, not a host or QEMU property. See DESIGN.md #10 and `docs/m4-hvf-arm64-investigation.md` (quickchr#97). `qemu-system-x86_64` for x86 CHR must also use `accel=tcg` (x86 software emulation on ARM). **Rosetta2 does not help**: it translates QEMU's *process binary* to run natively on arm64 but cannot provide hardware acceleration for x86 *guest instructions* inside QEMU. CHR images also have known conflicts with Apple's Virtualization Framework (separate from QEMU HVF), making QEMU the only reliable hypervisor for CHR on any Mac.
 >
 > Cross-arch TCG (guest arch ≠ host arch) is significantly slower than native KVM/HVF. Do not assume any specific timing — measure with your target config. The per-probe HTTP timeout in boot-wait loops is often the critical factor, not total poll duration.
 

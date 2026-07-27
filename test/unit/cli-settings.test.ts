@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 describe("CLI `quickchr settings`", () => {
-	test("print shows all 5 keys with their built-in defaults when nothing is configured", async () => {
+	test("print shows all 6 keys with their built-in defaults when nothing is configured", async () => {
 		const { stdout, exitCode } = await runQuickchr(["settings", "print"]);
 		expect(exitCode).toBe(0);
 		expect(stdout).toContain("default-channel");
@@ -56,15 +56,17 @@ describe("CLI `quickchr settings`", () => {
 		expect(stdout).toContain("cache-max-size");
 		expect(stdout).toContain("2.00 GiB");
 		expect(stdout).toContain("timeout-extra");
+		expect(stdout).toContain("accel");
+		expect(stdout).toContain("auto");
 		expect(stdout).toContain("secure-login");
 		expect(stdout).toContain("(unset)");
 	});
 
-	test("print --json is valid JSON with all 5 entries", async () => {
+	test("print --json is valid JSON with all 6 entries", async () => {
 		const { stdout, exitCode } = await runQuickchr(["settings", "print", "--json"]);
 		expect(exitCode).toBe(0);
 		const parsed = JSON.parse(stdout);
-		expect(parsed.settings).toHaveLength(5);
+		expect(parsed.settings).toHaveLength(6);
 	});
 
 	test("set/get/reset round-trip through the real CLI", async () => {

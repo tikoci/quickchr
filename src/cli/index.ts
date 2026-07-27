@@ -157,6 +157,21 @@ export async function resolveTimeoutExtraMs(flags: Record<string, string | boole
 	return seconds !== undefined ? seconds * 1000 : undefined;
 }
 
+/** Apply an explicit `--accel <auto|tcg|hvf|kvm>` as the process-level accelerator
+ *  override, so every detectAccel() call in this run (QEMU args, boot timeouts,
+ *  respawn logic) agrees on one value. Absent flag → the accel setting's own
+ *  env/file/default tiers apply, so this only installs the top tier. Throws
+ *  INVALID_SETTING_VALUE on an unrecognized mode. Shared by cmdAdd and cmdStart. */
+export async function applyAccelFlag(flags: Record<string, string | boolean | string[]>): Promise<void> {
+	const raw = flag(flags, "accel");
+	if (raw === undefined) return;
+	const [{ parseAccelMode }, { setAccelOverride }] = await Promise.all([
+		import("../lib/types.ts"),
+		import("../lib/platform.ts"),
+	]);
+	setAccelOverride(parseAccelMode(raw));
+}
+
 /** Resolve --secure-login/--no-secure-login, falling back to the secure-login setting
  *  only when neither flag was passed. Shared by cmdAdd, cmdStart, and cmdStart's
  *  --all bulk-restart path. */
@@ -535,6 +550,7 @@ async function cmdAdd(argv: string[]) {
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold, formatPorts, formatNetworks, dim } = await import("./format.ts");
 	const { resolveSetting } = await import("../lib/settings.ts");
+	await applyAccelFlag(flags);
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
@@ -1175,6 +1191,8 @@ async function cmdSetup() {
 async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	applyTimeoutExtraShortFlag(argv, flags, positional);
+	// Before the --all branch: both start paths must see the same override.
+	await applyAccelFlag(flags);
 
 	// --all: start every stopped machine in background
 	if (flagBool(flags, "all")) {
@@ -2720,6 +2738,9 @@ Options:
   --arch <arch>         Architecture: arm64, x86, auto (default: host native)
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
+  --accel <mode>        Force QEMU accelerator: auto|tcg|hvf|kvm (default: auto).
+                        Anything but 'auto' bypasses detection, including the
+                        arm64-on-Apple-Silicon TCG fallback (tikoci/quickchr#97).
 	--boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
 	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
 	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
@@ -2802,6 +2823,9 @@ Options:
   --name <name>         Instance name
   --cpu <n>             vCPU count (default: 1)
   --mem <mb>            RAM in MB (default: 512)
+  --accel <mode>        Force QEMU accelerator: auto|tcg|hvf|kvm (default: auto).
+                        Anything but 'auto' bypasses detection, including the
+                        arm64-on-Apple-Silicon TCG fallback (tikoci/quickchr#97).
 	--boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
 	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
 	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
