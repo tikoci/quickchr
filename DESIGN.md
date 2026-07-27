@@ -108,8 +108,9 @@ Current consumers are all first-party tikoci projects (centrs, donny, restraml),
 **Global settings** live separately, under the XDG **config** tier (not the data tree
 above): `~/.config/quickchr/quickchr.env`, dotenv-style (`QUICKCHR_KEY=value` lines).
 Managed via `quickchr settings get|set|print|reset`. Precedence per key: CLI flag >
-`QUICKCHR_<KEY>` env var > `quickchr.env` > built-in default. The 5 managed keys:
-`default-channel`, `default-arch`, `cache-max-size`, `timeout-extra`, `secure-login`.
+`QUICKCHR_<KEY>` env var > `quickchr.env` > built-in default. The 6 managed keys:
+`default-channel`, `default-arch`, `accel`, `cache-max-size`, `timeout-extra`,
+`secure-login`.
 See MANUAL.md's CLI reference and environment-variables sections for the full surface.
 
 ## Platform Support
@@ -117,19 +118,20 @@ See MANUAL.md's CLI reference and environment-variables sections for the full su
 | Platform               | x86 CHR | arm64 CHR | Notes |
 |------------------------|---------|-----------|-------|
 | macOS x86_64           | HVF     | TCG       | Intel Mac |
-| macOS arm64 (native)   | HVF     | TCG¹     | Apple Silicon, bun is arm64 |
-| macOS arm64 (Rosetta)  | HVF     | TCG       | bun is x86_64; arm64 HVF skipped |
+| macOS arm64 (native)   | TCG     | TCG¹     | Apple Silicon, bun is arm64 |
+| macOS arm64 (Rosetta)  | TCG     | TCG¹     | Apple Silicon, bun reports x86_64 |
 | Linux x86_64           | KVM     | TCG       | KVM requires `/dev/kvm` writable |
 | Linux aarch64          | TCG     | KVM       | x86 TCG on arm64 Linux |
 | Windows x86_64         | TCG     | TCG       | HVF/KVM not available |
 
-¹ arm64 CHR is forced to **TCG on every Apple Silicon generation**: the image's required userspace is 32-bit ARM and Apple CPUs implement no AArch32, so an HVF guest panics at init (see Design Decisions #10). x86 CHR is unaffected. Override with `--accel hvf` to test a future AArch64-only image.
+¹ arm64 CHR is forced to **TCG on every Apple Silicon generation**: the image's required userspace is 32-bit ARM and Apple CPUs implement no AArch32, so an HVF guest panics at init (see Design Decisions #10). x86 CHR also uses TCG because HVF cannot virtualize x86 on an arm64 host. Override with `--accel hvf` to test a future AArch64-only image.
 
 **Acceleration detection** (`detectAccel`):
 - An explicit override (`--accel` flag > `QUICKCHR_ACCEL` env > `accel` in `quickchr.env`) short-circuits detection entirely; `auto` (the default) runs the checks below.
-- macOS: checks `kern.hv_support` via sysctl. x86 guests get HVF; **arm64 guests always get TCG** — on Intel/Rosetta because `process.arch !== "arm64"` makes arm64 HVF impossible, and on Apple Silicon because the CHR image needs AArch32 (Design Decisions #10).
+- macOS: checks `kern.hv_support` via sysctl. Intel x86 guests get HVF; **all guests on Apple Silicon get TCG** — x86 because HVF cannot virtualize across architectures, arm64 because the CHR image needs AArch32 (Design Decisions #10). A Rosetta process is identified via `sysctl.proc_translated`.
 - Linux: checks `/dev/kvm` writability.
-- Falling back to TCG is always safe, just slower (~20s x86 TCG boot on Apple Silicon; ~2 min arm64 TCG on Intel).
+- Falling back to TCG is safe but can be significantly slower; measure with the
+  target host, guest architecture, and RouterOS version.
 
 ## CI System
 

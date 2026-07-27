@@ -69,6 +69,13 @@ describe("CLI `quickchr settings`", () => {
 		expect(parsed.settings).toHaveLength(6);
 	});
 
+	test("help documents the accel key and its accepted modes", async () => {
+		const { stdout, exitCode } = await runQuickchr(["help", "settings"]);
+		expect(exitCode).toBe(0);
+		expect(stdout).toContain("accel");
+		expect(stdout).toContain("auto|tcg|hvf|kvm");
+	});
+
 	test("set/get/reset round-trip through the real CLI", async () => {
 		const setRes = await runQuickchr(["settings", "set", "default-channel", "testing"]);
 		expect(setRes.exitCode).toBe(0);

@@ -10,6 +10,7 @@ import {
 	getQemuInstallHint,
 	getQemuVersion,
 	isAppleSiliconHost,
+	resetAppleSiliconHostCache,
 	qgaKvmWarning,
 	accelNote,
 	resolveAccelOverride,
@@ -66,11 +67,13 @@ function mockSpawnSync(
 // so a developer who has forced an accelerator would see these tests fail.
 beforeEach(() => {
 	setAccelOverride("auto");
+	resetAppleSiliconHostCache();
 });
 
 afterEach(() => {
 	restoreRuntimeDetection();
 	setAccelOverride(undefined);
+	resetAppleSiliconHostCache();
 	mock.restore();
 });
 
@@ -322,30 +325,18 @@ describe("qgaKvmWarning", () => {
 });
 
 describe("isCrossArchEmulation", () => {
-	test("x86 guest is never cross-arch emulation", () => {
-		// x86 runs natively on x86_64 or via KVM/HVF — never TCG-only
-		expect(isCrossArchEmulation("x86")).toBe(false);
-	});
-
-	test("arm64 guest on arm64 host is not cross-arch", () => {
-		if (process.arch !== "arm64") {
-			console.log("Skipping: not running on arm64 host");
-			return;
-		}
+	test("compares both guest architectures to an arm64 host", () => {
+		setPlatform("darwin");
+		setArch("arm64");
 		expect(isCrossArchEmulation("arm64")).toBe(false);
+		expect(isCrossArchEmulation("x86")).toBe(true);
 	});
 
-	test("arm64 guest on x86_64 host is cross-arch", () => {
-		if (process.arch === "arm64") {
-			console.log("Skipping: running on arm64 host");
-			return;
-		}
+	test("compares both guest architectures to an x86_64 host", () => {
+		setPlatform("linux");
+		setArch("x64");
 		expect(isCrossArchEmulation("arm64")).toBe(true);
-	});
-
-	test("returns boolean", () => {
-		expect(typeof isCrossArchEmulation("x86")).toBe("boolean");
-		expect(typeof isCrossArchEmulation("arm64")).toBe("boolean");
+		expect(isCrossArchEmulation("x86")).toBe(false);
 	});
 });
 
@@ -377,6 +368,7 @@ describe("detectAccel", () => {
 		setPlatform("darwin");
 		setArch("x64");
 		mockSpawnSync((cmd) => {
+			if (cmd.at(-1) === "sysctl.proc_translated") return { exitCode: 1 };
 			expect(cmd).toEqual(["sysctl", "-n", "kern.hv_support"]);
 			return { exitCode: 0, stdout: "1\n" };
 		});
@@ -394,8 +386,23 @@ describe("detectAccel", () => {
 		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
 
 		expect(await detectAccel("arm64")).toBe("tcg");
-		// x86 guests are unaffected — HVF has no AArch32 problem there.
-		expect(await detectAccel("x86")).toBe("hvf");
+		// x86 is cross-architecture on this physical host, so HVF is unavailable.
+		expect(await detectAccel("x86")).toBe("tcg");
+	});
+
+	test("falls back to tcg for both guests when running under Rosetta on Apple Silicon", async () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync((cmd) => {
+			if (cmd.at(-1) === "sysctl.proc_translated") {
+				return { exitCode: 0, stdout: "1\n" };
+			}
+			expect(cmd).toEqual(["sysctl", "-n", "kern.hv_support"]);
+			return { exitCode: 0, stdout: "1\n" };
+		});
+
+		expect(await detectAccel("x86")).toBe("tcg");
+		expect(await detectAccel("arm64")).toBe("tcg");
 	});
 
 	test("falls back to tcg on macOS when Hypervisor Framework is unavailable", async () => {
@@ -408,15 +415,26 @@ describe("detectAccel", () => {
 });
 
 describe("isAppleSiliconHost", () => {
-	test("true only on darwin with a native arm64 process", () => {
+	test("true on darwin with a native arm64 process", () => {
 		setPlatform("darwin");
 		setArch("arm64");
 		expect(isAppleSiliconHost()).toBe(true);
 	});
 
-	test("false on an Intel Mac and on a Rosetta (x64) process", () => {
+	test("true for a Rosetta process", () => {
 		setPlatform("darwin");
 		setArch("x64");
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			return { exitCode: 0, stdout: "1\n" };
+		});
+		expect(isAppleSiliconHost()).toBe(true);
+	});
+
+	test("false on an Intel Mac", () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync(() => ({ exitCode: 1 }));
 		expect(isAppleSiliconHost()).toBe(false);
 	});
 
@@ -489,18 +507,18 @@ describe("accelNote", () => {
 		expect(accelNote("arm64", "tcg")).toBeNull();
 	});
 
-	test("reports a forced accelerator, and warns when forcing arm64 HVF on Apple Silicon", () => {
+	test("reports a configured accelerator, and warns when forcing arm64 HVF on Apple Silicon", () => {
 		setPlatform("darwin");
 		setArch("arm64");
 
 		setAccelOverride("hvf");
 		const note = accelNote("arm64", "hvf");
-		expect(note).toContain("forced");
+		expect(note).toContain("configured");
 		expect(note).toContain("No working init found");
 
-		// x86 guests get the plain "forced" line with no #97 caveat.
+		// x86 guests get the plain configured line with no #97 caveat.
 		const x86Note = accelNote("x86", "hvf");
-		expect(x86Note).toContain("forced");
+		expect(x86Note).toContain("configured");
 		expect(x86Note).not.toContain("No working init found");
 	});
 });

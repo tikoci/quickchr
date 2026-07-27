@@ -6,7 +6,7 @@ import { imageTarget } from "./image-target.ts";
  * Integration test — start and stop a CHR.
  *
  * Requires QEMU installed. Skipped in CI unless QUICKCHR_INTEGRATION=1.
- * On macOS arm64, tests arm64 CHR with HVF.
+ * On macOS arm64, tests arm64 CHR with TCG.
  * On Linux x86_64, tests x86 CHR with KVM.
  */
 
@@ -33,8 +33,8 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
-			// Let start() pick the native arch (x86 + HVF on Rosetta, arm64 + HVF on native)
-			// so QEMU uses hardware acceleration and boots quickly.
+				// Let start() pick the process-native arch; detectAccel() applies the
+				// physical-host policy (including Apple Silicon TCG fallback).
 			instance = await QuickCHR.start({
 				...imageTarget(),
 				background: true,
@@ -75,7 +75,7 @@ describe.skipIf(SKIP)("package installation", () => {
 	test("start with extra package → package active after boot", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
-		// Use arm64 if on macOS arm64 (native HVF), x86 otherwise
+		// Use arm64 when the process is native arm64, x86 otherwise.
 		const arch = process.arch === "arm64" ? "arm64" : "x86";
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 

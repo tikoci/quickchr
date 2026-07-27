@@ -929,16 +929,20 @@ arch:
 |---|---|---|
 | macOS x86_64 | x86 | HVF |
 | macOS x86_64 | arm64 | TCG |
-| macOS arm64 (native bun) | arm64 | HVF |
+| macOS arm64 (native bun) | arm64 | TCG |
 | macOS arm64 (native bun) | x86 | TCG |
 | macOS arm64 (Rosetta bun) | arm64 | TCG |
+| macOS arm64 (Rosetta bun) | x86 | TCG |
 | Linux x86_64 + `/dev/kvm` writable | x86 | KVM |
 | Linux aarch64 + `/dev/kvm` writable | arm64 | KVM |
 | any other combo | any | TCG |
 
 `Bun` running under Rosetta on Apple Silicon reports `process.arch ===
-"x64"`, so HVF for arm64 is skipped (architecture mismatch). Run with
-native arm64 Bun to get arm64 HVF.
+"x64"`, so quickchr checks `sysctl.proc_translated` to identify the physical
+arm64 host. Auto-selection uses TCG for both guest architectures there: HVF
+cannot virtualize x86 across architectures, and current arm64 CHR images need
+AArch32 userspace support that Apple Silicon does not provide. Use `--accel`
+(or `QUICKCHR_ACCEL` / the `accel` setting) only to override this deliberately.
 
 ### Boot timeout
 
@@ -1002,7 +1006,7 @@ managed via `quickchr settings get|set|print|reset` (§3, Meta). Atomic writes
 preserve every other line (comments, blank lines, foreign vars) byte-for-byte.
 `reset <key>` deletes the line entirely rather than blanking it, since a blank
 `KEY=` line is still "set" to a bash-sourced file. Never stores credentials —
-the 5 managed keys are all structural preferences, not secrets.
+the 6 managed keys are all structural preferences, not secrets.
 
 ### Environment variables consumed
 

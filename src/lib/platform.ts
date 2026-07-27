@@ -114,14 +114,11 @@ export function qgaKvmWarning(): string | null {
 	);
 }
 
-/** Whether guestArch requires cross-architecture emulation (TCG) on this host.
- *  Cross-arch emulation is significantly slower and needs more memory/timeout.
- *  arm64 guest on x86_64 host → TCG (slow).
- *  x86 guest on any host → HVF or KVM when available (fast). */
+/** Whether guestArch differs from the physical host CPU architecture.
+ *  Cross-arch TCG is significantly slower and needs more memory/timeout. */
 export function isCrossArchEmulation(guestArch: "x86" | "arm64"): boolean {
-	// x86 CHR is always runnable under HVF/KVM or TCG — never "slow" cross-arch.
-	// arm64 CHR on an arm64 host uses HVF/KVM; on an x86_64 host it falls back to TCG.
-	return guestArch === "arm64" && process.arch !== "arm64";
+	const hostIsArm64 = isAppleSiliconHost() || (process.platform !== "darwin" && process.arch === "arm64");
+	return (guestArch === "arm64") !== hostIsArm64;
 }
 
 /**
@@ -142,9 +139,8 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
 }
 
 /**
- * Whether this host is Apple Silicon *and* quickchr runs as a native arm64
- * process (the precondition for arm64-guest HVF at all — a Rosetta bun reports
- * process.arch "x64" and can only reach TCG).
+ * Whether the physical host is Apple Silicon, including when quickchr itself
+ * runs as an x64 process under Rosetta.
  *
  * Apple Silicon implements **no AArch32 at any exception level**: its
  * `ID_AA64PFR0_EL1` reports AArch64-only for EL0 and EL1, and HVF passes that
@@ -160,8 +156,30 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
  * bug: no QEMU flag and no macOS VMM can present a feature the silicon does not
  * implement.  See docs/m4-hvf-arm64-investigation.md and tikoci/quickchr#97.
  */
+let appleSiliconHostMemo: boolean | undefined;
+
 export function isAppleSiliconHost(): boolean {
-	return process.platform === "darwin" && process.arch === "arm64";
+	if (process.platform !== "darwin") return false;
+	if (process.arch === "arm64") return true;
+	if (process.arch !== "x64") return false;
+	if (appleSiliconHostMemo !== undefined) return appleSiliconHostMemo;
+	try {
+		const result = Bun.spawnSync(["sysctl", "-n", "sysctl.proc_translated"], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		appleSiliconHostMemo =
+			result.exitCode === 0 &&
+			new TextDecoder().decode(result.stdout).trim() === "1";
+	} catch {
+		appleSiliconHostMemo = false;
+	}
+	return appleSiliconHostMemo;
+}
+
+/** @internal Test-only: clear the memoized Rosetta probe between mocked runs. */
+export function resetAppleSiliconHostCache(): void {
+	appleSiliconHostMemo = undefined;
 }
 
 /**
@@ -200,7 +218,7 @@ export function resolveAccelOverride(): AccelMode {
 export function accelNote(guestArch: "x86" | "arm64", accel: string): string | null {
 	const forced = resolveAccelOverride();
 	if (forced !== "auto") {
-		const base = `Accelerator forced to "${forced}" (--accel / QUICKCHR_ACCEL) — auto-detection bypassed.`;
+		const base = `Accelerator configured as "${forced}" — auto-detection bypassed.`;
 		if (guestArch === "arm64" && forced === "hvf" && isAppleSiliconHost()) {
 			return `${base} Note: arm64 CHR images still ship a 32-bit ARM userspace, which Apple Silicon cannot execute under HVF — expect "No working init found" unless MikroTik has shipped an AArch64-only image (tikoci/quickchr#97).`;
 		}
@@ -238,9 +256,10 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 	}
 
 	if (hostOs === "darwin") {
-		// Apple Hypervisor Framework (HVF) is a system capability, not a per-process one.
-		// It is available if kern.hv_support=1, regardless of whether the bun process
-		// itself is arm64 native or running via Rosetta (process.arch="x64").
+		// Apple Hypervisor Framework only runs guests matching the physical host
+		// architecture. Rosetta can translate the quickchr process, but it cannot
+		// make x86 HVF guests run on Apple Silicon.
+		const appleSilicon = isAppleSiliconHost();
 		try {
 			const hvResult = Bun.spawnSync(["sysctl", "-n", "kern.hv_support"], {
 				stdout: "pipe",
@@ -248,19 +267,22 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 			});
 			const hv = new TextDecoder().decode(hvResult.stdout).trim();
 			if (hv === "1") {
-				if (guestArch === "x86") return "hvf";
+				if (guestArch === "x86" && !appleSilicon) return "hvf";
 				// arm64 guest: falls through to TCG on every macOS host.
 				//
 				// On Intel Macs process.arch is "x64" and arm64 HVF is impossible.
 				// On Apple Silicon HVF *is* available but must not be used: no Apple
 				// CPU implements AArch32 at any exception level, and current arm64 CHR
 				// images require a 32-bit ARM userspace, so an HVF guest panics at init
-				// (see isAppleSiliconHost()).  arm64 TCG still boots in <5 min.
+				// (see isAppleSiliconHost()).  arm64 TCG still boots, but is slower.
 				//
 				// Restore signal (#97) is the *guest artifact*, not the host or QEMU
 				// version: a future arm64 CHR whose appended /init and system-package
 				// executables are all AArch64, verified by a real HVF boot.  Until then
 				// `--accel hvf` / QUICKCHR_ACCEL=hvf is the escape hatch for testing.
+				//
+				// x86 guests also fall through on Apple Silicon because HVF cannot
+				// virtualize across architectures; their escape hatch is the same.
 			}
 		} catch { /* fall through */ }
 	}

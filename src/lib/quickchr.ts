@@ -2008,7 +2008,7 @@ export class QuickCHR {
 				// Under an override, accelAvailable is just the forced mode for every
 				// arch — say so, or the row reads as a capability report it isn't.
 				const forced = resolveAccelOverride();
-				const suffix = forced === "auto" ? "" : " — forced via --accel/QUICKCHR_ACCEL";
+				const suffix = forced === "auto" ? "" : " — configured override";
 				checks.push({
 					label: "Acceleration",
 					status: "ok",

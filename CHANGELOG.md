@@ -41,6 +41,11 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   throughout. Root-cause chain in `docs/m4-hvf-arm64-investigation.md`; originally
   reported in tikoci/mikropkl#11. Issue #97.
 
+- **x86 CHR now also auto-selects TCG on Apple Silicon**, including when quickchr
+  runs under Rosetta. HVF cannot virtualize an x86 guest on a physical arm64 host;
+  `sysctl.proc_translated` distinguishes Rosetta from an Intel Mac. Explicit
+  accelerator overrides still bypass this policy.
+
 ## [0.4.5] — 2026-07-18
 
 ### Changed

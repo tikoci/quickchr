@@ -123,7 +123,7 @@ export const SETTINGS_KEYS: readonly SettingsKeyDef[] = [
 		serialize: (v) => String(v),
 	},
 	{
-		// No builtinDefault: unlike the other 4 keys, the wizard needs to distinguish
+		// No builtinDefault: unlike the other 5 keys, the wizard needs to distinguish
 		// "not configured" from "explicitly false" (src/cli/wizard.ts's userChoice
 		// initialValue only pre-highlights "admin" when the setting is concretely
 		// false) — a builtinDefault here would collapse that distinction and always

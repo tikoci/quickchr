@@ -29,7 +29,7 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 
 0. An explicit override (`--accel` flag > `QUICKCHR_ACCEL` env > `accel` in `quickchr.env`) other than `auto` → used verbatim, **skipping every check below**
 1. Linux + matching host/guest arch + /dev/kvm writable → `kvm`
-2. macOS + `kern.hv_support=1` + **x86 guest** → `hvf`
+2. macOS + `kern.hv_support=1` + **physical x86_64 host + x86 guest** → `hvf`
 3. Fallback → `tcg` (software emulation, use `tb-size=256`)
 
 macOS **arm64 guests never auto-select HVF** — see the Apple Silicon note below.
@@ -95,4 +95,3 @@ Poll `http://127.0.0.1:{http_port}/` with timeout. RouterOS REST API responds on
 Boot time varies significantly by acceleration mode and host hardware — do not hard-code estimates.
 Under cross-arch TCG, a single HTTP round-trip through the emulated TCP stack can take many seconds;
 the per-probe HTTP timeout must be long enough to actually receive a response.
-

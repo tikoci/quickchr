@@ -163,8 +163,13 @@ export async function resolveTimeoutExtraMs(flags: Record<string, string | boole
  *  env/file/default tiers apply, so this only installs the top tier. Throws
  *  INVALID_SETTING_VALUE on an unrecognized mode. Shared by cmdAdd and cmdStart. */
 export async function applyAccelFlag(flags: Record<string, string | boolean | string[]>): Promise<void> {
-	const raw = flag(flags, "accel");
-	if (raw === undefined) return;
+	const value = flags.accel;
+	if (value === undefined) return;
+	const raw = Array.isArray(value)
+		? value.at(-1) ?? ""
+		: typeof value === "string"
+			? value
+			: "";
 	const [{ parseAccelMode }, { setAccelOverride }] = await Promise.all([
 		import("../lib/types.ts"),
 		import("../lib/platform.ts"),
@@ -3080,6 +3085,8 @@ Managed keys:
   default-channel   Default --channel for 'add'/'start' and the setup wizard.
                     stable|long-term|testing|development (default: stable)
   default-arch      Default --arch. arm64|x86|auto (default: auto = host native)
+  accel             QEMU accelerator for 'add'/'start'.
+                    auto|tcg|hvf|kvm (default: auto = detect)
   cache-max-size    Auto-prune cap applied after each successful start.
                     Size string (e.g. 2G, 512M). (default: 2G)
   timeout-extra     Default for 'start's --timeout-extra/-T when omitted.
