@@ -272,6 +272,7 @@ pci
 pdb
 perflevel
 pflash
+pfr
 pgrep
 pidfile
 pingable
@@ -426,6 +427,7 @@ virtio
 virtserialport
 virtualenv
 vmcore
+vmm
 vmnet
 vms
 vnd

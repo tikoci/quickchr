@@ -1,20 +1,22 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseFlags, resolveTimeoutExtraMs, resolveSecureLoginFlag, applyTimeoutExtraShortFlag } from "../../src/cli/index.ts";
+import { parseFlags, resolveTimeoutExtraMs, resolveSecureLoginFlag, applyTimeoutExtraShortFlag, applyAccelFlag } from "../../src/cli/index.ts";
 import { settingsFilePath } from "../../src/lib/settings.ts";
+import { resolveAccelOverride, setAccelOverride } from "../../src/lib/platform.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
 const TMP = join(import.meta.dir, ".tmp-cli-start-flag-resolution-test");
 const HOME = join(TMP, "home");
 const originalHome = process.env.HOME;
-const ENV_KEYS = ["QUICKCHR_TIMEOUT_EXTRA", "QUICKCHR_SECURE_LOGIN"];
+const ENV_KEYS = ["QUICKCHR_TIMEOUT_EXTRA", "QUICKCHR_SECURE_LOGIN", "QUICKCHR_ACCEL"];
 const originalEnvValues = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
 beforeEach(() => {
 	rmSync(TMP, { recursive: true, force: true });
 	process.env.HOME = HOME;
 	for (const k of ENV_KEYS) delete process.env[k];
+	setAccelOverride(undefined);
 });
 
 afterEach(() => {
@@ -25,6 +27,7 @@ afterEach(() => {
 		if (originalEnvValues[k] === undefined) delete process.env[k];
 		else process.env[k] = originalEnvValues[k];
 	}
+	setAccelOverride(undefined);
 });
 
 function writeSettingsFile(content: string): void {
@@ -131,6 +134,19 @@ describe("resolveTimeoutExtraMs", () => {
 	test("a negative --timeout-extra value throws INVALID_SETTING_VALUE", async () => {
 		const { flags } = parseFlags(["--timeout-extra", "-5"]);
 		await expect(resolveTimeoutExtraMs(flags)).rejects.toThrow(QuickCHRError);
+	});
+});
+
+describe("applyAccelFlag", () => {
+	test("uses the last repeated --accel value", async () => {
+		const { flags } = parseFlags(["--accel", "hvf", "--accel", "tcg"]);
+		await applyAccelFlag(flags);
+		expect(resolveAccelOverride()).toBe("tcg");
+	});
+
+	test("rejects --accel without a value", async () => {
+		const { flags } = parseFlags(["--accel"]);
+		await expect(applyAccelFlag(flags)).rejects.toThrow(QuickCHRError);
 	});
 });
 

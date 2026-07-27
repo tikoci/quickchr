@@ -398,12 +398,18 @@ Precedence per key (highest wins): CLI flag > `QUICKCHR_<KEY>` env var >
 |---|---|---|---|
 | `default-channel` | `add`/`start`'s `--channel`, wizard's channel prompt | `stable`\|`long-term`\|`testing`\|`development` | `stable` |
 | `default-arch` | `add`/`start`'s `--arch`, wizard's arch prompt | `arm64`\|`x86`\|`auto` | `auto` (host native) |
+| `accel` | `add`/`start`'s `--accel`; every `detectAccel()` call in the run | `auto`\|`tcg`\|`hvf`\|`kvm` | `auto` (detect) |
 | `cache-max-size` | Auto-prune cap applied after each successful `start` | size string (e.g. `2G`, `512M`) | `2G` |
 | `timeout-extra` | `start`'s `--timeout-extra`/`-T` when omitted | non-negative integer seconds | `0` |
 | `secure-login` | `add`/`start`'s `--secure-login` when neither `--secure-login` nor `--no-secure-login` is passed | boolean | `unset` (reported as `(unset)` — see note) |
 
+Anything other than `auto` for `accel` is handed to QEMU verbatim and **skips detection
+entirely**, including the arm64-on-Apple-Silicon TCG fallback (§Platform notes) and the
+availability checks — force `kvm` on macOS and QEMU itself reports the error. That is
+deliberate: the override exists to test an accelerator the detector currently refuses.
+
 `secure-login` is the one key `settings print`/`get` report as `(unset)` rather than a
-concrete `false`, unlike the other four: the setup wizard's login prompt needs to tell
+concrete `false`, unlike the others: the setup wizard's login prompt needs to tell
 "not configured" apart from "explicitly set to false" (it only pre-highlights "Keep
 admin with no password" when the setting is concretely `false`; leaving it unset keeps
 the wizard's own recommended "managed login" highlighted). Giving it a real
@@ -412,7 +418,7 @@ the wizard's own recommended "managed login" highlighted). Giving it a real
 the setting resolves to exactly `true`.
 
 ```bash
-quickchr settings print                       # all 5 keys, resolved value + source
+quickchr settings print                       # all 6 keys, resolved value + source
 quickchr settings set default-channel testing # write one key to quickchr.env
 quickchr settings get default-arch            # print one key's resolved value
 quickchr settings reset default-channel       # delete one managed line
@@ -420,7 +426,7 @@ quickchr settings reset                       # clear all managed lines
 ```
 
 Credentials (`--add-user`, `MIKROTIK_WEB_ACCOUNT`/`MIKROTIK_WEB_PASSWORD`) are
-never stored here — `settings` only manages the 5 keys above, and does not
+never stored here — `settings` only manages the 6 keys above, and does not
 mutate any machine's `machine.json`.
 
 ### Global behavior
@@ -923,16 +929,20 @@ arch:
 |---|---|---|
 | macOS x86_64 | x86 | HVF |
 | macOS x86_64 | arm64 | TCG |
-| macOS arm64 (native bun) | arm64 | HVF |
+| macOS arm64 (native bun) | arm64 | TCG |
 | macOS arm64 (native bun) | x86 | TCG |
 | macOS arm64 (Rosetta bun) | arm64 | TCG |
+| macOS arm64 (Rosetta bun) | x86 | TCG |
 | Linux x86_64 + `/dev/kvm` writable | x86 | KVM |
 | Linux aarch64 + `/dev/kvm` writable | arm64 | KVM |
 | any other combo | any | TCG |
 
 `Bun` running under Rosetta on Apple Silicon reports `process.arch ===
-"x64"`, so HVF for arm64 is skipped (architecture mismatch). Run with
-native arm64 Bun to get arm64 HVF.
+"x64"`, so quickchr checks `sysctl.proc_translated` to identify the physical
+arm64 host. Auto-selection uses TCG for both guest architectures there: HVF
+cannot virtualize x86 across architectures, and current arm64 CHR images need
+AArch32 userspace support that Apple Silicon does not provide. Use `--accel`
+(or `QUICKCHR_ACCEL` / the `accel` setting) only to override this deliberately.
 
 ### Boot timeout
 
@@ -996,7 +1006,7 @@ managed via `quickchr settings get|set|print|reset` (§3, Meta). Atomic writes
 preserve every other line (comments, blank lines, foreign vars) byte-for-byte.
 `reset <key>` deletes the line entirely rather than blanking it, since a blank
 `KEY=` line is still "set" to a bash-sourced file. Never stores credentials —
-the 5 managed keys are all structural preferences, not secrets.
+the 6 managed keys are all structural preferences, not secrets.
 
 ### Environment variables consumed
 
@@ -1008,6 +1018,7 @@ the 5 managed keys are all structural preferences, not secrets.
 | `QUICKCHR_INTEGRATION` | `bun:test` gate for `test/integration/` |
 | `QUICKCHR_DEFAULT_CHANNEL` | `settings.ts` — env tier for the `default-channel` setting |
 | `QUICKCHR_DEFAULT_ARCH` | `settings.ts` — env tier for the `default-arch` setting |
+| `QUICKCHR_ACCEL` | `settings.ts` / `platform.ts` — env tier for the `accel` setting; forces `-accel` and bypasses detection |
 | `QUICKCHR_CACHE_MAX_SIZE` | `settings.ts` — env tier for the `cache-max-size` setting |
 | `QUICKCHR_TIMEOUT_EXTRA` | `settings.ts` — env tier for the `timeout-extra` setting |
 | `QUICKCHR_SECURE_LOGIN` | `settings.ts` — env tier for the `secure-login` setting |

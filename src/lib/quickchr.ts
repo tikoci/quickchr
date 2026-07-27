@@ -26,7 +26,7 @@ import type {
 } from "./types.ts";
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./types.ts";
 import packageJson from "../../package.json";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, ssbsTcgWarning, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
 	resolveVersion,
 	isValidVersion,
@@ -1526,8 +1526,8 @@ export class QuickCHR {
 		// Build QEMU args and spawn
 		const platform = await detectPlatform();
 		const accel = await detectAccel(arch);
-		const ssbsNote = ssbsTcgWarning(arch);
-		if (ssbsNote) logger.warn(ssbsNote);
+		const note = accelNote(arch, accel);
+		if (note) logger.warn(note);
 		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
@@ -1840,8 +1840,8 @@ export class QuickCHR {
 
 		const platform = await detectPlatform();
 		const accel = await detectAccel(state.arch);
-		const ssbsNote = ssbsTcgWarning(state.arch);
-		if (ssbsNote) (logger ?? createLogger()).warn(ssbsNote);
+		const note = accelNote(state.arch, accel);
+		if (note) (logger ?? createLogger()).warn(note);
 		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
@@ -2005,10 +2005,14 @@ export class QuickCHR {
 		try {
 			const platform = await detectPlatform();
 			if (platform.accelAvailable.length > 0) {
+				// Under an override, accelAvailable is just the forced mode for every
+				// arch — say so, or the row reads as a capability report it isn't.
+				const { mode: forced, source } = resolveAccelOverrideWithSource();
+				const suffix = forced === "auto" ? "" : ` — configured override via ${accelSourceLabel(source)}`;
 				checks.push({
 					label: "Acceleration",
 					status: "ok",
-					detail: `${platform.accelAvailable.join(", ")} (host: ${platform.hostArch})`,
+					detail: `${platform.accelAvailable.join(", ")} (host: ${platform.hostArch})${suffix}`,
 				});
 			} else {
 				checks.push({

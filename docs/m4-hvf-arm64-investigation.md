@@ -573,38 +573,46 @@ mechanism or after MikroTik ships an ARM32-free required userspace.
 
 ## Implications for quickchr and mikropkl
 
-1. **Keep a safe TCG fallback, but broaden its scope — this is a live bug
-   today.** The current `hostLacksSsbs()` gate covers M4+ only, so on
-   **M1/M2/M3 quickchr still selects HVF for arm64 guests** and those users will
-   hit this panic: no Apple Silicon implements AArch32 at any exception level, so
-   the ELF32 `/init` cannot execute there either. The predicate should not be
-   `FEAT_SSBS == 0` but simply *"Apple Silicon host + arm64 guest + current CHR
-   artifact"* — i.e. in `detectAccel("arm64")`, return `tcg` for
-   `darwin`/`arm64` unconditionally until the artifact changes. Note there is
-   currently **no env-var accelerator override** in quickchr (unlike mikropkl's
-   `QEMU_ACCEL`); the only bypass is the library-level `config.accel` passed to
-   the QEMU arg builder (`src/lib/qemu.ts:45`). If we make the fallback
-   unconditional, an explicit escape hatch should land with it so a fixed future
-   image can be tested on HVF without a code change. E12's "works through M3"
-   claim is not merely unverified — the chain predicts it false.
-2. **Rewrite user-facing warnings.** They should say current arm64 CHR includes
-   required 32-bit ARM userspace that HVF cannot execute, not that RouterOS
-   requires SSBS.
-3. **Correct the shipped quickchr explanation and mitigation.** `DESIGN.md`,
-   `CHANGELOG.md`, `src/lib/platform.ts`, tests, and the launch warning still
-   claim SSBS is causal and scope the fallback to M4+. The runtime policy must
-   fall back for current arm64 CHR on all Apple Silicon, while preserving the
-   evidence boundary that the exact M4 `-8` line remains unobserved.
-4. **Define a restore signal from the guest artifact.** The useful signal is a
-   future arm64 CHR release whose appended `/init` and required system-package
-   executables and shared objects are AArch64, followed by a real HVF boot. Host
-   SSBS, QEMU version, and a 64-bit `/init` alone are not sufficient restore
-   signals.
-5. **Report upstream to MikroTik with a minimal artifact fact.** The narrow
-   request is: ship an ARM32-free required userspace for arm64 CHR, or document
-   that the image requires AArch32 EL0 even though its kernel is AArch64.
-6. **Do not advertise prior-generation Apple-Silicon HVF support without a
-   log.** Source predicts the same failure on M1/M2/M3.
+**Status: implemented in quickchr (issue #97, unreleased).** Items 1–4, 6 and 7
+below landed together; item 5 has been reported upstream to MikroTik.
+
+1. **TCG fallback broadened from M4+ to all Apple Silicon — done.** The
+   `hostLacksSsbs()` gate covered M4 only, so **M1/M2/M3 still selected HVF for
+   arm64 guests** and hit this panic: no Apple Silicon implements AArch32 at any
+   exception level, so the ELF32 `/init` cannot execute there either. The
+   predicate is no longer `FEAT_SSBS == 0` but *"Apple Silicon host + arm64
+   guest"* — `detectAccel("arm64")` now returns `tcg` on every macOS host
+   (`isAppleSiliconHost()`, `src/lib/platform.ts`). E12's "works through M3"
+   claim was not merely unverified; the chain predicted it false.
+2. **An explicit accelerator escape hatch landed with it — done.** quickchr
+   previously had no accelerator override at all (unlike mikropkl's
+   `QEMU_ACCEL`); the only bypass was the library-level `config.accel` passed to
+   the QEMU arg builder. Now `--accel <auto|tcg|hvf|kvm>` on `start`/`add`, the
+   `accel` setting, and `QUICKCHR_ACCEL` force the accelerator verbatim and skip
+   detection, so a fixed future image can be tested on HVF without a code
+   change. Forcing `hvf` for an arm64 guest on Apple Silicon still prints the
+   panic caveat rather than obeying silently.
+3. **User-facing warnings rewritten — done.** `accelNote()` (replacing
+   `ssbsTcgWarning()`) says the arm64 CHR image includes required 32-bit ARM
+   userspace that HVF cannot execute, not that RouterOS requires SSBS.
+4. **Shipped explanation corrected — done.** `DESIGN.md` #10, `CHANGELOG.md`,
+   `src/lib/platform.ts`, `test/unit/platform.test.ts`, the launch warning, and
+   `.github/instructions/qemu.instructions.md` no longer claim SSBS is causal or
+   scope the fallback to M4+. The evidence boundary is preserved: the exact M4
+   `-8` line remains unobserved.
+5. **Report upstream to MikroTik with a minimal artifact fact — sent.** The
+   narrow request was: ship an ARM32-free required userspace for arm64 CHR, or
+   document that the image requires AArch32 EL0 even though its kernel is
+   AArch64. No response recorded here yet; a MikroTik build whose arm64 image
+   drops the ARM32 userspace is the restore signal for item 6.
+6. **Restore signal defined from the guest artifact — done.** The useful signal
+   is a future arm64 CHR release whose appended `/init` and required
+   system-package executables and shared objects are AArch64, followed by a real
+   HVF boot. Host SSBS, QEMU version, and a 64-bit `/init` alone are not
+   sufficient restore signals, so the previously-deferred `getQemuVersion()`
+   floor was dropped rather than left as a TODO.
+7. **Do not advertise prior-generation Apple-Silicon HVF support without a log.**
+   Source predicts the same failure on M1/M2/M3.
 
 The fallback remains a mitigation, not the desired performance outcome.
 Removing it safely requires a changed RouterOS artifact, not additional QEMU

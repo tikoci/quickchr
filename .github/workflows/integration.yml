@@ -22,10 +22,17 @@ name: Integration
 # Platform ids (comma-separate to combine, or use a group alias):
 #   linux-x86    ubuntu-latest      x86 CHR    KVM
 #   linux-arm64  ubuntu-24.04-arm   arm64 CHR  KVM if available; hosted runners may fall back to TCG
-#   macos-arm64  macos-15           arm64 CHR  HVF
+#   macos-arm64  macos-15           arm64 CHR  TCG (see note below)
 #   macos-x86    macos-15-intel     x86 CHR    TCG (no hw accel — slow)
 #   windows-x86  windows-latest     x86 CHR    TCG (no hw accel — slow)
 #   gating  = linux-x86,linux-arm64,macos-arm64      all = every platform
+#
+# NOTE (quickchr#97): the macos-arm64 leg does NOT exercise HVF. Hosted macos-15
+# runners are themselves VMs ("Apple M1 (Virtual)") and report kern.hv_support=0,
+# so detectAccel() returns tcg there — verified in run 29669706663's platform log.
+# Separately, quickchr now auto-selects TCG for BOTH guest arches on Apple Silicon
+# by policy. So a green macos-arm64 leg is NOT evidence about the HVF path; that
+# still needs a physical Apple Silicon Mac with --accel hvf.
 #
 # Every platform runs the FULL suite by default — including the TCG ones, which
 # is the honest "find out where windows/mac break" path (they just get a much
@@ -303,7 +310,10 @@ jobs:
             elif [ "${{ matrix.tcg }}" = "true" ]; then
               echo "- Accel hint: TCG (no hardware acceleration on this hosted runner)"
             else
-              echo "- Accel hint: HVF (expected)"
+              # macOS. Do not claim HVF: hosted macos-15 runners report
+              # kern.hv_support=0, and Apple Silicon auto-selects TCG by policy
+              # (quickchr#97). The detectAccel line logged above is authoritative.
+              echo "- Accel hint: see detectAccel line above (hosted macOS runners have no nested HVF)"
             fi
           } | tee "$HOME/platform-info.txt" | tee -a "$GITHUB_STEP_SUMMARY"
 

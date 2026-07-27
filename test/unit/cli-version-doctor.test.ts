@@ -8,14 +8,19 @@ const TEST_DIR = join(import.meta.dir, ".tmp-cli-version-doctor-test");
 const CLI = join(import.meta.dir, "../../src/cli/index.ts");
 const originalHome = process.env.HOME;
 
-async function runQuickchr(args: string[]) {
+async function runQuickchr(args: string[], extraEnv: Record<string, string> = {}) {
+	// Drop QUICKCHR_ACCEL from the inherited env: a developer who has an
+	// accelerator forced in their own shell would otherwise see the
+	// "no override configured" assertion fail for an unrelated reason.
+	const { QUICKCHR_ACCEL: _ignored, ...inherited } = process.env;
 	const proc = Bun.spawn(["bun", CLI, ...args], {
 		env: {
-			...process.env,
+			...inherited,
 			QUICKCHR_DATA_DIR: TEST_DIR,
 			NO_COLOR: "1",
 			QUICKCHR_NO_PROMPT: "1",
 			HOME: TEST_DIR,
+			...extraEnv,
 		},
 		stdout: "pipe",
 		stderr: "pipe",
@@ -77,5 +82,26 @@ describe("CLI doctor --json", () => {
 			expect(typeof check.detail).toBe("string");
 		}
 		expect(result.exitCode).toBe(parsed.ok ? 0 : 1);
+	});
+
+	test("acceleration row names the override source, never the internal enum", async () => {
+		const result = await runQuickchr(["doctor", "--json"], { QUICKCHR_ACCEL: "tcg" });
+
+		const parsed = JSON.parse(result.stdout);
+		const accel = parsed.checks.find((c: { label: string }) => c.label === "Acceleration");
+		expect(accel).toBeDefined();
+		// The user-facing env var name, not the AccelOverrideSource discriminant.
+		expect(accel.detail).toContain("QUICKCHR_ACCEL");
+		for (const internal of ["(flag)", "(env)", "(file)", "(default)"]) {
+			expect(accel.detail).not.toContain(internal);
+		}
+	});
+
+	test("acceleration row carries no override suffix when nothing is configured", async () => {
+		const result = await runQuickchr(["doctor", "--json"]);
+
+		const parsed = JSON.parse(result.stdout);
+		const accel = parsed.checks.find((c: { label: string }) => c.label === "Acceleration");
+		expect(accel.detail).not.toContain("configured override");
 	});
 });

@@ -3,8 +3,11 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import type { EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo } from "./types.ts";
-import { QuickCHRError as QError } from "./types.ts";
+import type { AccelMode, EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo } from "./types.ts";
+import { QuickCHRError as QError, parseAccelMode } from "./types.ts";
+// settings-file.ts, not settings.ts: the latter's graph (cache → state → network
+// → platform) is a cycle that would load eagerly on every CLI start.
+import { loadSettingsFileDefaults } from "./settings-file.ts";
 
 /** UEFI firmware search paths by platform. */
 const EFI_CODE_PATHS = [
@@ -111,14 +114,11 @@ export function qgaKvmWarning(): string | null {
 	);
 }
 
-/** Whether guestArch requires cross-architecture emulation (TCG) on this host.
- *  Cross-arch emulation is significantly slower and needs more memory/timeout.
- *  arm64 guest on x86_64 host → TCG (slow).
- *  x86 guest on any host → HVF or KVM when available (fast). */
+/** Whether guestArch differs from the physical host CPU architecture.
+ *  Cross-arch TCG is significantly slower and needs more memory/timeout. */
 export function isCrossArchEmulation(guestArch: "x86" | "arm64"): boolean {
-	// x86 CHR is always runnable under HVF/KVM or TCG — never "slow" cross-arch.
-	// arm64 CHR on an arm64 host uses HVF/KVM; on an x86_64 host it falls back to TCG.
-	return guestArch === "arm64" && process.arch !== "arm64";
+	const hostIsArm64 = isAppleSiliconHost() || (process.platform !== "darwin" && process.arch === "arm64");
+	return (guestArch === "arm64") !== hostIsArm64;
 }
 
 /**
@@ -139,68 +139,131 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
 }
 
 /**
- * Whether this Apple host omits FEAT_SSBS (Apple M4 and later drop it).
+ * Whether the physical host is Apple Silicon, including when quickchr itself
+ * runs as an x64 process under Rosetta.
  *
- * Under HVF the guest reads the *physical* CPU ID registers — the `-cpu` model
- * is inert — so `-cpu host` passes the missing FEAT_SSBS through to the guest.
- * RouterOS's Linux 5.6.3 kernel assumes the ARMv8.5 standard set and panics at
- * init ("No working init found", t≈0.076s) on such a host, while TCG's fixed
- * cortex-a710 model boots fine.  Confirmed on M4 (tikoci/mikropkl#11); no QEMU
- * release injects SSBS yet (the upstream HVF shim is an unmerged RFC), so an
- * SSBS-less host must fall back to TCG for arm64 guests.  See tikoci/quickchr#97.
+ * Apple Silicon implements **no AArch32 at any exception level**: its
+ * `ID_AA64PFR0_EL1` reports AArch64-only for EL0 and EL1, and HVF passes that
+ * hardware register straight through to the guest (the `-cpu` model is inert
+ * under HVF).  Current arm64 CHR images ship an AArch64 kernel over a *32-bit
+ * ARM* userspace — the appended initramfs `/init` is `ELF 32-bit LSB ARM
+ * EABI5`, and the system package holds 101 further ARM32 executables — so the
+ * guest kernel never sets `ARM64_HAS_32BIT_EL0`, `execve("/init")` returns
+ * -ENOEXEC, and Linux panics ~0.08 s in with "No working init found".
+ * TCG's emulated CPU models do provide AArch32 EL0, so the same image boots.
  *
- * Only meaningful on darwin/arm64.  The sysctl key is absent on older macOS
- * (no such key), while pre-M4 Apple Silicon has it and reports FEAT_SSBS=1.
- * Either way, only a clean exit reading a literal "0" counts as SSBS-less — a
- * missing key, non-zero exit, or any other value is treated as "has SSBS".
- *
- * Memoized: the host's capability is fixed for the process lifetime, and this is
- * probed twice per launch (detectAccel + ssbsTcgWarning), so cache the result.
+ * This is an image-artifact incompatibility, not an accelerator or CPU-model
+ * bug: no QEMU flag and no macOS VMM can present a feature the silicon does not
+ * implement.  See docs/m4-hvf-arm64-investigation.md and tikoci/quickchr#97.
  */
-let ssbsLessMemo: boolean | undefined;
+let appleSiliconHostMemo: boolean | undefined;
 
-export function hostLacksSsbs(): boolean {
-	if (ssbsLessMemo !== undefined) return ssbsLessMemo;
-	ssbsLessMemo = probeHostLacksSsbs();
-	return ssbsLessMemo;
-}
-
-/** @internal Test-only: clear the memoized FEAT_SSBS probe between mocked runs. */
-export function resetSsbsProbeCache(): void {
-	ssbsLessMemo = undefined;
-}
-
-function probeHostLacksSsbs(): boolean {
-	if (process.platform !== "darwin" || process.arch !== "arm64") return false;
+export function isAppleSiliconHost(): boolean {
+	if (process.platform !== "darwin") return false;
+	if (process.arch === "arm64") return true;
+	if (process.arch !== "x64") return false;
+	if (appleSiliconHostMemo !== undefined) return appleSiliconHostMemo;
 	try {
-		const r = Bun.spawnSync(["sysctl", "-n", "hw.optional.arm.FEAT_SSBS"], {
+		const result = Bun.spawnSync(["sysctl", "-n", "sysctl.proc_translated"], {
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		if (r.exitCode !== 0) return false;
-		return new TextDecoder().decode(r.stdout).trim() === "0";
+		appleSiliconHostMemo =
+			result.exitCode === 0 &&
+			new TextDecoder().decode(result.stdout).trim() === "1";
 	} catch {
-		return false;
+		appleSiliconHostMemo = false;
 	}
+	return appleSiliconHostMemo;
+}
+
+/** @internal Test-only: clear the memoized Rosetta probe between mocked runs. */
+export function resetAppleSiliconHostCache(): void {
+	appleSiliconHostMemo = undefined;
 }
 
 /**
- * One-line explanation for the FEAT_SSBS→TCG downgrade, or null if it doesn't
- * apply.  Surface this at launch when detectAccel() has picked TCG on an
- * SSBS-less host so the user understands why they're on slower emulation.
+ * Process-level accelerator override, set by `--accel` (CLI) or by a library
+ * caller.  Highest tier of the documented precedence chain
+ * (flag > QUICKCHR_ACCEL env > quickchr.env > built-in "auto"); `undefined`
+ * means "not set, fall through to the settings tiers".
  */
-export function ssbsTcgWarning(guestArch: "x86" | "arm64"): string | null {
-	if (guestArch !== "arm64" || !hostLacksSsbs()) return null;
+let accelOverride: AccelMode | undefined;
+
+/** Force the accelerator for the rest of this process, or clear with undefined. */
+export function setAccelOverride(mode: AccelMode | undefined): void {
+	accelOverride = mode;
+}
+
+/**
+ * Resolve the accelerator override: process override > QUICKCHR_ACCEL env >
+ * quickchr.env > "auto".  Mirrors settings.ts's `accel` key resolution (same
+ * tiers, same validator) but reads the file tier directly to stay out of that
+ * module's import cycle.  Throws INVALID_SETTING_VALUE on an unrecognized mode.
+ */
+export function resolveAccelOverride(): AccelMode {
+	return resolveAccelOverrideWithSource().mode;
+}
+
+/** Which tier supplied the accelerator, for messages that must say *why*. */
+export type AccelOverrideSource = "flag" | "env" | "file" | "default";
+
+/**
+ * As resolveAccelOverride(), but also reports the tier the value came from.
+ * With three override tiers, "TCG because ~/.config/quickchr/quickchr.env says
+ * so" and "TCG because you passed --accel" are very different support answers,
+ * so the launch note names the source rather than guessing at it.
+ */
+export function resolveAccelOverrideWithSource(): { mode: AccelMode; source: AccelOverrideSource } {
+	if (accelOverride !== undefined) return { mode: accelOverride, source: "flag" };
+	const envRaw = process.env.QUICKCHR_ACCEL;
+	if (envRaw !== undefined) return { mode: parseAccelMode(envRaw), source: "env" };
+	const fileRaw = loadSettingsFileDefaults().QUICKCHR_ACCEL;
+	if (fileRaw !== undefined) return { mode: parseAccelMode(fileRaw), source: "file" };
+	return { mode: "auto", source: "default" };
+}
+
+/**
+ * User-facing name of the override tier — the thing the user would actually go
+ * edit.  Shared by the launch note and `doctor` so both name the same source;
+ * never print the raw AccelOverrideSource enum, which is internal.
+ */
+export function accelSourceLabel(source: AccelOverrideSource): string {
+	if (source === "flag") return "--accel";
+	if (source === "env") return "QUICKCHR_ACCEL";
+	if (source === "file") return "quickchr.env";
+	return "auto-detection";
+}
+
+/**
+ * One-line note about how the accelerator was chosen, or null when there is
+ * nothing worth saying.  Surfaced at launch so a user on slow emulation — or
+ * one who forced a mode that is known not to boot — understands why.
+ */
+export function accelNote(guestArch: "x86" | "arm64", accel: string): string | null {
+	const { mode: forced, source } = resolveAccelOverrideWithSource();
+	if (forced !== "auto") {
+		const base = `Accelerator configured as "${forced}" via ${accelSourceLabel(source)} — auto-detection bypassed.`;
+		if (guestArch === "arm64" && forced === "hvf" && isAppleSiliconHost()) {
+			return `${base} Note: arm64 CHR images still ship a 32-bit ARM userspace, which Apple Silicon cannot execute under HVF — expect "No working init found" unless MikroTik has shipped an AArch64-only image (tikoci/quickchr#97).`;
+		}
+		return base;
+	}
+	if (guestArch !== "arm64" || accel !== "tcg" || !isAppleSiliconHost()) return null;
 	return (
-		"This Apple CPU omits FEAT_SSBS (Apple M4+); arm64 CHR panics under HVF " +
-		"(-cpu host) because RouterOS's kernel assumes it is present — using TCG " +
-		"(slower but reliable). No released QEMU injects SSBS under HVF yet, so " +
-		"TCG is currently the only accelerator that boots here (tikoci/quickchr#97)."
+		"arm64 CHR is running under TCG on Apple Silicon: the image's appended " +
+		"initramfs /init and most of its system package are 32-bit ARM, and Apple " +
+		"CPUs implement no AArch32 at any exception level, so an HVF guest panics " +
+		'with "No working init found". TCG is slower but boots. Override with ' +
+		"--accel hvf once MikroTik ships an AArch64-only arm64 image (tikoci/quickchr#97)."
 	);
 }
 
 /** Detect available QEMU acceleration for a guest architecture. */
 export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
+	const forced = resolveAccelOverride();
+	if (forced !== "auto") return forced;
+
 	const hostOs = process.platform;
 	const hostArch = process.arch; // "x64" | "arm64"
 
@@ -218,9 +281,10 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 	}
 
 	if (hostOs === "darwin") {
-		// Apple Hypervisor Framework (HVF) is a system capability, not a per-process one.
-		// It is available if kern.hv_support=1, regardless of whether the bun process
-		// itself is arm64 native or running via Rosetta (process.arch="x64").
+		// Apple Hypervisor Framework only runs guests matching the physical host
+		// architecture. Rosetta can translate the quickchr process, but it cannot
+		// make x86 HVF guests run on Apple Silicon.
+		const appleSilicon = isAppleSiliconHost();
 		try {
 			const hvResult = Bun.spawnSync(["sysctl", "-n", "kern.hv_support"], {
 				stdout: "pipe",
@@ -228,24 +292,22 @@ export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 			});
 			const hv = new TextDecoder().decode(hvResult.stdout).trim();
 			if (hv === "1") {
-				if (guestArch === "x86") return "hvf";
-				// arm64 guest HVF requires a native arm64 host process.
-				// Use process.arch — on Intel Macs this is "x64" so arm64 guests get TCG,
-				// which is correct (Intel can't run arm64 HVF). On Apple Silicon, native
-				// bun reports "arm64" and gets HVF. Rosetta bun reports "x64" and gets TCG
-				// (acceptable — arm64 TCG on Apple Silicon still boots in <5 min).
-				if (process.arch === "arm64") {
-					// Apple M4+ drops FEAT_SSBS; HVF `-cpu host` passes that gap to
-					// the guest and RouterOS's 5.6.3 kernel panics at init.  No
-					// released QEMU injects SSBS under HVF yet, so an SSBS-less host
-					// falls back to TCG unconditionally (still boots in <5 min).
-					// TODO(#97): the host sysctl stays 0 regardless of QEMU, so when a
-					// QEMU release does inject SSBS under HVF, gate this on a
-					// getQemuVersion() floor here to restore HVF on that build or newer
-					// — version is the only available restore signal.
-					if (hostLacksSsbs()) return "tcg";
-					return "hvf";
-				}
+				if (guestArch === "x86" && !appleSilicon) return "hvf";
+				// arm64 guest: falls through to TCG on every macOS host.
+				//
+				// On Intel Macs process.arch is "x64" and arm64 HVF is impossible.
+				// On Apple Silicon HVF *is* available but must not be used: no Apple
+				// CPU implements AArch32 at any exception level, and current arm64 CHR
+				// images require a 32-bit ARM userspace, so an HVF guest panics at init
+				// (see isAppleSiliconHost()).  arm64 TCG still boots, but is slower.
+				//
+				// Restore signal (#97) is the *guest artifact*, not the host or QEMU
+				// version: a future arm64 CHR whose appended /init and system-package
+				// executables are all AArch64, verified by a real HVF boot.  Until then
+				// `--accel hvf` / QUICKCHR_ACCEL=hvf is the escape hatch for testing.
+				//
+				// x86 guests also fall through on Apple Silicon because HVF cannot
+				// virtualize across architectures; their escape hatch is the same.
 			}
 		} catch { /* fall through */ }
 	}

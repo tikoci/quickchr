@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import {
 	detectAccel,
 	detectPackageManager,
@@ -9,10 +9,12 @@ import {
 	findQemuImg,
 	getQemuInstallHint,
 	getQemuVersion,
-	hostLacksSsbs,
-	resetSsbsProbeCache,
+	isAppleSiliconHost,
+	resetAppleSiliconHostCache,
 	qgaKvmWarning,
-	ssbsTcgWarning,
+	accelNote,
+	resolveAccelOverride,
+	setAccelOverride,
 	requireQemu,
 	requireFirmware,
 	resolveInterfaceAlias,
@@ -60,9 +62,18 @@ function mockSpawnSync(
 	return spawn;
 }
 
+// Pin the accelerator override tier for every test: without this, resolveAccelOverride()
+// falls through to the real QUICKCHR_ACCEL env var and ~/.config/quickchr/quickchr.env,
+// so a developer who has forced an accelerator would see these tests fail.
+beforeEach(() => {
+	setAccelOverride("auto");
+	resetAppleSiliconHostCache();
+});
+
 afterEach(() => {
 	restoreRuntimeDetection();
-	resetSsbsProbeCache();
+	setAccelOverride(undefined);
+	resetAppleSiliconHostCache();
 	mock.restore();
 });
 
@@ -314,30 +325,18 @@ describe("qgaKvmWarning", () => {
 });
 
 describe("isCrossArchEmulation", () => {
-	test("x86 guest is never cross-arch emulation", () => {
-		// x86 runs natively on x86_64 or via KVM/HVF — never TCG-only
-		expect(isCrossArchEmulation("x86")).toBe(false);
-	});
-
-	test("arm64 guest on arm64 host is not cross-arch", () => {
-		if (process.arch !== "arm64") {
-			console.log("Skipping: not running on arm64 host");
-			return;
-		}
+	test("compares both guest architectures to an arm64 host", () => {
+		setPlatform("darwin");
+		setArch("arm64");
 		expect(isCrossArchEmulation("arm64")).toBe(false);
+		expect(isCrossArchEmulation("x86")).toBe(true);
 	});
 
-	test("arm64 guest on x86_64 host is cross-arch", () => {
-		if (process.arch === "arm64") {
-			console.log("Skipping: running on arm64 host");
-			return;
-		}
+	test("compares both guest architectures to an x86_64 host", () => {
+		setPlatform("linux");
+		setArch("x64");
 		expect(isCrossArchEmulation("arm64")).toBe(true);
-	});
-
-	test("returns boolean", () => {
-		expect(typeof isCrossArchEmulation("x86")).toBe("boolean");
-		expect(typeof isCrossArchEmulation("arm64")).toBe("boolean");
+		expect(isCrossArchEmulation("x86")).toBe(false);
 	});
 });
 
@@ -369,6 +368,7 @@ describe("detectAccel", () => {
 		setPlatform("darwin");
 		setArch("x64");
 		mockSpawnSync((cmd) => {
+			if (cmd.at(-1) === "sysctl.proc_translated") return { exitCode: 1 };
 			expect(cmd).toEqual(["sysctl", "-n", "kern.hv_support"]);
 			return { exitCode: 0, stdout: "1\n" };
 		});
@@ -377,26 +377,31 @@ describe("detectAccel", () => {
 		expect(await detectAccel("arm64")).toBe("tcg");
 	});
 
-	test("returns hvf for arm64 guest only when macOS process arch is arm64 and host has FEAT_SSBS", async () => {
+	test("falls back to tcg for arm64 on Apple Silicon even though HVF is available", async () => {
 		setPlatform("darwin");
 		setArch("arm64");
-		// hv_support=1 and FEAT_SSBS=1 (pre-M4 Apple Silicon).
+		// hv_support=1 — HVF *is* usable, but arm64 CHR ships a 32-bit ARM userspace
+		// and Apple Silicon implements no AArch32 at any exception level, so an HVF
+		// guest panics at init ("No working init found"). tikoci/quickchr#97.
 		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
 
-		expect(await detectAccel("arm64")).toBe("hvf");
+		expect(await detectAccel("arm64")).toBe("tcg");
+		// x86 is cross-architecture on this physical host, so HVF is unavailable.
+		expect(await detectAccel("x86")).toBe("tcg");
 	});
 
-	test("falls back to tcg for arm64 on Apple silicon that omits FEAT_SSBS (M4+)", async () => {
+	test("falls back to tcg for both guests when running under Rosetta on Apple Silicon", async () => {
 		setPlatform("darwin");
-		setArch("arm64");
-		// HVF is available, but the host lacks FEAT_SSBS — HVF -cpu host would
-		// pass that gap to RouterOS's 5.6.3 kernel and panic it (tikoci/quickchr#97).
+		setArch("x64");
 		mockSpawnSync((cmd) => {
-			if (cmd[2] === "kern.hv_support") return { exitCode: 0, stdout: "1\n" };
-			if (cmd[2] === "hw.optional.arm.FEAT_SSBS") return { exitCode: 0, stdout: "0\n" };
-			return { exitCode: 1 };
+			if (cmd.at(-1) === "sysctl.proc_translated") {
+				return { exitCode: 0, stdout: "1\n" };
+			}
+			expect(cmd).toEqual(["sysctl", "-n", "kern.hv_support"]);
+			return { exitCode: 0, stdout: "1\n" };
 		});
 
+		expect(await detectAccel("x86")).toBe("tcg");
 		expect(await detectAccel("arm64")).toBe("tcg");
 	});
 
@@ -409,76 +414,124 @@ describe("detectAccel", () => {
 	});
 });
 
-describe("hostLacksSsbs", () => {
-	test("true only when the FEAT_SSBS sysctl reads exactly 0 on darwin/arm64", () => {
+describe("isAppleSiliconHost", () => {
+	test("true on darwin with a native arm64 process", () => {
 		setPlatform("darwin");
 		setArch("arm64");
-		mockSpawnSync((cmd) => {
-			expect(cmd).toEqual(["sysctl", "-n", "hw.optional.arm.FEAT_SSBS"]);
-			return { exitCode: 0, stdout: "0\n" };
-		});
-
-		expect(hostLacksSsbs()).toBe(true);
+		expect(isAppleSiliconHost()).toBe(true);
 	});
 
-	test("false when FEAT_SSBS reads 1 (pre-M4 silicon)", () => {
-		setPlatform("darwin");
-		setArch("arm64");
-		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
-
-		expect(hostLacksSsbs()).toBe(false);
-	});
-
-	test("memoizes the probe — a second call does not re-spawn sysctl", () => {
-		setPlatform("darwin");
-		setArch("arm64");
-		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
-
-		expect(hostLacksSsbs()).toBe(true);
-		expect(hostLacksSsbs()).toBe(true);
-		expect(spawn).toHaveBeenCalledTimes(1);
-	});
-
-	test("false when the sysctl key is absent (empty output / older macOS)", () => {
-		setPlatform("darwin");
-		setArch("arm64");
-		mockSpawnSync(() => ({ exitCode: 1, stdout: "" }));
-
-		expect(hostLacksSsbs()).toBe(false);
-	});
-
-	test("false on non-darwin or non-arm64 without probing", () => {
-		setPlatform("linux");
-		setArch("arm64");
-		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
-		expect(hostLacksSsbs()).toBe(false);
-
+	test("true for a Rosetta process", () => {
 		setPlatform("darwin");
 		setArch("x64");
-		expect(hostLacksSsbs()).toBe(false);
-		expect(spawn).not.toHaveBeenCalled();
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			return { exitCode: 0, stdout: "1\n" };
+		});
+		expect(isAppleSiliconHost()).toBe(true);
+	});
+
+	test("false on an Intel Mac", () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync(() => ({ exitCode: 1 }));
+		expect(isAppleSiliconHost()).toBe(false);
+	});
+
+	test("false on non-darwin arm64 (Linux/Windows on ARM)", () => {
+		setPlatform("linux");
+		setArch("arm64");
+		expect(isAppleSiliconHost()).toBe(false);
 	});
 });
 
-describe("ssbsTcgWarning", () => {
-	test("returns a note for an arm64 guest on an SSBS-less host", () => {
+describe("accelerator override", () => {
+	test("a forced mode short-circuits detection on every platform", async () => {
 		setPlatform("darwin");
 		setArch("arm64");
-		mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
+		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
 
-		const note = ssbsTcgWarning("arm64");
-		expect(note).toContain("FEAT_SSBS");
-		expect(note).toContain("TCG");
+		setAccelOverride("hvf");
+		expect(resolveAccelOverride()).toBe("hvf");
+		// Forced arm64 HVF on Apple Silicon — the case #97 normally downgrades.
+		expect(await detectAccel("arm64")).toBe("hvf");
+		// Detection never ran, so no sysctl was probed.
+		expect(spawn).not.toHaveBeenCalled();
 	});
 
-	test("returns null for x86 guests and for hosts that have FEAT_SSBS", () => {
+	test("a forced mode is passed through verbatim even when unavailable", async () => {
 		setPlatform("darwin");
 		setArch("arm64");
-		mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
-		expect(ssbsTcgWarning("x86")).toBeNull();
-
 		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
-		expect(ssbsTcgWarning("arm64")).toBeNull();
+
+		// kvm does not exist on macOS: force means force, and QEMU reports the error.
+		setAccelOverride("kvm");
+		expect(await detectAccel("x86")).toBe("kvm");
+	});
+
+	test('"auto" restores normal detection', async () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
+
+		setAccelOverride("hvf");
+		expect(await detectAccel("arm64")).toBe("hvf");
+		setAccelOverride("auto");
+		expect(await detectAccel("arm64")).toBe("tcg");
+	});
+});
+
+describe("accelNote", () => {
+	test("explains the arm64 TCG downgrade on Apple Silicon", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+
+		const note = accelNote("arm64", "tcg");
+		expect(note).toContain("32-bit ARM");
+		expect(note).toContain("--accel hvf");
+	});
+
+	test("null for x86 guests, for HVF arm64, and on non-Apple-Silicon hosts", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+		expect(accelNote("x86", "hvf")).toBeNull();
+		// arm64 under HVF is not a downgrade, so there is nothing to explain.
+		expect(accelNote("arm64", "hvf")).toBeNull();
+
+		// Intel Mac: arm64 TCG is cross-arch emulation, not the #97 fallback.
+		// The mock is load-bearing, not decoration: darwin + x64 is the one branch
+		// where isAppleSiliconHost() shells out, so without it this assertion runs
+		// the real probe — and on an Apple Silicon host running this suite under
+		// Rosetta that answers "1", flipping the expected null to a note.
+		setArch("x64");
+		resetAppleSiliconHostCache();
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			return { exitCode: 1 };
+		});
+		expect(accelNote("arm64", "tcg")).toBeNull();
+
+		// Non-darwin short-circuits before the probe, so no mock is needed here.
+		setPlatform("linux");
+		setArch("x64");
+		expect(accelNote("arm64", "tcg")).toBeNull();
+	});
+
+	test("reports a configured accelerator, and warns when forcing arm64 HVF on Apple Silicon", () => {
+		setPlatform("darwin");
+		setArch("arm64");
+
+		setAccelOverride("hvf");
+		const note = accelNote("arm64", "hvf");
+		expect(note).toContain("configured");
+		// Naming the tier is the point: "why am I on this accelerator?"
+		expect(note).toContain("--accel");
+		expect(note).toContain("No working init found");
+
+		// x86 guests get the plain configured line with no #97 caveat.
+		const x86Note = accelNote("x86", "hvf");
+		expect(x86Note).toContain("configured");
+		expect(x86Note).not.toContain("No working init found");
 	});
 });
 
