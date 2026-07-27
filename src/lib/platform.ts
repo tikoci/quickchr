@@ -223,11 +223,16 @@ export function resolveAccelOverrideWithSource(): { mode: AccelMode; source: Acc
 	return { mode: "auto", source: "default" };
 }
 
-/** Human-readable name of the override tier, for the launch note. */
-function accelSourceLabel(source: AccelOverrideSource): string {
+/**
+ * User-facing name of the override tier — the thing the user would actually go
+ * edit.  Shared by the launch note and `doctor` so both name the same source;
+ * never print the raw AccelOverrideSource enum, which is internal.
+ */
+export function accelSourceLabel(source: AccelOverrideSource): string {
 	if (source === "flag") return "--accel";
 	if (source === "env") return "QUICKCHR_ACCEL";
-	return "the 'accel' setting in quickchr.env";
+	if (source === "file") return "quickchr.env";
+	return "auto-detection";
 }
 
 /**
