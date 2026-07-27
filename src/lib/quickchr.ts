@@ -960,13 +960,15 @@ function bootFailureReportDir(): string {
 
 /** Tear down a machine that failed to boot, and describe what was done.
  *
- *  Default is still full cleanup — a failed `start()` must not leave a half-dead
+ *  Default is full cleanup — a failed `start()` must not leave a half-dead
  *  machine behind for the next call to trip over. QUICKCHR_PRESERVE_ON_FAILURE=1
- *  inverts that for CI and local debugging: the QEMU process is still stopped
- *  (it is wedged, and its port block must be released), but the machine
- *  directory survives with qemu.log, boot-failure.json, and — with
- *  QUICKCHR_SERIAL_LOG=1 — serial.log intact. Without this, every CI boot
- *  failure destroyed its own evidence before it could be uploaded (#79). */
+ *  inverts that for **local** debugging: the QEMU process is still stopped (it is
+ *  wedged, and its port block must be released), but the machine directory
+ *  survives so it can be inspected by hand.
+ *
+ *  Evidence does not depend on that flag, and CI deliberately does not set it —
+ *  `captureBootFailure()` has already written its report outside the machine dir
+ *  with qemu.log and serial.log embedded, so cleanup cannot destroy it (#79). */
 async function cleanupAfterBootFailure(
 	instance: ChrInstance,
 	name: string,

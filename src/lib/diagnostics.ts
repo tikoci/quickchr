@@ -116,8 +116,14 @@ export function summarizeBootProbe(stats: BootProbeStats): string {
 }
 
 /** True when failure paths should keep the machine directory instead of
- *  removing it. CI sets this so `boot-failure.json`, the full `qemu.log`, and
- *  (with QUICKCHR_SERIAL_LOG=1) `serial.log` survive into the run artifacts. */
+ *  removing it — for poking at a wedged machine by hand (`quickchr console`,
+ *  the disk image, the sockets).
+ *
+ *  A local debugging aid, **not** how evidence reaches CI: `captureBootFailure()`
+ *  writes its report outside the machine dir and embeds the logs, so the report
+ *  survives cleanup either way. CI therefore leaves this unset — stranded
+ *  machines hold ~130-190 MB and a port block each, which risks tripping
+ *  test/preload.ts's storage preflight on a full matrix. */
 export function preserveOnFailure(): boolean {
 	return process.env.QUICKCHR_PRESERVE_ON_FAILURE === "1";
 }
