@@ -328,13 +328,22 @@ a new tracked issue.
    - `monitor["info status"]` reporting `paused` (especially `paused (io-error)`)
      is a disk/backing-file answer on its own — stop looking at timeouts.
 
-   `monitor["info usernet"]` is the follow-up when the guest looks up but is
-   unreachable: it prints slirp's `HOST_FORWARD` table and any live guest
-   traffic. On a healthy machine the guest appears as `10.0.2.15` (including
-   its own UDP/5678 MNDP chatter). Forwards present but **no traffic from
-   10.0.2.15 at all** means the guest never took its DHCP address, so slirp has
-   nowhere to deliver — which presents to the probe as `probe-timeout`, not
-   `refused`.
+   `monitor["info usernet"]` is the decisive follow-up when the guest looks up
+   but is unreachable. It prints slirp's connection table, and the **per-row
+   TCP state is the answer**:
+
+   - `TCP[SYN_SENT]` piling up against `10.0.2.15:<port>` → slirp *is* delivering
+     the SYN and **the guest is not answering on that port**. Guest-side service
+     problem, not networking. (This is what #79 turned out to be.)
+   - `HOST_FORWARD` rows only, with **no traffic from `10.0.2.15` anywhere in the
+     table** → the guest never took its DHCP address, so slirp has nowhere to
+     deliver.
+   - a `UDP` row sourced from `10.0.2.15` (RouterOS's own MNDP on 5678) proves
+     the guest has its address and its NIC is live — check for it before blaming
+     DHCP.
+
+   Both cases present to the REST probe identically, as `probe-timeout`. Only
+   `info usernet` separates them.
 
    **slirp caveat (verified locally, 2026-07-27).** With the default `user` network
    mode, QEMU's hostfwd `listen()`s on the host port for the whole life of the
