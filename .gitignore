@@ -41,6 +41,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Local assistant settings
 .claude/settings*.json
 
+# Ignore repo "temp" directory (.scratch)
+.scratch
+
 # Finder (MacOS) folder config
 .DS_Store
 
