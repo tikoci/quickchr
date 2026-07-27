@@ -221,14 +221,19 @@ jobs:
         shell: bash
     env:
       QUICKCHR_TEST_TARGET: ${{ matrix.target }}
-      # Keep a failed machine's directory instead of remove()-ing it, so
-      # boot-failure.json / qemu.log / serial.log survive into the run artifacts.
-      # Without this every boot failure destroyed its own evidence (#79).
-      QUICKCHR_PRESERVE_ON_FAILURE: "1"
       # Tee the guest serial console to <machineDir>/serial.log. Safe here and
       # only here: provisioning types the generated password over serial in
       # cleartext, but CI passwords are per-run throwaways.
       QUICKCHR_SERIAL_LOG: "1"
+      # QUICKCHR_PRESERVE_ON_FAILURE is deliberately NOT set. The boot-failure
+      # report is written to <dataDir>/failures/ and embeds qemu.log + serial.log
+      # in full, so it already survives cleanup — preserving the machine dir adds
+      # no evidence here, and nobody inspects a runner after the job ends. What it
+      # would add is risk on a full matrix: each stranded machine holds ~130-190 MB
+      # and its port block, and test/preload.ts runs a storage preflight that
+      # exits(1) on INSUFFICIENT_DISK_SPACE — so a couple of real failures could
+      # cascade into unrelated red files and obscure the very failure we are
+      # chasing. The flag stays for local debugging (see testing.instructions.md).
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
@@ -655,8 +660,8 @@ jobs:
     env:
       QUICKCHR_TEST_TARGET: ${{ matrix.target }}
       EXAMPLE_FILTER: ${{ inputs.example-filter }}
-      # See the integration job's env for why these two are on in CI.
-      QUICKCHR_PRESERVE_ON_FAILURE: "1"
+      # See the integration job's env for why serial logging is on and
+      # QUICKCHR_PRESERVE_ON_FAILURE is not.
       QUICKCHR_SERIAL_LOG: "1"
     steps:
       - uses: actions/checkout@v5

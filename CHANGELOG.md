@@ -22,15 +22,19 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   generated password in cleartext, so the log is secret-bearing. Off by default.
 - **`QUICKCHR_PRESERVE_ON_FAILURE=1`** keeps a failed machine's directory instead of
   removing it (QEMU is still stopped, so the port block is released). Off by default —
-  a failed `start()` still cleans up.
+  a failed `start()` still cleans up. Mainly useful locally; the failure report itself
+  survives cleanup without it.
 
 ### Changed
 
 - `BOOT_TIMEOUT` messages now report *what the REST probe saw* rather than only that it
-  gave up: a window of nothing but `ECONNREFUSED` (the forwarded port never bound)
-  reads differently from resets or hangs (the port answered, RouterOS did not finish
-  starting). `ChrInstance.waitForBoot()` takes an optional second argument to collect
-  that tally; existing calls are unaffected.
+  gave up — connection refusals, resets, and hung connections are counted separately,
+  and the report adds QEMU's `info usernet` so a guest that booted but is unreachable
+  is distinguishable from one that never booted. (Under the default `user`/slirp
+  network mode the host port accepts regardless of guest state, so the probe tally and
+  the slirp connection table — not a live host port — are what carry the answer.)
+  `ChrInstance.waitForBoot()` takes an optional second argument to collect that tally;
+  existing calls are unaffected.
 - `Monitor command timed out` now names the command and reports where the round-trip
   stalled — connect / first byte / prompt / command written / response first byte, plus
   bytes received — instead of failing with no detail.

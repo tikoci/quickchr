@@ -53,8 +53,10 @@ fail version-gated provisioning/device-mode tests by design.
 
 ### Diagnosing a boot that never becomes REST-ready
 
-Turn both diagnostic knobs on when chasing a `BOOT_TIMEOUT`. `integration.yml` sets
-them for every CI leg; locally they are off by default.
+Turn both diagnostic knobs on when chasing a `BOOT_TIMEOUT`. Both are off by
+default. CI sets `QUICKCHR_SERIAL_LOG` on every leg but deliberately leaves
+`QUICKCHR_PRESERVE_ON_FAILURE` unset — the report survives cleanup on its own,
+and stranded machines risk tripping the storage preflight on a full matrix.
 
 ```bash
 QUICKCHR_PRESERVE_ON_FAILURE=1 QUICKCHR_SERIAL_LOG=1 \
