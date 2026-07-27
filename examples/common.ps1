@@ -36,7 +36,10 @@ function Invoke-Qc {
 	$pre = if ($parts.Length -gt 1) { $parts[1..($parts.Length - 1)] } else { @() }
 	& $exe @($pre + $Rest)
 	if ($LASTEXITCODE -ne 0) {
-		throw "quickchr exited with code $LASTEXITCODE: $($Rest -join ' ')"
+		# ${} is required, not stylistic: PowerShell parses `$NAME:` as a
+		# scope-qualified reference (`$env:PATH`, `$script:foo`), so a bare
+		# `$LASTEXITCODE:` is a ParserError that kills the whole file.
+		throw "quickchr exited with code ${LASTEXITCODE}: $($Rest -join ' ')"
 	}
 }
 

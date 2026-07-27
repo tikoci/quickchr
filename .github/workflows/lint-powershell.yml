@@ -46,6 +46,29 @@ jobs:
           # of 2026-06; raise intentionally and re-verify the .ps1 examples stay clean.
           ANALYZER_VERSION: "1.25.0"
         run: |
+          # Parse check FIRST, with PowerShell's own parser — the same one that runs
+          # the scripts. PSScriptAnalyzer with a Severity filter does not surface
+          # ParserErrors, so a file that cannot be parsed at all can pass this gate:
+          # `$LASTEXITCODE:` in examples/common.ps1 (PowerShell reads `$NAME:` as a
+          # scope qualifier) killed every helper in that file, left quickstart.ps1
+          # running with no functions defined, and the smoke test still reported
+          # green because the script exited 0. Found in run 30312099123.
+          $parseErrors = @()
+          Get-ChildItem -Recurse -Path examples -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            foreach ($e in $errors) {
+              $parseErrors += "$($_.FullName):$($e.Extent.StartLineNumber) $($e.Message)"
+            }
+          }
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Host $_ }
+            Write-Error "PowerShell parse errors in $($parseErrors.Count) location(s) — these scripts cannot run at all"
+            exit 1
+          }
+          Write-Host "PowerShell parser: all example .ps1 files parse"
+
           Install-Module -Name PSScriptAnalyzer -RequiredVersion $env:ANALYZER_VERSION -Force -Scope CurrentUser -ErrorAction Stop
           $settings = Join-Path $PWD 'examples/PSScriptAnalyzerSettings.psd1'
           $issues = Get-ChildItem -Recurse -Path examples -Filter *.ps1 |
