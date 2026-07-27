@@ -241,7 +241,12 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 
 	const monitor: Record<string, string> = {};
 	if (ctx.monitorQuery) {
-		for (const command of ["info status", "info block", "info chardev"]) {
+		// `info usernet` dumps slirp's VLAN state and hostfwd table. It is the one
+		// query that separates "the guest is up but unreachable" from "the guest is
+		// down": under user-mode networking the host port always accepts (see
+		// probeTcpPort), so the forwarding table is the only host-side view of
+		// whether slirp can actually deliver to the guest.
+		for (const command of ["info status", "info block", "info chardev", "info usernet", "info network"]) {
 			try {
 				monitor[command] = await ctx.monitorQuery(command);
 			} catch (e) {

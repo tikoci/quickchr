@@ -310,6 +310,7 @@ a new tracked issue.
   - `issue69-*.ndjson` — only when `issue69-settling.probe.ts` is dispatched; per-iteration port probes, REST probe attempts/retries, QEMU load, and console diagnostics
   - `machines/**/*.json` — `machine.json` with last-known state, ports, config
   - `machines/**/*.log` — `qemu.log` with QEMU stdout/stderr (boot messages, panics), plus `serial.log` (the guest console tee — CI sets `QUICKCHR_SERIAL_LOG=1`)
+  - **These POSIX paths only reach the artifact because the step sets `include-hidden-files: true`** — `~/.local/share/…` is a dot path and `upload-artifact` drops hidden files by default. If you add an artifact step touching the POSIX data root, set it, or the upload silently ships nothing (`if-no-files-found: warn` will not save you — the non-hidden `~/*.txt` files still match).
   - `failures/boot-failure-<machine>-<iso8601>.json` — **start here for any `BOOT_TIMEOUT`**. Self-contained: REST-probe tally, hostfwd TCP probe, monitor `info status`/`info block`, QEMU liveness + argv, machine-dir listing, and the full `qemu.log`/`serial.log` text. Written under `<dataDir>/failures/`, outside the machine dir, so the test's own `finally { cleanupMachine() }` can't delete it
 - **Step summary**: `integration.yml` shows failing lines + per-file timing + boot-timing table (full log in the artifact)
 
@@ -326,6 +327,14 @@ a new tracked issue.
      the #69 settling signature, not a dead boot.
    - `monitor["info status"]` reporting `paused` (especially `paused (io-error)`)
      is a disk/backing-file answer on its own — stop looking at timeouts.
+
+   `monitor["info usernet"]` is the follow-up when the guest looks up but is
+   unreachable: it prints slirp's `HOST_FORWARD` table and any live guest
+   traffic. On a healthy machine the guest appears as `10.0.2.15` (including
+   its own UDP/5678 MNDP chatter). Forwards present but **no traffic from
+   10.0.2.15 at all** means the guest never took its DHCP address, so slirp has
+   nowhere to deliver — which presents to the probe as `probe-timeout`, not
+   `refused`.
 
    **slirp caveat (verified locally, 2026-07-27).** With the default `user` network
    mode, QEMU's hostfwd `listen()`s on the host port for the whole life of the

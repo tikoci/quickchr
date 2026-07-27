@@ -508,12 +508,23 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # include-hidden-files is MANDATORY here, not a nicety. The POSIX data root
+      # is ~/.local/share/quickchr — `.local` is a dot directory, and
+      # upload-artifact excludes hidden paths by default. Every Linux and macOS
+      # integration artifact had been silently dropping boot-log.ndjson,
+      # machine.json and qemu.log for exactly that reason; `if-no-files-found:
+      # warn` never fired because the four non-hidden ~/ files still matched, so
+      # the artifact looked healthy. Verified in run 30308608464, where the
+      # linux-x86 upload logged `include-hidden-files: false` / "there will be 4
+      # files uploaded". The Windows step is unaffected — AppData is not hidden by
+      # this rule — which is why only that leg ever shipped a boot-log.
       - name: Upload integration logs (POSIX)
         if: ${{ always() && runner.os != 'Windows' }}
         uses: actions/upload-artifact@v6
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
+          include-hidden-files: true
           path: |
             ~/platform-info.txt
             ~/integration-output.txt

@@ -44,6 +44,11 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 - CI: the examples smoke harness buffered child output until exit, so an example that
   hung until the per-test timeout produced no output at all. Output now streams with a
   per-example prefix, and both streams are printed on a non-zero exit.
+- CI: every Linux and macOS integration artifact had been silently dropping
+  `boot-log.ndjson`, `machine.json` and `qemu.log`. The POSIX data root lives under
+  `~/.local/share/quickchr`, and `actions/upload-artifact` excludes hidden paths unless
+  `include-hidden-files` is set — while the four non-hidden `~/*.txt` files kept
+  matching, so `if-no-files-found: warn` never fired and the artifact looked healthy.
 
 ## [0.4.6] — 2026-07-27
 
