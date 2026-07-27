@@ -26,7 +26,7 @@ import type {
 } from "./types.ts";
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./types.ts";
 import packageJson from "../../package.json";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverride, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
+import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
 	resolveVersion,
 	isValidVersion,
@@ -2007,8 +2007,8 @@ export class QuickCHR {
 			if (platform.accelAvailable.length > 0) {
 				// Under an override, accelAvailable is just the forced mode for every
 				// arch — say so, or the row reads as a capability report it isn't.
-				const forced = resolveAccelOverride();
-				const suffix = forced === "auto" ? "" : " — configured override";
+				const { mode: forced, source } = resolveAccelOverrideWithSource();
+				const suffix = forced === "auto" ? "" : ` — configured override (${source})`;
 				checks.push({
 					label: "Acceleration",
 					status: "ok",

@@ -514,6 +514,8 @@ describe("accelNote", () => {
 		setAccelOverride("hvf");
 		const note = accelNote("arm64", "hvf");
 		expect(note).toContain("configured");
+		// Naming the tier is the point: "why am I on this accelerator?"
+		expect(note).toContain("--accel");
 		expect(note).toContain("No working init found");
 
 		// x86 guests get the plain configured line with no #97 caveat.

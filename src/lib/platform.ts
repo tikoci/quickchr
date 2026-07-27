@@ -202,12 +202,32 @@ export function setAccelOverride(mode: AccelMode | undefined): void {
  * module's import cycle.  Throws INVALID_SETTING_VALUE on an unrecognized mode.
  */
 export function resolveAccelOverride(): AccelMode {
-	if (accelOverride !== undefined) return accelOverride;
+	return resolveAccelOverrideWithSource().mode;
+}
+
+/** Which tier supplied the accelerator, for messages that must say *why*. */
+export type AccelOverrideSource = "flag" | "env" | "file" | "default";
+
+/**
+ * As resolveAccelOverride(), but also reports the tier the value came from.
+ * With three override tiers, "TCG because ~/.config/quickchr/quickchr.env says
+ * so" and "TCG because you passed --accel" are very different support answers,
+ * so the launch note names the source rather than guessing at it.
+ */
+export function resolveAccelOverrideWithSource(): { mode: AccelMode; source: AccelOverrideSource } {
+	if (accelOverride !== undefined) return { mode: accelOverride, source: "flag" };
 	const envRaw = process.env.QUICKCHR_ACCEL;
-	if (envRaw !== undefined) return parseAccelMode(envRaw);
+	if (envRaw !== undefined) return { mode: parseAccelMode(envRaw), source: "env" };
 	const fileRaw = loadSettingsFileDefaults().QUICKCHR_ACCEL;
-	if (fileRaw !== undefined) return parseAccelMode(fileRaw);
-	return "auto";
+	if (fileRaw !== undefined) return { mode: parseAccelMode(fileRaw), source: "file" };
+	return { mode: "auto", source: "default" };
+}
+
+/** Human-readable name of the override tier, for the launch note. */
+function accelSourceLabel(source: AccelOverrideSource): string {
+	if (source === "flag") return "--accel";
+	if (source === "env") return "QUICKCHR_ACCEL";
+	return "the 'accel' setting in quickchr.env";
 }
 
 /**
@@ -216,9 +236,9 @@ export function resolveAccelOverride(): AccelMode {
  * one who forced a mode that is known not to boot — understands why.
  */
 export function accelNote(guestArch: "x86" | "arm64", accel: string): string | null {
-	const forced = resolveAccelOverride();
+	const { mode: forced, source } = resolveAccelOverrideWithSource();
 	if (forced !== "auto") {
-		const base = `Accelerator configured as "${forced}" — auto-detection bypassed.`;
+		const base = `Accelerator configured as "${forced}" via ${accelSourceLabel(source)} — auto-detection bypassed.`;
 		if (guestArch === "arm64" && forced === "hvf" && isAppleSiliconHost()) {
 			return `${base} Note: arm64 CHR images still ship a 32-bit ARM userspace, which Apple Silicon cannot execute under HVF — expect "No working init found" unless MikroTik has shipped an AArch64-only image (tikoci/quickchr#97).`;
 		}

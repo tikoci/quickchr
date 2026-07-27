@@ -33,8 +33,8 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
-				// Let start() pick the process-native arch; detectAccel() applies the
-				// physical-host policy (including Apple Silicon TCG fallback).
+			// Let start() pick the process-native arch; detectAccel() applies the
+			// physical-host policy (including Apple Silicon TCG fallback).
 			instance = await QuickCHR.start({
 				...imageTarget(),
 				background: true,
