@@ -499,9 +499,19 @@ describe("accelNote", () => {
 		expect(accelNote("arm64", "hvf")).toBeNull();
 
 		// Intel Mac: arm64 TCG is cross-arch emulation, not the #97 fallback.
+		// The mock is load-bearing, not decoration: darwin + x64 is the one branch
+		// where isAppleSiliconHost() shells out, so without it this assertion runs
+		// the real probe — and on an Apple Silicon host running this suite under
+		// Rosetta that answers "1", flipping the expected null to a note.
 		setArch("x64");
+		resetAppleSiliconHostCache();
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			return { exitCode: 1 };
+		});
 		expect(accelNote("arm64", "tcg")).toBeNull();
 
+		// Non-darwin short-circuits before the probe, so no mock is needed here.
 		setPlatform("linux");
 		setArch("x64");
 		expect(accelNote("arm64", "tcg")).toBeNull();
