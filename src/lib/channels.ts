@@ -15,6 +15,7 @@ import type { Arch, ChannelTcpEndpoint, QgaCommand } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { qgaProbe, qgaRawCommand } from "./qga.ts";
 import { qgaKvmWarning } from "./platform.ts";
+import { newMonitorPhaseTimings, summarizeMonitorPhases } from "./diagnostics.ts";
 
 /**
  * Resolve the IPC path for a QEMU channel (monitor, serial, qga).
@@ -87,9 +88,19 @@ export async function monitorCommand(
 	const endpoint = channelEndpoint(machineDir, "monitor", portBase);
 
 	return new Promise((resolve, reject) => {
+		// Per-phase timings so a timeout says *where* the round-trip stalled rather
+		// than just that it did (#80). Only read on the timeout path — a successful
+		// command pays nothing but a few Date.now() calls.
+		const started = Date.now();
+		const phases = newMonitorPhaseTimings();
+		const since = () => Date.now() - started;
+
 		const timeout = setTimeout(() => {
 			socket.destroy();
-			reject(new QuickCHRError("BOOT_TIMEOUT", "Monitor command timed out"));
+			reject(new QuickCHRError(
+				"BOOT_TIMEOUT",
+				`Monitor command timed out after ${timeoutMs}ms: "${command}" — ${summarizeMonitorPhases(phases)}`,
+			));
 		}, timeoutMs);
 
 		let buffer = "";
@@ -99,13 +110,20 @@ export async function monitorCommand(
 			? connect({ path: endpoint })
 			: connect(endpoint.port, endpoint.host);
 
+		socket.on("connect", () => { phases.connectedAtMs = since(); });
+
 		socket.on("data", (data) => {
+			phases.bytesReceived += data.length;
+			phases.firstByteAtMs ??= since();
+			if (sentCommand) phases.responseFirstByteAtMs ??= since();
 			buffer += data.toString();
 			// Wait for the (qemu) prompt before sending command
 			if (!sentCommand && buffer.includes("(qemu)")) {
 				sentCommand = true;
+				phases.promptAtMs = since();
 				buffer = "";
 				socket.write(command + "\n");
+				phases.commandWrittenAtMs = since();
 			} else if (sentCommand && buffer.includes("(qemu)")) {
 				// Got response — strip the prompt, the command echo, and ANSI noise
 				clearTimeout(timeout);
@@ -122,7 +140,10 @@ export async function monitorCommand(
 			if (sentCommand) {
 				resolve(cleanMonitorResponse(buffer.replace(/\(qemu\)\s*/g, "")));
 			} else {
-				reject(new QuickCHRError("MACHINE_STOPPED", "Monitor socket closed before command could be sent"));
+				reject(new QuickCHRError(
+					"MACHINE_STOPPED",
+					`Monitor socket closed before command could be sent — ${summarizeMonitorPhases(phases)}`,
+				));
 			}
 		});
 

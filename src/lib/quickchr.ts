@@ -57,6 +57,7 @@ import { resolveSetting } from "./settings.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint } from "./channels.ts";
+import { captureBootFailure, newBootProbeStats, type BootFailureReport, type BootProbeStats } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
@@ -412,11 +413,11 @@ function createInstance(state: MachineState): ChrInstance {
 		captureInterface: process.platform === "darwin" ? "lo0" : "any",
 		tzspGatewayIp: "10.0.2.2",
 
-		async waitForBoot(timeoutMs?: number): Promise<boolean> {
+		async waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean> {
 			// Use resolved credentials so waitForBoot can validate the response body
 			// on authenticated machines (post-provisioning, post-install reboots).
 			const auth = resolveAuth(state);
-			return waitForBoot(ports.http, timeoutMs, auth.header);
+			return waitForBoot(ports.http, timeoutMs, auth.header, stats);
 		},
 
 		async waitFor(condition: () => Promise<boolean>, timeoutMs = 30_000): Promise<boolean> {
@@ -948,6 +949,37 @@ async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> 
 		await Bun.sleep(100);
 	}
 	return false;
+}
+
+/** Where boot-failure reports land: `<dataDir>/failures/`, deliberately outside
+ *  any machine directory so `remove()` — which every integration test calls from
+ *  its `finally` — cannot delete the evidence it was written to explain (#79). */
+function bootFailureReportDir(): string {
+	return join(getDataDir(), "failures");
+}
+
+/** Tear down a machine that failed to boot, and describe what was done.
+ *
+ *  Default is full cleanup — a failed `start()` must not leave a half-dead
+ *  machine behind for the next call to trip over. QUICKCHR_PRESERVE_ON_FAILURE=1
+ *  inverts that for **local** debugging: the QEMU process is still stopped (it is
+ *  wedged, and its port block must be released), but the machine directory
+ *  survives so it can be inspected by hand.
+ *
+ *  Evidence does not depend on that flag, and CI deliberately does not set it —
+ *  `captureBootFailure()` has already written its report outside the machine dir
+ *  with qemu.log and serial.log embedded, so cleanup cannot destroy it (#79). */
+async function cleanupAfterBootFailure(
+	instance: ChrInstance,
+	name: string,
+	failure: BootFailureReport,
+): Promise<string> {
+	try { await instance.stop(); } catch { /* ignore */ }
+	if (failure.preserved) {
+		return ` Machine "${name}" was preserved for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — remove it with \`quickchr remove ${name}\`.`;
+	}
+	try { await instance.remove(); } catch { /* ignore */ }
+	return ` Machine "${name}" has been cleaned up automatically.`;
 }
 
 /** Wait for CHR to boot with periodic progress status updates every 20s. */
@@ -1569,7 +1601,8 @@ export class QuickCHR {
 		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages, accel) + (opts.timeoutExtra ?? 0);
 
 		// Always wait for boot in background mode — the JSDoc promises "REST-ready".
-		let booted = await instance.waitForBoot(bootTimeout);
+		const probe = newBootProbeStats();
+		let booted = await instance.waitForBoot(bootTimeout, probe);
 
 		// Hardware-accelerated runners (nested-KVM on CI, HVF on virtualized macOS
 		// runners) occasionally produce a single QEMU process that boots but never
@@ -1586,22 +1619,31 @@ export class QuickCHR {
 			({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper));
 			state.pid = pid;
 			saveMachine(state);
-			booted = await instance.waitForBoot(bootTimeout);
+			booted = await instance.waitForBoot(bootTimeout, probe);
 		}
 
 		if (!booted) {
-			let qemuLogTail = "";
-			try {
-				const logPath = join(machineDir, "qemu.log");
-				if (existsSync(logPath)) qemuLogTail = `\nqemu.log:\n${readFileSync(logPath, "utf-8").slice(-1200)}`;
-			} catch { /* ignore */ }
-			try { await instance.stop(); } catch { /* ignore */ }
-			try { await instance.remove(); } catch { /* ignore */ }
+			const failure = await captureBootFailure({
+				name,
+				machineDir,
+				arch,
+				accel,
+				bootTimeoutMs: bootTimeout,
+				pid,
+				httpPort: instance.ports.http,
+				portBase: state.portBase,
+				qemuArgs,
+				probe,
+				phase: "start",
+				reportDir: bootFailureReportDir(),
+				monitorQuery: (cmd) => monitorCommand(machineDir, cmd, 3000, state.portBase),
+			});
 			throw new QuickCHRError(
 				"BOOT_TIMEOUT",
 				`CHR did not respond within ${bootTimeout / 1000}s (accel=${accel})` +
 				(hasProvisioning ? " — provisioning could not run." : ".") +
-				` Machine "${name}" has been cleaned up automatically.${qemuLogTail}`,
+				await cleanupAfterBootFailure(instance, name, failure) +
+				`\n${failure.summary}`,
 			);
 		}
 
@@ -1882,20 +1924,30 @@ export class QuickCHR {
 
 		// Always wait for boot in background mode — start() promises "REST-ready".
 		const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts?.installAllPackages, accel);
-		const booted = await instance.waitForBoot(bootTimeout);
+		const probe = newBootProbeStats();
+		const booted = await instance.waitForBoot(bootTimeout, probe);
 		if (!booted) {
-			let qemuLogTail = "";
-			try {
-				const logPath = join(state.machineDir, "qemu.log");
-				if (existsSync(logPath)) qemuLogTail = `\nqemu.log:\n${readFileSync(logPath, "utf-8").slice(-1200)}`;
-			} catch { /* ignore */ }
-			try { await instance.stop(); } catch { /* ignore */ }
-			try { await instance.remove(); } catch { /* ignore */ }
+			const failure = await captureBootFailure({
+				name: state.name,
+				machineDir: state.machineDir,
+				arch: state.arch,
+				accel,
+				bootTimeoutMs: bootTimeout,
+				pid,
+				httpPort: instance.ports.http,
+				portBase: state.portBase,
+				qemuArgs,
+				probe,
+				phase: "_launchExisting",
+				reportDir: bootFailureReportDir(),
+				monitorQuery: (cmd) => monitorCommand(state.machineDir, cmd, 3000, state.portBase),
+			});
 			throw new QuickCHRError(
 				"BOOT_TIMEOUT",
 				`CHR did not respond within ${bootTimeout / 1000}s (accel=${accel})` +
 				(hasProvisioning ? " — provisioning could not run." : ".") +
-				` Machine "${state.name}" has been cleaned up automatically.${qemuLogTail}`,
+				await cleanupAfterBootFailure(instance, state.name, failure) +
+				`\n${failure.summary}`,
 			);
 		}
 

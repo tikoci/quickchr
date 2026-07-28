@@ -437,6 +437,8 @@ mutate any machine's `machine.json`.
 | `QUICKCHR_NO_PROMPT` | Force non-interactive mode (skips all wizards) |
 | `QUICKCHR_DEBUG` | Emit `[debug]` lines from the progress logger |
 | `QUICKCHR_INTEGRATION` | Required to run `test/integration/` |
+| `QUICKCHR_PRESERVE_ON_FAILURE` | `=1` keeps the machine directory after a boot timeout instead of removing it (QEMU is still stopped) |
+| `QUICKCHR_SERIAL_LOG` | `=1` tees the guest serial console to `<machineDir>/serial.log`. **Secret-bearing** — serial provisioning types the generated password in cleartext |
 | `MIKROTIK_WEB_ACCOUNT`, `MIKROTIK_WEB_PASSWORD` | License credentials fallback |
 | `NO_COLOR` | Disable ANSI styling |
 
@@ -1016,6 +1018,8 @@ the 6 managed keys are all structural preferences, not secrets.
 | `QUICKCHR_NO_PROMPT` | CLI dispatcher — forces non-interactive mode |
 | `QUICKCHR_DEBUG` | progress logger — emits `[debug]` lines |
 | `QUICKCHR_INTEGRATION` | `bun:test` gate for `test/integration/` |
+| `QUICKCHR_PRESERVE_ON_FAILURE` | `quickchr.ts` — skip `remove()` on `BOOT_TIMEOUT` so the machine dir survives for diagnosis |
+| `QUICKCHR_SERIAL_LOG` | `qemu.ts` — adds `logfile=` to the serial chardev (writes cleartext provisioning passwords) |
 | `QUICKCHR_DEFAULT_CHANNEL` | `settings.ts` — env tier for the `default-channel` setting |
 | `QUICKCHR_DEFAULT_ARCH` | `settings.ts` — env tier for the `default-arch` setting |
 | `QUICKCHR_ACCEL` | `settings.ts` / `platform.ts` — env tier for the `accel` setting; forces `-accel` and bypasses detection |

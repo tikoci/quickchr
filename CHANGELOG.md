@@ -8,6 +8,54 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Added
+
+- **Boot-failure reports.** A `BOOT_TIMEOUT` now writes a self-contained
+  `boot-failure-<machine>-<timestamp>.json` under `<dataDir>/failures/`, holding the
+  REST-probe tally, a TCP probe of the forwarded port, QEMU monitor `info status` /
+  `info block`, process liveness, the QEMU argv, the machine-dir listing, and the full
+  `qemu.log` / `serial.log` text. It is written outside the machine directory so
+  cleanup cannot delete the evidence, and a condensed version is appended to the thrown
+  error message. `serial.log` is deliberately **not** inlined into that message — only
+  into the report — because the message reaches console and CI job logs and the log can
+  carry provisioning credentials. The directory keeps the 20 newest reports.
+- **`QUICKCHR_SERIAL_LOG=1`** tees the guest serial console to
+  `<machineDir>/serial.log`. Opt-in by design: serial-console provisioning types the
+  generated password in cleartext, so the log is secret-bearing. Off by default.
+- **`QUICKCHR_PRESERVE_ON_FAILURE=1`** keeps a failed machine's directory instead of
+  removing it (QEMU is still stopped, so the port block is released). Off by default —
+  a failed `start()` still cleans up. Mainly useful locally; the failure report itself
+  survives cleanup without it.
+
+### Changed
+
+- `BOOT_TIMEOUT` messages now report *what the REST probe saw* rather than only that it
+  gave up — connection refusals, resets, and hung connections are counted separately,
+  and the report adds QEMU's `info usernet` so a guest that booted but is unreachable
+  is distinguishable from one that never booted. (Under the default `user`/slirp
+  network mode the host port accepts regardless of guest state, so the probe tally and
+  the slirp connection table — not a live host port — are what carry the answer.)
+  `ChrInstance.waitForBoot()` takes an optional second argument to collect that tally;
+  existing calls are unaffected.
+- `Monitor command timed out` now names the command and reports where the round-trip
+  stalled — connect / first byte / prompt / command written / response first byte, plus
+  bytes received — instead of failing with no detail.
+
+### Fixed
+
+- CI: the CHR image cache never re-saved. `actions/cache` skips its post-job save on an
+  exact key hit, so the static `chr-images-{OS}-{arch}-v1` key meant any RouterOS
+  version resolved after the cache was first populated re-downloaded on *every* run.
+  The primary key now rotates per run, with `restore-keys` doing the prefix fallback.
+- CI: the examples smoke harness buffered child output until exit, so an example that
+  hung until the per-test timeout produced no output at all. Output now streams with a
+  per-example prefix, and both streams are printed on a non-zero exit.
+- CI: every Linux and macOS integration artifact had been silently dropping
+  `boot-log.ndjson`, `machine.json` and `qemu.log`. The POSIX data root lives under
+  `~/.local/share/quickchr`, and `actions/upload-artifact` excludes hidden paths unless
+  `include-hidden-files` is set — while the four non-hidden `~/*.txt` files kept
+  matching, so `if-no-files-found: warn` never fired and the artifact looked healthy.
+
 ## [0.4.6] — 2026-07-27
 
 > **Apple Silicon users: we would like your help confirming this.** The arm64 HVF
