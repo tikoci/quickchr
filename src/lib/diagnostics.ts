@@ -25,7 +25,7 @@
  * error: every capture path swallows its own failures and records them as text.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
 
@@ -201,6 +201,27 @@ function readIfPresent(path: string): string | null {
 	}
 }
 
+/** Keep only the newest N reports in a failures directory.
+ *
+ *  Each report embeds up to 2 × 256 KB of log text, and a flaky-boot loop can
+ *  produce one per attempt, so this directory would otherwise grow without
+ *  bound — the image cache has `autoPruneIfOverCap`, this had nothing. Newest-
+ *  first by filename, which sorts chronologically because the name carries an
+ *  ISO-8601 stamp. Best-effort: never throws. */
+export const MAX_BOOT_FAILURE_REPORTS = 20;
+
+export function pruneBootFailureReports(dir: string, keep = MAX_BOOT_FAILURE_REPORTS): void {
+	try {
+		const reports = readdirSync(dir)
+			.filter((name) => name.startsWith("boot-failure-") && name.endsWith(".json"))
+			.sort()
+			.reverse();
+		for (const stale of reports.slice(keep)) {
+			try { unlinkSync(join(dir, stale)); } catch { /* ignore */ }
+		}
+	} catch { /* ignore */ }
+}
+
 export interface BootFailureContext {
 	name: string;
 	machineDir: string;
@@ -298,6 +319,7 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 		reportPath = join(dir, `boot-failure-${ctx.name}-${stamp}.json`);
 		writeFileSync(reportPath, `${JSON.stringify(record, null, 2)}\n`);
+		pruneBootFailureReports(dir);
 	} catch {
 		reportPath = null;
 	}
@@ -309,7 +331,18 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 	for (const [command, output] of Object.entries(monitor)) {
 		if (command === "info status") lines.push(`monitor ${command}: ${output.replace(/\s+/g, " ").trim()}`);
 	}
-	if (serialLog) lines.push(`serial.log tail:\n${serialLog.slice(-1200)}`);
+	// serial.log is NOT inlined here, only pointed at. This summary is appended to
+	// a thrown QuickCHRError, which the CLI prints and CI echoes into job logs —
+	// public ones, on a public repo. The log itself is secret-bearing (console
+	// provisioning types the generated password in cleartext) and `logappend=on`
+	// means it spans every boot of that machine dir, so an unrelated later failure
+	// could print a password typed sessions earlier. The full text stays in the
+	// JSON report, which is opt-in and lands in an access-controlled artifact.
+	if (serialLog) {
+		lines.push(
+			`serial.log: ${serialLog.length} bytes captured — not inlined (may contain provisioning credentials); see the full report`,
+		);
+	}
 	if (qemuLog) lines.push(`qemu.log tail:\n${qemuLog.slice(-1200)}`);
 	if (reportPath) lines.push(`Full report: ${reportPath}`);
 

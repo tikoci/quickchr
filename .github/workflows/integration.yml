@@ -781,6 +781,37 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # This job boots real CHRs and sets QUICKCHR_SERIAL_LOG, but had no upload
+      # at all — so smoke-output.txt and any boot-failure report died with the
+      # runner. Not hypothetical: #80's savevm timeout surfaced here, via the
+      # `rollback` example, and the evidence had to be scraped out of the raw job
+      # log. include-hidden-files is required for the POSIX dot-path data root
+      # (see the integration job's upload step).
+      - name: Upload smoke logs (POSIX)
+        if: ${{ always() && runner.os != 'Windows' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.artifact-prefix || 'integration' }}-smoke-${{ matrix.id }}-${{ matrix.target }}
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            ~/smoke-output.txt
+            ~/.local/share/quickchr/boot-log.ndjson
+            ~/.local/share/quickchr/failures/*.json
+          retention-days: 7
+
+      - name: Upload smoke logs (Windows)
+        if: ${{ always() && runner.os == 'Windows' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.artifact-prefix || 'integration' }}-smoke-${{ matrix.id }}-${{ matrix.target }}
+          if-no-files-found: warn
+          path: |
+            ~/smoke-output.txt
+            ~/AppData/Local/quickchr/boot-log.ndjson
+            ~/AppData/Local/quickchr/failures/*.json
+          retention-days: 7
+
   # ── PowerShell lint ──────────────────────────────────────────────────────────
   # Static-analyze the example .ps1 mirrors whenever examples run. Reuses the
   # dedicated workflow (which also runs on its own for .ps1 pushes/PRs — #28).

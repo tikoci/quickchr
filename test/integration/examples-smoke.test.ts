@@ -121,6 +121,13 @@ async function drain(stream: ReadableStream<Uint8Array>, prefix: string): Promis
 		pending = lines.pop() ?? "";
 		for (const line of lines) process.stderr.write(`${prefix} ${line}\n`);
 	}
+	// Flush the decoder: a multi-byte UTF-8 sequence split across the last chunk
+	// boundary is held back by { stream: true } and would otherwise be dropped.
+	const tail = decoder.decode();
+	if (tail) {
+		text += tail;
+		if (STREAM) pending += tail;
+	}
 	if (STREAM && pending) process.stderr.write(`${prefix} ${pending}\n`);
 	return text;
 }
@@ -159,9 +166,15 @@ describe.skipIf(SKIP)("examples smoke", () => {
 			`${r.name} (${r.lang}) runs clean`,
 			async () => {
 				const { code, out, errOut } = await run(r.cmd, r.env, r.name);
-				// Both streams on failure — an example that fails a REST assertion
-				// reports it on stdout, so stderr alone can be empty and useless.
-				if (code !== 0) console.error(`[${r.name}] exit ${code}\nstdout:\n${out}\nstderr:\n${errOut}`);
+				// Replay both streams only when they were NOT already streamed —
+				// under STREAM (i.e. in CI) drain() has printed every line as it
+				// arrived, and repeating them here doubles the job log for no gain.
+				// Both streams, not just stderr: an example that fails a REST
+				// assertion reports it on stdout, so stderr alone can be empty.
+				if (code !== 0) {
+					const detail = STREAM ? "(output streamed above)" : `stdout:\n${out}\nstderr:\n${errOut}`;
+					console.error(`[${r.name}] exit ${code} ${detail}`);
+				}
 				expect(code).toBe(0);
 				expect(out.length).toBeGreaterThan(0);
 			},

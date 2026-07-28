@@ -1,14 +1,16 @@
 import { describe, test, expect, afterEach } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	captureBootFailure,
 	classifyProbeError,
+	MAX_BOOT_FAILURE_REPORTS,
 	newBootProbeStats,
 	newMonitorPhaseTimings,
 	preserveOnFailure,
 	probeTcpPort,
+	pruneBootFailureReports,
 	recordBootProbe,
 	serialLogEnabled,
 	summarizeBootProbe,
@@ -194,6 +196,52 @@ describe("captureBootFailure", () => {
 		expect(record.host.qemuProcess).toContain("alive");
 
 		expect(report.summary).toContain("monitor info status: VM status: paused (io-error)");
+	});
+
+	// The summary is appended to a thrown QuickCHRError, which the CLI prints and
+	// CI echoes into public job logs. serial.log can hold the generated
+	// provisioning password in cleartext, so it must stay in the report only.
+	test("never puts serial.log content into the error summary", async () => {
+		const machineDir = scratch();
+		const reportDir = join(scratch(), "failures");
+		writeFileSync(join(machineDir, "serial.log"), 'MikroTik Login: admin\n/user add name=q password="SuperSecret123"\n');
+		writeFileSync(join(machineDir, "qemu.log"), "qemu: some warning\n");
+
+		const report = await captureBootFailure({
+			name: "leaky", machineDir, reportDir, arch: "x86", accel: "kvm", bootTimeoutMs: 1000, phase: "unit",
+		});
+
+		expect(report.summary).not.toContain("SuperSecret123");
+		expect(report.summary).not.toContain("/user add");
+		expect(report.summary).toContain("serial.log:");
+		expect(report.summary).toContain("not inlined");
+		// qemu.log carries no credentials and stays inline — it is the useful tail.
+		expect(report.summary).toContain("some warning");
+		// The full text is still preserved in the report itself.
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.serialLog).toContain("SuperSecret123");
+	});
+
+	test("prunes to the newest MAX_BOOT_FAILURE_REPORTS reports", async () => {
+		const dir = scratch();
+		// 25 stale reports with sortable ISO-ish stamps, plus one non-report file.
+		for (let i = 0; i < 25; i++) {
+			writeFileSync(join(dir, `boot-failure-m-2026-07-27T00-00-${String(i).padStart(2, "0")}-000Z.json`), "{}");
+		}
+		writeFileSync(join(dir, "unrelated.json"), "{}");
+
+		pruneBootFailureReports(dir);
+
+		const left = readdirSync(dir).filter((f) => f.startsWith("boot-failure-")).sort();
+		expect(left.length).toBe(MAX_BOOT_FAILURE_REPORTS);
+		// Newest kept, oldest dropped.
+		expect(left.at(-1)).toContain("00-00-24");
+		expect(left[0]).toContain("00-00-05");
+		expect(existsSync(join(dir, "unrelated.json"))).toBe(true);
+	});
+
+	test("pruneBootFailureReports tolerates a missing directory", () => {
+		expect(() => pruneBootFailureReports(join(tmpdir(), "quickchr-no-such-dir-9182"))).not.toThrow();
 	});
 
 	test("never throws when the machine directory is gone and no monitor is reachable", async () => {

@@ -16,7 +16,9 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   `info block`, process liveness, the QEMU argv, the machine-dir listing, and the full
   `qemu.log` / `serial.log` text. It is written outside the machine directory so
   cleanup cannot delete the evidence, and a condensed version is appended to the thrown
-  error message.
+  error message. `serial.log` is deliberately **not** inlined into that message — only
+  into the report — because the message reaches console and CI job logs and the log can
+  carry provisioning credentials. The directory keeps the 20 newest reports.
 - **`QUICKCHR_SERIAL_LOG=1`** tees the guest serial console to
   `<machineDir>/serial.log`. Opt-in by design: serial-console provisioning types the
   generated password in cleartext, so the log is secret-bearing. Off by default.
