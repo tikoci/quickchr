@@ -68,6 +68,37 @@ REST after boot.
 `waitForBoot` probe. Under TCG where TCP round-trips are slow, this compounds badly.
 Lab evidence: `test/lab/slirp-hostfwd/`.
 
+### Reading `info usernet` — the only host-side view of the guest
+
+The QEMU monitor's `info usernet` prints slirp's forwarding table plus live
+connections. It is the **only** host-side instrument that separates "nothing is
+listening" from "the packets are being silently dropped" — a host-side TCP connect
+reads "accepting" in both cases (see the hostfwd note above). Measured on a healthy
+7.21.5 CHR (x86/HVF), four probes per condition:
+
+| guest condition | rows for that guest port |
+|---|---|
+| serving (e.g. `www` enabled) | `TIME_WAIT` / `ESTABLISHED` / `FIN_WAIT_*` |
+| nothing listening (service disabled) | **none at all** — the guest RSTs and slirp discards the entry |
+| silently dropped (`action=drop`) | `TCP[SYN_SENT]`, persisting |
+
+Row format — the bracketed state can contain a space, so parse it as "anything but
+`]`" (UDP rows carry a TTL):
+
+```text
+  Protocol[State]    FD  Source Address  Port   Dest. Address  Port RecvQ SendQ
+  TCP[HOST_FORWARD]  21               *  9170       10.0.2.15    80     0     0
+  TCP[SYN_SENT]     103       127.0.0.1  9100       10.0.2.15    80     0     0
+  UDP[223 sec]      168       10.0.2.15  5678 255.255.255.255  5678     0     0
+```
+
+That last row is a useful positive: MNDP broadcasting *from* `10.0.2.15` proves the
+guest holds its DHCP lease. `SYN_SENT` does **not** say *where* the drop happens —
+a guest that received every SYN and dropped it itself looks identical from the
+host. Localizing that needs a guest-side counter; see `src/lib/guest-snapshot.ts`
+and `.github/instructions/provisioning.instructions.md`. Implementation:
+`parseUsernetTable()` / `classifyForwardedPorts()` in `src/lib/diagnostics.ts`.
+
 ### Guest→host UDP via the gateway (no hostfwd)
 
 SLIRP's gateway `10.0.2.2` **is the host** from inside the guest. A datagram the

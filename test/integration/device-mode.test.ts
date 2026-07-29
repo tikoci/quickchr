@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { imageTarget } from "./image-target.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Integration tests — device-mode provisioning.
@@ -60,7 +61,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			}
 			await cleanupMachine("integration-dm-rose");
 		}
-	}, 300_000);
+	}, bootTestTimeout({ boots: 2 })); // + hard power-cycle
 
 	test("deviceMode=skip boots without device-mode provisioning", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -93,7 +94,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			}
 			await cleanupMachine("integration-dm-skip");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 
 	test("mode=basic with enable/disable feature flags is applied and verified", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -146,7 +147,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			}
 			await cleanupMachine("integration-dm-features");
 		}
-	}, 300_000);
+	}, bootTestTimeout({ boots: 2 })); // + hard power-cycle
 
 	test("setDeviceMode() changes mode on a running instance", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -183,5 +184,5 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			}
 			await cleanupMachine("integration-dm-setmode");
 		}
-	}, 300_000);
+	}, bootTestTimeout({ boots: 2 })); // + hard power-cycle
 });

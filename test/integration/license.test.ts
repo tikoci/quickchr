@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { imageTarget } from "./image-target.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Integration tests for license and package install functionality.
@@ -65,7 +66,7 @@ describe.skipIf(SKIP)("license — getLicenseInfo on fresh CHR", () => {
 			}
 			await cleanupMachine("integration-license-test");
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 });
 
 describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credentials", () => {
@@ -112,7 +113,7 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 			}
 			await cleanupMachine("integration-license-renew");
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 
 	test("instance.license() applies license to running CHR", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -152,7 +153,7 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 			}
 			await cleanupMachine("integration-license-renew");
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 });
 
 describe.skipIf(SKIP)("downloadAndListPackages — enumerate from zip", () => {

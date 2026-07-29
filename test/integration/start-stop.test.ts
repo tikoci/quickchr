@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { restGet } from "../../src/lib/rest.ts";
 import { imageTarget } from "./image-target.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Integration test — start and stop a CHR.
@@ -63,7 +64,7 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 			}
 			await cleanupMachine("integration-test-1");
 		}
-	}, 360_000); // 6 min — boot ceiling 180s (KVM×1.5); start() may respawn a wedged boot once, so budget two boots + headroom
+	}, bootTestTimeout({ boots: 2 })); // start() may respawn a wedged boot once
 });
 
 describe.skipIf(SKIP)("package installation", () => {
@@ -111,7 +112,7 @@ describe.skipIf(SKIP)("package installation", () => {
 			}
 			await cleanupMachine("integration-pkg-test");
 		}
-	}, 600_000); // 10 min: download + two boots + package install
+	}, bootTestTimeout({ withPackages: true }));
 });
 
 describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
@@ -154,7 +155,7 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			// remove() deletes the machine, so cleanupMachine is a no-op here
 			await cleanupMachine("integration-remove-running");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 
 	test("clean() resets disk to factory defaults — custom users disappear on next boot", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -212,7 +213,7 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			}
 			await cleanupMachine("integration-clean-test");
 		}
-	}, 540_000); // 9 min: two full boots + provisioning, slower on arm64
+	}, bootTestTimeout({ boots: 2 })); // provisioned boot + post-clean() relaunch (#79)
 });
 
 describe.skipIf(SKIP)("instance channels — serial console", () => {
@@ -262,7 +263,7 @@ describe.skipIf(SKIP)("instance channels — serial console", () => {
 			}
 			await cleanupMachine("integration-serial-test");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 });
 
 describe.skipIf(SKIP)("instance-level package methods", () => {
@@ -335,5 +336,5 @@ describe.skipIf(SKIP)("instance-level package methods", () => {
 			}
 			await cleanupMachine("integration-pkg-instance");
 		}
-	}, 720_000); // 12 min: image download (if needed) + boot + SCP upload + reboot + boot
+	}, bootTestTimeout({ withPackages: true, extraMs: 120_000 })); // + SCP upload and a reboot
 });

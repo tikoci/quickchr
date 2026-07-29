@@ -252,6 +252,38 @@ came out of that:
    the command and went quiet); the phase line can, at the cost of a few
    `Date.now()` calls on the success path.
 
+Two more came out of #105/#106, once the reports above proved only *that* #79's
+boot went silent:
+
+5. **Evidence has to localize, so the capture is layered by invasiveness.**
+   Host-side per-port classification from `info usernet` (read-only, always on)
+   → read-only guest snapshot over the serial console, which stays reachable
+   while REST is dead (on whenever a serial channel exists) → the counting-rule
+   probe, which writes a mangle rule into the guest and is therefore opt-in via
+   `QUICKCHR_DEEP_BOOT_DIAGNOSTICS=1` and skipped under
+   `QUICKCHR_PRESERVE_ON_FAILURE=1`. Each layer answers a question the one
+   before it cannot: `SYN_SENT` proves a silent drop but not *whose*; only a
+   counter inside the guest separates "RouterOS dropped it" from "it never
+   arrived". The RouterOS-side details (why mangle `passthrough` and not a
+   filter `accept`, why conntrack cannot answer this) live in
+   `provisioning.instructions.md`; the `info usernet` reading in
+   `qemu.instructions.md`.
+
+   The same secrecy rule as (3) applies one level up: guest payloads go to the
+   JSON report, and only credential-free shapes — row counts, booleans, a
+   verdict — reach the thrown error, which CI echoes into public job logs.
+
+6. **A timeout that outlives the forensics is not optional.** Integration tests
+   hardcoding `300_000` against a 480 s same-arch TCG budget meant bun killed
+   the test before `waitForBoot()` gave up, so the capture above never ran —
+   four #79 reproductions arrived bare for exactly this reason. Tests derive
+   their timeout from `defaultBootTimeout()` plus `BOOT_FORENSICS_BUDGET_MS`
+   (`test/integration/timeouts.ts`), and a unit test asserts the invariant
+   across every arch/accel combination. Note this is alignment, not tuning: the
+   4× same-arch TCG factor is still ~11× the measured 44 s worst case, and
+   cutting it needs its own measurement of the package-install and device-mode
+   paths (#106).
+
 Corollary for CI cache keys: `actions/cache` only saves when the primary key
 *missed*, so a static key means a newly-resolved RouterOS version re-downloads
 every run forever (#91). Primary keys must carry a rotating component, with

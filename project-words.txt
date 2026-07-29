@@ -15,6 +15,7 @@
 
 aavmf
 accels
+ACK
 acpi
 addrs
 aehd
@@ -66,6 +67,7 @@ compgen
 compinit
 compreply
 connectionless
+conntrack
 consoletest
 containerregistry
 conv
@@ -289,6 +291,7 @@ powerdown
 poweroff
 pptp
 prereq
+prerouting
 printk
 proplist
 provpass
@@ -328,6 +331,7 @@ roskrnl
 routerboard
 routeros
 rsc
+RST
 rta
 runspace
 runspaces

@@ -311,7 +311,7 @@ a new tracked issue.
   - `machines/**/*.json` — `machine.json` with last-known state, ports, config
   - `machines/**/*.log` — `qemu.log` with QEMU stdout/stderr (boot messages, panics), plus `serial.log` (the guest console tee — CI sets `QUICKCHR_SERIAL_LOG=1`)
   - **These POSIX paths only reach the artifact because the step sets `include-hidden-files: true`** — `~/.local/share/…` is a dot path and `upload-artifact` drops hidden files by default. If you add an artifact step touching the POSIX data root, set it, or the upload silently ships nothing (`if-no-files-found: warn` will not save you — the non-hidden `~/*.txt` files still match).
-  - `failures/boot-failure-<machine>-<iso8601>.json` — **start here for any `BOOT_TIMEOUT`**. Self-contained: REST-probe tally, hostfwd TCP probe, monitor `info status`/`info block`, QEMU liveness + argv, machine-dir listing, and the full `qemu.log`/`serial.log` text. Written under `<dataDir>/failures/`, outside the machine dir, so the test's own `finally { cleanupMachine() }` can't delete it
+  - `failures/boot-failure-<machine>-<iso8601>.json` — **start here for any `BOOT_TIMEOUT`**. Self-contained: REST-probe tally, per-port slirp classification (`forwardProbe`), the guest-side serial snapshot (`guest`), the counting-rule verdict (`countingRule`, deep diagnostics only), hostfwd TCP probe, monitor `info status`/`info block`/`info usernet`, QEMU liveness + argv, machine-dir listing, and the full `qemu.log`/`serial.log` text. Written under `<dataDir>/failures/`, outside the machine dir, so the test's own `finally { cleanupMachine() }` can't delete it
 - **Step summary**: `integration.yml` shows failing lines + per-file timing + boot-timing table (full log in the artifact)
 
 ### Boot failure diagnosis checklist
@@ -328,22 +328,39 @@ a new tracked issue.
    - `monitor["info status"]` reporting `paused` (especially `paused (io-error)`)
      is a disk/backing-file answer on its own — stop looking at timeouts.
 
-   `monitor["info usernet"]` is the decisive follow-up when the guest looks up
-   but is unreachable. It prints slirp's connection table, and the **per-row
-   TCP state is the answer**:
+   `forwardProbe.ports` is the decisive follow-up when the guest looks up but is
+   unreachable. It probes every forwarded TCP port and classifies each from
+   slirp's own table (`monitor["info usernet"]` holds the pre-probe raw dump,
+   `forwardProbe.usernetAfterProbe` the one the table was read from):
 
-   - `TCP[SYN_SENT]` piling up against `10.0.2.15:<port>` → slirp *is* delivering
-     the SYN and **the guest is not answering on that port**. Guest-side service
-     problem, not networking. (This is what #79 turned out to be.)
-   - `HOST_FORWARD` rows only, with **no traffic from `10.0.2.15` anywhere in the
-     table** → the guest never took its DHCP address, so slirp has nowhere to
-     deliver.
+   - `dropped` (`TCP[SYN_SENT]` persisting against `10.0.2.15:<port>`) → the SYNs
+     are being **silently dropped**. **This does not say by whom** — measured
+     locally, a guest that received all 20 SYNs and dropped them itself produced
+     the same table as one that never saw them. Read `countingRule` next.
+   - `refused` (no row at all) → the guest **RST'd**: nothing listening on that
+     port, but the guest is alive.
+   - `served` → the connection completed; that service is fine.
+   - `not-forwarded` → QEMU never bound that forward. Host-side.
+
+   **Every port `dropped` points at the guest RX path; one dropped port beside
+   healthy ones is service-specific.** (#79 shows all-but-`http` healthy.)
+
+   Then, in order:
+
+   - `guest.consoleReachable: true` → RouterOS is alive and answering over serial
+     while REST is dead. `guest.entries` carries `/log` (DHCP churn — a `lost IP
+     address`/`got IP address` pair means a link flap; a single `got` means none),
+     `/ip/address`, `/ip/service`, `/ip/firewall/filter` (expected `[]` on a fresh
+     CHR), `/interface` stats, conntrack, `/system/resource`.
+   - `countingRule.verdict` (deep diagnostics only) — `guest-received` = the SYNs
+     arrive and RouterOS drops them; `not-delivered` = they never reach RouterOS,
+     so the drop is in the slirp/virtio RX path.
    - a `UDP` row sourced from `10.0.2.15` (RouterOS's own MNDP on 5678) proves
      the guest has its address and its NIC is live — check for it before blaming
-     DHCP.
+     DHCP. `HOST_FORWARD` rows only, with no traffic from `10.0.2.15` anywhere,
+     is the shape of a guest that never took its DHCP address.
 
-   Both cases present to the REST probe identically, as `probe-timeout`. Only
-   `info usernet` separates them.
+   All of these present to the REST probe identically, as `probe-timeout`.
 
    **slirp caveat (verified locally, 2026-07-27).** With the default `user` network
    mode, QEMU's hostfwd `listen()`s on the host port for the whole life of the

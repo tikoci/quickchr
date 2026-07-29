@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Integration test — exec() against a real CHR instance.
@@ -86,7 +87,7 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 				);
 			}
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 
 	afterAll(async () => {
 		if (instance) {
@@ -299,7 +300,7 @@ describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
 			name: MACHINE,
 			secureLogin: true,
 		});
-	}, 120_000);
+	}, bootTestTimeout());
 
 	afterAll(async () => {
 		try { await instance?.stop(); } catch { /* ignore */ }

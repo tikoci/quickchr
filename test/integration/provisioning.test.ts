@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
 import { ensureEmptySshConfig, matchesManagedSshKey, opensshSha256Fingerprint, SSH_NULL_DEVICE, type SshKeyListRow } from "../../src/lib/provision.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Integration tests — user provisioning and admin management.
@@ -68,7 +69,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-old-boot");
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 
 	test("old 7.x provisioning is blocked with explicit code/message", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -119,7 +120,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-floor-green");
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 
 	test("background mode: custom user created and accessible via REST", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -147,7 +148,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-bg");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 
 	test("background mode: admin can be disabled after creating a replacement user", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -188,7 +189,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-disable");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 
 	test("provisioning fires before QEMU console handoff (background:true verifies shared provisioning path)", async () => {
 		// When background:false + provisioning: the library boots in background, provisions,
@@ -221,7 +222,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-fg");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 
 	test("default: quickchr managed account auto-created when no user specified", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -257,7 +258,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-managed");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 });
 
 describe.skipIf(SKIP)("console provisioning", () => {
@@ -348,7 +349,7 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-console");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 });
 
 describe.skipIf(SKIP)("provisioning corner cases", () => {
@@ -387,7 +388,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			}
 			await cleanupMachine(machineName);
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 
 	test("createUser sets the user group to 'full' by default", async () => {
 		// RouterOS has a concept of user groups. The library must place the new user
@@ -429,7 +430,7 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			}
 			await cleanupMachine(machineName);
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 });
 
 describe.skipIf(SKIP)("SSH key provisioning", () => {
@@ -552,5 +553,5 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			}
 			await cleanupMachine("integration-ssh-key");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 });

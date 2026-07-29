@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { request as nodeRequest } from "node:http";
 import { accelTimeoutFactor, detectAccel, isCrossArchEmulation } from "../../src/lib/platform.ts";
 import { imageTarget } from "./image-target.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Fresh-connection GET using node:http with agent:false.
@@ -173,5 +174,5 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			}
 			await cleanupMachine(MACHINE_NAME);
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 });
