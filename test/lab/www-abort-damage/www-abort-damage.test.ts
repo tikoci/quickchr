@@ -20,7 +20,7 @@
  * discriminating experiment produced identical output.
  *
  * NOT ESTABLISHED: the permanent wedge seen in CI. Here `www` recovers within
- * ~6 s of the last abort. See REPORT.md.
+ * 1.3–2.4 s after the last abort. See REPORT.md.
  *
  * Lab probe, not a CI gate. Run against a running CHR:
  *
@@ -33,8 +33,10 @@
 import { describe, test, expect } from "bun:test";
 import { request as nodeRequest } from "node:http";
 
-const SKIP = !process.env.QUICKCHR_INTEGRATION || !process.env.QUICKCHR_LAB_PORT;
 const PORT = Number(process.env.QUICKCHR_LAB_PORT ?? 0);
+// Gate matches every other test file in the repo (`!process.env.QUICKCHR_INTEGRATION`);
+// the port must also be a real one, or the whole file would "pass" against nothing.
+const SKIP = !process.env.QUICKCHR_INTEGRATION || !Number.isInteger(PORT) || PORT < 1 || PORT > 65535;
 const PATH = "/rest/system/resource";
 
 const BOGUS = `Basic ${btoa("cleanuser:CleanPass1")}`;
@@ -43,15 +45,22 @@ const ADMIN = `Basic ${btoa("admin:")}`;
 /**
  * One connection. `abortAfterMs === null` lets it complete; otherwise the
  * socket is destroyed with the request in flight, as restGet() does at its
- * deadline. Returns the status code, "ABORT" (we tore it down) or "RST" (the
- * guest tore it down).
+ * deadline.
+ *
+ * Outcomes are classified, never collapsed: only a genuine `ECONNRESET` counts
+ * as "RST". A refusal, a stall, or any other error gets its own label, so the
+ * reset assertions below cannot be satisfied by an unrelated failure — the
+ * whole claim of this lab is that *the guest* resets the connection.
  */
 function connect(auth: string, abortAfterMs: number | null): Promise<string> {
 	return new Promise((resolve) => {
 		let done = false;
+		const settle = (v: string) => { if (!done) { done = true; if (timer) clearTimeout(timer); if (stall) clearTimeout(stall); resolve(v); } };
 		const timer = abortAfterMs === null ? null : setTimeout(() => {
-			if (!done) { done = true; req.destroy(); resolve("ABORT"); }
+			if (!done) { req.destroy(); settle("ABORT"); }
 		}, abortAfterMs);
+		// A request we intend to complete must not hang the suite.
+		const stall = setTimeout(() => { if (!done) { req.destroy(); settle("STALL"); } }, 20_000);
 		const req = nodeRequest(
 			{
 				hostname: "127.0.0.1", port: PORT, path: PATH, method: "GET",
@@ -59,25 +68,46 @@ function connect(auth: string, abortAfterMs: number | null): Promise<string> {
 			},
 			(res) => {
 				res.on("data", () => { /* drain */ });
-				res.on("end", () => {
-					if (!done) { done = true; if (timer) clearTimeout(timer); resolve(String(res.statusCode)); }
-				});
+				res.on("end", () => settle(String(res.statusCode)));
+				res.on("error", (e) => settle(classify(e)));
 			},
 		);
-		req.on("error", () => { if (!done) { done = true; if (timer) clearTimeout(timer); resolve("RST"); } });
+		req.on("error", (e) => settle(classify(e)));
 		req.end();
 	});
 }
 
-/** Health via curl — a separate process, so no Bun socket state is shared.
- *  curl exit 56 = connection reset while receiving. */
+/** Distinguish "the guest reset us" from every other way a request can fail. */
+function classify(e: unknown): string {
+	const code = (e as NodeJS.ErrnoException)?.code;
+	if (code === "ECONNRESET") return "RST";
+	if (code === "ECONNREFUSED") return "REFUSED";
+	if (code) return `ERR-${code}`;
+	// Bun's node:http shim does not always populate `code` on a peer reset;
+	// fall back to the message, but only for the reset shape.
+	const msg = (e as Error)?.message ?? "";
+	if (/closed unexpectedly|socket hang up|ECONNRESET|reset by peer/i.test(msg)) return "RST";
+	return `ERR-${msg.slice(0, 30)}`;
+}
+
+/**
+ * Health via curl — a separate process, so no Bun socket state is shared.
+ * curl exit codes are mapped individually for the same reason as `classify()`:
+ * 56 is "reset while receiving", and nothing else may masquerade as it.
+ */
 async function curlProbe(): Promise<string> {
 	const p = Bun.spawn([
 		"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
 		"--max-time", "20", "-u", "admin:", `http://127.0.0.1:${PORT}${PATH}`,
-	], { stdout: "pipe", stderr: "pipe" });
+	], { stdout: "pipe", stderr: "ignore" });
 	const out = (await new Response(p.stdout).text()).trim();
-	return (await p.exited) === 0 ? out : "RST";
+	const rc = await p.exited;
+	if (rc === 0) return out;
+	if (rc === 56) return "RST";       // recv failure: connection reset by peer
+	if (rc === 7) return "REFUSED";    // failed to connect
+	if (rc === 28) return "TIMEOUT";   // --max-time exceeded
+	if (rc === 127) return "NO-CURL";  // curl missing — a broken lab, not a finding
+	return `curl-rc${rc}`;
 }
 
 /** www recovers on its own; settle before each pattern so rounds are independent. */
@@ -113,23 +143,41 @@ describe.skipIf(SKIP)("RouterOS www — aborted REST requests", () => {
 			pairs.push([await connect(BOGUS, 50), await connect(ADMIN, null)]);
 			await Bun.sleep(1000);
 		}
-		const flat = pairs.flat();
-
 		// Observed identically on x86/HVF and arm64/TCG:
 		//   [ABORT/200  RST/RST  RST/RST  ABORT/401]
-		// The guest resets connections from the second pair on …
-		expect(flat.filter((o) => o === "RST").length).toBeGreaterThanOrEqual(2);
-		// … and admin: with a valid empty password is answered 401 — the status
-		// belonging to the aborted cleanuser request, delivered to the wrong
-		// connection. This is the corruption that matters: not a lost response,
-		// a WRONG one. Same family as #69.
-		expect(flat).toContain("401");
+
+		// The guest resets connections from the second pair on. Assert on the
+		// SECOND slot of each pair — the request we let complete — so a reset of
+		// the request we were going to abort anyway cannot satisfy this.
+		const completed = pairs.map(([, c]) => c);
+		expect(completed.filter((o) => o === "RST").length).toBeGreaterThanOrEqual(2);
+
+		// The corruption that matters. `admin:` carries a valid empty password,
+		// so 401 is not a legitimate answer to it — it is the status computed for
+		// the ABORTED cleanuser request in the same pair, delivered to the wrong
+		// connection. Asserting on the pair (not on a flattened list) is what
+		// makes this evidence of wrong-response delivery: a 401 in the abort slot
+		// would just be the bogus request answering normally.
+		expect(pairs.some(([aborted, admin]) => aborted === "ABORT" && admin === "401")).toBe(true);
+
 		// Damage outlives the loop.
 		expect(await curlProbe()).toBe("RST");
 	}, 60_000);
 
-	test("www recovers on its own within ~6 s", async () => {
-		await settle();
-		expect(await curlProbe()).toBe("200");
-	}, 30_000);
+	test("www recovers on its own, measured at 1.3–2.4 s", async () => {
+		// Polled rather than a fixed sleep: recovery time varies with host and
+		// TCG scheduling, and the claim being recorded is "it recovers", not
+		// "it recovers in exactly 6 s".
+		const deadline = Date.now() + 60_000;
+		let last = "";
+		let recoveredAfterMs = 0;
+		const t0 = Date.now();
+		while (Date.now() < deadline) {
+			last = await curlProbe();
+			if (last === "200") { recoveredAfterMs = Date.now() - t0; break; }
+			await Bun.sleep(1000);
+		}
+		console.log(`  www recovered after ${recoveredAfterMs} ms`);
+		expect(last).toBe("200");
+	}, 90_000);
 });

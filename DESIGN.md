@@ -308,7 +308,7 @@ every run forever (#91). Primary keys must carry a rotating component, with
    received after any timeout in the same conversation cannot be trusted to
    belong to the request that received it — the #69 surface.
 
-   Bounds, so this is not over-read: locally `www` recovers within ~6 s, so the
+   Bounds, so this is not over-read: locally `www` recovers in 1.3–2.4 s, so the
    *permanent* wedge in #79's CI forensics is **not** reproduced, and neither is
    whatever made CI's very first probe exceed 3 s — locally a failed login
    answers in ~125 ms even at `cpu-load: 100`. Both remain open, and the entry

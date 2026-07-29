@@ -154,7 +154,7 @@ and the next one succeeds. Two rules follow:
   *alternation* that does the damage, not the number of aborts, so continuing to
   poll at a fixed cadence keeps re-triggering it.
 
-Limits of the evidence: locally `www` recovers within ~6 s, so the permanent
+Limits of the evidence: locally `www` recovers in 1.3–2.4 s, so the permanent
 wedge in #79's CI forensics is **not** reproduced here, and nothing local
 explains what made CI's first probe exceed 3 s (a failed login answers in
 ~125 ms even at `cpu-load: 100`). Treat those two as open.

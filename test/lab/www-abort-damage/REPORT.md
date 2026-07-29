@@ -80,7 +80,8 @@ Read pattern B's output:
 Formalized as `www-abort-damage.test.ts` and run against both guests.
 
 **Result:** 5/5 pass on x86/HVF (twice) and on arm64 cross-arch TCG. `www`
-recovers on its own within ~6 s of the last abort.
+recovers on its own within a few seconds of the last abort — polled, and measured
+at 1344 / 2301 / 2309 / 2376 ms across four runs.
 
 ### Experiment 5 — reproducing CI's failure end to end
 
@@ -115,7 +116,7 @@ Established here:
 
 Not established — stated plainly because [#79][i79]'s write-up asserts it:
 
-- **The permanent wedge did not reproduce.** Here `www` recovers within ~6 s.
+- **The permanent wedge did not reproduce.** Here `www` recovers in 1.3–2.4 s.
    "After five aborts `www` stops accepting SYNs forever" remains an inference
    from CI's socket table, not a demonstrated fact.
 - **The trigger for CI's *first* abort is still unexplained.** Every CI probe

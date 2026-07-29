@@ -168,8 +168,11 @@ jobs:
           #
           # accel grounding:
           #   linux-x86/linux-arm64  kvm  — /dev/kvm on hosted runners; either
-          #                                 may fall back to tcg, which the
-          #                                 runtime drift warning surfaces.
+          #                                 may fall back to tcg when the runner
+          #                                 ships without a writable /dev/kvm.
+          #                                 That fallback is reported as a
+          #                                 ::notice::, not drift — it is a
+          #                                 runner condition, not a stale table.
           #   macos-arm64            tcg  — hosted macos-15 is itself a VM
           #                                 ("Apple M1 (Virtual)"), kern.hv_support=0
           #                                 (run 29669706663), and quickchr forces
@@ -370,7 +373,15 @@ jobs:
             # not the detected value — drove the timeout and smoke planning.
             echo "- Accel: detected=$detected expected=$EXPECTED_ACCEL (guest $guest_arch) — budget class ${{ matrix.budget }}"
             if [ "$detected" != "$EXPECTED_ACCEL" ]; then
-              echo "::warning::Accel drift on ${{ matrix.id }}: detectAccel($guest_arch) returned '$detected' but the plan matrix expects '$EXPECTED_ACCEL' — update the platform table in integration.yml"
+              # A Linux leg dropping kvm→tcg is a known runner condition, not a
+              # wrong table: hosted runners sometimes ship without a writable
+              # /dev/kvm (#79). Say so, but do not cry drift — a ::warning:: that
+              # fires on an expected fallback is the noise that hides the real one.
+              if [ "${{ runner.os }}" = "Linux" ] && [ "$EXPECTED_ACCEL" = "kvm" ] && [ "$detected" = "tcg" ]; then
+                echo "::notice::${{ matrix.id }} fell back to TCG — no writable /dev/kvm on this runner. Expected-but-slow; see the KVM probe above."
+              else
+                echo "::warning::Accel drift on ${{ matrix.id }}: detectAccel($guest_arch) returned '$detected' but the plan matrix expects '$EXPECTED_ACCEL' — update the platform table in integration.yml"
+              fi
             fi
             if [ "${{ runner.os }}" = "Linux" ]; then
               if [ -e /dev/kvm ]; then
