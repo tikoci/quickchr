@@ -978,21 +978,37 @@ function bootFailureGuestExec(state: MachineState): { exec: GuestExec; users: st
 	// leaving `state.user` in machine.json, so a configured user that was never
 	// provisioned — or was just wiped — is the least likely to work.
 	const candidates: { user: string; password: string }[] = [];
-	const stored = getInstanceCredentials(state.name);
+	// Guarded even though secrets.ts already swallows unreadable/corrupt stores:
+	// this runs on the BOOT_TIMEOUT path *before* captureBootFailure(), so
+	// anything thrown here would replace the forensics report with an unrelated
+	// error — the exact failure mode the diagnostics modules exist to avoid.
+	let stored: { user: string; password: string } | null = null;
+	try {
+		stored = getInstanceCredentials(state.name);
+	} catch { /* no stored credentials — fall through to the other candidates */ }
 	if (stored) candidates.push(stored);
 	candidates.push({ user: "admin", password: "" });
 	if (state.user && state.user.name !== "admin" && state.user.password !== STORED_IN_SECRETS_PASSWORD) {
 		candidates.push({ user: state.user.name, password: state.user.password });
 	}
 
+	// `timeoutMs` is a budget for the whole call, not per attempt: captureGuestSnapshot()
+	// sizes its own budget assuming one exec() costs at most what it passed in, so
+	// N candidates × the full timeout would burn the snapshot budget on the first
+	// query. Untried candidates therefore share the budget, and once a credential
+	// is known to work it gets all of it — which is every query after the first.
 	let working: { user: string; password: string } | undefined;
 	const exec: GuestExec = async (command, timeoutMs) => {
 		const order = working ? [working, ...candidates.filter((c) => c !== working)] : candidates;
-		let lastError: unknown;
+		const deadline = Date.now() + timeoutMs;
+		const share = working ? timeoutMs : Math.max(5_000, Math.floor(timeoutMs / order.length));
+		let lastError: unknown = new Error("no credential candidates");
 		for (const cred of order) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) break;
 			try {
 				const { output } = await consoleExec(
-					state.machineDir, command, cred.user, cred.password, timeoutMs, state.portBase,
+					state.machineDir, command, cred.user, cred.password, Math.min(share, remaining), state.portBase,
 				);
 				working = cred;
 				return output;

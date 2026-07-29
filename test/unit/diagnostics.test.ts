@@ -381,6 +381,32 @@ describe("classifyForwardedPorts", () => {
 		expect(out[1]?.outcome).toBe("not-forwarded");
 	});
 
+	// Two forwards may target the same guest port from different host ports. slirp
+	// reports the host forward port as a row's source port, so that is what
+	// attributes a row — otherwise one forward's SYN_SENT lands on the other's verdict.
+	test("does not conflate two forwards sharing a guest port", () => {
+		const shared = [
+			{ name: "http", host: 9100, guest: 80, proto: "tcp" },
+			{ name: "http-alt", host: 9200, guest: 80, proto: "tcp" },
+		];
+		const text = [
+			hostForward(9100, 80), hostForward(9200, 80),
+			live("SYN_SENT", 9100, 80), live("TIME_WAIT", 9200, 80),
+		].join("\n");
+		const out = classifyForwardedPorts(parseUsernetTable(text), shared);
+		expect(out[0]).toMatchObject({ name: "http", outcome: "dropped" });
+		expect(out[1]).toMatchObject({ name: "http-alt", outcome: "served" });
+	});
+
+	// Guarding the narrowing above: if slirp ever stops reporting the host port as
+	// the source port, classification must degrade to guest-port matching rather
+	// than silently calling every port `refused`.
+	test("falls back to guest-port matching when no row carries the host port", () => {
+		const text = [hostForward(9100, 80), live("SYN_SENT", 54321, 80)].join("\n");
+		const out = classifyForwardedPorts(parseUsernetTable(text), [forwards[0] as typeof forwards[0]]);
+		expect(out[0]?.outcome).toBe("dropped");
+	});
+
 	test("carries the host-side connect result without letting it decide", () => {
 		const text = [hostForward(9100, 80), hostForward(9105, 8291), live("SYN_SENT", 9100, 80)].join("\n");
 		const out = classifyForwardedPorts(parseUsernetTable(text), forwards, { http: "accepting", winbox: "accepting" });

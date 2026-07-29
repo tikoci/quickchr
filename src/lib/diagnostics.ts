@@ -270,10 +270,23 @@ export function classifyForwardedPorts(
 	forwards: { name: string; host: number; guest: number; proto: string }[],
 	hostConnect: Record<string, string> = {},
 ): ForwardClassification[] {
+	// Two forwards may target the same guest port from different host ports, so the
+	// guest port alone cannot attribute a row. slirp reports the *host* forward
+	// port as a forwarded connection's source port, not the client's ephemeral one
+	// — verified on captured output, where every live row sat at
+	// `127.0.0.1:<hostPort> -> 10.0.2.15:<guestPort>`, and the same shape appears
+	// in #79's CI dumps. Confirm that convention holds in this dump before relying
+	// on it: if it ever stops, classification degrades to guest-port matching
+	// rather than silently reporting every port as `refused`.
+	const liveRowsCarryHostPort = rows.some(
+		(r) => r.state !== "HOST_FORWARD" && forwards.some((f) => f.host === r.srcPort),
+	);
+
 	return forwards.map((fwd) => {
-		const mine = rows.filter((r) => r.proto.toUpperCase() === fwd.proto.toUpperCase() && r.dstPort === fwd.guest);
-		const forwarded = mine.some((r) => r.state === "HOST_FORWARD");
-		const live = mine.filter((r) => r.state !== "HOST_FORWARD");
+		const byGuestPort = rows.filter((r) => r.proto.toUpperCase() === fwd.proto.toUpperCase() && r.dstPort === fwd.guest);
+		const forwarded = byGuestPort.some((r) => r.state === "HOST_FORWARD" && r.srcPort === fwd.host);
+		const liveRows = byGuestPort.filter((r) => r.state !== "HOST_FORWARD");
+		const live = liveRowsCarryHostPort ? liveRows.filter((r) => r.srcPort === fwd.host) : liveRows;
 
 		const tally = new Map<string, number>();
 		for (const r of live) tally.set(r.state, (tally.get(r.state) ?? 0) + 1);
