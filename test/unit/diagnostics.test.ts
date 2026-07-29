@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	captureBootFailure,
+	classifyForwardedPorts,
 	classifyProbeError,
+	parseUsernetTable,
+	summarizeForwardOutcomes,
 	MAX_BOOT_FAILURE_REPORTS,
 	newBootProbeStats,
 	newMonitorPhaseTimings,
@@ -16,6 +19,7 @@ import {
 	summarizeBootProbe,
 	summarizeMonitorPhases,
 } from "../../src/lib/diagnostics.ts";
+import type { PortMapping } from "../../src/lib/types.ts";
 
 const dirs: string[] = [];
 function scratch(): string {
@@ -269,5 +273,164 @@ describe("captureBootFailure", () => {
 		expect((await captureBootFailure(base)).preserved).toBe(false);
 		process.env.QUICKCHR_PRESERVE_ON_FAILURE = "1";
 		expect((await captureBootFailure(base)).preserved).toBe(true);
+	});
+
+	test("classifies each forwarded port and carries the guest snapshot into the report", async () => {
+		const reportDir = join(scratch(), "failures");
+		const forwards: PortMapping[] = [
+			{ name: "http", host: 9100, guest: 80, proto: "tcp" },
+			{ name: "winbox", host: 9105, guest: 8291, proto: "tcp" },
+		];
+		const usernet = [
+			"  Protocol[State]    FD  Source Address  Port   Dest. Address  Port RecvQ SendQ",
+			"  TCP[HOST_FORWARD]  19               *  9100       10.0.2.15    80     0     0",
+			"  TCP[HOST_FORWARD]  20               *  9105       10.0.2.15  8291     0     0",
+			"  TCP[SYN_SENT]     103       127.0.0.1  9100       10.0.2.15    80     0     0",
+			"  TCP[SYN_SENT]     104       127.0.0.1  9100       10.0.2.15    80     0     0",
+			"  TCP[TIME_WAIT]    105       127.0.0.1  9105       10.0.2.15  8291     0     0",
+		].join("\n");
+
+		const report = await captureBootFailure({
+			name: "localized",
+			machineDir: scratch(),
+			reportDir,
+			arch: "x86",
+			accel: "kvm",
+			bootTimeoutMs: 180_000,
+			httpPort: 9100,
+			phase: "unit",
+			forwards,
+			monitorQuery: async (cmd) => (cmd === "info usernet" ? usernet : ""),
+			guestExec: async (command) =>
+				command.includes("/ip/firewall/filter") ? "[]" : '[{"address":"10.0.2.15/24"}]',
+			guestUser: "admin",
+		});
+
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		const byName = Object.fromEntries(
+			(record.forwardProbe.ports as { name: string; outcome: string }[]).map((p) => [p.name, p.outcome]),
+		);
+		expect(byName).toEqual({ http: "dropped", winbox: "served" });
+		expect(record.guest.consoleReachable).toBe(true);
+		expect(record.guest.entries.firewallFilter.value).toEqual([]);
+		// Opt-in only: the counting rule mutates the guest.
+		expect(record.countingRule.ran).toBe(false);
+		expect(record.countingRule.skipped).toContain("QUICKCHR_DEEP_BOOT_DIAGNOSTICS");
+
+		expect(report.summary).toContain("slirp per-port:");
+		expect(report.summary).toContain("service-specific");
+	});
+});
+
+describe("parseUsernetTable", () => {
+	// Real `info usernet` output from a healthy 7.21.5 CHR (tikoci/quickchr#79).
+	const sample = [
+		"VLAN -1 (slirp0):",
+		"  Protocol[State]    FD  Source Address  Port   Dest. Address  Port RecvQ SendQ",
+		"  TCP[HOST_FORWARD]  21               *  9170       10.0.2.15    80     0     0",
+		"  TCP[SYN_SENT]     103       127.0.0.1  9100       10.0.2.15    80     0     0",
+		"  UDP[223 sec]      168       10.0.2.15  5678 255.255.255.255  5678     0     0",
+	].join("\n");
+
+	test("parses rows and ignores headers", () => {
+		const rows = parseUsernetTable(sample);
+		expect(rows.length).toBe(3);
+		expect(rows[0]).toMatchObject({ proto: "TCP", state: "HOST_FORWARD", srcPort: 9170, dstPort: 80 });
+		expect(rows[1]).toMatchObject({ state: "SYN_SENT", srcAddr: "127.0.0.1", dstAddr: "10.0.2.15" });
+	});
+
+	// UDP rows carry a TTL with a space inside the brackets — the guest's MNDP
+	// broadcast is the one row that proves it holds its DHCP address.
+	test("keeps a bracketed state containing a space", () => {
+		expect(parseUsernetTable(sample)[2]).toMatchObject({ proto: "UDP", state: "223 sec", srcAddr: "10.0.2.15" });
+	});
+
+	test("returns nothing for unparsable text", () => {
+		expect(parseUsernetTable("<failed: monitor socket not found>")).toEqual([]);
+	});
+});
+
+describe("classifyForwardedPorts", () => {
+	const forwards = [
+		{ name: "http", host: 9100, guest: 80, proto: "tcp" },
+		{ name: "winbox", host: 9105, guest: 8291, proto: "tcp" },
+	];
+	const hostForward = (host: number, guest: number) =>
+		`  TCP[HOST_FORWARD]  19               *  ${host}       10.0.2.15  ${guest}     0     0`;
+	const live = (state: string, host: number, guest: number) =>
+		`  TCP[${state}]  103       127.0.0.1  ${host}       10.0.2.15  ${guest}     0     0`;
+
+	// The three conditions measured on a healthy local CHR: serving leaves
+	// TIME_WAIT, "nothing listening" leaves NO row (the guest RSTs), and a silent
+	// drop leaves SYN_SENT. A host-side connect reads "accepting" in all three.
+	test("SYN_SENT = dropped, TIME_WAIT = served, no row = refused", () => {
+		const text = [
+			hostForward(9100, 80), hostForward(9105, 8291),
+			live("SYN_SENT", 9100, 80), live("SYN_SENT", 9100, 80),
+		].join("\n");
+		const out = classifyForwardedPorts(parseUsernetTable(text), forwards);
+		expect(out[0]).toMatchObject({ name: "http", outcome: "dropped", states: ["SYN_SENT×2"] });
+		expect(out[1]).toMatchObject({ name: "winbox", outcome: "refused", states: [] });
+
+		const served = [hostForward(9100, 80), hostForward(9105, 8291), live("TIME_WAIT", 9105, 8291)].join("\n");
+		expect(classifyForwardedPorts(parseUsernetTable(served), forwards)[1]?.outcome).toBe("served");
+	});
+
+	test("a missing HOST_FORWARD row is not-forwarded — QEMU never bound it", () => {
+		const out = classifyForwardedPorts(parseUsernetTable(hostForward(9100, 80)), forwards);
+		expect(out[1]?.outcome).toBe("not-forwarded");
+	});
+
+	// Two forwards may target the same guest port from different host ports. slirp
+	// reports the host forward port as a row's source port, so that is what
+	// attributes a row — otherwise one forward's SYN_SENT lands on the other's verdict.
+	test("does not conflate two forwards sharing a guest port", () => {
+		const shared = [
+			{ name: "http", host: 9100, guest: 80, proto: "tcp" },
+			{ name: "http-alt", host: 9200, guest: 80, proto: "tcp" },
+		];
+		const text = [
+			hostForward(9100, 80), hostForward(9200, 80),
+			live("SYN_SENT", 9100, 80), live("TIME_WAIT", 9200, 80),
+		].join("\n");
+		const out = classifyForwardedPorts(parseUsernetTable(text), shared);
+		expect(out[0]).toMatchObject({ name: "http", outcome: "dropped" });
+		expect(out[1]).toMatchObject({ name: "http-alt", outcome: "served" });
+	});
+
+	// Guarding the narrowing above: if slirp ever stops reporting the host port as
+	// the source port, classification must degrade to guest-port matching rather
+	// than silently calling every port `refused`.
+	test("falls back to guest-port matching when no row carries the host port", () => {
+		const text = [hostForward(9100, 80), live("SYN_SENT", 54321, 80)].join("\n");
+		const out = classifyForwardedPorts(parseUsernetTable(text), [forwards[0] as typeof forwards[0]]);
+		expect(out[0]?.outcome).toBe("dropped");
+	});
+
+	test("carries the host-side connect result without letting it decide", () => {
+		const text = [hostForward(9100, 80), hostForward(9105, 8291), live("SYN_SENT", 9100, 80)].join("\n");
+		const out = classifyForwardedPorts(parseUsernetTable(text), forwards, { http: "accepting", winbox: "accepting" });
+		expect(out[0]?.hostConnect).toBe("accepting");
+		expect(out[0]?.outcome).toBe("dropped");
+	});
+});
+
+describe("summarizeForwardOutcomes", () => {
+	const port = (name: string, outcome: string) =>
+		({ name, hostPort: 9100, guestPort: 80, proto: "tcp", outcome, states: [], hostConnect: "accepting" }) as never;
+
+	test("every port dropped points at the RX path", () => {
+		const s = summarizeForwardOutcomes([port("http", "dropped"), port("winbox", "dropped")]);
+		expect(s).toContain("EVERY forwarded port");
+		expect(s).toContain("RX path");
+	});
+
+	test("one port dropped among healthy ones is service-specific", () => {
+		expect(summarizeForwardOutcomes([port("http", "dropped"), port("winbox", "served")]))
+			.toContain("service-specific");
+	});
+
+	test("no drops says so plainly", () => {
+		expect(summarizeForwardOutcomes([port("http", "served")])).toContain("no silent drop observed");
 	});
 });

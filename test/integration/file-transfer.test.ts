@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Integration test — ChrInstance.upload() / .download() round-trip.
@@ -76,6 +77,6 @@ describe.skipIf(SKIP)("ChrInstance upload/download round-trip", () => {
 				await instance.stop();
 			}
 		}
-	}, 360_000); // 6-min ceiling — matches start-stop.test.ts boot budget (allows one start() boot respawn)
+	}, bootTestTimeout());
 });
 

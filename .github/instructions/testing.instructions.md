@@ -53,10 +53,11 @@ fail version-gated provisioning/device-mode tests by design.
 
 ### Diagnosing a boot that never becomes REST-ready
 
-Turn both diagnostic knobs on when chasing a `BOOT_TIMEOUT`. Both are off by
-default. CI sets `QUICKCHR_SERIAL_LOG` on every leg but deliberately leaves
-`QUICKCHR_PRESERVE_ON_FAILURE` unset — the report survives cleanup on its own,
-and stranded machines risk tripping the storage preflight on a full matrix.
+Turn the diagnostic knobs on when chasing a `BOOT_TIMEOUT`. All three are off by
+default. CI sets `QUICKCHR_SERIAL_LOG` and `QUICKCHR_DEEP_BOOT_DIAGNOSTICS` on
+every leg but deliberately leaves `QUICKCHR_PRESERVE_ON_FAILURE` unset — the
+report survives cleanup on its own, and stranded machines risk tripping the
+storage preflight on a full matrix.
 
 ```bash
 QUICKCHR_PRESERVE_ON_FAILURE=1 QUICKCHR_SERIAL_LOG=1 \
@@ -74,9 +75,48 @@ QUICKCHR_PRESERVE_ON_FAILURE=1 QUICKCHR_SERIAL_LOG=1 \
   report itself is written to `<dataDir>/failures/boot-failure-<machine>-<ts>.json`,
   outside the machine dir, with the log contents embedded. **Read that file first**;
   its `restProbe` field says whether the forwarded port ever answered at all.
+- `QUICKCHR_DEEP_BOOT_DIAGNOSTICS=1` allows the one capture that writes to the
+  guest: the counting-rule probe (a mangle `passthrough` rule + a burst of host
+  probes), which is what separates "RouterOS dropped it" from "it never reached
+  RouterOS". Automatically skipped when `QUICKCHR_PRESERVE_ON_FAILURE=1` — that
+  flag means the failure state must be left alone.
 
-Both are plain `process.env` checks (like `QUICKCHR_DEBUG`), not managed
+All three are plain `process.env` checks (like `QUICKCHR_DEBUG`), not managed
 `settings.ts` keys — they are developer/CI knobs, not user preferences.
+
+#### Reading the report
+
+Read the fields in this order — they narrow from "where" to "what":
+
+1. **`forwardProbe.ports`** — every forwarded TCP port classified as `served` /
+   `refused` / `dropped` / `not-forwarded`. **Every port `dropped` points at the
+   guest RX path; one port `dropped` next to healthy ones is service-specific.**
+   Ignore `hostfwd.tcpConnect`: under user-mode networking slirp accepts on the
+   host side regardless of guest state, so it reads "accepting" in all cases.
+2. **`guest`** — the read-only serial snapshot (`/log`, `/ip/address`,
+   `/ip/service`, `/ip/firewall/filter`, `/interface` stats, conntrack,
+   `/system/resource`). `consoleReachable: true` alone is a result: RouterOS is
+   alive and answering while REST is dead.
+3. **`countingRule`** — present only with deep diagnostics on. `verdict:
+   "guest-received"` means the SYNs arrive and RouterOS drops them;
+   `"not-delivered"` means they never get there.
+
+#### Test timeouts must outlive the boot budget
+
+Do **not** hardcode a timeout on a test that boots CHR. Use
+`bootTestTimeout()` from `test/integration/timeouts.ts`, which derives it from
+`defaultBootTimeout()` for this host's arch/accel plus the forensics budget:
+
+```ts
+test("start → wait for boot → stop", async () => { … }, bootTestTimeout());
+test("clean() resets disk …",        async () => { … }, bootTestTimeout({ boots: 2 }));
+```
+
+A hardcoded number that is *shorter* than the boot budget silently destroys
+evidence: bun kills the test before `waitForBoot()` gives up, so
+`captureBootFailure()` never runs and the failure arrives bare. That is exactly
+what a 300 s literal did against the 480 s same-arch TCG budget (#106) — and why
+#79 went unexplained for four reproductions.
 
 ## Integration Test Requirements
 

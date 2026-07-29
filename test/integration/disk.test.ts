@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 
@@ -143,7 +144,7 @@ describe.skipIf(SKIP)("disk support", () => {
 			}
 			await cleanupMachine("integration-disk-add-start");
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 
 	// Runs on ALL arches — arm64 savevm was broken until the qcow2 EFI-vars
 	// pflash fix (#31, test/lab/arm64-rollback/REPORT.md); this test is the
@@ -186,5 +187,5 @@ describe.skipIf(SKIP)("disk support", () => {
 			}
 			await cleanupMachine("integration-snapshot-savevm");
 		}
-	}, 360_000);
+	}, bootTestTimeout());
 });

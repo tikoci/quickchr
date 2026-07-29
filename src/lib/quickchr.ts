@@ -56,7 +56,7 @@ import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
-import { monitorCommand, serialStreams, qgaCommand, channelEndpoint } from "./channels.ts";
+import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, type BootFailureReport, type BootProbeStats } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
@@ -80,6 +80,7 @@ import {
 	waitForDeviceModeApi,
 } from "./device-mode.ts";
 import type { LicenseOptions } from "./types.ts";
+import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
 import { assertSufficientQuickchrStorage, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
 import { existsSync, readdirSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
@@ -958,6 +959,69 @@ function bootFailureReportDir(): string {
 	return join(getDataDir(), "failures");
 }
 
+/** Serial-console executor for boot forensics, or null when there is no serial
+ *  channel to talk to (foreground runs, or QEMU never got far enough).
+ *
+ *  Which account works depends on how far the failed boot got: a machine that
+ *  timed out before provisioning — and any machine after `clean()` — is factory
+ *  fresh and answers only to `admin` with an empty password, while a relaunch of
+ *  an already-provisioned machine needs its stored credentials. Rather than
+ *  guess, candidates are tried in order and the first that reaches a prompt is
+ *  reused for the rest of the snapshot. */
+function bootFailureGuestExec(state: MachineState): { exec: GuestExec; users: string[] } | null {
+	if (!channelFileExists(channelPath(state.machineDir, "serial"))) return null;
+
+	// Order matters only for speed — a wrong candidate costs a ~15 s login timeout
+	// before the next is tried. Stored credentials are the strongest evidence the
+	// machine is provisioned (provisioning stores them on success), so they lead;
+	// factory admin comes next because `clean()` deletes stored credentials while
+	// leaving `state.user` in machine.json, so a configured user that was never
+	// provisioned — or was just wiped — is the least likely to work.
+	const candidates: { user: string; password: string }[] = [];
+	// Guarded even though secrets.ts already swallows unreadable/corrupt stores:
+	// this runs on the BOOT_TIMEOUT path *before* captureBootFailure(), so
+	// anything thrown here would replace the forensics report with an unrelated
+	// error — the exact failure mode the diagnostics modules exist to avoid.
+	let stored: { user: string; password: string } | null = null;
+	try {
+		stored = getInstanceCredentials(state.name);
+	} catch { /* no stored credentials — fall through to the other candidates */ }
+	if (stored) candidates.push(stored);
+	candidates.push({ user: "admin", password: "" });
+	if (state.user && state.user.name !== "admin" && state.user.password !== STORED_IN_SECRETS_PASSWORD) {
+		candidates.push({ user: state.user.name, password: state.user.password });
+	}
+
+	// `timeoutMs` is a budget for the whole call, not per attempt: captureGuestSnapshot()
+	// sizes its own budget assuming one exec() costs at most what it passed in, so
+	// N candidates × the full timeout would burn the snapshot budget on the first
+	// query. Untried candidates therefore share the budget, and once a credential
+	// is known to work it gets all of it — which is every query after the first.
+	let working: { user: string; password: string } | undefined;
+	const exec: GuestExec = async (command, timeoutMs) => {
+		const order = working ? [working, ...candidates.filter((c) => c !== working)] : candidates;
+		const deadline = Date.now() + timeoutMs;
+		const share = working ? timeoutMs : Math.max(5_000, Math.floor(timeoutMs / order.length));
+		let lastError: unknown = new Error("no credential candidates");
+		for (const cred of order) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) break;
+			try {
+				const { output } = await consoleExec(
+					state.machineDir, command, cred.user, cred.password, Math.min(share, remaining), state.portBase,
+				);
+				working = cred;
+				return output;
+			} catch (e) {
+				lastError = e;
+			}
+		}
+		throw lastError instanceof Error ? lastError : new Error(String(lastError));
+	};
+
+	return { exec, users: candidates.map((c) => c.user) };
+}
+
 /** Tear down a machine that failed to boot, and describe what was done.
  *
  *  Default is full cleanup — a failed `start()` must not leave a half-dead
@@ -1623,6 +1687,7 @@ export class QuickCHR {
 		}
 
 		if (!booted) {
+			const guest = bootFailureGuestExec(state);
 			const failure = await captureBootFailure({
 				name,
 				machineDir,
@@ -1637,6 +1702,9 @@ export class QuickCHR {
 				phase: "start",
 				reportDir: bootFailureReportDir(),
 				monitorQuery: (cmd) => monitorCommand(machineDir, cmd, 3000, state.portBase),
+				forwards: Object.values(state.ports),
+				guestExec: guest?.exec,
+				guestUser: guest?.users.join(" → "),
 			});
 			throw new QuickCHRError(
 				"BOOT_TIMEOUT",
@@ -1927,6 +1995,7 @@ export class QuickCHR {
 		const probe = newBootProbeStats();
 		const booted = await instance.waitForBoot(bootTimeout, probe);
 		if (!booted) {
+			const guest = bootFailureGuestExec(state);
 			const failure = await captureBootFailure({
 				name: state.name,
 				machineDir: state.machineDir,
@@ -1941,6 +2010,9 @@ export class QuickCHR {
 				phase: "_launchExisting",
 				reportDir: bootFailureReportDir(),
 				monitorQuery: (cmd) => monitorCommand(state.machineDir, cmd, 3000, state.portBase),
+				forwards: Object.values(state.ports),
+				guestExec: guest?.exec,
+				guestUser: guest?.users.join(" → "),
 			});
 			throw new QuickCHRError(
 				"BOOT_TIMEOUT",

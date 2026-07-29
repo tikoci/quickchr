@@ -116,6 +116,59 @@ server-side before returning results.
 For packet-level debugging: `/tool/sniffer` with TZSP streaming, or `tcpdump`/`tshark`
 on the host side of the QEMU network.
 
+## Reading structured state over the serial console
+
+The serial console **stays reachable while REST is dead** — verified against a
+synthetic stuck state (a filter `drop` on tcp/80 makes REST time out exactly as in
+#79, and `consoleExec` still logs in and answers). That makes it the transport for
+boot forensics (`src/lib/guest-snapshot.ts`). Rules, all measured on 7.21.5/7.23.2:
+
+- **Always `:put [:serialize to=json [ … print as-value]]`.** A bare `print` on
+  `/log` or `/ip/firewall/connection/tracking` hits a paging prompt: it blocks
+  (~11 s observed) and returns empty. `without-paging` fixes the table form;
+  `as-value` is better because it round-trips as JSON.
+- **De-wrap before `JSON.parse`.** `:serialize` emits one line, so every newline in
+  the reply is a terminal wrap — and a wrap landing inside a string breaks parsing.
+  Strip `\r`, then join from the payload's first line. RouterOS repaints the input
+  line, so the echoed command appears several times before the payload: search
+  candidate starts **last-first** and take the first that parses.
+- **Counters need `print stats`.** `/ip/firewall/{filter,mangle} print as-value`
+  returns the rule *without* `packets`/`bytes`; only `print stats as-value`
+  carries them.
+- **`/tool/profile` does not work over serial** — it repaints instead of printing
+  and returns empty in both `duration=` and `as-value` forms. Do not re-try it.
+- **Credentials depend on how far the boot got.** A machine that timed out before
+  provisioning, and any machine after `clean()`, is factory fresh: `admin` with an
+  empty password. A provisioned relaunch needs its stored instance credentials.
+
+### Counting packet arrivals inside the guest
+
+To ask "did the guest receive these packets at all", use a mangle counter, not a
+filter rule:
+
+```routeros
+/ip/firewall/mangle add chain=prerouting protocol=tcp dst-port=80 action=passthrough comment="quickchr-boot-diagnostic"
+/ip/firewall/mangle print stats as-value where comment="quickchr-boot-diagnostic"
+```
+
+- `passthrough` is non-terminating and prerouting runs before the filter chains, so
+  it counts arrivals whatever else is installed — measured: 10/10 SYNs counted that
+  a filter `drop` on the same port then killed.
+- A filter `accept` appended after an existing `drop` counts **zero** and reports
+  the guest as unreachable when it is receiving everything.
+- `place-before=0` is not the workaround: on the empty chain of a fresh CHR it
+  fails with `no such item`.
+- Read the delta as a boolean. slirp retransmits a SYN the guest never answers, so
+  one probe can move the counter several times.
+- **Conntrack cannot answer this question.** RouterOS ships `enabled=auto`, so
+  tracking is off while no filter/NAT/mangle rule exists — a fresh CHR reports
+  `active-ipv4: false` and zero connections after healthy probes. Even with
+  tracking forced on, a dropped packet leaves no entry: conntrack records what was
+  accepted, never what was dropped.
+- A newly added filter rule takes a moment to affect new connections — a REST call
+  issued immediately after the `add` still succeeded, the next one (2 s later)
+  hung. Wait for the effect rather than assuming it is instant.
+
 ## Timeout Rules
 
 Boot and response times vary significantly by acceleration mode and host hardware.

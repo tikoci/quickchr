@@ -26,6 +26,19 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   removing it (QEMU is still stopped, so the port block is released). Off by default —
   a failed `start()` still cleans up. Mainly useful locally; the failure report itself
   survives cleanup without it.
+- **Boot-failure reports now localize the drop, not just record it.** Three additions
+  (#105): a `forwardProbe` table classifying every forwarded TCP port as
+  `served`/`refused`/`dropped`/`not-forwarded` from slirp's own `info usernet` view —
+  all ports dropped points at the guest RX path, one dropped port at that service; a
+  read-only `guest` snapshot taken over the serial console, which stays reachable while
+  REST is dead (`/log`, `/ip/address`, `/ip/service`, `/ip/firewall/filter`,
+  `/interface` stats, connection tracking, `/system/resource`); and an opt-in
+  `countingRule` probe that says whether the guest received the packets at all. Guest
+  payloads stay in the report — only credential-free shapes reach the thrown error.
+- **`QUICKCHR_DEEP_BOOT_DIAGNOSTICS=1`** allows the counting-rule probe, the one
+  capture that writes to the guest (a mangle `passthrough` rule plus a burst of host
+  probes). Off by default, on in CI, and always skipped when
+  `QUICKCHR_PRESERVE_ON_FAILURE=1` asks for the failure state to be left untouched.
 
 ### Changed
 
@@ -40,6 +53,12 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 - `Monitor command timed out` now names the command and reports where the round-trip
   stalled — connect / first byte / prompt / command written / response first byte, plus
   bytes received — instead of failing with no detail.
+- Integration tests derive their own timeout from `defaultBootTimeout()` via
+  `bootTestTimeout()` instead of hardcoding it. Hardcoded literals were *shorter* than
+  the same-arch TCG boot budget (300 s vs 480 s), so on TCG legs bun killed the test
+  before `waitForBoot()` gave up and the boot-failure report was never written — the
+  reason several #79 reproductions carried no evidence. The budget itself is unchanged;
+  retuning it is #106.
 
 ### Fixed
 

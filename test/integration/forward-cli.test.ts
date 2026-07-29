@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createConnection } from "node:net";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Integration test — `quickchr add --forward smb` end-to-end.
@@ -110,5 +111,5 @@ describe.skipIf(SKIP)("CLI --forward flag end-to-end", () => {
 		} finally {
 			try { await instance.stop(); } catch { /* ignore */ }
 		}
-	}, 300_000);
+	}, bootTestTimeout());
 });

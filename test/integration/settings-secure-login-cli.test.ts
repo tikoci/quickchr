@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { imageTarget } from "./image-target.ts";
+import { bootTestTimeout } from "./timeouts.ts";
 
 /**
  * Integration test — the QUICKCHR_SECURE_LOGIN setting end-to-end.
@@ -85,5 +86,5 @@ describe.skipIf(SKIP)("QUICKCHR_SECURE_LOGIN setting end-to-end", () => {
 			10_000,
 		);
 		expect(resp.status).toBe(200);
-	}, 300_000);
+	}, bootTestTimeout());
 });

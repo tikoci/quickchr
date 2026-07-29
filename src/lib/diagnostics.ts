@@ -21,13 +21,30 @@
  *      instant answer), QEMU liveness, a direct TCP probe of the forwarded
  *      port, the argv, and the machine-dir listing.
  *
- * Both are best-effort and must never turn a diagnostic problem into a thrown
- * error: every capture path swallows its own failures and records them as text.
+ *   3. **Where the drop happened**, added for #105 because (1) and (2) proved
+ *      only *that* #79's boot went silent. Three instruments, in increasing
+ *      order of invasiveness: per-port slirp classification
+ *      ({@link probeForwardedPorts}), a read-only guest snapshot over the
+ *      serial console (guest-snapshot.ts), and — opt-in — the counting-rule
+ *      probe that says whether the guest received the SYNs at all.
+ *
+ * All of it is best-effort and must never turn a diagnostic problem into a
+ * thrown error: every capture path swallows its own failures and records them
+ * as text.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
+import {
+	captureGuestSnapshot,
+	deepBootDiagnosticsEnabled,
+	runCountingRuleProbe,
+	type CountingRuleProbe,
+	type GuestExec,
+	type GuestSnapshot,
+} from "./guest-snapshot.ts";
+import type { PortMapping } from "./types.ts";
 
 /** Classification of a single REST readiness probe. */
 export type BootProbeOutcome =
@@ -159,6 +176,202 @@ export async function probeTcpPort(port: number, timeoutMs = 2000): Promise<stri
 	});
 }
 
+// --- Per-port slirp classification ---
+
+/** One row of QEMU's `info usernet` table:
+ *
+ *  ```text
+ *    Protocol[State]    FD  Source Address  Port   Dest. Address  Port RecvQ SendQ
+ *    TCP[HOST_FORWARD]  21               *  9170       10.0.2.15    80     0     0
+ *    TCP[SYN_SENT]     103       127.0.0.1  9100       10.0.2.15    80     0     0
+ *    UDP[223 sec]      168       10.0.2.15  5678 255.255.255.255  5678     0     0
+ *  ```
+ *
+ *  The bracketed state can contain a space (UDP rows carry a TTL, `[223 sec]`),
+ *  so it is matched as "anything but `]`" rather than a word. */
+export interface UsernetRow {
+	proto: string;
+	state: string;
+	fd: number;
+	srcAddr: string;
+	srcPort: number;
+	dstAddr: string;
+	dstPort: number;
+	recvQ: number;
+	sendQ: number;
+}
+
+const USERNET_ROW_RE =
+	/^\s*(TCP|UDP)\[([^\]]*)\]\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/;
+
+export function parseUsernetTable(text: string): UsernetRow[] {
+	const rows: UsernetRow[] = [];
+	for (const line of text.split(/\r?\n/)) {
+		const m = USERNET_ROW_RE.exec(line);
+		if (!m) continue;
+		rows.push({
+			proto: String(m[1]),
+			state: String(m[2]),
+			fd: Number(m[3]),
+			srcAddr: String(m[4]),
+			srcPort: Number(m[5]),
+			dstAddr: String(m[6]),
+			dstPort: Number(m[7]),
+			recvQ: Number(m[8]),
+			sendQ: Number(m[9]),
+		});
+	}
+	return rows;
+}
+
+/** What a probe of one forwarded port revealed about the guest behind it.
+ *
+ *  Grounded on a healthy local 7.21.5 CHR (x86/HVF), four probes per condition
+ *  — see tikoci/quickchr#79 (comment 5109767102) and #105:
+ *
+ *  | guest condition                     | `info usernet` after probing |
+ *  |-------------------------------------|------------------------------|
+ *  | serving (`www` enabled)             | `TIME_WAIT` rows             |
+ *  | nothing listening (service off)     | **no rows at all** — the guest RSTs and slirp discards the entry |
+ *  | silently dropped (`action=drop`)    | `SYN_SENT` rows, persisting  |
+ *
+ *  A host-side TCP connect reads "accepting" in all three cases (slirp's
+ *  hostfwd accepts regardless of guest state), which is why `hostfwd.tcpConnect`
+ *  in the report is not evidence and this table is. */
+export type ForwardOutcome =
+	/** Connection completed — something in the guest answered on this port. */
+	| "served"
+	/** No lingering row: the guest sent an RST, so nothing is listening on that
+	 *  port — but the guest itself is alive and answering. */
+	| "refused"
+	/** `SYN_SENT` persisting: the SYNs are being silently dropped. */
+	| "dropped"
+	/** No `HOST_FORWARD` row — QEMU never bound this forward. */
+	| "not-forwarded"
+	/** Rows exist but in no state we classify. */
+	| "unknown";
+
+export interface ForwardClassification {
+	name: string;
+	hostPort: number;
+	guestPort: number;
+	proto: string;
+	outcome: ForwardOutcome;
+	/** Non-`HOST_FORWARD` states seen for this guest port, e.g. `["SYN_SENT×15"]`. */
+	states: string[];
+	/** Result of the host-side TCP connect, kept for completeness. */
+	hostConnect: string;
+}
+
+const SERVED_STATES = ["ESTABLISHED", "TIME_WAIT", "FIN_WAIT_1", "FIN_WAIT_2", "CLOSE_WAIT", "LAST_ACK", "CLOSING"];
+
+export function classifyForwardedPorts(
+	rows: UsernetRow[],
+	forwards: { name: string; host: number; guest: number; proto: string }[],
+	hostConnect: Record<string, string> = {},
+): ForwardClassification[] {
+	// Two forwards may target the same guest port from different host ports, so the
+	// guest port alone cannot attribute a row. slirp reports the *host* forward
+	// port as a forwarded connection's source port, not the client's ephemeral one
+	// — verified on captured output, where every live row sat at
+	// `127.0.0.1:<hostPort> -> 10.0.2.15:<guestPort>`, and the same shape appears
+	// in #79's CI dumps. Confirm that convention holds in this dump before relying
+	// on it: if it ever stops, classification degrades to guest-port matching
+	// rather than silently reporting every port as `refused`.
+	const liveRowsCarryHostPort = rows.some(
+		(r) => r.state !== "HOST_FORWARD" && forwards.some((f) => f.host === r.srcPort),
+	);
+
+	return forwards.map((fwd) => {
+		const byGuestPort = rows.filter((r) => r.proto.toUpperCase() === fwd.proto.toUpperCase() && r.dstPort === fwd.guest);
+		const forwarded = byGuestPort.some((r) => r.state === "HOST_FORWARD" && r.srcPort === fwd.host);
+		const liveRows = byGuestPort.filter((r) => r.state !== "HOST_FORWARD");
+		const live = liveRowsCarryHostPort ? liveRows.filter((r) => r.srcPort === fwd.host) : liveRows;
+
+		const tally = new Map<string, number>();
+		for (const r of live) tally.set(r.state, (tally.get(r.state) ?? 0) + 1);
+		const states = [...tally].map(([state, n]) => (n > 1 ? `${state}×${n}` : state));
+
+		let outcome: ForwardOutcome;
+		if (!forwarded) outcome = "not-forwarded";
+		else if (live.some((r) => r.state === "SYN_SENT")) outcome = "dropped";
+		else if (live.length === 0) outcome = "refused";
+		else if (live.some((r) => SERVED_STATES.includes(r.state))) outcome = "served";
+		else outcome = "unknown";
+
+		return {
+			name: fwd.name,
+			hostPort: fwd.host,
+			guestPort: fwd.guest,
+			proto: fwd.proto,
+			outcome,
+			states,
+			hostConnect: hostConnect[fwd.name] ?? "not probed",
+		};
+	});
+}
+
+/** Read the classification table as one sentence. All ports dropping points at
+ *  the RX path (nothing the guest exposes is reachable); a single dropped port
+ *  next to healthy ones points at that one service. */
+export function summarizeForwardOutcomes(ports: ForwardClassification[]): string {
+	if (ports.length === 0) return "no TCP forwards to classify";
+	const dropped = ports.filter((p) => p.outcome === "dropped");
+	const table = ports.map((p) => `${p.name}:${p.guestPort}=${p.outcome}`).join(" ");
+	if (dropped.length === 0) return `${table} — no silent drop observed`;
+	if (dropped.length === ports.length) {
+		return `${table} — EVERY forwarded port is silently dropped: whole-stack silence, points at the guest RX path`;
+	}
+	return `${table} — ${dropped.map((p) => p.name).join(",")} silently dropped while others are not: service-specific`;
+}
+
+export interface ForwardProbeResult {
+	probesPerPort: number;
+	ports: ForwardClassification[];
+	/** Raw `info usernet` taken *after* the probes — the classification input. */
+	usernetAfterProbe: string;
+	summary: string;
+}
+
+/**
+ * Probe every forwarded TCP port and classify what slirp saw.
+ *
+ * The probes are what make the table meaningful: a `refused` verdict only means
+ * "nothing listening" because a probe was sent and left no row behind. Fired in
+ * parallel — rows are attributed by destination port, not by time.
+ */
+export async function probeForwardedPorts(
+	forwards: { name: string; host: number; guest: number; proto: string }[],
+	monitorQuery: (command: string) => Promise<string>,
+	opts: { probesPerPort?: number; settleMs?: number } = {},
+): Promise<ForwardProbeResult> {
+	const probesPerPort = opts.probesPerPort ?? 2;
+	const tcp = forwards.filter((f) => f.proto.toLowerCase() === "tcp");
+
+	const hostConnect: Record<string, string> = {};
+	await Promise.all(
+		tcp.map(async (fwd) => {
+			let last = "not probed";
+			for (let i = 0; i < probesPerPort; i++) last = await probeTcpPort(fwd.host);
+			hostConnect[fwd.name] = last;
+		}),
+	);
+
+	// Let the guest's RSTs land (which removes `refused` rows) before sampling;
+	// `SYN_SENT` and `TIME_WAIT` both persist well past this.
+	await Bun.sleep(opts.settleMs ?? 1000);
+
+	let usernet: string;
+	try {
+		usernet = await monitorQuery("info usernet");
+	} catch (e) {
+		usernet = `<failed: ${e instanceof Error ? e.message : String(e)}>`;
+	}
+
+	const ports = classifyForwardedPorts(parseUsernetTable(usernet), tcp, hostConnect);
+	return { probesPerPort, ports, usernetAfterProbe: usernet, summary: summarizeForwardOutcomes(ports) };
+}
+
 function isProcessAlive(pid: number | undefined): string {
 	if (pid === undefined) return "unknown (no pid recorded)";
 	try {
@@ -222,6 +435,18 @@ export function pruneBootFailureReports(dir: string, keep = MAX_BOOT_FAILURE_REP
 	} catch { /* ignore */ }
 }
 
+/**
+ * Worst-case wall clock `captureBootFailure()` may consume, in ms.
+ *
+ * It runs *after* a boot budget has already been spent, so anything waiting on
+ * that call — most importantly a test's own timeout — has to allow for it, or
+ * the forensics are killed before they can be written and the failure is
+ * evidence-free again (tikoci/quickchr#106). Sum of the bounded parts: forward
+ * probe ≤ 20 s, guest snapshot ≤ 60 s (GUEST_SNAPSHOT_BUDGET_MS), counting-rule
+ * probe ≤ 90 s, report write and cleanup the rest.
+ */
+export const BOOT_FORENSICS_BUDGET_MS = 180_000;
+
 export interface BootFailureContext {
 	name: string;
 	machineDir: string;
@@ -247,6 +472,15 @@ export interface BootFailureContext {
 	/** Runs `info status` / `info block` against the QEMU monitor. Injected so
 	 *  this module stays free of a channels.ts import cycle. */
 	monitorQuery?: (command: string) => Promise<string>;
+	/** The machine's port forwards, for per-port slirp classification. Without
+	 *  them the report can only say *that* the drop happened, not *where*. */
+	forwards?: PortMapping[];
+	/** Runs one RouterOS command over the serial console. Injected (console.ts)
+	 *  so this module keeps no channel dependency. Omit to skip guest-side
+	 *  capture entirely — e.g. when no serial channel exists. */
+	guestExec?: GuestExec;
+	/** Account `guestExec` logs in as. Recorded in the report only. */
+	guestUser?: string;
 }
 
 export interface BootFailureReport {
@@ -282,6 +516,55 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 		}
 	}
 
+	// Host-side localization: probe every forwarded port and read slirp's own
+	// view of what happened to each. This is the only host-side instrument that
+	// distinguishes "nothing listening" from "silently dropped" — see
+	// ForwardOutcome.
+	let forwardProbe: ForwardProbeResult | null = null;
+	if (ctx.monitorQuery && ctx.forwards?.length) {
+		try {
+			forwardProbe = await probeForwardedPorts(ctx.forwards, ctx.monitorQuery);
+		} catch (e) {
+			forwardProbe = {
+				probesPerPort: 0,
+				ports: [],
+				usernetAfterProbe: "",
+				summary: `<forward probe failed: ${e instanceof Error ? e.message : String(e)}>`,
+			};
+		}
+	}
+
+	// Guest-side: read-only, and reachable even when REST is dead.
+	let guest: GuestSnapshot | null = null;
+	if (ctx.guestExec) {
+		try {
+			guest = await captureGuestSnapshot(ctx.guestExec, ctx.guestUser);
+		} catch { /* captureGuestSnapshot swallows its own failures; belt and braces */ }
+	}
+
+	// The discriminator, opt-in because it writes to the guest. Skipped when the
+	// caller wants the machine preserved — that flag means "leave the state alone".
+	let countingRule: CountingRuleProbe | null = null;
+	if (ctx.guestExec && ctx.httpPort !== undefined) {
+		if (guest && !guest.consoleReachable) {
+			countingRule = { ran: false, skipped: "serial console unreachable", detail: "" };
+		} else if (!deepBootDiagnosticsEnabled()) {
+			countingRule = { ran: false, skipped: "QUICKCHR_DEEP_BOOT_DIAGNOSTICS is not 1", detail: "" };
+		} else if (preserveOnFailure()) {
+			countingRule = { ran: false, skipped: "QUICKCHR_PRESERVE_ON_FAILURE=1 — guest left untouched", detail: "" };
+		} else {
+			const httpGuestPort = ctx.forwards?.find((f) => f.host === ctx.httpPort)?.guest ?? 80;
+			try {
+				countingRule = await runCountingRuleProbe(ctx.guestExec, probeTcpPort, {
+					guestPort: httpGuestPort,
+					hostPort: ctx.httpPort,
+				});
+			} catch (e) {
+				countingRule = { ran: false, detail: `counting-rule probe failed: ${e instanceof Error ? e.message : String(e)}` };
+			}
+		}
+	}
+
 	const record = {
 		capturedAt: new Date().toISOString(),
 		phase: ctx.phase,
@@ -305,6 +588,9 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 		hostfwd: ctx.httpPort === undefined
 			? null
 			: { port: ctx.httpPort, tcpConnect: await probeTcpPort(ctx.httpPort) },
+		forwardProbe,
+		guest,
+		countingRule,
 		monitor,
 		qemuArgs: ctx.qemuArgs ?? null,
 		machineDirListing: listMachineDir(ctx.machineDir),
@@ -328,6 +614,10 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 	if (ctx.probe) lines.push(`REST probe: ${summarizeBootProbe(ctx.probe)}`);
 	lines.push(`QEMU process: ${record.host.qemuProcess}`);
 	if (record.hostfwd) lines.push(`hostfwd 127.0.0.1:${record.hostfwd.port}: ${record.hostfwd.tcpConnect}`);
+	if (forwardProbe) lines.push(`slirp per-port: ${forwardProbe.summary}`);
+	// Shapes only — the values stay in the report. See summarizeGuestSnapshot.
+	if (guest) lines.push(guest.summary);
+	if (countingRule?.ran) lines.push(`counting rule: ${countingRule.detail}`);
 	for (const [command, output] of Object.entries(monitor)) {
 		if (command === "info status") lines.push(`monitor ${command}: ${output.replace(/\s+/g, " ").trim()}`);
 	}

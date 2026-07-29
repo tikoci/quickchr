@@ -225,6 +225,13 @@ jobs:
       # only here: provisioning types the generated password over serial in
       # cleartext, but CI passwords are per-run throwaways.
       QUICKCHR_SERIAL_LOG: "1"
+      # Let a boot failure run the counting-rule probe (#105) — the only
+      # instrument that says whether the guest received the SYNs at all, and so
+      # whether a #79-style silent drop is RouterOS-side or in the RX path. It
+      # writes a mangle passthrough rule into a guest that is about to be
+      # destroyed; that is only acceptable because these machines are per-run
+      # throwaways, which is why it is opt-in rather than always on.
+      QUICKCHR_DEEP_BOOT_DIAGNOSTICS: "1"
       # QUICKCHR_PRESERVE_ON_FAILURE is deliberately NOT set. The boot-failure
       # report is written to <dataDir>/failures/ and embeds qemu.log + serial.log
       # in full, so it already survives cleanup — preserving the machine dir adds
