@@ -27,9 +27,16 @@ import type { Arch } from "../../src/lib/types.ts";
  *  what `QuickCHR.start()` picks when the caller passes no `arch`. */
 export const TEST_ARCH: Arch = process.arch === "arm64" ? "arm64" : "x86";
 
-/** Resolved once at module load: `detectAccel()` shells out to QEMU, and a test
- *  timeout has to be a plain number at `test()` definition time. */
-export const TEST_ACCEL: string = await detectAccel(TEST_ARCH);
+/** Resolved once at module load, because a test timeout has to be a plain number
+ *  at `test()` definition time and `detectAccel()` is async.
+ *
+ *  Gated on `QUICKCHR_INTEGRATION` so a unit-only run stays side-effect free:
+ *  `detectAccel()` probes the host (`/dev/kvm` on Linux, `sysctl` on macOS), and
+ *  `test/unit/timeout-scaling.test.ts` imports this module for
+ *  {@link bootTestTimeoutFor}, which takes its accel as an argument. Without the
+ *  gate every integration `describe` is skipped anyway, so the value is unused —
+ *  `tcg` is just the conservative placeholder. */
+export const TEST_ACCEL: string = process.env.QUICKCHR_INTEGRATION ? await detectAccel(TEST_ARCH) : "tcg";
 
 /** Slack for everything in a test body that is not booting: the image download
  *  on a cold cache, REST round-trips, `stop()`/`remove()`, and the assertions. */

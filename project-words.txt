@@ -15,7 +15,7 @@
 
 aavmf
 accels
-ACK
+ack
 acpi
 addrs
 aehd
@@ -331,7 +331,7 @@ roskrnl
 routerboard
 routeros
 rsc
-RST
+rst
 rta
 runspace
 runspaces
