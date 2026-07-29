@@ -16,6 +16,7 @@ Each subdirectory is a self-contained lab covering one subsystem:
 | `licensing/` | `/system/license` tiers, renew response shapes | 5 | `licensing-rest.md` |
 | `slirp-hostfwd/` | SLiRP hostfwd: does it work without a guest IP? | 4 | `qemu.instructions.md` |
 | `ssh-keys/` | SSH key provisioning and `exec --via=ssh` | — | `provisioning.instructions.md` |
+| `www-abort-damage/` | Does an aborted REST probe damage RouterOS `www`? (#79) | 5 | `qemu.instructions.md` |
 | `scripting-patterns/` | RouterOS scripting via REST `/execute` | — | — |
 
 Each directory contains:

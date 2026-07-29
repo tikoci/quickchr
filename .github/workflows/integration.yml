@@ -20,12 +20,19 @@ name: Integration
 # not an optional extra); narrow/lab dispatches turn it off explicitly.
 #
 # Platform ids (comma-separate to combine, or use a group alias):
-#   linux-x86    ubuntu-latest      x86 CHR    KVM
-#   linux-arm64  ubuntu-24.04-arm   arm64 CHR  KVM if available; hosted runners may fall back to TCG
-#   macos-arm64  macos-15           arm64 CHR  TCG (see note below)
-#   macos-x86    macos-15-intel     x86 CHR    TCG (no hw accel — slow)
-#   windows-x86  windows-latest     x86 CHR    TCG (no hw accel — slow)
+#   linux-x86    ubuntu-latest      x86 CHR    KVM   standard budget
+#   linux-arm64  ubuntu-24.04-arm   arm64 CHR  KVM   standard budget (may fall back to TCG)
+#   macos-arm64  macos-15           arm64 CHR  TCG   standard budget (see note below)
+#   macos-x86    macos-15-intel     x86 CHR    HVF   extended budget
+#   windows-x86  windows-latest     x86 CHR    TCG   extended budget (no hw accel — slow)
 #   gating  = linux-x86,linux-arm64,macos-arm64      all = every platform
+#
+# The accelerator column and the budget column are deliberately independent —
+# see the platform table in the plan job for the grounding behind each value.
+# macos-x86 read "TCG" here until #76; it is a bare-metal Intel runner and
+# detectAccel() returns hvf on it. It keeps the extended budget anyway, because
+# its full suite has never yet finished inside 60 min — an open question (#76),
+# not a property of its accelerator.
 #
 # NOTE (quickchr#97): the macos-arm64 leg does NOT exercise HVF. Hosted macos-15
 # runners are themselves VMs ("Apple M1 (Virtual)") and report kern.hv_support=0,
@@ -34,13 +41,19 @@ name: Integration
 # by policy. So a green macos-arm64 leg is NOT evidence about the HVF path; that
 # still needs a physical Apple Silicon Mac with --accel hvf.
 #
-# Every platform runs the FULL suite by default — including the TCG ones, which
+# Every platform runs the FULL suite by default — including the slow ones, which
 # is the honest "find out where windows/mac break" path (they just get a much
-# larger timeout). Pass tcg-smoke=true to bound TCG legs to the curated
-# anchor.test.ts subset instead (the weekly sweep does, to cap its cost).
+# larger timeout). Pass tcg-smoke=true to bound the extended-budget legs to the
+# curated anchor.test.ts subset instead (the weekly sweep does, to cap its cost).
 # There is NO continue-on-error anywhere in this file: green means the selected
 # tests passed, red means they didn't (see ci.instructions.md "green should be
 # green").
+#
+# Timeouts are two-tier on purpose (#76). The job budget (matrix.timeout) is the
+# outer bound; the test step carries its own cap 10 min under it. A job timeout
+# tears the runner down and `if: always()` never fires, so the artifact upload
+# is skipped and the leg produces no evidence at all — the exact reason macos-x86
+# resisted diagnosis for weeks. A step timeout leaves the job alive to report.
 #
 # Per-file timing is always captured (integration-timing.txt in the artifact) —
 # boot/test duration by platform × accel × RouterOS version is the raw feed for
@@ -71,7 +84,7 @@ on:
         default: ""
       tcg-smoke:
         type: boolean
-        description: "Bound TCG platforms (macos-x86, windows-x86) to the anchor smoke subset when test-filter is empty. Off = full suite everywhere (TCG legs are slow — extended timeout)."
+        description: "Bound the extended-budget platforms (macos-x86, windows-x86) to the anchor smoke subset when test-filter is empty. Off = full suite everywhere (those legs are slow — extended timeout)."
         default: false
       example-filter:
         type: string
@@ -141,15 +154,44 @@ jobs:
           TCG_SMOKE: ${{ inputs.tcg-smoke }}
         run: |
           set -eo pipefail
-          # id → label | runner | tcg (forced/no hw accel on hosted runner;
-          # Linux KVM may still fall back dynamically and is logged at runtime)
+          # id → label | runner | accel | budget
+          #
+          # `accel` is the accelerator this hosted runner is EXPECTED to give
+          # detectAccel(). It is a claim about the runner, checked at runtime:
+          # the Log platform step compares it against the detected value and
+          # emits a ::warning:: on drift. It is reporting only — it never
+          # changes what the tests do.
+          #
+          # `budget` is the empirical run-time class, kept separate on purpose:
+          # "slow leg" is measured, not derived from the accelerator. It drives
+          # the job/step timeouts and tcg-smoke eligibility.
+          #
+          # accel grounding:
+          #   linux-x86/linux-arm64  kvm  — /dev/kvm on hosted runners; either
+          #                                 may fall back to tcg, which the
+          #                                 runtime drift warning surfaces.
+          #   macos-arm64            tcg  — hosted macos-15 is itself a VM
+          #                                 ("Apple M1 (Virtual)"), kern.hv_support=0
+          #                                 (run 29669706663), and quickchr forces
+          #                                 TCG on Apple Silicon anyway (#97).
+          #   macos-x86              hvf  — macos-15-intel is bare metal: detectAccel
+          #                                 returns hvf (timeoutFactor 1.5), boots
+          #                                 take 30–46 s at cpu-load 0–1 %. This row
+          #                                 read `tcg` until #76; the summary line
+          #                                 printed that hardcoded claim directly
+          #                                 under the detectAccel line contradicting
+          #                                 it. Its budget stays `extended` because
+          #                                 the full suite has never yet finished
+          #                                 inside 60 min there — an open question
+          #                                 (#76), not an accel fact.
+          #   windows-x86            tcg  — no hardware acceleration available.
           table() {
             case "$1" in
-              linux-x86)   echo 'linux/x86_64|ubuntu-latest|false' ;;
-              linux-arm64) echo 'linux/aarch64|ubuntu-24.04-arm|false' ;;
-              macos-arm64) echo 'macos/arm64|macos-15|false' ;;
-              macos-x86)   echo 'macos/x86_64|macos-15-intel|true' ;;
-              windows-x86) echo 'windows/x86_64|windows-latest|true' ;;
+              linux-x86)   echo 'linux/x86_64|ubuntu-latest|kvm|standard' ;;
+              linux-arm64) echo 'linux/aarch64|ubuntu-24.04-arm|kvm|standard' ;;
+              macos-arm64) echo 'macos/arm64|macos-15|tcg|standard' ;;
+              macos-x86)   echo 'macos/x86_64|macos-15-intel|hvf|extended' ;;
+              windows-x86) echo 'windows/x86_64|windows-latest|tcg|extended' ;;
               *) return 1 ;;
             esac
           }
@@ -178,25 +220,37 @@ jobs:
               echo "::error::Unknown platform id '$id' (valid: linux-x86, linux-arm64, macos-arm64, macos-x86, windows-x86, gating, all)"
               exit 1
             fi
-            IFS='|' read -r label runner tcg <<< "$row"
+            IFS='|' read -r label runner accel budget <<< "$row"
             # smoke is OPT-IN (tcg-smoke input), never an implicit narrowing: an
             # explicit platforms=all/windows-x86 dispatch means the full suite.
+            # Eligibility follows `budget`, not the accelerator: the point of the
+            # smoke subset is to cap legs that take hours, whatever makes them slow.
             smoke=false
-            [ "$tcg" = "true" ] && [ "$TCG_SMOKE" = "true" ] && smoke=true
-            # Full suite under TCG is slow but real (the "find out" path) — give
-            # it a generous cap. Smoke/filtered TCG legs and accelerated legs
-            # stay tight so a hang is caught quickly.
+            [ "$budget" = "extended" ] && [ "$TCG_SMOKE" = "true" ] && smoke=true
+            # Full suite on a slow leg is slow but real (the "find out" path) —
+            # give it a generous cap. Smoke/filtered slow legs and fast legs stay
+            # tight so a hang is caught quickly.
             timeout=60
-            if [ "$tcg" = "true" ]; then
+            if [ "$budget" = "extended" ]; then
               if [ "$smoke" = "true" ] || [ -n "$FILTER" ]; then timeout=90; else timeout=300; fi
             fi
+            # Step budget for the test step, 10 min under the job budget (#76).
+            # `if: always()` is worthless when the JOB timeout fires — GitHub tears
+            # the job down and the upload steps never run, which is exactly why
+            # macos-x86 has produced zero artifacts for weeks. A step-level cap
+            # inside the job budget kills only the step, so the reap, metrics,
+            # summary and artifact-upload steps still run and the leg fails with
+            # its evidence attached. (It does not rescue a runner that loses
+            # communication with the server — nothing in-job can.)
+            steptimeout=$((timeout - 10))
             for t in "${TARGET_ARR[@]}"; do
               [ -z "$t" ] && continue
               inc=$(printf '%s' "$inc" | jq -c \
                 --arg id "$id" --arg label "$label" --arg os "$runner" \
-                --arg target "$t" \
-                --argjson tcg "$tcg" --argjson smoke "$smoke" --argjson timeout "$timeout" \
-                '. + [{id:$id, label:$label, os:$os, tcg:$tcg, smoke:$smoke, timeout:$timeout, target:$target}]')
+                --arg target "$t" --arg accel "$accel" --arg budget "$budget" \
+                --argjson smoke "$smoke" --argjson timeout "$timeout" \
+                --argjson steptimeout "$steptimeout" \
+                '. + [{id:$id, label:$label, os:$os, accel:$accel, budget:$budget, smoke:$smoke, timeout:$timeout, steptimeout:$steptimeout, target:$target}]')
             done
           done
           if [ "$inc" = "[]" ]; then
@@ -289,11 +343,16 @@ jobs:
           fi
 
       - name: Log platform
+        env:
+          EXPECTED_ACCEL: ${{ matrix.accel }}
         run: |
           guest_arch=x86
           case "${{ matrix.id }}" in
             linux-arm64|macos-arm64) guest_arch=arm64 ;;
           esac
+          # Resolve the detected accelerator first, outside the reporting block,
+          # so the summary can state it instead of restating a matrix constant.
+          detected=$(QUICKCHR_LOG_ARCH="$guest_arch" bun --eval 'const { detectAccel } = await import("./src/lib/platform.ts"); process.stdout.write(await detectAccel(process.env.QUICKCHR_LOG_ARCH));' 2>/dev/null || echo unknown)
           {
             echo "### Platform: ${{ matrix.label }} — target ${{ matrix.target }}"
             echo "- Matrix: id=${{ matrix.id }} runner=${{ matrix.os }} runner.os=${{ runner.os }} runner.arch=${{ runner.arch }}"
@@ -304,6 +363,15 @@ jobs:
             qemu-system-aarch64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
             echo "- RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
             QUICKCHR_LOG_ARCH="$guest_arch" bun --eval 'const { detectAccel, isCrossArchEmulation, accelTimeoutFactor } = await import("./src/lib/platform.ts"); const arch = process.env.QUICKCHR_LOG_ARCH; const accel = await detectAccel(arch); const cross = isCrossArchEmulation(arch); console.log(`- quickchr detectAccel(${arch}): ${accel} (crossArch=${cross}, timeoutFactor=${accelTimeoutFactor(accel, cross)})`);'
+            # ONE accel statement per leg, and it reports what was detected.
+            # Until #76 this line printed the matrix's hardcoded flag directly
+            # under the detectAccel line that contradicted it (macos-x86 was
+            # labelled TCG while detectAccel returned hvf), and that flag —
+            # not the detected value — drove the timeout and smoke planning.
+            echo "- Accel: detected=$detected expected=$EXPECTED_ACCEL (guest $guest_arch) — budget class ${{ matrix.budget }}"
+            if [ "$detected" != "$EXPECTED_ACCEL" ]; then
+              echo "::warning::Accel drift on ${{ matrix.id }}: detectAccel($guest_arch) returned '$detected' but the plan matrix expects '$EXPECTED_ACCEL' — update the platform table in integration.yml"
+            fi
             if [ "${{ runner.os }}" = "Linux" ]; then
               if [ -e /dev/kvm ]; then
                 echo "- /dev/kvm: $(ls -l /dev/kvm)"
@@ -326,14 +394,8 @@ jobs:
                   sed 's/^/  /' "$probe_log" | head -20 || true
                 fi
               fi
-              if [ -w /dev/kvm ] 2>/dev/null; then echo "- Accel hint: KVM"; else echo "- Accel hint: TCG (no writable /dev/kvm)"; fi
-            elif [ "${{ matrix.tcg }}" = "true" ]; then
-              echo "- Accel hint: TCG (no hardware acceleration on this hosted runner)"
-            else
-              # macOS. Do not claim HVF: hosted macos-15 runners report
-              # kern.hv_support=0, and Apple Silicon auto-selects TCG by policy
-              # (quickchr#97). The detectAccel line logged above is authoritative.
-              echo "- Accel hint: see detectAccel line above (hosted macOS runners have no nested HVF)"
+            elif [ "${{ runner.os }}" = "macOS" ]; then
+              echo "- kern.hv_support: $(sysctl -n kern.hv_support 2>/dev/null || echo unavailable)"
             fi
           } | tee "$HOME/platform-info.txt" | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -416,6 +478,12 @@ jobs:
       # C:\, and upload-artifact needs a common ancestor across all paths.
       - name: Run integration tests (sequential per-file)
         id: run
+        # 10 min under the job budget. A JOB timeout tears the whole job down and
+        # `if: always()` never runs — that is why macos-x86 produced no artifact
+        # at all across weeks of failures (#76). A STEP timeout kills only this
+        # step, so the reap / metrics / summary / upload steps below still run and
+        # the failure arrives with its evidence.
+        timeout-minutes: ${{ matrix.steptimeout }}
         env:
           FILE_LIST: ${{ steps.files.outputs.list }}
         run: |
