@@ -423,6 +423,21 @@ Provisioning via REST API is preferred (simple HTTP calls). Serial console provi
 
 **Credential resolution** (`src/lib/auth.ts`): Priority order is (1) explicit `--user`/`--password` override, (2) provisioned user from `machine.json` (`state.user`), (3) CHR default `admin:` (empty password). Both `exec()` and `rest()` on ChrInstance use this.
 
+**`machine.json` holds two kinds of fact, and `clean()` is where they diverge.**
+Some fields describe the *guest* — what accounts exist on the disk right now:
+`user`, `managedSshKey`, `disableAdmin`, and the per-instance entry in the secret
+store. Others are *intent* — what to apply the next time provisioning runs:
+`packages`, `deviceMode`, `secureLogin`. `clean()` replaces the disk with a fresh
+image, so every guest fact it recorded is false the moment it returns, and nothing
+restores them: a post-`clean()` `start()` reaches `_launchExisting(…, undefined)`
+because `lastStartedAt` is set, so the erased account is never recreated. `clean()`
+therefore clears the guest facts (and deletes the managed keypair under
+`<machineDir>/ssh/`) and keeps the intent. Without that, credential resolution
+kept preferring `state.user` and authenticated every REST call, exec, and SCP as a
+user RouterOS had deleted — the confound removed ahead of #79's QEMU-version
+experiment. Priority (3) above is what a cleaned machine must land on, and it is
+the truth of a fresh CHR image: `admin` with an empty password.
+
 Output formatting via `--json` flag. RouterOS trick for structured output: wrap commands in `[:serialize to=json [<routeros-cmd>]]` to get JSON from any CLI command. For REST-to-CLI mapping, see tikoci/restraml `lookup.html`.
 
 ### Examples Philosophy

@@ -74,6 +74,18 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- **`clean()` left credentials naming an erased user** (#79). `clean()` replaces the
+  disk with a fresh image, but `machine.json` kept `user`, `managedSshKey`, and
+  `disableAdmin` from the machine that disk used to hold — and nothing recreates
+  them, because a post-`clean()` `start()` does not re-provision. Credential
+  resolution kept preferring `state.user`, so every subsequent `rest()`, `exec()`,
+  and SCP authenticated as a user RouterOS had deleted, and `inspect` advertised
+  that dead account as the machine's login. Those three fields are now cleared with
+  the disk, along with the stored instance credentials (already) and the managed
+  keypair under `<machineDir>/ssh/`, leaving resolution on the factory fallback a
+  fresh image actually answers to — `admin` with an empty password. Provisioning
+  *intent* (`packages`, `deviceMode`, `secureLogin`) is not guest state and
+  survives.
 - **Serial console: large replies could come back empty** (#109). `consoleExec`
   ended a reply at the first prompt that had been followed by 150 ms of quiet, but
   RouterOS repaints prompt+command *before* emitting output — so on a guest that

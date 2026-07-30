@@ -185,6 +185,12 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			await instance.stop();
 			await instance.clean();
 
+			// The disk that held `cleanuser` is gone and nothing re-provisions it,
+			// so the credential facts must go with it — otherwise every REST call,
+			// exec, and SCP after this authenticates as a user RouterOS erased (#79).
+			expect(instance.state.user).toBeUndefined();
+			expect(instance.state.managedSshKey).toBeUndefined();
+
 			// Reboot from the fresh disk image
 			const fresh = await QuickCHR.start({ name: "integration-clean-test" });
 			instance = fresh;
@@ -207,6 +213,15 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 				10_000,
 			);
 			expect(adminOk.status).toBe(200);
+
+			// …and quickchr's own credential resolution must land on it without being
+			// told: rest() authenticates with resolveAuth(state), which is the path
+			// that was still offering `cleanuser` before this state was cleared.
+			// (`board-name` carries the emulated machine type on some releases —
+			// 7.23.2/x86 answers "CHR QEMU Standard PC (i440FX + PIIX, 1996)" — so
+			// match the prefix, not the whole string.)
+			const resolved = await instance.rest("/system/resource") as { "board-name"?: string };
+			expect(resolved["board-name"]).toStartWith("CHR");
 		} finally {
 			if (instance) {
 				try { await instance.stop(); } catch { /* ignore */ }

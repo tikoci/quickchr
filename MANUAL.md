@@ -199,9 +199,17 @@ credentials from the secret store.
 #### `clean <name>`
 
 Resets the machine to a fresh image: stops QEMU, re-copies the boot
-image from cache, recreates extra disks per the saved config, deletes
-EFI vars (UEFI re-initializes), and clears per-instance credentials.
-Provisioning options remain in `machine.json` and re-run on next `start`.
+image from cache, recreates extra disks per the saved config, and clears
+every credential the old disk held — the per-instance secret-store entry,
+the provisioned `user`, the managed SSH keypair, and the `disableAdmin`
+flag. The next `start` therefore logs in as factory `admin` with an empty
+password. EFI vars are deliberately **kept** (they store boot order, not
+guest state; wiping them costs an arm64 device rescan).
+
+`clean` does not re-provision: the boot options in `machine.json`
+(`packages`, `deviceMode`, `secureLogin`) are re-applied only on a machine
+that has never started, so a cleaned machine comes back factory-fresh. Pass
+the provisioning flags again, or `remove` and re-create, to get them back.
 
 ### Inspection
 
@@ -1168,8 +1176,12 @@ state deliberately) if a built-in service needs a different host port.
 
 `quickchr clean <name>` re-copies the boot image from cache and
 recreates extra disks per `machine.json`. Snapshots are gone (they live
-inside the qcow2 file). Per-instance credentials are wiped so the next
-boot re-provisions them.
+inside the qcow2 file). Every credential the old disk held is wiped —
+stored instance credentials, `state.user`, the managed SSH keypair under
+`<machineDir>/ssh/`, and `disableAdmin` — because the accounts they named
+went with the disk. The machine comes back as a factory CHR: `admin` with
+an empty password, which is what `rest()`, `exec()`, and `inspect` resolve
+to afterwards. Nothing is re-provisioned automatically.
 
 ### Snapshots
 
