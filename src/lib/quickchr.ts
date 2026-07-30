@@ -489,18 +489,43 @@ function createInstance(state: MachineState): ChrInstance {
 				state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
 			);
 
-			// Clean up stored instance credentials (re-provisioned on next start)
+			// Every guest-side credential went with the old disk, so the credential
+			// facts in machine.json now describe a machine that no longer exists.
+			// Nothing re-provisions them either: a post-clean() start() takes the
+			// `_launchExisting(…, undefined)` path (lastStartedAt is set), so the
+			// erased account is never recreated. Left in place, `resolveAuth()` /
+			// `resolveCreds()` prefer `state.user` and authenticate every REST call,
+			// exec, and SCP as a deleted user — the confound #79 removes here.
+			// Clearing them restores the documented fallback: factory `admin` with an
+			// empty password, which is what a fresh CHR image actually answers to
+			// (anchored by the "clean() resets disk to factory defaults" integration
+			// test). `disableAdmin` goes with them because it is read as a live fact
+			// about the guest (buildDescriptor's `disableAdminLockout`) and a fresh
+			// image has admin enabled again. Provisioning *intent* — packages,
+			// deviceMode, secureLogin — is not guest state and survives.
 			deleteInstanceCredentials(state.name);
+			// The managed keypair authenticated to the account factory reset erased,
+			// so it is dead credential material sitting in the machine dir. Removing
+			// it also keeps a future re-provision viable: `ssh-keygen -f <path>` on an
+			// existing file exits 1 with "already exists" rather than overwriting
+			// (verified locally), so a leftover key would break `installSshKey()`.
+			rmSync(join(state.machineDir, "ssh"), { recursive: true, force: true });
 
 			// Update state
 			const current = loadMachine(state.name);
 			if (current) {
 				current.status = "stopped";
 				current.pid = undefined;
+				current.user = undefined;
+				current.managedSshKey = undefined;
+				current.disableAdmin = undefined;
 				saveMachine(current);
 			}
 			state.status = "stopped";
 			state.pid = undefined;
+			state.user = undefined;
+			state.managedSshKey = undefined;
+			state.disableAdmin = undefined;
 		},
 
 		async monitor(command: string): Promise<string> {
@@ -974,9 +999,10 @@ function bootFailureGuestExec(state: MachineState): { exec: GuestExec; users: st
 	// Order matters only for speed — a wrong candidate costs a ~15 s login timeout
 	// before the next is tried. Stored credentials are the strongest evidence the
 	// machine is provisioned (provisioning stores them on success), so they lead;
-	// factory admin comes next because `clean()` deletes stored credentials while
-	// leaving `state.user` in machine.json, so a configured user that was never
-	// provisioned — or was just wiped — is the least likely to work.
+	// factory admin comes next because a cleaned machine has neither (`clean()`
+	// clears both the stored credentials and `state.user`), leaving `state.user`
+	// as the weakest case: a user configured on the machine but never provisioned
+	// onto the guest.
 	const candidates: { user: string; password: string }[] = [];
 	// Guarded even though secrets.ts already swallows unreadable/corrupt stores:
 	// this runs on the BOOT_TIMEOUT path *before* captureBootFailure(), so

@@ -140,6 +140,13 @@ boot forensics (`src/lib/guest-snapshot.ts`). Rules, all measured on 7.21.5/7.23
 - **Credentials depend on how far the boot got.** A machine that timed out before
   provisioning, and any machine after `clean()`, is factory fresh: `admin` with an
   empty password. A provisioned relaunch needs its stored instance credentials.
+  `clean()` clears the guest-side credential facts it invalidates — the stored
+  instance credentials, `state.user`, `state.managedSshKey`, `state.disableAdmin`,
+  and the keypair under `<machineDir>/ssh/` — so credential resolution lands on
+  factory admin on its own (#79). It does **not** re-provision: `start()` only
+  re-applies stored provisioning options on a machine that never started
+  (`lastStartedAt` unset), so a cleaned machine stays factory-fresh until the
+  provisioning options are passed again.
 
 ### Where a console reply ends — use the sentinel, not the prompt
 
