@@ -69,6 +69,15 @@ describe("parseSerializedJson", () => {
 		expect(parseSerializedJson("   ").error).toContain("empty");
 		expect(parseSerializedJson("bad command name").error).toContain("no JSON payload");
 	});
+
+	// #109: `empty console reply` used to cover both "RouterOS printed nothing"
+	// and "the reader lost the payload", so the blanked ipService/log entries in
+	// the #79 forensics read as a guest answer rather than a reader defect.
+	test("an unframed empty reply is reported as a framing failure, not an empty answer", () => {
+		expect(parseSerializedJson("   ", false).error).toContain("could not frame");
+		expect(parseSerializedJson("   ", true).error).toContain("RouterOS printed nothing");
+		expect(parseSerializedJson("   ", true).error).not.toContain("could not frame");
+	});
 });
 
 describe("captureGuestSnapshot", () => {
@@ -102,6 +111,18 @@ describe("captureGuestSnapshot", () => {
 		expect(snap.consoleReachable).toBe(false);
 		expect(snap.summary).toContain("console unreachable");
 		expect(Object.values(snap.entries).every((e) => !e.ok)).toBe(true);
+	});
+
+	test("records whether the console reader could frame each reply", async () => {
+		const snap = await captureGuestSnapshot(async (command) =>
+			command.includes("/ip/service")
+				? { output: "", framed: false }
+				: { output: "[]", framed: true },
+		);
+		expect(snap.entries.ipService?.framed).toBe(false);
+		expect(snap.entries.ipService?.error).toContain("could not frame");
+		expect(snap.entries.firewallFilter?.framed).toBe(true);
+		expect(snap.entries.firewallFilter?.ok).toBe(true);
 	});
 
 	test("keeps the raw text when a reply cannot be parsed", async () => {
@@ -215,6 +236,48 @@ describe("runCountingRuleProbe", () => {
 		const result = await runCountingRuleProbe(exec, async () => "accepting", {
 			guestPort: 80, hostPort: 9100, probes: 2,
 		});
+		expect(result.verdict).toBe("inconclusive");
+	});
+
+	// #109: the #79 report read `packetsAfter: 2` and still said "inconclusive"
+	// because the pre-probe read had failed. The rule is created by this function
+	// moments earlier, so its counter necessarily starts at 0 — a post-probe
+	// counter above zero is already proof the guest received the SYNs.
+	test("an unreadable pre-probe counter does not discard a positive post-probe one", async () => {
+		let added = false;
+		const exec: GuestExec = async (command) => {
+			if (command.includes("/ip/firewall/mangle add")) {
+				added = true;
+				return "";
+			}
+			if (command.includes("/ip/firewall/mangle print stats")) {
+				// First read (pre-probe) fails; the second one answers.
+				if (added) {
+					added = false;
+					return "input does not match any value of value-name";
+				}
+				return '[{"packets":"2","bytes":"120"}]';
+			}
+			return "";
+		};
+		const result = await runCountingRuleProbe(exec, async () => "accepting", {
+			guestPort: 80, hostPort: 9100, probes: 5,
+		});
+		expect(result.packetsBefore).toBeNull();
+		expect(result.packetsAfter).toBe(2);
+		expect(result.verdict).toBe("guest-received");
+		expect(result.detail).toContain("freshly added rule starts at 0");
+	});
+
+	test("an unreadable post-probe counter is still inconclusive", async () => {
+		const exec: GuestExec = async (command) => {
+			if (command.includes("/ip/firewall/mangle add")) return "";
+			return "input does not match any value of value-name";
+		};
+		const result = await runCountingRuleProbe(exec, async () => "accepting", {
+			guestPort: 80, hostPort: 9100, probes: 2,
+		});
+		expect(result.packetsAfter).toBeNull();
 		expect(result.verdict).toBe("inconclusive");
 	});
 });

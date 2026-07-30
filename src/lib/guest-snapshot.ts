@@ -34,9 +34,22 @@
  *     returns empty in both `duration=` and `as-value` forms. Do not re-try it.
  */
 
+/** A console reply, with whether the reader could frame it. `framed:false` means
+ *  the end-of-reply sentinel never arrived, so an empty `output` says "the reader
+ *  could not delimit the reply", not "the guest printed nothing" (#109). */
+export interface GuestReply {
+	output: string;
+	framed?: boolean;
+}
+
 /** Executes one RouterOS CLI command in the guest and returns its raw output.
- *  Injected so this module stays free of a console.ts/channels.ts import. */
-export type GuestExec = (command: string, timeoutMs: number) => Promise<string>;
+ *  Injected so this module stays free of a console.ts/channels.ts import.
+ *  A bare string is accepted for callers and fakes that cannot report framing. */
+export type GuestExec = (command: string, timeoutMs: number) => Promise<string | GuestReply>;
+
+function asReply(reply: string | GuestReply): GuestReply {
+	return typeof reply === "string" ? { output: reply } : reply;
+}
 
 /** Opens a TCP connection to a host port and returns a one-word outcome.
  *  Injected (diagnostics.probeTcpPort) to avoid an import cycle. */
@@ -75,6 +88,9 @@ export interface GuestSnapshotEntry {
 	error?: string;
 	/** Raw console text, kept only when parsing failed so the payload is not lost. */
 	raw?: string;
+	/** False when the console reader could not delimit the reply — the failure
+	 *  mode is then the reader, not RouterOS. Absent when the exec never ran. */
+	framed?: boolean;
 }
 
 export interface GuestSnapshot {
@@ -101,7 +117,7 @@ const MAX_RAW_BYTES = 32 * 1024;
  * the real payload is the last thing on the wire, and a candidate that starts
  * mid-payload leaves unbalanced JSON that fails to parse.
  */
-export function parseSerializedJson(raw: string): { value?: unknown; error?: string } {
+export function parseSerializedJson(raw: string, framed?: boolean): { value?: unknown; error?: string } {
 	const cleaned = raw.replace(/\r/g, "");
 	const lines = cleaned.split("\n");
 	const starts: number[] = [];
@@ -110,7 +126,15 @@ export function parseSerializedJson(raw: string): { value?: unknown; error?: str
 		if (trimmed.startsWith("[") || trimmed.startsWith("{")) starts.push(i);
 	}
 	if (starts.length === 0) {
-		return { error: cleaned.trim() === "" ? "empty console reply" : "no JSON payload in console reply" };
+		if (cleaned.trim() !== "") return { error: "no JSON payload in console reply" };
+		// An empty reply has two very different causes, and #109 is the case where
+		// telling them apart is the whole point: a *framed* empty reply is RouterOS
+		// printing nothing, while an *unframed* one is the reader losing the payload.
+		return {
+			error: framed === false
+				? "empty console reply — the reader could not frame it (payload may have been lost)"
+				: "empty console reply — RouterOS printed nothing",
+		};
 	}
 	let lastError = "unparsable console reply";
 	for (let i = starts.length - 1; i >= 0; i--) {
@@ -160,17 +184,18 @@ export async function captureGuestSnapshot(
 		}
 		const queryStart = Date.now();
 		try {
-			const output = await exec(command, Math.min(queryTimeoutMs, budgetMs - elapsed));
-			const parsed = parseSerializedJson(output);
+			const { output, framed } = asReply(await exec(command, Math.min(queryTimeoutMs, budgetMs - elapsed)));
+			const parsed = parseSerializedJson(output, framed);
 			consoleReachable = true;
 			entries[key] = parsed.error === undefined
-				? { command, ok: true, elapsedMs: Date.now() - queryStart, value: parsed.value }
+				? { command, ok: true, elapsedMs: Date.now() - queryStart, value: parsed.value, framed }
 				: {
 					command,
 					ok: false,
 					elapsedMs: Date.now() - queryStart,
 					error: parsed.error,
 					raw: output.slice(-MAX_RAW_BYTES),
+					framed,
 				};
 		} catch (e) {
 			entries[key] = {
@@ -273,8 +298,8 @@ function firstNumber(value: unknown, field: string): number | null {
 }
 
 async function execJson(exec: GuestExec, query: string, timeoutMs: number): Promise<unknown> {
-	const output = await exec(serializeJsonCommand(query), timeoutMs);
-	const parsed = parseSerializedJson(output);
+	const { output, framed } = asReply(await exec(serializeJsonCommand(query), timeoutMs));
+	const parsed = parseSerializedJson(output, framed);
 	if (parsed.error !== undefined) throw new Error(parsed.error);
 	return parsed.value;
 }
@@ -370,17 +395,24 @@ export async function runCountingRuleProbe(
 		await exec(`/ip/firewall/mangle remove [find comment="${DIAGNOSTIC_RULE_COMMENT}"]`, timeout);
 	} catch { /* ignore */ }
 
-	const delta = packetsBefore !== null && packetsAfter !== null ? packetsAfter - packetsBefore : null;
+	// Only `packetsAfter` is load-bearing. The rule is created by *this* function a
+	// moment earlier, so its counter necessarily starts at 0 — which means an
+	// unreadable `packetsBefore` costs nothing and must not throw the verdict away.
+	// #109: a report read `packetsAfter: 2` and still said "inconclusive", even
+	// though a counter at 2 on a seconds-old rule already proves `guest-received`.
+	const baseline = packetsBefore ?? 0;
+	const delta = packetsAfter === null ? null : packetsAfter - baseline;
 	const verdict: CountingRuleProbe["verdict"] = delta === null
 		? "inconclusive"
 		: delta > 0
 			? "guest-received"
 			: "not-delivered";
+	const assumed = packetsBefore === null ? " (pre-probe read failed; a freshly added rule starts at 0)" : "";
 	const detail = delta === null
-		? "could not read the rule counter — cannot localize the drop"
+		? "could not read the rule counter after the probes — cannot localize the drop"
 		: delta > 0
-			? `rule counter advanced by ${delta} over ${probes} probes — the guest IS receiving the SYNs; the drop is RouterOS-side`
-			: `rule counter flat over ${probes} probes — the SYNs never reach RouterOS; the drop is in the slirp/virtio RX path`;
+			? `rule counter advanced by ${delta} over ${probes} probes${assumed} — the guest IS receiving the SYNs; the drop is RouterOS-side`
+			: `rule counter flat over ${probes} probes${assumed} — the SYNs never reach RouterOS; the drop is in the slirp/virtio RX path`;
 
 	return { ...base, ran: true, probesFired: probes, packetsBefore, packetsAfter, connections, verdict, detail };
 }
