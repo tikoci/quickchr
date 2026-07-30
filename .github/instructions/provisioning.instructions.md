@@ -1,5 +1,5 @@
 ---
-applyTo: "src/lib/provision.ts,src/lib/exec.ts,src/lib/qemu.ts,src/lib/license.ts,src/lib/device-mode.ts,test/integration/**"
+applyTo: "src/lib/provision.ts,src/lib/exec.ts,src/lib/qemu.ts,src/lib/license.ts,src/lib/device-mode.ts,src/lib/console.ts,src/lib/guest-snapshot.ts,test/integration/**"
 ---
 
 # Provisioning & RouterOS Debugging Instructions
@@ -141,6 +141,40 @@ boot forensics (`src/lib/guest-snapshot.ts`). Rules, all measured on 7.21.5/7.23
   provisioning, and any machine after `clean()`, is factory fresh: `admin` with an
   empty password. A provisioned relaunch needs its stored instance credentials.
 
+### Where a console reply ends — use the sentinel, not the prompt
+
+A prompt is **not** a reliable end-of-reply marker. RouterOS repaints
+prompt+command *before* emitting output, so "a prompt appeared and the buffer went
+quiet" fires on the redraw whenever the guest pauses before the payload. That is
+#109: on a loaded 1-vCPU TCG guest the two largest guest-snapshot queries returned
+`empty console reply` while every small one succeeded, blanking the field #79
+needed. `consoleExec` therefore frames each reply with a sentinel.
+
+Measured on 7.21.5 (x86/HVF, QEMU 11.0.3):
+
+- **Build the marker in the guest.** `:put ("QCHR" . "<nonce>" . "END")` prints
+  `QCHR<nonce>END`, while the echoed line only ever shows the split expression. A
+  marker passed as one literal would match its own echo.
+- **Send the sentinel as its own `\r`-terminated line, never `;`-chained.** A `;`
+  chain aborts at the first failure and never runs the rest — confirmed for both a
+  syntax error (`/bogus/nope print; :put (…)`) and a runtime one
+  (`/ip/address add address=nonsense; :put (…)`). Chaining would lose the
+  terminator on exactly the replies that carry an error message. Two `\r`-
+  terminated lines are two separate console inputs and both run.
+- **The echo is one physical line**, redrawn with bare `\r` and terminated by
+  `\r\n`. A **long** command is scrolled horizontally rather than wrapped
+  (`<ss=nonsense; :put (…`), so its opening characters are absent from the redraw —
+  do not identify the echo by matching command text.
+- **The prompt redraw shares a line with the next command's echo**, so dropping
+  lines that carry the sentinel nonce removes the trailing prompt with it.
+- **Fallback rule:** if a command changes console state and swallows the sentinel
+  line, fall back to a prompt that is *trailing* (nothing but whitespace/ANSI after
+  it) **and** stable. Trailing alone already rejects a redraw, since a redraw is
+  always followed by repainted command text.
+- **Report framing.** `consoleExec` returns `framed`; an empty reply that was
+  framed means RouterOS printed nothing, an unframed one means the reader could not
+  delimit it. Do not collapse those into one message.
+
 ### Counting packet arrivals inside the guest
 
 To ask "did the guest receive these packets at all", use a mangle counter, not a
@@ -160,6 +194,10 @@ filter rule:
   fails with `no such item`.
 - Read the delta as a boolean. slirp retransmits a SYN the guest never answers, so
   one probe can move the counter several times.
+- **Only the post-probe reading is load-bearing.** The rule is created moments
+  earlier, so its counter necessarily starts at 0 — an unreadable pre-probe reading
+  must not throw the verdict away. #109 hit exactly that: a report carried
+  `packetsAfter: 2` and still said "inconclusive".
 - **Conntrack cannot answer this question.** RouterOS ships `enabled=auto`, so
   tracking is off while no filter/NAT/mangle rule exists — a fresh CHR reports
   `active-ipv4: false` and zero connections after healthy probes. Even with

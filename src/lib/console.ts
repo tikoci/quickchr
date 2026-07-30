@@ -120,50 +120,130 @@ async function waitFor(
 }
 
 /**
- * Wait for the LAST occurrence of `pattern` at or after `searchFrom` in the
- * buffer, determined by buffer stability.
+ * Ceiling on the quiet period the fallback prompt terminator waits for.
  *
- * RouterOS's VT100 terminal redraws the prompt+command line during execution,
- * so the first "] > " after the command is just the redraw, not the output prompt.
- * We wait until no new data arrives for `stableMs` milliseconds, then return
- * the position of the LAST occurrence of `pattern`.
+ * This is no longer the normal way a command reply ends — {@link makeSentinel}
+ * is — so it is sized for safety rather than speed, and does not need to scale
+ * with the accelerator. The old flat 150 ms *was* the normal path, and that is
+ * exactly what let a prompt **redraw** terminate a slow large reply (#109): the
+ * two biggest guest-snapshot queries came back empty on a loaded TCG guest while
+ * every small one succeeded.
  */
-async function waitForFinalPrompt(
+const FALLBACK_PROMPT_STABLE_MS = 2_000;
+
+/** Floor, so a very small `timeoutMs` cannot reduce the window to nothing. */
+const MIN_PROMPT_STABLE_MS = 250;
+
+/**
+ * The quiet period to require before the fallback prompt may terminate a reply.
+ *
+ * Derived from the caller's budget rather than fixed: a caller passing less than
+ * ~2 s would otherwise never reach the fallback at all, and an unframed but
+ * *complete* reply would surface as a `BOOT_TIMEOUT` instead of `framed: false`.
+ * A small fraction leaves the rest of the budget for the reply itself. The
+ * window is only a secondary guard now — {@link isTrailingPrompt} already
+ * rejects a redraw structurally, whatever the timing.
+ */
+function promptStableWindow(timeoutMs: number): number {
+	return Math.min(FALLBACK_PROMPT_STABLE_MS, Math.max(MIN_PROMPT_STABLE_MS, Math.floor(timeoutMs / 8)));
+}
+
+/** True when `pattern` at `idx` is the last meaningful thing in the buffer.
+ *
+ * The redraw that broke #109 is "prompt + repainted command", so the redraw
+ * prompt always has the command text after it. Requiring the prompt to sit at
+ * the end of the buffer therefore rejects a redraw outright, independently of
+ * any timing window. Trailing ANSI and whitespace are ignored — RouterOS paints
+ * the prompt with color codes and terminal queries around it. */
+function isTrailingPrompt(buffer: string, idx: number, pattern: string): boolean {
+	return stripAnsi(buffer.slice(idx + pattern.length)).trim() === "";
+}
+
+/** How a command's reply ended. */
+type ReplyEnd =
+	/** The sentinel arrived — the reply is complete by construction. */
+	| { kind: "sentinel"; index: number }
+	/** No sentinel; a trailing, stable prompt terminated it instead. */
+	| { kind: "prompt"; index: number };
+
+/**
+ * Build the end-of-reply sentinel.
+ *
+ * The marker is assembled **in the guest** from three string literals, so the
+ * echoed command line contains the expression but never the contiguous marker
+ * text. That is what makes "the marker appeared" mean "the payload is complete"
+ * rather than "the command was echoed".
+ *
+ * It is sent as a **separate console line**, not chained with `;`. Measured on
+ * 7.21.5: `/bogus print; :put ("QC" . "END" . "e1")` prints the syntax error and
+ * **never runs the second statement**, and the same holds for a runtime error
+ * (`/ip/address add address=nonsense; …`). A `;` chain would therefore lose the
+ * terminator on exactly the replies that carry an error message. Two `\r`-
+ * terminated lines are two separate console inputs, so the second one still runs.
+ */
+function makeSentinel(): { command: string; marker: string; nonce: string } {
+	const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+	return {
+		command: `:put ("QCHR" . "${nonce}" . "END")`,
+		marker: `QCHR${nonce}END`,
+		nonce,
+	};
+}
+
+/**
+ * Wait for a command's reply to end — by sentinel, or failing that by a prompt
+ * that is both trailing and stable.
+ *
+ * Both terminators are watched in **one** loop on purpose. Waiting out the
+ * sentinel first and only then starting a prompt wait would spend the entire
+ * budget before the fallback got a chance, turning every unframed reply into a
+ * timeout instead of a slower success.
+ *
+ * Returns null if neither terminator arrives in time.
+ */
+async function waitForReplyEnd(
 	session: ConsoleSessionState,
+	marker: string,
 	pattern: string,
 	searchFrom: number,
 	timeoutMs: number,
-	stableMs = 150,
-): Promise<number> {
+	stableMs = promptStableWindow(timeoutMs),
+): Promise<ReplyEnd | null> {
 	const FAST_POLL = 50;
 	const deadline = Date.now() + timeoutMs;
 	let lastGrowthAt = Date.now();
 	let lastLen = session.buffer.length;
-	let lastPromptAt = -1;
 
-	while (Date.now() < deadline) {
+	const trailingPrompt = (): number => {
+		const candidate = session.buffer.lastIndexOf(pattern);
+		if (candidate < searchFrom) return -1;
+		return isTrailingPrompt(session.buffer, candidate, pattern) ? candidate : -1;
+	};
+
+	for (;;) {
+		const sentinelAt = session.buffer.indexOf(marker, searchFrom);
+		if (sentinelAt >= 0) {
+			session.matchOffset = sentinelAt + marker.length;
+			return { kind: "sentinel", index: sentinelAt };
+		}
+
 		const currentLen = session.buffer.length;
 		if (currentLen > lastLen) {
 			lastLen = currentLen;
 			lastGrowthAt = Date.now();
-			const candidate = session.buffer.lastIndexOf(pattern);
-			if (candidate >= searchFrom) lastPromptAt = candidate;
 		}
 
-		if (lastPromptAt >= 0 && Date.now() - lastGrowthAt >= stableMs) {
-			session.matchOffset = lastPromptAt + pattern.length;
-			return lastPromptAt;
+		const promptAt = trailingPrompt();
+		const quiet = Date.now() - lastGrowthAt >= stableMs;
+		if (promptAt >= 0 && (quiet || session.streamDone)) {
+			session.matchOffset = promptAt + pattern.length;
+			return { kind: "prompt", index: promptAt };
 		}
-
-		if (session.streamDone) {
-			if (lastPromptAt >= 0)
-				session.matchOffset = lastPromptAt + pattern.length;
-			return lastPromptAt;
-		}
+		if (session.streamDone) return null;
+		if (Date.now() >= deadline) return null;
 
 		await Bun.sleep(FAST_POLL);
 	}
-	return -1;
 }
 
 /**
@@ -316,11 +396,69 @@ async function handlePostLogin(
 }
 
 /**
+ * Reduce the raw post-command console text to just the command's output.
+ *
+ * Measured shape of a RouterOS 7.21.5 serial reply (x86/HVF, QEMU 11.0.3):
+ *
+ * ```text
+ * <cmd>\r[admin@MikroTik] > <cmd>\r\n   echo — ONE physical line, bare-\r redraws
+ * \r<output>\r\n                        output, wrapped at the terminal width
+ * \r\r\r\r[admin@MikroTik] >     \r[admin@MikroTik] > <sentinel echo>\r\n
+ * \rQCHR…END\r\n                        the sentinel; the caller cuts before it
+ * ```
+ *
+ * Two structural rules do the work, and neither relies on matching the command
+ * text throughout — a long command is **horizontally scrolled** in the redraw
+ * (`<ss=nonsense; :put (…)`), so its opening characters are not present there:
+ *
+ *  - the sentinel echo carries this call's `nonce`, and shares a physical line
+ *    with the prompt redraw ahead of it, so dropping nonce-bearing lines removes
+ *    both at once;
+ *  - the command echo is the first physical line, and is dropped only when it
+ *    actually looks like one (it carries a prompt redraw, or starts with the
+ *    command) — so a reply with no echo cannot lose its first output line.
+ */
+export function extractOutput(raw: string, command: string, nonce?: string): string {
+	const lines = stripAnsi(raw)
+		.split(/\r?\n/)
+		.filter((l) => nonce === undefined || !l.includes(nonce));
+
+	const cmdPrefix = command.trim().slice(0, 24);
+	const first = lines[0];
+	let startIdx =
+		first !== undefined &&
+		(first.includes(PROMPT_PATTERN) || (cmdPrefix !== "" && first.trimStart().startsWith(cmdPrefix)))
+			? 1
+			: 0;
+	while (startIdx < lines.length && (lines[startIdx] ?? "").trim() === "") startIdx++;
+
+	// Trailing prompt fragments and blank lines are the redraw after the reply.
+	let endIdx = lines.length;
+	for (let i = lines.length - 1; i >= startIdx; i--) {
+		const trimmed = (lines[i] ?? "").trim();
+		if (trimmed === "" || trimmed.endsWith(PROMPT_PATTERN.trim())) endIdx = i;
+		else break;
+	}
+
+	return lines.slice(startIdx, endIdx).join("\n").trim();
+}
+
+/** Result of one console command.
+ *
+ * `framed` says the reply was delimited by the end-of-reply sentinel — i.e. the
+ * reader saw the whole reply. When it is false the reply was terminated by the
+ * fallback prompt heuristic instead, so an empty `output` means "could not frame
+ * the reply", not "the guest printed nothing" (#109). */
+export interface ConsoleExecResult {
+	output: string;
+	framed: boolean;
+}
+
+/**
  * Execute a RouterOS CLI command over the serial console.
  *
- * Connects to serial socket, ensures the session is logged in,
- * sends the command, and captures output between the command echo
- * and the next prompt.
+ * Connects to serial socket, ensures the session is logged in, sends the command
+ * followed by an end-of-reply sentinel, and captures the output between them.
  *
  * @param machineDir  Machine directory containing serial.sock
  * @param command     RouterOS CLI command to execute
@@ -335,7 +473,7 @@ export async function consoleExec(
 	password: string = "",
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 	portBase?: number,
-): Promise<{ output: string }> {
+): Promise<ConsoleExecResult> {
 	const session = openSession(machineDir, portBase);
 
 	try {
@@ -367,62 +505,30 @@ export async function consoleExec(
 		// pre-buffered "] > " from ANSI codes or OSC title sequences RouterOS emits.
 		session.matchOffset = Math.max(session.matchOffset, preCommandOffset);
 
-		// Send command
-		write(session, `${command}\r`);
+		// Send the command and the end-of-reply sentinel as two console lines in one
+		// write. The sentinel is what terminates the reply; the prompt is only a
+		// fallback (see makeSentinel / waitForReplyEnd).
+		const sentinel = makeSentinel();
+		write(session, `${command}\r${sentinel.command}\r`);
 
-		// Wait for the FINAL prompt after the command completes.
-		// RouterOS VT100 redraws the prompt+command line during execution, so the
-		// first "] > " is a redraw, not the output prompt. waitForFinalPrompt uses
-		// buffer stability (no new data for 150ms) to identify the last prompt.
-		const promptFound = await waitForFinalPrompt(session, PROMPT_PATTERN, preCommandOffset, timeoutMs);
-		if (promptFound < 0) {
+		const end = await waitForReplyEnd(session, sentinel.marker, PROMPT_PATTERN, preCommandOffset, timeoutMs);
+		if (end === null) {
 			throw new QuickCHRError(
 				"BOOT_TIMEOUT",
-				`Console exec: no prompt after command (timed out after ${timeoutMs}ms)`,
+				`Console exec: no end-of-reply sentinel and no prompt after command (timed out after ${timeoutMs}ms)`,
 			);
 		}
+		const framed = end.kind === "sentinel";
 
-		// Extract output: everything between our command and the next prompt.
-		// promptFound points at "] > " — back up to the newline before the prompt
-		// line so we don't include the "[admin@...] > " prefix in output.
-		const lastNewline = session.buffer.lastIndexOf("\n", promptFound);
-		const sliceEnd = lastNewline >= preCommandOffset ? lastNewline : promptFound;
+		// Cut back to the newline that starts the terminator's own line, so neither
+		// the marker nor the "[admin@…] > " prefix lands in the output.
+		const lineStart = session.buffer.lastIndexOf("\n", end.index);
+		const sliceEnd = lineStart >= preCommandOffset ? lineStart : end.index;
+
 		const rawOutput = session.buffer.slice(preCommandOffset, sliceEnd);
 
-		// Clean up: strip ANSI, strip the command echo line, trim
-		const cleaned = stripAnsi(rawOutput);
-		const lines = cleaned.split(/\r?\n/);
-
-		// First non-empty line(s) are the command echo — skip them.
-		// The echo repeats back what we typed.
-		let startIdx = 0;
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			if (!line) continue;
-			const trimmed = line.trim();
-			// Skip echo lines that contain our command text
-			if (trimmed.includes(command.trim()) || trimmed === "") {
-				startIdx = i + 1;
-			} else {
-				break;
-			}
-		}
-
-		// Also strip trailing prompt fragments and empty lines
-		let endIdx = lines.length;
-		for (let i = lines.length - 1; i >= startIdx; i--) {
-			const line = lines[i];
-			if (!line) continue;
-			const trimmed = line.trim();
-			if (trimmed === "" || trimmed.endsWith(PROMPT_PATTERN.trim())) {
-				endIdx = i;
-			} else {
-				break;
-			}
-		}
-
-		const output = lines.slice(startIdx, endIdx).join("\n").trim();
-		return { output };
+		const output = extractOutput(rawOutput, command, sentinel.nonce);
+		return { output, framed };
 	} finally {
 		session.socket.destroy();
 	}

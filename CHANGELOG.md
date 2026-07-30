@@ -74,6 +74,28 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- **Serial console: large replies could come back empty** (#109). `consoleExec`
+  ended a reply at the first prompt that had been followed by 150 ms of quiet, but
+  RouterOS repaints prompt+command *before* emitting output — so on a guest that
+  paused before the payload, the **redraw** terminated the read and the output was
+  sliced away. It hit the biggest replies only: in the #79 forensics the `/log` and
+  `/ip/service` queries returned `empty console reply` while the five smaller ones
+  succeeded, blanking the field that investigation needed. Each command is now
+  framed by a nonce sentinel the guest assembles itself
+  (`:put ("QCHR" . "<nonce>" . "END")`), sent as its own console line so it still
+  runs when the command fails — a `;` chain aborts and never reaches it. The prompt
+  heuristic survives only as a fallback, and now requires the prompt to be
+  *trailing* as well as stable, which rejects a redraw regardless of timing.
+  `consoleExec` returns `framed`, so an empty reply that was framed ("RouterOS
+  printed nothing") is no longer indistinguishable from one the reader lost.
+- Serial console: output from a **long** command leaked its own echo. RouterOS
+  scrolls a long input line horizontally instead of wrapping it, so the redraw does
+  not contain the start of the command and the text-matching echo stripper gave up
+  early. Echo removal is now structural.
+- Boot forensics: the counting-rule probe discarded its own answer. A `packetsAfter`
+  above zero proves the guest received the SYNs — the rule is created seconds
+  earlier, so its counter necessarily starts at 0 — but an unreadable *pre*-probe
+  reading forced the verdict to `inconclusive` anyway.
 - CI: the CHR image cache never re-saved. `actions/cache` skips its post-job save on an
   exact key hit, so the static `chr-images-{OS}-{arch}-v1` key meant any RouterOS
   version resolved after the cache was first populated re-downloaded on *every* run.

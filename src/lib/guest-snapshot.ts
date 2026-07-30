@@ -34,9 +34,22 @@
  *     returns empty in both `duration=` and `as-value` forms. Do not re-try it.
  */
 
+/** A console reply, with whether the reader could frame it. `framed:false` means
+ *  the end-of-reply sentinel never arrived, so an empty `output` says "the reader
+ *  could not delimit the reply", not "the guest printed nothing" (#109). */
+export interface GuestReply {
+	output: string;
+	framed?: boolean;
+}
+
 /** Executes one RouterOS CLI command in the guest and returns its raw output.
- *  Injected so this module stays free of a console.ts/channels.ts import. */
-export type GuestExec = (command: string, timeoutMs: number) => Promise<string>;
+ *  Injected so this module stays free of a console.ts/channels.ts import.
+ *  A bare string is accepted for callers and fakes that cannot report framing. */
+export type GuestExec = (command: string, timeoutMs: number) => Promise<string | GuestReply>;
+
+function asReply(reply: string | GuestReply): GuestReply {
+	return typeof reply === "string" ? { output: reply } : reply;
+}
 
 /** Opens a TCP connection to a host port and returns a one-word outcome.
  *  Injected (diagnostics.probeTcpPort) to avoid an import cycle. */
@@ -75,6 +88,11 @@ export interface GuestSnapshotEntry {
 	error?: string;
 	/** Raw console text, kept only when parsing failed so the payload is not lost. */
 	raw?: string;
+	/** False when the console reader could not delimit the reply — the failure
+	 *  mode is then the reader, not RouterOS. **Undefined means "not reported"**,
+	 *  which covers both an exec that never ran and one that returned a bare
+	 *  string (see {@link GuestExec}); do not read it as "no exec". */
+	framed?: boolean;
 }
 
 export interface GuestSnapshot {
@@ -101,7 +119,7 @@ const MAX_RAW_BYTES = 32 * 1024;
  * the real payload is the last thing on the wire, and a candidate that starts
  * mid-payload leaves unbalanced JSON that fails to parse.
  */
-export function parseSerializedJson(raw: string): { value?: unknown; error?: string } {
+export function parseSerializedJson(raw: string, framed?: boolean): { value?: unknown; error?: string } {
 	const cleaned = raw.replace(/\r/g, "");
 	const lines = cleaned.split("\n");
 	const starts: number[] = [];
@@ -110,7 +128,17 @@ export function parseSerializedJson(raw: string): { value?: unknown; error?: str
 		if (trimmed.startsWith("[") || trimmed.startsWith("{")) starts.push(i);
 	}
 	if (starts.length === 0) {
-		return { error: cleaned.trim() === "" ? "empty console reply" : "no JSON payload in console reply" };
+		if (cleaned.trim() !== "") return { error: "no JSON payload in console reply" };
+		// An empty reply has two very different causes, and #109 is the case where
+		// telling them apart is the whole point: a *framed* empty reply is RouterOS
+		// printing nothing, while an *unframed* one is the reader losing the payload.
+		// `undefined` is neither — the exec could not report framing at all, so the
+		// message must stay ambiguous rather than claim the guest was silent.
+		if (framed === true) return { error: "empty console reply — RouterOS printed nothing" };
+		if (framed === false) {
+			return { error: "empty console reply — the reader could not frame it (payload may have been lost)" };
+		}
+		return { error: "empty console reply — framing unknown, so a lost payload cannot be ruled out" };
 	}
 	let lastError = "unparsable console reply";
 	for (let i = starts.length - 1; i >= 0; i--) {
@@ -160,17 +188,18 @@ export async function captureGuestSnapshot(
 		}
 		const queryStart = Date.now();
 		try {
-			const output = await exec(command, Math.min(queryTimeoutMs, budgetMs - elapsed));
-			const parsed = parseSerializedJson(output);
+			const { output, framed } = asReply(await exec(command, Math.min(queryTimeoutMs, budgetMs - elapsed)));
+			const parsed = parseSerializedJson(output, framed);
 			consoleReachable = true;
 			entries[key] = parsed.error === undefined
-				? { command, ok: true, elapsedMs: Date.now() - queryStart, value: parsed.value }
+				? { command, ok: true, elapsedMs: Date.now() - queryStart, value: parsed.value, framed }
 				: {
 					command,
 					ok: false,
 					elapsedMs: Date.now() - queryStart,
 					error: parsed.error,
 					raw: output.slice(-MAX_RAW_BYTES),
+					framed,
 				};
 		} catch (e) {
 			entries[key] = {
@@ -246,6 +275,9 @@ export function deepBootDiagnosticsEnabled(): boolean {
  *  preserved machine where the rule came from. */
 export const DIAGNOSTIC_RULE_COMMENT = "quickchr-boot-diagnostic";
 
+/** How long to let the guest count retransmitted SYNs before re-reading. */
+export const COUNTER_SETTLE_MS = 1_500;
+
 export interface CountingRuleProbe {
 	ran: boolean;
 	/** Set when the probe declined to run; `ran` is then false. */
@@ -273,8 +305,8 @@ function firstNumber(value: unknown, field: string): number | null {
 }
 
 async function execJson(exec: GuestExec, query: string, timeoutMs: number): Promise<unknown> {
-	const output = await exec(serializeJsonCommand(query), timeoutMs);
-	const parsed = parseSerializedJson(output);
+	const { output, framed } = asReply(await exec(serializeJsonCommand(query), timeoutMs));
+	const parsed = parseSerializedJson(output, framed);
 	if (parsed.error !== undefined) throw new Error(parsed.error);
 	return parsed.value;
 }
@@ -320,7 +352,7 @@ async function execJson(exec: GuestExec, query: string, timeoutMs: number): Prom
 export async function runCountingRuleProbe(
 	exec: GuestExec,
 	probeHostPort: HostPortProbe,
-	opts: { guestPort: number; hostPort: number; probes?: number; queryTimeoutMs?: number },
+	opts: { guestPort: number; hostPort: number; probes?: number; queryTimeoutMs?: number; settleMs?: number },
 ): Promise<CountingRuleProbe> {
 	const probes = opts.probes ?? 10;
 	const timeout = opts.queryTimeoutMs ?? GUEST_QUERY_TIMEOUT_MS;
@@ -355,7 +387,8 @@ export async function runCountingRuleProbe(
 	for (let i = 0; i < probes; i++) await probeHostPort(opts.hostPort, 2000);
 	// slirp retransmits a dropped SYN, so give the guest a moment to count what
 	// was already sent before sampling — otherwise a slow TCG guest reads flat.
-	await Bun.sleep(1500);
+	// Overridable only so unit tests need not pay it; never shorten it in anger.
+	await Bun.sleep(opts.settleMs ?? COUNTER_SETTLE_MS);
 	const packetsAfter = await readCounter();
 
 	let connections: unknown;
@@ -370,17 +403,34 @@ export async function runCountingRuleProbe(
 		await exec(`/ip/firewall/mangle remove [find comment="${DIAGNOSTIC_RULE_COMMENT}"]`, timeout);
 	} catch { /* ignore */ }
 
-	const delta = packetsBefore !== null && packetsAfter !== null ? packetsAfter - packetsBefore : null;
-	const verdict: CountingRuleProbe["verdict"] = delta === null
+	// Only `packetsAfter` is load-bearing. The rule is created by *this* function a
+	// moment earlier, so its counter necessarily starts at 0 — which means an
+	// unreadable `packetsBefore` costs nothing and must not throw the verdict away.
+	// #109: a report read `packetsAfter: 2` and still said "inconclusive", even
+	// though a counter at 2 on a seconds-old rule already proves `guest-received`.
+	const baseline = packetsBefore ?? 0;
+	const delta = packetsAfter === null ? null : packetsAfter - baseline;
+	// A negative delta cannot happen on a rule this function created moments ago,
+	// so it means the rule was replaced or reset mid-probe — that is unmeasured,
+	// not evidence of non-delivery.
+	const verdict: CountingRuleProbe["verdict"] = delta === null || delta < 0
 		? "inconclusive"
 		: delta > 0
 			? "guest-received"
 			: "not-delivered";
-	const detail = delta === null
-		? "could not read the rule counter — cannot localize the drop"
-		: delta > 0
-			? `rule counter advanced by ${delta} over ${probes} probes — the guest IS receiving the SYNs; the drop is RouterOS-side`
-			: `rule counter flat over ${probes} probes — the SYNs never reach RouterOS; the drop is in the slirp/virtio RX path`;
+	const assumed = packetsBefore === null ? " (pre-probe read failed; a freshly added rule starts at 0)" : "";
+	let detail: string;
+	if (delta === null) {
+		detail = "could not read the rule counter after the probes — cannot localize the drop";
+	} else if (delta > 0) {
+		detail = `rule counter advanced by ${delta} over ${probes} probes${assumed} — the guest IS receiving the SYNs; the drop is RouterOS-side`;
+	} else if (delta < 0) {
+		// Should not happen on a rule this function created; report it as the
+		// anomaly it is rather than folding it into "flat".
+		detail = `rule counter went BACKWARDS by ${-delta} over ${probes} probes${assumed} — the rule was replaced or reset mid-probe; treat as not measured`;
+	} else {
+		detail = `rule counter flat over ${probes} probes${assumed} — the SYNs never reach RouterOS; the drop is in the slirp/virtio RX path`;
+	}
 
 	return { ...base, ran: true, probesFired: probes, packetsBefore, packetsAfter, connections, verdict, detail };
 }

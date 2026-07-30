@@ -1007,11 +1007,11 @@ function bootFailureGuestExec(state: MachineState): { exec: GuestExec; users: st
 			const remaining = deadline - Date.now();
 			if (remaining <= 0) break;
 			try {
-				const { output } = await consoleExec(
+				const { output, framed } = await consoleExec(
 					state.machineDir, command, cred.user, cred.password, Math.min(share, remaining), state.portBase,
 				);
 				working = cred;
-				return output;
+				return { output, framed };
 			} catch (e) {
 				lastError = e;
 			}

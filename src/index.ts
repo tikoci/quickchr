@@ -108,6 +108,7 @@ export type { QgaCommandInfo } from "./lib/qga.ts";
 
 // Console exec utilities
 export { consoleExec, isConsoleReady, stripAnsi } from "./lib/console.ts";
+export type { ConsoleExecResult } from "./lib/console.ts";
 
 // Channel utilities
 export { isQgaReady } from "./lib/channels.ts";
