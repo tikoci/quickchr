@@ -120,7 +120,7 @@ async function waitFor(
 }
 
 /**
- * Fallback quiet period for the prompt-stability terminator.
+ * Ceiling on the quiet period the fallback prompt terminator waits for.
  *
  * This is no longer the normal way a command reply ends — {@link makeSentinel}
  * is — so it is sized for safety rather than speed, and does not need to scale
@@ -130,6 +130,23 @@ async function waitFor(
  * every small one succeeded.
  */
 const FALLBACK_PROMPT_STABLE_MS = 2_000;
+
+/** Floor, so a very small `timeoutMs` cannot reduce the window to nothing. */
+const MIN_PROMPT_STABLE_MS = 250;
+
+/**
+ * The quiet period to require before the fallback prompt may terminate a reply.
+ *
+ * Derived from the caller's budget rather than fixed: a caller passing less than
+ * ~2 s would otherwise never reach the fallback at all, and an unframed but
+ * *complete* reply would surface as a `BOOT_TIMEOUT` instead of `framed: false`.
+ * A small fraction leaves the rest of the budget for the reply itself. The
+ * window is only a secondary guard now — {@link isTrailingPrompt} already
+ * rejects a redraw structurally, whatever the timing.
+ */
+function promptStableWindow(timeoutMs: number): number {
+	return Math.min(FALLBACK_PROMPT_STABLE_MS, Math.max(MIN_PROMPT_STABLE_MS, Math.floor(timeoutMs / 8)));
+}
 
 /** True when `pattern` at `idx` is the last meaningful thing in the buffer.
  *
@@ -190,7 +207,7 @@ async function waitForReplyEnd(
 	pattern: string,
 	searchFrom: number,
 	timeoutMs: number,
-	stableMs = FALLBACK_PROMPT_STABLE_MS,
+	stableMs = promptStableWindow(timeoutMs),
 ): Promise<ReplyEnd | null> {
 	const FAST_POLL = 50;
 	const deadline = Date.now() + timeoutMs;
@@ -490,7 +507,7 @@ export async function consoleExec(
 
 		// Send the command and the end-of-reply sentinel as two console lines in one
 		// write. The sentinel is what terminates the reply; the prompt is only a
-		// fallback (see makeSentinel / waitForFinalPrompt).
+		// fallback (see makeSentinel / waitForReplyEnd).
 		const sentinel = makeSentinel();
 		write(session, `${command}\r${sentinel.command}\r`);
 

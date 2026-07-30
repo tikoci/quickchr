@@ -77,6 +77,10 @@ describe("parseSerializedJson", () => {
 		expect(parseSerializedJson("   ", false).error).toContain("could not frame");
 		expect(parseSerializedJson("   ", true).error).toContain("RouterOS printed nothing");
 		expect(parseSerializedJson("   ", true).error).not.toContain("could not frame");
+		// `undefined` is "not reported", not "framed" — it must not claim the guest
+		// was silent, because a bare-string GuestExec cannot report framing at all.
+		expect(parseSerializedJson("   ", undefined).error).toContain("framing unknown");
+		expect(parseSerializedJson("   ").error).not.toContain("printed nothing");
 	});
 });
 
@@ -192,7 +196,7 @@ describe("runCountingRuleProbe", () => {
 	// advances by 4 per probe to keep any count-equality assumption out of the code.
 	test("counter advancing means the guest received the SYNs (RouterOS-side drop)", async () => {
 		const guest = fakeGuest(4);
-		const result = await runCountingRuleProbe(guest.exec, guest.probe, { guestPort: 80, hostPort: 9100, probes: 5 });
+		const result = await runCountingRuleProbe(guest.exec, guest.probe, { guestPort: 80, hostPort: 9100, probes: 5, settleMs: 0 });
 		expect(result.ran).toBe(true);
 		expect(result.verdict).toBe("guest-received");
 		expect(result.packetsBefore).toBe(12);
@@ -202,20 +206,20 @@ describe("runCountingRuleProbe", () => {
 
 	test("reads the counter with `print stats` — plain print omits packets/bytes", async () => {
 		const guest = fakeGuest(4);
-		await runCountingRuleProbe(guest.exec, guest.probe, { guestPort: 80, hostPort: 9100, probes: 1 });
+		await runCountingRuleProbe(guest.exec, guest.probe, { guestPort: 80, hostPort: 9100, probes: 1, settleMs: 0 });
 		expect(guest.state.commands.some((c) => c.includes("/ip/firewall/mangle print stats as-value where comment="))).toBe(true);
 	});
 
 	test("flat counter means the SYNs never reach RouterOS (RX path)", async () => {
 		const guest = fakeGuest(0);
-		const result = await runCountingRuleProbe(guest.exec, guest.probe, { guestPort: 80, hostPort: 9100, probes: 5 });
+		const result = await runCountingRuleProbe(guest.exec, guest.probe, { guestPort: 80, hostPort: 9100, probes: 5, settleMs: 0 });
 		expect(result.verdict).toBe("not-delivered");
 		expect(result.detail).toContain("RX path");
 	});
 
 	test("installs the rule, then removes it again", async () => {
 		const guest = fakeGuest(1);
-		await runCountingRuleProbe(guest.exec, guest.probe, { guestPort: 80, hostPort: 9100, probes: 1 });
+		await runCountingRuleProbe(guest.exec, guest.probe, { guestPort: 80, hostPort: 9100, probes: 1, settleMs: 0 });
 		expect(guest.state.commands.some((c) => c.startsWith("/ip/firewall/mangle add"))).toBe(true);
 		expect(guest.state.commands.some((c) => c.includes("mangle remove [find comment="))).toBe(true);
 	});
@@ -224,7 +228,7 @@ describe("runCountingRuleProbe", () => {
 		const result = await runCountingRuleProbe(
 			async () => { throw new Error("no such command"); },
 			async () => "accepting",
-			{ guestPort: 80, hostPort: 9100, probes: 2 },
+			{ guestPort: 80, hostPort: 9100, probes: 2, settleMs: 0 },
 		);
 		expect(result.ran).toBe(false);
 		expect(result.detail).toContain("could not install counting rule");
@@ -234,7 +238,7 @@ describe("runCountingRuleProbe", () => {
 		const exec: GuestExec = async (command) =>
 			command.includes("/ip/firewall/mangle add") ? "" : "input does not match any value of value-name";
 		const result = await runCountingRuleProbe(exec, async () => "accepting", {
-			guestPort: 80, hostPort: 9100, probes: 2,
+			guestPort: 80, hostPort: 9100, probes: 2, settleMs: 0,
 		});
 		expect(result.verdict).toBe("inconclusive");
 	});
@@ -244,16 +248,15 @@ describe("runCountingRuleProbe", () => {
 	// moments earlier, so its counter necessarily starts at 0 — a post-probe
 	// counter above zero is already proof the guest received the SYNs.
 	test("an unreadable pre-probe counter does not discard a positive post-probe one", async () => {
-		let added = false;
+		let preProbeReadPending = false;
 		const exec: GuestExec = async (command) => {
 			if (command.includes("/ip/firewall/mangle add")) {
-				added = true;
+				preProbeReadPending = true;
 				return "";
 			}
 			if (command.includes("/ip/firewall/mangle print stats")) {
-				// First read (pre-probe) fails; the second one answers.
-				if (added) {
-					added = false;
+				if (preProbeReadPending) {
+					preProbeReadPending = false;
 					return "input does not match any value of value-name";
 				}
 				return '[{"packets":"2","bytes":"120"}]';
@@ -261,7 +264,7 @@ describe("runCountingRuleProbe", () => {
 			return "";
 		};
 		const result = await runCountingRuleProbe(exec, async () => "accepting", {
-			guestPort: 80, hostPort: 9100, probes: 5,
+			guestPort: 80, hostPort: 9100, probes: 5, settleMs: 0,
 		});
 		expect(result.packetsBefore).toBeNull();
 		expect(result.packetsAfter).toBe(2);
@@ -275,9 +278,27 @@ describe("runCountingRuleProbe", () => {
 			return "input does not match any value of value-name";
 		};
 		const result = await runCountingRuleProbe(exec, async () => "accepting", {
-			guestPort: 80, hostPort: 9100, probes: 2,
+			guestPort: 80, hostPort: 9100, probes: 2, settleMs: 0,
 		});
 		expect(result.packetsAfter).toBeNull();
 		expect(result.verdict).toBe("inconclusive");
+	});
+
+	// A rule this function created moments ago cannot legitimately count down, so
+	// a negative delta means it was replaced or reset — unmeasured, not "flat".
+	test("a counter that goes backwards is inconclusive, not not-delivered", async () => {
+		let reads = 0;
+		const exec: GuestExec = async (command) => {
+			if (command.includes("/ip/firewall/mangle print stats")) {
+				reads++;
+				return `[{"packets":"${reads === 1 ? 5 : 3}","bytes":"120"}]`;
+			}
+			return "";
+		};
+		const result = await runCountingRuleProbe(exec, async () => "accepting", {
+			guestPort: 80, hostPort: 9100, probes: 2, settleMs: 0,
+		});
+		expect(result.verdict).toBe("inconclusive");
+		expect(result.detail).toContain("BACKWARDS");
 	});
 });

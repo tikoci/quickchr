@@ -89,7 +89,9 @@ export interface GuestSnapshotEntry {
 	/** Raw console text, kept only when parsing failed so the payload is not lost. */
 	raw?: string;
 	/** False when the console reader could not delimit the reply — the failure
-	 *  mode is then the reader, not RouterOS. Absent when the exec never ran. */
+	 *  mode is then the reader, not RouterOS. **Undefined means "not reported"**,
+	 *  which covers both an exec that never ran and one that returned a bare
+	 *  string (see {@link GuestExec}); do not read it as "no exec". */
 	framed?: boolean;
 }
 
@@ -130,11 +132,13 @@ export function parseSerializedJson(raw: string, framed?: boolean): { value?: un
 		// An empty reply has two very different causes, and #109 is the case where
 		// telling them apart is the whole point: a *framed* empty reply is RouterOS
 		// printing nothing, while an *unframed* one is the reader losing the payload.
-		return {
-			error: framed === false
-				? "empty console reply — the reader could not frame it (payload may have been lost)"
-				: "empty console reply — RouterOS printed nothing",
-		};
+		// `undefined` is neither — the exec could not report framing at all, so the
+		// message must stay ambiguous rather than claim the guest was silent.
+		if (framed === true) return { error: "empty console reply — RouterOS printed nothing" };
+		if (framed === false) {
+			return { error: "empty console reply — the reader could not frame it (payload may have been lost)" };
+		}
+		return { error: "empty console reply — framing unknown, so a lost payload cannot be ruled out" };
 	}
 	let lastError = "unparsable console reply";
 	for (let i = starts.length - 1; i >= 0; i--) {
@@ -271,6 +275,9 @@ export function deepBootDiagnosticsEnabled(): boolean {
  *  preserved machine where the rule came from. */
 export const DIAGNOSTIC_RULE_COMMENT = "quickchr-boot-diagnostic";
 
+/** How long to let the guest count retransmitted SYNs before re-reading. */
+export const COUNTER_SETTLE_MS = 1_500;
+
 export interface CountingRuleProbe {
 	ran: boolean;
 	/** Set when the probe declined to run; `ran` is then false. */
@@ -345,7 +352,7 @@ async function execJson(exec: GuestExec, query: string, timeoutMs: number): Prom
 export async function runCountingRuleProbe(
 	exec: GuestExec,
 	probeHostPort: HostPortProbe,
-	opts: { guestPort: number; hostPort: number; probes?: number; queryTimeoutMs?: number },
+	opts: { guestPort: number; hostPort: number; probes?: number; queryTimeoutMs?: number; settleMs?: number },
 ): Promise<CountingRuleProbe> {
 	const probes = opts.probes ?? 10;
 	const timeout = opts.queryTimeoutMs ?? GUEST_QUERY_TIMEOUT_MS;
@@ -380,7 +387,8 @@ export async function runCountingRuleProbe(
 	for (let i = 0; i < probes; i++) await probeHostPort(opts.hostPort, 2000);
 	// slirp retransmits a dropped SYN, so give the guest a moment to count what
 	// was already sent before sampling — otherwise a slow TCG guest reads flat.
-	await Bun.sleep(1500);
+	// Overridable only so unit tests need not pay it; never shorten it in anger.
+	await Bun.sleep(opts.settleMs ?? COUNTER_SETTLE_MS);
 	const packetsAfter = await readCounter();
 
 	let connections: unknown;
@@ -402,17 +410,27 @@ export async function runCountingRuleProbe(
 	// though a counter at 2 on a seconds-old rule already proves `guest-received`.
 	const baseline = packetsBefore ?? 0;
 	const delta = packetsAfter === null ? null : packetsAfter - baseline;
-	const verdict: CountingRuleProbe["verdict"] = delta === null
+	// A negative delta cannot happen on a rule this function created moments ago,
+	// so it means the rule was replaced or reset mid-probe — that is unmeasured,
+	// not evidence of non-delivery.
+	const verdict: CountingRuleProbe["verdict"] = delta === null || delta < 0
 		? "inconclusive"
 		: delta > 0
 			? "guest-received"
 			: "not-delivered";
 	const assumed = packetsBefore === null ? " (pre-probe read failed; a freshly added rule starts at 0)" : "";
-	const detail = delta === null
-		? "could not read the rule counter after the probes — cannot localize the drop"
-		: delta > 0
-			? `rule counter advanced by ${delta} over ${probes} probes${assumed} — the guest IS receiving the SYNs; the drop is RouterOS-side`
-			: `rule counter flat over ${probes} probes${assumed} — the SYNs never reach RouterOS; the drop is in the slirp/virtio RX path`;
+	let detail: string;
+	if (delta === null) {
+		detail = "could not read the rule counter after the probes — cannot localize the drop";
+	} else if (delta > 0) {
+		detail = `rule counter advanced by ${delta} over ${probes} probes${assumed} — the guest IS receiving the SYNs; the drop is RouterOS-side`;
+	} else if (delta < 0) {
+		// Should not happen on a rule this function created; report it as the
+		// anomaly it is rather than folding it into "flat".
+		detail = `rule counter went BACKWARDS by ${-delta} over ${probes} probes${assumed} — the rule was replaced or reset mid-probe; treat as not measured`;
+	} else {
+		detail = `rule counter flat over ${probes} probes${assumed} — the SYNs never reach RouterOS; the drop is in the slirp/virtio RX path`;
+	}
 
 	return { ...base, ran: true, probesFired: probes, packetsBefore, packetsAfter, connections, verdict, detail };
 }

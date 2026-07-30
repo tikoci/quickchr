@@ -168,6 +168,10 @@ function createRouterOsMock(
 ): Promise<Server> {
 	const prompt = `[admin@${opts.identity ?? "MikroTik"}] > `;
 	return createMockSerial(machineDir, (client) => {
+		// consoleExec destroys its socket the moment the reply is framed, which can
+		// land mid-`drain()`. Without this, the resulting EPIPE surfaces as an
+		// unhandled 'error' event and takes down the whole test process.
+		client.on("error", () => { /* peer went away — expected */ });
 		let pending = "";
 		let greeted = false;
 		let stage: "login" | "password" | "shell" = opts.requireLogin ? "login" : "shell";
@@ -188,6 +192,7 @@ function createRouterOsMock(
 				if (opts.payloadDelayMs) {
 					client.write(`${line}\r${prompt}${line}\r\n`);
 					await Bun.sleep(opts.payloadDelayMs);
+					if (client.destroyed) continue;
 					client.write(`\r${payload}\r\n\r\r\r\r${prompt}${" ".repeat(40)}\r${prompt}`);
 				} else {
 					client.write(routerOsReply(line, payload, prompt));
@@ -275,7 +280,10 @@ describe("consoleExec", () => {
 		if (process.platform === "win32") return;
 		const server = await createRouterOsMock(TMP, () => "still-here", { dropSentinel: true });
 		try {
-			const result = await consoleExec(TMP, ':put "x"', "admin", "", 20_000);
+			// 4 s budget => a 500 ms stable window (timeoutMs/8), so this exercises the
+			// fallback without paying the 2 s production ceiling. A caller passing a
+			// budget below that ceiling must still get `framed:false`, not a timeout.
+			const result = await consoleExec(TMP, ':put "x"', "admin", "", 4_000);
 			expect(result.framed).toBe(false);
 			expect(result.output).toBe("still-here");
 		} finally {
