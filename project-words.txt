@@ -280,6 +280,7 @@ pflash
 pfr
 pgrep
 pidfile
+piix
 pingable
 pipefail
 pkgs
@@ -312,6 +313,7 @@ readback
 readconfig
 recvfrom
 redists
+rescan
 resolv
 respawn
 respawning
