@@ -289,6 +289,31 @@ Corollary for CI cache keys: `actions/cache` only saves when the primary key
 every run forever (#91). Primary keys must carry a rotating component, with
 `restore-keys` doing the prefix fallback.
 
+7. **The boot probe can break the service it is waiting for.** `restGet()`
+   implements its deadline as `req.destroy()` — a mid-flight TCP teardown. On
+   its own that is harmless. But an aborted request **followed by a completed
+   one** corrupts RouterOS `www`: the guest then resets incoming connections,
+   and a surviving connection is answered with the status computed for the
+   *aborted* request. An `admin:` probe carrying a valid empty password comes
+   back `401`. `waitForBoot()` emits exactly that pattern — overrun a probe,
+   then succeed on the next one 2 s later.
+
+   Reproduced deterministically on RouterOS 7.21.5, x86/HVF **and** arm64
+   cross-arch TCG, with `curl` in a separate process confirming it is
+   guest-side rather than a Bun `node:http` artifact
+   (`test/lab/www-abort-damage/`). Two consequences for design: a slow-but-alive
+   REST layer must be **waited for** rather than aborted, and backing off after
+   consecutive aborts matters because it is the abort/complete *alternation*,
+   not the abort count, that does the damage. It also means a REST status
+   received after any timeout in the same conversation cannot be trusted to
+   belong to the request that received it — the #69 surface.
+
+   Bounds, so this is not over-read: locally `www` recovers in 1.3–2.4 s, so the
+   *permanent* wedge in #79's CI forensics is **not** reproduced, and neither is
+   whatever made CI's very first probe exceed 3 s — locally a failed login
+   answers in ~125 ms even at `cpu-load: 100`. Both remain open, and the entry
+   point to the CI failure is still the unexplained one.
+
 ## Design Principles
 
 ### Scope Boundary — QEMU Expert, Not Orchestrator

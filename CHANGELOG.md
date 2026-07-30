@@ -42,6 +42,18 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Changed
 
+- CI: the integration test step now carries its own `timeout-minutes`, 10 minutes under
+  the job budget. A *job* timeout tears the runner down before any `if: always()` step
+  runs, so the artifact upload is skipped and the leg produces no evidence at all — the
+  reason the `macos-x86` leg resisted diagnosis for weeks (#76). A *step* timeout leaves
+  the job alive to reap QEMU, assemble metrics, and upload its logs.
+- CI: corrected the `macos-x86` accelerator classification. `macos-15-intel` is a
+  bare-metal Intel runner where `detectAccel()` returns **hvf**, but the platform table
+  hardcoded `tcg`, and the "Accel hint" summary line printed that hardcoded value one
+  row below the `detectAccel` line contradicting it. The table now records the expected
+  accelerator separately from the empirical run-time budget, the summary reports the
+  *detected* accelerator, and a mismatch raises a `::warning::` so the table cannot
+  drift silently again. No leg's timeout or smoke eligibility changes.
 - `BOOT_TIMEOUT` messages now report *what the REST probe saw* rather than only that it
   gave up — connection refusals, resets, and hung connections are counted separately,
   and the report adds QEMU's `info usernet` so a guest that booted but is unreachable

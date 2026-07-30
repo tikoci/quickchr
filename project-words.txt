@@ -371,6 +371,7 @@ sshpass
 statfs
 stdlib
 steamdeck
+steptimeout
 stext
 subcmd
 subdirs

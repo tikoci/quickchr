@@ -126,3 +126,35 @@ Poll `http://127.0.0.1:{http_port}/` with timeout. RouterOS REST API responds on
 Boot time varies significantly by acceleration mode and host hardware — do not hard-code estimates.
 Under cross-arch TCG, a single HTTP round-trip through the emulated TCP stack can take many seconds;
 the per-probe HTTP timeout must be long enough to actually receive a response.
+
+### Aborting a probe damages `www` — don't do it to hurry a slow guest
+
+`restGet()` enforces its deadline with `req.destroy()`, tearing the socket down
+mid-request. Measured on RouterOS 7.21.5 (`test/lab/www-abort-damage/`):
+
+| pattern | result |
+|---|---|
+| a lone aborted request, probed 0–3000 ms later | no effect, `HTTP 200` throughout |
+| 2–5 aborts in a row, gaps 0–2000 ms, nothing completing between | no effect |
+| **abort, then a completed request, repeated** | **`www` resets incoming connections, and a surviving one gets the ABORTED request's response** |
+
+The third row is the damaging one and it is deterministic. Concretely: probe as a
+non-existent user, abort mid-flight, then probe as `admin:` with its valid empty
+password — and get `401`, the status belonging to the aborted request. Verified
+with `curl` from a separate process, so it is **guest-side**, not client socket
+reuse; and reproduced on **x86/HVF as well as arm64 cross-arch TCG**, so it is
+not an arm64 quirk.
+
+`waitForBoot()` emits exactly that pattern whenever a probe overruns its deadline
+and the next one succeeds. Two rules follow:
+
+- **Scale the per-probe deadline with the accel factor**, like the budget around
+  it. Under TCG the honest fix for a slow answer is to wait for it.
+- **Back off after consecutive aborted probes.** It is the abort/complete
+  *alternation* that does the damage, not the number of aborts, so continuing to
+  poll at a fixed cadence keeps re-triggering it.
+
+Limits of the evidence: locally `www` recovers in 1.3–2.4 s, so the permanent
+wedge in #79's CI forensics is **not** reproduced here, and nothing local
+explains what made CI's first probe exceed 3 s (a failed login answers in
+~125 ms even at `cpu-load: 100`). Treat those two as open.
