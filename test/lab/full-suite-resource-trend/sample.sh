@@ -47,7 +47,12 @@ while :; do
 
 	DISK_FREE=$(df -k "$DATA_VOL" | awk 'NR==2 {printf "%d", $4/1024}')
 
+	# Escape for a JSON string literal. Today the marker only ever holds a test
+	# filename or a "(…)" sentinel, but a torn line would be dropped SILENTLY by
+	# analyze.ts's parser — an invalid sample is indistinguishable from a missing
+	# one, which is the failure mode this whole lab exists to avoid.
 	FILE=$(cat "$MARKER" 2>/dev/null || echo "")
+	FILE=$(printf '%s' "$FILE" | tr -d '\n\r\t' | sed 's/\\/\\\\/g; s/"/\\"/g')
 
 	printf '{"ts":%s,"file":"%s","load1":%s,"pressure":%s,"free_mb":%s,"inactive_mb":%s,"wired_mb":%s,"compressed_mb":%s,"swap_used_mb":%s,"qemu_procs":%s,"qemu_rss_mb":%s,"disk_free_mb":%s}\n' \
 		"$NOW" "$FILE" "$LOAD1" "$PRESSURE" "$VM_FREE" "$VM_INACTIVE" "$VM_WIRED" \
