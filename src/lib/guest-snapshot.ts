@@ -153,8 +153,38 @@ export function parseSerializedJson(raw: string, framed?: boolean): { value?: un
 }
 
 /** Default per-command console timeout. Measured round-trips are ~0.5 s once
- *  paging is avoided; 15 s is slack for a loaded TCG guest, not an expectation. */
+ *  paging is avoided; 15 s is slack for a loaded TCG guest, not an expectation.
+ *  This covers the *command* only — see {@link GUEST_LOGIN_ALLOWANCE_MS}. */
 export const GUEST_QUERY_TIMEOUT_MS = 15_000;
+
+/**
+ * Extra time a query gets, on top of {@link GUEST_QUERY_TIMEOUT_MS}, to pay for
+ * the serial login the executor has to do before any command can run — granted
+ * until one query answers, then dropped for the rest of the snapshot.
+ *
+ * The query cap was sized on the ~0.3 s cost of a command on an already-open
+ * session (`CONSOLE_LOGIN_COST_MS` in console.ts has the measurements), which
+ * left the ~11.4 s login unbudgeted. With a multi-candidate executor —
+ * `bootFailureGuestExec()` tries stored credentials, then factory `admin`, then
+ * `state.user` — that budget was then *divided*, so no candidate ever got enough
+ * time to finish logging in. The first query failed, no credential was ever
+ * marked working, every later query repeated the same doomed split, and the
+ * snapshot spent its whole budget to report `consoleReachable: false` about a
+ * guest that was answering serial in 10 ms (tikoci/quickchr#69, B10 of #110).
+ *
+ * Sized so at least two candidates fit in one query: 15 s + 15 s = 30 s of the
+ * 60 s {@link GUEST_SNAPSHOT_BUDGET_MS}, leaving the remaining ~30 s for the
+ * other six queries, which cost ~0.3 s each once a working credential is known.
+ * Two candidates is the meaningful coverage — stored credentials and factory
+ * `admin:""`, the pair that between them answer any machine we produce;
+ * `state.user` is documented as the weakest case.
+ *
+ * Dropping it after the first answer is what keeps it bounded, and it costs a
+ * genuinely wedged console nothing extra: `budgetMs - elapsed` caps every query
+ * regardless, so an unreachable console spends the same total in fewer, longer
+ * waits rather than more.
+ */
+export const GUEST_LOGIN_ALLOWANCE_MS = 15_000;
 
 /** Default wall-clock cap for the whole read-only snapshot. It runs on an
  *  already-timed-out path, so it must be bounded rather than thorough. */
@@ -171,10 +201,11 @@ export const GUEST_SNAPSHOT_BUDGET_MS = 60_000;
 export async function captureGuestSnapshot(
 	exec: GuestExec,
 	loginUser = "admin",
-	opts: { queryTimeoutMs?: number; budgetMs?: number } = {},
+	opts: { queryTimeoutMs?: number; budgetMs?: number; loginAllowanceMs?: number } = {},
 ): Promise<GuestSnapshot> {
 	const queryTimeoutMs = opts.queryTimeoutMs ?? GUEST_QUERY_TIMEOUT_MS;
 	const budgetMs = opts.budgetMs ?? GUEST_SNAPSHOT_BUDGET_MS;
+	const loginAllowanceMs = opts.loginAllowanceMs ?? GUEST_LOGIN_ALLOWANCE_MS;
 	const started = Date.now();
 	const entries: Record<string, GuestSnapshotEntry> = {};
 	let consoleReachable = false;
@@ -186,9 +217,16 @@ export async function captureGuestSnapshot(
 			entries[key] = { command, ok: false, elapsedMs: 0, error: `skipped — snapshot budget ${budgetMs}ms spent` };
 			continue;
 		}
+		// Granted until a query actually answers, not just to the first one: while
+		// nothing has answered, no login has been established, so the next query
+		// still has to pay for one. Tying it to "first" instead would let a single
+		// hiccup cost the whole snapshot its only chance to log in. This cannot
+		// overrun, because `budgetMs - elapsed` bounds every query either way — an
+		// unreachable console spends the same total budget, in fewer, longer waits.
+		const allowance = consoleReachable ? 0 : loginAllowanceMs;
 		const queryStart = Date.now();
 		try {
-			const { output, framed } = asReply(await exec(command, Math.min(queryTimeoutMs, budgetMs - elapsed)));
+			const { output, framed } = asReply(await exec(command, Math.min(queryTimeoutMs + allowance, budgetMs - elapsed)));
 			const parsed = parseSerializedJson(output, framed);
 			consoleReachable = true;
 			entries[key] = parsed.error === undefined

@@ -314,6 +314,59 @@ every run forever (#91). Primary keys must carry a rotating component, with
    answers in ~125 ms even at `cpu-load: 100`. Both remain open, and the entry
    point to the CI failure is still the unexplained one.
 
+8. **Readiness is not the end of the evidence.** Items 1–7 all instrument a boot
+   that never became REST-ready. #69 is the other shape: the machine boots, it
+   passes `waitForBoot()`, and a *later* request is reset — so every instrument
+   above was skipped and the failure arrived as one line of `ECONNRESET`.
+   `captureRunningFailure()` (`quickchr.ts`) runs the same instrument set against
+   a machine that is still up, and does not stop, remove, or otherwise touch it —
+   the caller owns the lifecycle and may well keep testing against it.
+
+   What that capture has to add is a `trigger` (`FailureTrigger` in
+   `diagnostics.ts`): the failed operation, the error with its `code`/`errno`,
+   `sinceReadyMs`, and the credential transition that preceded it. Without it the
+   report is a healthy machine with no statement of what broke — a boot-failure
+   report explains itself through `restProbe`, and here `restProbe` is null. The
+   transition is **stated by the caller, never inferred**: the capture can see
+   the auth header, but "who this request authenticates as" and "what just
+   changed on the guest" are different facts, and only the caller knows the
+   second. An absent field reads as "not recorded", which is true; a guessed one
+   would send the next reader down a path nobody actually took.
+
+   The two report kinds share one directory and one 20-file cap, which is why
+   pruning orders by the timestamp *inside* the filename rather than by the
+   filename: whole-name sort was chronological only while every report carried
+   one prefix, and would now rank every `post-readiness-failure-` above every
+   `boot-failure-`, deleting the newest of one kind to keep the oldest of the
+   other.
+
+   Building that capture surfaced a defect in the instrument it reuses. The
+   guest snapshot's per-query budget was sized on the ~0.3 s cost of a command on
+   an already-open console session, which left the **~11.4 s serial login**
+   unbudgeted — and `bootFailureGuestExec()` then *divided* that budget across
+   credential candidates, so no attempt could finish logging in. No credential was
+   ever marked working, every later query repeated the same split, and the
+   snapshot spent its full 60 s to report `consoleReachable: false` about a guest
+   answering serial in 10 ms. It read as a broken console, which is why it went
+   unnoticed on the boot path: there the guest usually *is* unreachable, so the
+   wrong answer looked right. Queries now carry a login allowance until one of
+   them answers (`GUEST_LOGIN_ALLOWANCE_MS`), with the per-candidate floor raised
+   to the measured login cost; the 60 s snapshot budget and the 180 s forensics budget
+   are unchanged, so no test timeout moves. Locally this took a capture from
+   61.1 s / 0 of 7 queries to 14.4 s / 7 of 7.
+
+   The general rule, since it is not obvious from the numbers: a console budget
+   has two parts that differ by ~40×, and only one of them is a round-trip.
+   `provisioning.instructions.md` has the phase-by-phase measurements.
+
+   Test-side, the same finding forces a single REST client:
+   `test/integration/chr-rest.ts` is the only way integration tests reach CHR.
+   Tests previously used Bun `fetch()` and, in one file, a hand-rolled `node:http`
+   copy of `restGet` — two extra connection-reuse policies that made "client or
+   guest?" unanswerable on every reset. Collapsing them is **confound removal,
+   not a fix**: run 30507484030 reset through `restGet` too, and
+   `test/lab/bun-pool/` never reproduced the pooling bug it was built to catch.
+
 ## Design Principles
 
 ### Scope Boundary — QEMU Expert, Not Orchestrator

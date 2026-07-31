@@ -1,43 +1,9 @@
 import { describe, test, expect } from "bun:test";
-import { request as nodeRequest } from "node:http";
 import { accelTimeoutFactor, detectAccel, isCrossArchEmulation } from "../../src/lib/platform.ts";
+import { restGet } from "../../src/lib/rest.ts";
+import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
-
-/**
- * Fresh-connection GET using node:http with agent:false.
- * Bun's fetch() pools TCP connections by host:port. When a prior test's
- * machine is stopped and its port is recycled to a new machine, pooled
- * connections return stale responses. agent:false forces a new TCP
- * connection for every request, bypassing the pool entirely.
- */
-function nodeGet(url: string, headers: Record<string, string>, timeoutMs: number): Promise<{ status: number; body: string }> {
-	return new Promise((resolve, reject) => {
-		const parsed = new URL(url);
-		let done = false;
-		const timer = setTimeout(() => {
-			if (!done) { done = true; req.destroy(); reject(new Error("request timeout")); }
-		}, timeoutMs);
-		const req = nodeRequest(
-			{
-				hostname: parsed.hostname,
-				port: parsed.port,
-				path: parsed.pathname + parsed.search,
-				method: "GET",
-				headers,
-				agent: false,
-			},
-			(res) => {
-				let body = "";
-				res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-				res.on("end", () => { if (!done) { done = true; clearTimeout(timer); resolve({ status: res.statusCode ?? 0, body }); } });
-				res.on("error", (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
-			},
-		);
-		req.on("error", (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
-		req.end();
-	});
-}
 
 /**
  * Anchor test — RouterOS REST API schema stability.
@@ -88,9 +54,13 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			expect(booted).toBe(true);
 
 			const base = `http://127.0.0.1:${instance.ports.http}/rest`;
-			const auth = `Basic ${btoa("admin:")}`;
-			const headers = { Authorization: auth };
+			const auth = basicAuth("admin", "");
 
+			// One-shot reads below go through chrGet, so a reset after readiness produces
+			// a forensic report rather than a bare error (#69). fetchUntilHasKeys stays on
+			// plain restGet: it is *built* to catch errors and retry, and a capture per
+			// retry would cost BOOT_FORENSICS_BUDGET_MS each.
+			//
 			// RouterOS non-resource endpoints (identity, license, device-mode) may briefly
 			// return wrong data after boot even after waitForBoot declares the REST layer
 			// stable — waitForBoot only guards /system/resource. Poll until each endpoint
@@ -100,7 +70,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 				let lastBody = "";
 				while (Date.now() < deadline) {
 					try {
-						const { status, body } = await nodeGet(`${base}/${path}`, headers, 5_000);
+						const { status, body } = await restGet(`${base}/${path}`, auth, 5_000);
 						if (status >= 200 && status < 300) {
 							lastBody = body;
 							const data = JSON.parse(body) as unknown;
@@ -130,7 +100,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			expect(license).toHaveProperty("system-id");
 
 			// --- /user ---
-			const { status: userStatus, body: userBody } = await nodeGet(`${base}/user`, headers, 10_000);
+			const { status: userStatus, body: userBody } = await chrGet(instance, "/rest/user", auth);
 			expect(userStatus).toBe(200);
 			const users = JSON.parse(userBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(users)).toBe(true);
@@ -148,7 +118,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			expect(dm).toHaveProperty("mode");
 
 			// --- /ip/address ---
-			const { status: ipStatus, body: ipBody } = await nodeGet(`${base}/ip/address`, headers, 10_000);
+			const { status: ipStatus, body: ipBody } = await chrGet(instance, "/rest/ip/address", auth);
 			expect(ipStatus).toBe(200);
 			const ips = JSON.parse(ipBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(ips)).toBe(true);
@@ -158,7 +128,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			}
 
 			// --- /interface ---
-			const { status: ifStatus, body: ifBody } = await nodeGet(`${base}/interface`, headers, 10_000);
+			const { status: ifStatus, body: ifBody } = await chrGet(instance, "/rest/interface", auth);
 			expect(ifStatus).toBe(200);
 			const ifaces = JSON.parse(ifBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(ifaces)).toBe(true);

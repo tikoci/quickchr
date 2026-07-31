@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll } from "bun:test";
-import { restGet } from "../../src/lib/rest.ts";
+import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
 
@@ -174,10 +174,11 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			});
 
 			// Verify the custom user exists before clean
-			const before = await restGet(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				`Basic ${btoa("cleanuser:CleanPass1")}`,
-				10_000,
+			const before = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth("cleanuser", "CleanPass1"),
+				{ after: "createUser(cleanuser) during provisioning" },
 			);
 			expect(before.status).toBe(200);
 
@@ -199,18 +200,20 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 				await instance.waitForBoot(120_000);
 
 			// cleanuser must no longer exist — 401 expected
-			const afterClean = await restGet(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				`Basic ${btoa("cleanuser:CleanPass1")}`,
-				10_000,
+			const afterClean = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth("cleanuser", "CleanPass1"),
+				{ after: "clean() factory reset, then relaunch from the fresh disk (#79)" },
 			);
 			expect(afterClean.status).toBe(401);
 
 			// Factory admin with empty password must work
-			const adminOk = await restGet(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				`Basic ${btoa("admin:")}`,
-				10_000,
+			const adminOk = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth("admin", ""),
+				{ after: "clean() factory reset, then relaunch from the fresh disk (#79)" },
 			);
 			expect(adminOk.status).toBe(200);
 

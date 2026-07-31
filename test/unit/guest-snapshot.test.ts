@@ -3,12 +3,16 @@ import {
 	captureGuestSnapshot,
 	deepBootDiagnosticsEnabled,
 	DIAGNOSTIC_RULE_COMMENT,
+	GUEST_LOGIN_ALLOWANCE_MS,
+	GUEST_QUERY_TIMEOUT_MS,
+	GUEST_SNAPSHOT_BUDGET_MS,
 	GUEST_SNAPSHOT_QUERIES,
 	parseSerializedJson,
 	runCountingRuleProbe,
 	serializeJsonCommand,
 	type GuestExec,
 } from "../../src/lib/guest-snapshot.ts";
+import { CONSOLE_LOGIN_COST_MS } from "../../src/lib/console.ts";
 
 afterEach(() => {
 	delete process.env.QUICKCHR_DEEP_BOOT_DIAGNOSTICS;
@@ -146,6 +150,54 @@ describe("captureGuestSnapshot", () => {
 		const snap = await captureGuestSnapshot(exec, "admin", { budgetMs: 100 });
 		expect(calls).toBeLessThan(GUEST_SNAPSHOT_QUERIES.length);
 		expect(Object.values(snap.entries).some((e) => e.error?.includes("budget"))).toBe(true);
+	});
+
+	// #69/B10 regression. Before this, the login was unbudgeted: every query got
+	// GUEST_QUERY_TIMEOUT_MS, an executor with N credential candidates divided
+	// that N ways, and no share was long enough to finish a ~11.4 s RouterOS
+	// serial login. The first query failed, so no credential was ever marked
+	// working, so every later query repeated the same split — and the snapshot
+	// burned its whole budget to report `consoleReachable: false` about a guest
+	// answering serial in 10 ms.
+	test("pays the login allowance until a query answers, then stops", async () => {
+		const budgets: number[] = [];
+		const exec: GuestExec = async (_command, timeoutMs) => {
+			budgets.push(timeoutMs);
+			// Nothing answers until the third query, so the first three all have to
+			// budget for a login that has not happened yet.
+			if (budgets.length < 3) throw new Error("Console exec: could not reach CLI prompt");
+			return "[]";
+		};
+
+		await captureGuestSnapshot(exec, "admin");
+
+		const withLogin = GUEST_QUERY_TIMEOUT_MS + GUEST_LOGIN_ALLOWANCE_MS;
+		expect(budgets.slice(0, 3)).toEqual([withLogin, withLogin, withLogin]);
+		expect(budgets.slice(3).every((b) => b === GUEST_QUERY_TIMEOUT_MS)).toBe(true);
+	});
+
+	// The allowance must not become a way for a wedged console to spend the whole
+	// budget: it is added to one query, then bounded by whatever budget is left.
+	test("the login allowance never exceeds the remaining budget", async () => {
+		const budgets: number[] = [];
+		const exec: GuestExec = async (_command, timeoutMs) => {
+			budgets.push(timeoutMs);
+			return "[]";
+		};
+
+		await captureGuestSnapshot(exec, "admin", { budgetMs: 5_000 });
+
+		expect(budgets[0]).toBeLessThanOrEqual(5_000);
+	});
+
+	// Two candidates must fit inside the first query, because those two —
+	// stored credentials and factory admin:"" — are what actually answer the
+	// machines we produce. One candidate's worth of allowance would leave a
+	// provisioned machine diagnosable only by luck of ordering.
+	test("the allowance covers at least two credential logins", () => {
+		expect(GUEST_QUERY_TIMEOUT_MS + GUEST_LOGIN_ALLOWANCE_MS).toBeGreaterThanOrEqual(2 * CONSOLE_LOGIN_COST_MS);
+		// …and still leaves the rest of the snapshot room to run.
+		expect(GUEST_QUERY_TIMEOUT_MS + GUEST_LOGIN_ALLOWANCE_MS).toBeLessThan(GUEST_SNAPSHOT_BUDGET_MS);
 	});
 
 	// The summary is appended to a thrown error that CI echoes into a public log,

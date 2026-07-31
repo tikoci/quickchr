@@ -57,7 +57,7 @@ import { resolveSetting } from "./settings.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath } from "./channels.ts";
-import { captureBootFailure, newBootProbeStats, type BootFailureReport, type BootProbeStats } from "./diagnostics.ts";
+import { captureBootFailure, newBootProbeStats, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
@@ -66,7 +66,7 @@ import { scpPush, scpPull } from "./scp.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
-import { consoleExec } from "./console.ts";
+import { consoleExec, CONSOLE_LOGIN_COST_MS } from "./console.ts";
 import { restRequest, restGet, restPost } from "./rest.ts";
 import { createNamedSocket, getNamedSocket, addSocketMember, removeSocketMember } from "./socket-registry.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
@@ -984,6 +984,32 @@ function bootFailureReportDir(): string {
 	return join(getDataDir(), "failures");
 }
 
+/**
+ * How long one credential candidate gets inside a single guest-exec call.
+ *
+ * `timeoutMs` is a budget for the whole call, not per attempt: `captureGuestSnapshot()`
+ * sizes its own budget assuming one exec costs at most what it passed in, so N
+ * candidates × the full timeout would spend the snapshot's entire budget on the
+ * first query. Untried candidates therefore share it, and once a credential is
+ * known to work it gets all of it — which is every query after the first.
+ *
+ * The floor is {@link CONSOLE_LOGIN_COST_MS} rather than a round number, because
+ * a share below the cost of a login cannot succeed **by construction** — and a
+ * candidate that can never succeed also never becomes the working one, so every
+ * later query repeats the same doomed division. The floor used to be 5 s against
+ * a measured 11.4 s login, which is why forensics reported "console unreachable"
+ * for guests that were answering serial in 10 ms (#69). A share this large is
+ * affordable only because `captureGuestSnapshot()` adds a login allowance to its
+ * query budget until the console answers; see `GUEST_LOGIN_ALLOWANCE_MS`.
+ *
+ * Exported for tests: this is the arithmetic the #69/B10 fix turns on, and it is
+ * otherwise reachable only through a live serial socket.
+ */
+export function credentialShareMs(timeoutMs: number, candidateCount: number, haveWorking: boolean): number {
+	if (haveWorking) return timeoutMs;
+	return Math.max(CONSOLE_LOGIN_COST_MS, Math.floor(timeoutMs / Math.max(1, candidateCount)));
+}
+
 /** Serial-console executor for boot forensics, or null when there is no serial
  *  channel to talk to (foreground runs, or QEMU never got far enough).
  *
@@ -1018,16 +1044,11 @@ function bootFailureGuestExec(state: MachineState): { exec: GuestExec; users: st
 		candidates.push({ user: state.user.name, password: state.user.password });
 	}
 
-	// `timeoutMs` is a budget for the whole call, not per attempt: captureGuestSnapshot()
-	// sizes its own budget assuming one exec() costs at most what it passed in, so
-	// N candidates × the full timeout would burn the snapshot budget on the first
-	// query. Untried candidates therefore share the budget, and once a credential
-	// is known to work it gets all of it — which is every query after the first.
 	let working: { user: string; password: string } | undefined;
 	const exec: GuestExec = async (command, timeoutMs) => {
 		const order = working ? [working, ...candidates.filter((c) => c !== working)] : candidates;
 		const deadline = Date.now() + timeoutMs;
-		const share = working ? timeoutMs : Math.max(5_000, Math.floor(timeoutMs / order.length));
+		const share = credentialShareMs(timeoutMs, order.length, working !== undefined);
 		let lastError: unknown = new Error("no credential candidates");
 		for (const cred of order) {
 			const remaining = deadline - Date.now();
@@ -1046,6 +1067,67 @@ function bootFailureGuestExec(state: MachineState): { exec: GuestExec; users: st
 	};
 
 	return { exec, users: candidates.map((c) => c.user) };
+}
+
+/**
+ * Capture the boot-failure evidence set for a machine that is **already
+ * running** — a request that failed after the machine was declared REST-ready.
+ *
+ * Same instruments as the BOOT_TIMEOUT path (guest snapshot, per-port slirp
+ * classification, monitor state, QEMU liveness, embedded logs), because #69's
+ * one-line `ECONNRESET` has never been enough to say whether the reset came from
+ * the client, RouterOS `www`, or slirp — and every one of those instruments
+ * answers a different part of that. What it does *not* share is the boot
+ * budget's excuse for the machine looking healthy: {@link FailureTrigger} is
+ * required here, so the report always records which request died and what
+ * changed just before it.
+ *
+ * Does not stop, remove, or otherwise touch the machine — the caller owns its
+ * lifecycle and may well want to keep testing against it. Never throws;
+ * `captureBootFailure()` swallows its own failures.
+ *
+ * One trace it does leave, and the reason that matters more here than on the
+ * boot path: the guest snapshot logs in over the serial console, and a RouterOS
+ * console login survives the host socket closing. A boot-timeout capture is
+ * followed by `stop()`/`remove()`, so nothing outlives it; here the machine
+ * keeps running. Harmless — `consoleExec()` `/quit`s a session belonging to a
+ * different user before it logs in — but a later console interaction on this
+ * machine starts from an already-logged-in prompt, not a `Login:` one.
+ */
+export async function captureRunningFailure(
+	state: MachineState,
+	phase: string,
+	trigger: FailureTrigger,
+): Promise<BootFailureReport> {
+	// Approximate, and labelled as such in the field docs: lastStartedAt is
+	// stamped at spawn and lastBootMs measured from just before it, so their sum
+	// is REST-ready to within the few ms between those two statements. Both are
+	// absent on a machine that never completed a timed boot, in which case the
+	// field is simply omitted rather than guessed at.
+	const readyAt = state.lastStartedAt !== undefined && state.lastBootMs !== undefined
+		? Date.parse(state.lastStartedAt) + state.lastBootMs
+		: undefined;
+	const guest = bootFailureGuestExec(state);
+	return await captureBootFailure({
+		name: state.name,
+		machineDir: state.machineDir,
+		arch: state.arch,
+		accel: state.lastAccel ?? "unknown",
+		pid: state.pid,
+		httpPort: state.ports.http?.host,
+		portBase: state.portBase,
+		phase,
+		trigger: {
+			...trigger,
+			sinceReadyMs: trigger.sinceReadyMs
+				?? (readyAt !== undefined && Number.isFinite(readyAt) ? Date.now() - readyAt : undefined),
+		},
+		reportDir: bootFailureReportDir(),
+		monitorQuery: (cmd) => monitorCommand(state.machineDir, cmd, 3000, state.portBase),
+		forwards: Object.values(state.ports),
+		guestExec: guest?.exec,
+		guestUser: guest?.users.join(" → "),
+	});
 }
 
 /** Tear down a machine that failed to boot, and describe what was done.

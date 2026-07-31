@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
 import { ensureEmptySshConfig, matchesManagedSshKey, opensshSha256Fingerprint, SSH_NULL_DEVICE, type SshKeyListRow } from "../../src/lib/provision.ts";
 import { bootTestTimeout } from "./timeouts.ts";
+import { basicAuth, chrGet } from "./chr-rest.ts";
+import { restGet } from "../../src/lib/rest.ts";
 
 /**
  * Integration tests — user provisioning and admin management.
@@ -55,13 +57,7 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			const booted = await instance.waitForBoot(120_000);
 			expect(booted).toBe(true);
 
-			const resp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				{
-					headers: { Authorization: `Basic ${btoa("admin:")}` },
-					signal: AbortSignal.timeout(10_000),
-				},
-			);
+			const resp = await chrGet(instance, "/rest/system/resource", basicAuth("admin", ""));
 			expect(resp.status).toBe(200);
 		} finally {
 			if (instance) {
@@ -106,12 +102,11 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			expect(creds).not.toBeNull();
 			expect(creds?.user).toBe("quickchr");
 
-			const resp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				{
-					headers: { Authorization: `Basic ${btoa(`${creds?.user}:${creds?.password}`)}` },
-					signal: AbortSignal.timeout(10_000),
-				},
+			const resp = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth(creds?.user ?? "", creds?.password ?? ""),
+				{ after: "secureLogin provisioning created the managed quickchr account" },
 			);
 			expect(resp.status).toBe(200);
 		} finally {
@@ -137,10 +132,12 @@ describe.skipIf(SKIP)("user provisioning", () => {
 
 			// The new user must be able to authenticate against the REST API.
 			// 200 = credentials accepted; 401 = user doesn't exist or wrong password.
-			const resp = await fetch(`http://127.0.0.1:${instance.ports.http}/rest/system/resource`, {
-				headers: { Authorization: `Basic ${btoa("testuser:TestPass1")}` },
-				signal: AbortSignal.timeout(10_000),
-			});
+			const resp = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth("testuser", "TestPass1"),
+				{ after: "createUser(testuser) during provisioning" },
+			);
 			expect(resp.status).toBe(200);
 		} finally {
 			if (instance) {
@@ -165,10 +162,12 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			});
 
 			// New user must work
-			const goodResp = await fetch(`http://127.0.0.1:${instance.ports.http}/rest/system/resource`, {
-				headers: { Authorization: `Basic ${btoa("skyfi:SkyfiPass1")}` },
-				signal: AbortSignal.timeout(10_000),
-			});
+			const goodResp = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth("skyfi", "SkyfiPass1"),
+				{ after: "createUser(skyfi) then disableAdmin during provisioning" },
+			);
 			expect(goodResp.status).toBe(200);
 
 			// Verify admin's disabled flag via the user list.
@@ -177,11 +176,13 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			// query runs immediately after the disable call, which may not have
 			// propagated to the HTTP auth layer within the same test run timing.
 			// The `disabled` field in the user list is the authoritative state.
-			const userListResp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/user?name=admin`,
-				{ headers: { Authorization: `Basic ${btoa("skyfi:SkyfiPass1")}` }, signal: AbortSignal.timeout(10_000) },
+			const userListResp = await chrGet(
+				instance,
+				"/rest/user?name=admin",
+				basicAuth("skyfi", "SkyfiPass1"),
+				{ after: "disableAdmin during provisioning" },
 			);
-			const users = await userListResp.json() as Record<string, string>[];
+			const users = JSON.parse(userListResp.body) as Record<string, string>[];
 			expect(users[0]?.disabled).toBe("true");
 		} finally {
 			if (instance) {
@@ -211,10 +212,12 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			expect(instance.state.status).toBe("running");
 
 			// Provisioning must have happened: new user can auth
-			const resp = await fetch(`http://127.0.0.1:${instance.ports.http}/rest/system/resource`, {
-				headers: { Authorization: `Basic ${btoa("fguser:FgPass1")}` },
-				signal: AbortSignal.timeout(10_000),
-			});
+			const resp = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth("fguser", "FgPass1"),
+				{ after: "createUser(fguser) during provisioning" },
+			);
 			expect(resp.status).toBe(200);
 		} finally {
 			if (instance) {
@@ -244,12 +247,11 @@ describe.skipIf(SKIP)("user provisioning", () => {
 			expect(creds?.user).toBe("quickchr");
 
 			// The managed account must authenticate against the REST API
-			const resp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				{
-					headers: { Authorization: `Basic ${btoa(`${creds?.user}:${creds?.password}`)}` },
-					signal: AbortSignal.timeout(10_000),
-				},
+			const resp = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth(creds?.user ?? "", creds?.password ?? ""),
+				{ after: "secureLogin provisioning created the managed quickchr account" },
 			);
 			expect(resp.status).toBe(200);
 		} finally {
@@ -295,12 +297,11 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			);
 
 			// Verify the user was created and can auth via REST
-			const resp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				{
-					headers: { Authorization: `Basic ${btoa("consoletest:ConsolePass1")}` },
-					signal: AbortSignal.timeout(10_000),
-				},
+			const resp = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth("consoletest", "ConsolePass1"),
+				{ after: "/user add consoletest over the serial console" },
 			);
 			expect(resp.status).toBe(200);
 
@@ -318,19 +319,23 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			// change (internal state flush), so we retry with up to 30s timeout.
 			// The user record reflects the change immediately once the REST service stabilizes —
 			// more reliable than polling admin HTTP auth (cached for several seconds).
+			//
+			// Plain `restGet`, not `chrGet`: this loop *expects* to catch errors, and
+			// a forensic capture costs up to BOOT_FORENSICS_BUDGET_MS — running one
+			// per retry would blow the test's timeout to collect fifteen reports on a
+			// condition the loop is designed to ride out. Forensics belong on the
+			// failures nobody planned for.
 			let adminRecord: Record<string, string> | undefined;
 			const verifyDeadline = Date.now() + 30_000;
 			while (Date.now() < verifyDeadline) {
 				try {
-					const userListResp = await fetch(
+					const userListResp = await restGet(
 						`http://127.0.0.1:${instance.ports.http}/rest/user`,
-						{
-							headers: { Authorization: `Basic ${btoa("consoletest:ConsolePass1")}` },
-							signal: AbortSignal.timeout(5_000),
-						},
+						basicAuth("consoletest", "ConsolePass1"),
+						5_000,
 					);
 					if (userListResp.status === 200) {
-						const users = await userListResp.json() as Record<string, string>[];
+						const users = JSON.parse(userListResp.body) as Record<string, string>[];
 						const found = users.find((u) => u.name === "admin");
 						if (found?.disabled === "true") {
 							adminRecord = found;
@@ -407,21 +412,22 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			});
 
 			// Confirm the user is in the "full" group by querying the user list as admin.
-			const resp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/user?name=groupcheck`,
-				{ headers: { Authorization: `Basic ${btoa("admin:")}` }, signal: AbortSignal.timeout(10_000) },
+			const resp = await chrGet(
+				instance,
+				"/rest/user?name=groupcheck",
+				basicAuth("admin", ""),
+				{ after: "createUser(groupcheck) during provisioning" },
 			);
-			const users = await resp.json() as Record<string, string>[];
+			const users = JSON.parse(resp.body) as Record<string, string>[];
 			expect(users[0]?.group).toBe("full");
 
 			// The new user must authenticate and can read (full group gives read+write).
 			// RouterOS returns 200 for any GET from a valid "full" group user.
-			const readResp = await fetch(
-				`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-				{
-					headers: { Authorization: `Basic ${btoa("groupcheck:GroupPass1")}` },
-					signal: AbortSignal.timeout(10_000),
-				},
+			const readResp = await chrGet(
+				instance,
+				"/rest/system/resource",
+				basicAuth("groupcheck", "GroupPass1"),
+				{ after: "createUser(groupcheck) during provisioning" },
 			);
 			expect(readResp.status).toBe(200);
 		} finally {
@@ -460,15 +466,12 @@ describe.skipIf(SKIP)("SSH key provisioning", () => {
 			const { getInstanceCredentials } = await import("../../src/lib/credentials.ts");
 			const creds = await getInstanceCredentials("integration-ssh-key");
 			const auth = creds
-				? `Basic ${btoa(`${creds.user}:${creds.password}`)}`
-				: `Basic ${btoa("admin:")}`;
+				? basicAuth(creds.user, creds.password)
+				: basicAuth("admin", "");
 
-			const { restGet } = await import("../../src/lib/rest.ts");
-			const { status, body } = await restGet(
-				`http://127.0.0.1:${instance.ports.http}/rest/user/ssh-keys`,
-				auth,
-				10_000,
-			);
+			const { status, body } = await chrGet(instance, "/rest/user/ssh-keys", auth, {
+				after: "secureLogin provisioning installed the managed SSH key",
+			});
 			expect(status).toBe(200);
 			const keys = JSON.parse(body) as SshKeyListRow[];
 			const expectedKeyComment = "quickchr@integration-ssh-key";

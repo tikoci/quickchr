@@ -1,7 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { QuickCHR, acquireLock } from "../../src/lib/quickchr.ts";
+import { QuickCHR, acquireLock, captureRunningFailure, credentialShareMs } from "../../src/lib/quickchr.ts";
+import type { MachineState } from "../../src/lib/types.ts";
+import { CONSOLE_LOGIN_COST_MS } from "../../src/lib/console.ts";
+import { GUEST_LOGIN_ALLOWANCE_MS, GUEST_QUERY_TIMEOUT_MS } from "../../src/lib/guest-snapshot.ts";
 
 function expectErrorCode(e: unknown, code: string) {
 	expect(e).toBeInstanceOf(Error);
@@ -10,13 +13,21 @@ function expectErrorCode(e: unknown, code: string) {
 
 const TEST_DIR = join(import.meta.dir, ".tmp-lock-test");
 
+// Snapshotted rather than deleted: a developer running with QUICKCHR_DATA_DIR
+// set in their own environment would otherwise have it silently unset for every
+// test after the first one here.
+let dataDirBefore: string | undefined;
+
 beforeEach(() => {
+	dataDirBefore = process.env.QUICKCHR_DATA_DIR;
 	rmSync(TEST_DIR, { recursive: true, force: true });
 	mkdirSync(TEST_DIR, { recursive: true });
 });
 
 afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
+	if (dataDirBefore === undefined) delete process.env.QUICKCHR_DATA_DIR;
+	else process.env.QUICKCHR_DATA_DIR = dataDirBefore;
 });
 
 describe("QuickCHR.start name validation", () => {
@@ -361,5 +372,127 @@ describe("ChrInstance API surface (dryRun)", () => {
 			}
 			throw e;
 		}
+	});
+});
+
+describe("captureRunningFailure", () => {
+	// A machine that booted and then reset a request. Everything the capture can
+	// reach is deliberately absent here — no QEMU, no monitor, no serial socket —
+	// because that is the shape it has to survive: it runs on a failure path, and
+	// an exception raised while collecting evidence replaces the real error with
+	// a worse one.
+	function state(overrides: Partial<MachineState> = {}): MachineState {
+		return {
+			name: "ready-then-reset",
+			version: "7.22.1",
+			arch: "arm64",
+			cpu: 1,
+			mem: 512,
+			networks: [],
+			ports: {
+				http: { name: "http", host: 9100, guest: 80, proto: "tcp" },
+				ssh: { name: "ssh", host: 9102, guest: 22, proto: "tcp" },
+			},
+			packages: [],
+			portBase: 9100,
+			excludePorts: [],
+			extraPorts: [],
+			createdAt: new Date().toISOString(),
+			status: "running",
+			machineDir: join(TEST_DIR, "machine"),
+			lastAccel: "kvm",
+			...overrides,
+		};
+	}
+
+	test("derives sinceReadyMs from the recorded boot, and records the trigger", async () => {
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		// REST-ready 30 s ago: started 90 s ago, boot took 60 s.
+		const report = await captureRunningFailure(
+			state({ lastStartedAt: new Date(Date.now() - 90_000).toISOString(), lastBootMs: 60_000 }),
+			"post-readiness-rest",
+			{ operation: "GET /rest/system/resource", error: "Error: socket hang up code=ECONNRESET" },
+		);
+
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.phase).toBe("post-readiness-rest");
+		expect(record.trigger.operation).toBe("GET /rest/system/resource");
+		expect(record.trigger.sinceReadyMs).toBeGreaterThanOrEqual(30_000);
+		expect(record.trigger.sinceReadyMs).toBeLessThan(35_000);
+		expect(record.machine.accel).toBe("kvm");
+		expect(report.reportPath).toContain("post-readiness-failure-ready-then-reset-");
+		// Written under QUICKCHR_DATA_DIR/failures, not next to the machine — the
+		// caller keeps the machine running, but a later remove() must not be able
+		// to take the evidence with it.
+		expect(report.reportPath).toContain(join(TEST_DIR, "failures"));
+	});
+
+	// Omitted, not zero: a machine with no completed timed boot has no readiness
+	// moment to measure from, and "+0.0s after REST-ready" would read as a reset
+	// that happened the instant the machine came up.
+	test("omits sinceReadyMs when the machine has no recorded boot", async () => {
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		const report = await captureRunningFailure(
+			state({ lastStartedAt: undefined, lastBootMs: undefined }),
+			"post-readiness-rest",
+			{ operation: "GET /rest/user", error: "Error: restGet timeout after 10000ms" },
+		);
+
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.trigger.sinceReadyMs).toBeUndefined();
+		expect(report.summary).toContain("Failed after readiness: GET /rest/user —");
+		expect(report.summary).not.toContain("after REST-ready");
+	});
+
+	test("an explicit sinceReadyMs wins over the derived one", async () => {
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		const report = await captureRunningFailure(
+			state({ lastStartedAt: new Date(Date.now() - 90_000).toISOString(), lastBootMs: 60_000 }),
+			"post-readiness-rest",
+			{ operation: "GET /rest/user", error: "boom", sinceReadyMs: 1_234 },
+		);
+
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.trigger.sinceReadyMs).toBe(1_234);
+	});
+});
+
+describe("credentialShareMs", () => {
+	// The #69/B10 fix itself. A share below the cost of a login cannot succeed, and
+	// a candidate that cannot succeed never becomes the working one — so the next
+	// query repeats the same division. Dividing below the floor is not "slower", it
+	// is permanently blind.
+	test("never gives a candidate less than one login costs", () => {
+		for (const candidates of [1, 2, 3, 4, 10]) {
+			expect(credentialShareMs(GUEST_QUERY_TIMEOUT_MS, candidates, false))
+				.toBeGreaterThanOrEqual(CONSOLE_LOGIN_COST_MS);
+		}
+	});
+
+	// The regression, stated as the arithmetic that used to hold: the old 5 s floor
+	// left every candidate short of the measured 11.4 s login.
+	test("the old floor could not have completed a login", () => {
+		expect(5_000).toBeLessThan(CONSOLE_LOGIN_COST_MS);
+		expect(Math.max(5_000, Math.floor(GUEST_QUERY_TIMEOUT_MS / 3))).toBeLessThan(CONSOLE_LOGIN_COST_MS);
+	});
+
+	// With the login allowance the snapshot grants until the console answers, the
+	// first query has to fit two candidates — stored credentials and factory
+	// admin:"", the pair that between them answer any machine we produce.
+	test("the first query fits two candidate logins", () => {
+		const firstQuery = GUEST_QUERY_TIMEOUT_MS + GUEST_LOGIN_ALLOWANCE_MS;
+		expect(credentialShareMs(firstQuery, 2, false) * 2).toBeLessThanOrEqual(firstQuery);
+		expect(credentialShareMs(firstQuery, 2, false)).toBeGreaterThanOrEqual(CONSOLE_LOGIN_COST_MS);
+	});
+
+	// Once a credential is known to work there is nothing left to search for, so
+	// the whole budget goes to it — that is what makes queries 2..N cheap.
+	test("a known-working credential gets the whole budget", () => {
+		expect(credentialShareMs(GUEST_QUERY_TIMEOUT_MS, 3, true)).toBe(GUEST_QUERY_TIMEOUT_MS);
+	});
+
+	// Defensive: an empty candidate list must not divide by zero.
+	test("tolerates a zero candidate count", () => {
+		expect(credentialShareMs(GUEST_QUERY_TIMEOUT_MS, 0, false)).toBe(CONSOLE_LOGIN_COST_MS);
 	});
 });

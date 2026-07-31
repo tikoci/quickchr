@@ -39,6 +39,14 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   capture that writes to the guest (a mangle `passthrough` rule plus a burst of host
   probes). Off by default, on in CI, and always skipped when
   `QUICKCHR_PRESERVE_ON_FAILURE=1` asks for the failure state to be left untouched.
+- **Post-readiness failure reports.** A request that fails *after* a machine has been
+  declared REST-ready now gets the same instrument set as a boot timeout, written as
+  `post-readiness-failure-<machine>-<timestamp>.json` in the same `<dataDir>/failures/`
+  directory and under the same 20-report cap. The machine is left running and untouched.
+  Because a boot that worked explains nothing on its own, these reports lead with a
+  `trigger` block naming the failed operation, the error with its `code`/`errno`, the
+  time since REST-ready, and the credential transition that preceded the request — the
+  #69 signature, which until now surfaced as a single line of `ECONNRESET`.
 
 ### Changed
 
@@ -71,9 +79,26 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   before `waitForBoot()` gave up and the boot-failure report was never written — the
   reason several #79 reproductions carried no evidence. The budget itself is unchanged;
   retuning it is #106.
+- Integration tests reach CHR's REST API through one client — `test/integration/chr-rest.ts`,
+  wrapping the same `src/lib/rest.ts` (`node:http`, `agent: false`, `Connection: close`)
+  the library itself uses. Bun `fetch()` and, in `anchor.test.ts`, a hand-rolled
+  `node:http` copy of `restGet` are both gone. This removes a confound rather than
+  fixing anything: run 30507484030 reset through `restGet` too, and `test/lab/bun-pool/`
+  never reproduced the pooling bug (#69).
 
 ### Fixed
 
+- **The guest snapshot in a failure report could never log in.** Its per-query budget
+  was sized on the ~0.3 s cost of a command on an already-open serial session, leaving
+  the ~11.4 s RouterOS login unbudgeted — and the executor then divided that budget
+  across credential candidates, so no attempt could finish one. No credential was ever
+  marked working, every later query repeated the same split, and the snapshot burned
+  its full 60 s to report `console unreachable` about guests that were answering serial
+  in 10 ms. It read as a broken console, which is why it survived on the boot path,
+  where the guest usually *is* unreachable. Queries now carry a login allowance until
+  one of them answers. Measured locally: a capture went from 61.1 s with 0 of 7 queries answered to
+  14.4 s with 7 of 7. The 60 s snapshot budget and the 180 s forensics budget are
+  unchanged, so no test timeout moves (#69).
 - **`clean()` left credentials naming an erased user** (#79). `clean()` replaces the
   disk with a fresh image, but `machine.json` kept `user`, `managedSshKey`, and
   `disableAdmin` from the machine that disk used to hold — and nothing recreates

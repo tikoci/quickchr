@@ -13,6 +13,14 @@
  *
  *   test timeout  >  boots × bootTimeout + forensics + test body
  *
+ * `forensics` is one budget, not one per capture kind, and stays that way now
+ * that `chr-rest.ts` can also trigger a capture after readiness (#69). A test
+ * gets at most one: either a boot exhausts its budget and throws — in which case
+ * no post-readiness request is ever made — or every boot succeeds and a later
+ * request fails. The two are mutually exclusive per test, and the worst case is
+ * already the sum above: boots that each take nearly the full budget and pass,
+ * then one capture.
+ *
  * It does NOT retune the budget itself — `accelTimeoutFactor`'s 4× for same-arch
  * TCG is still ~11× the measured 44 s worst case, and cutting it needs its own
  * measurement of the package-install and device-mode paths (#106).

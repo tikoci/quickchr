@@ -244,6 +244,87 @@ describe("captureBootFailure", () => {
 		expect(existsSync(join(dir, "unrelated.json"))).toBe(true);
 	});
 
+	// #69: a machine that passed readiness and then reset a request looks healthy
+	// in every other field of the report, so the trigger has to lead the summary
+	// and name the file — otherwise the evidence says "boot failure" about a boot
+	// that worked, and never says which request died.
+	test("a trigger makes the capture a post-readiness report, led by what failed", async () => {
+		const machineDir = scratch();
+		const reportDir = join(scratch(), "failures");
+		writeFileSync(join(machineDir, "qemu.log"), "qemu: nothing wrong here\n");
+
+		const report = await captureBootFailure({
+			name: "reset-after-ready",
+			machineDir,
+			reportDir,
+			arch: "arm64",
+			accel: "kvm",
+			phase: "post-readiness-rest",
+			trigger: {
+				operation: "GET /rest/system/resource",
+				error: "Error: socket hang up code=ECONNRESET syscall=read",
+				sinceReadyMs: 42_000,
+				credentialTransition: "createUser(testuser)",
+			},
+		});
+
+		expect(report.reportPath).toContain("post-readiness-failure-reset-after-ready-");
+		expect(report.reportPath).not.toContain("boot-failure-");
+
+		const lines = report.summary.split("\n");
+		expect(lines[0]).toBe(
+			"Failed after readiness: GET /rest/system/resource at +42.0s after REST-ready — Error: socket hang up code=ECONNRESET syscall=read",
+		);
+		expect(lines[1]).toBe("Preceding credential transition: createUser(testuser)");
+
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.trigger.operation).toBe("GET /rest/system/resource");
+		expect(record.trigger.credentialTransition).toBe("createUser(testuser)");
+		// No boot budget was spent, so there is none to report — null, not a fake 0.
+		expect(record.machine.bootTimeoutMs).toBeNull();
+		expect(record.restProbe).toBeNull();
+	});
+
+	test("without a trigger the report keeps its boot-failure name and null trigger", async () => {
+		const machineDir = scratch();
+		const reportDir = join(scratch(), "failures");
+
+		const report = await captureBootFailure({
+			name: "never-booted", machineDir, reportDir, arch: "x86", accel: "tcg", bootTimeoutMs: 1000, phase: "start",
+		});
+
+		expect(report.reportPath).toContain("boot-failure-never-booted-");
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.trigger).toBeNull();
+		expect(record.machine.bootTimeoutMs).toBe(1000);
+		expect(report.summary).not.toContain("Failed after readiness");
+	});
+
+	// Both kinds share one directory and one cap, so the ordering must come from
+	// the stamp. Sorting whole filenames — which was correct while every report
+	// was a `boot-failure-` — ranks every `post-readiness-failure-` above every
+	// `boot-failure-`, and would delete the newest boot reports while keeping
+	// older post-readiness ones.
+	test("prunes by timestamp across both report prefixes, not by filename", async () => {
+		const dir = scratch();
+		// Interleaved in time: even seconds are boot failures, odd are post-readiness.
+		for (let i = 0; i < 25; i++) {
+			const prefix = i % 2 === 0 ? "boot-failure" : "post-readiness-failure";
+			writeFileSync(join(dir, `${prefix}-m-2026-07-27T00-00-${String(i).padStart(2, "0")}-000Z.json`), "{}");
+		}
+
+		pruneBootFailureReports(dir);
+
+		const left = readdirSync(dir).filter((f) => f.endsWith(".json"));
+		expect(left.length).toBe(MAX_BOOT_FAILURE_REPORTS);
+		const stamps = left.map((f) => f.slice(-("00-00-00-000Z.json".length), -".json".length)).sort();
+		expect(stamps.at(0)).toBe("00-00-05-000Z");
+		expect(stamps.at(-1)).toBe("00-00-24-000Z");
+		// Nothing survives purely because of how its prefix sorts.
+		expect(left.some((f) => f.startsWith("boot-failure-"))).toBe(true);
+		expect(left.some((f) => f.startsWith("post-readiness-failure-"))).toBe(true);
+	});
+
 	test("pruneBootFailureReports tolerates a missing directory", () => {
 		expect(() => pruneBootFailureReports(join(tmpdir(), "quickchr-no-such-dir-9182"))).not.toThrow();
 	});

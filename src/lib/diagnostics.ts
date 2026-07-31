@@ -418,16 +418,32 @@ function readIfPresent(path: string): string | null {
  *
  *  Each report embeds up to 2 × 256 KB of log text, and a flaky-boot loop can
  *  produce one per attempt, so this directory would otherwise grow without
- *  bound — the image cache has `autoPruneIfOverCap`, this had nothing. Newest-
- *  first by filename, which sorts chronologically because the name carries an
- *  ISO-8601 stamp. Best-effort: never throws. */
+ *  bound — the image cache has `autoPruneIfOverCap`, this had nothing.
+ *  Best-effort: never throws. */
 export const MAX_BOOT_FAILURE_REPORTS = 20;
+
+/** Report filename prefixes, one per capture kind. The cap is on the *directory*,
+ *  not per prefix: a machine that fails post-readiness is exactly as likely to be
+ *  retried in a loop as one that fails to boot, and two independent 20-file caps
+ *  in one directory is a 40-file directory nobody chose. Adding a kind here is
+ *  what keeps it prunable — a prefix absent from this list grows without bound. */
+export const FAILURE_REPORT_PREFIXES = ["boot-failure-", "post-readiness-failure-"] as const;
+
+/** The ISO-8601 stamp `captureBootFailure()` appends, with `:` and `.` replaced
+ *  by `-`. Ordering is by this, not by the whole filename: sorting whole names
+ *  was chronological only while every report shared one prefix, and would now
+ *  rank every `post-readiness-failure-` above every `boot-failure-` regardless
+ *  of age — silently pruning the newer of the two kinds. */
+const REPORT_STAMP = /(\d{4}-\d{2}-\d{2}T[\d-]+Z)\.json$/;
 
 export function pruneBootFailureReports(dir: string, keep = MAX_BOOT_FAILURE_REPORTS): void {
 	try {
 		const reports = readdirSync(dir)
-			.filter((name) => name.startsWith("boot-failure-") && name.endsWith(".json"))
-			.sort()
+			.filter((name) => FAILURE_REPORT_PREFIXES.some((p) => name.startsWith(p)) && name.endsWith(".json"))
+			// Unstamped names sort last and are pruned first: this function only
+			// ever sees names it wrote, so one without a stamp is unrecognized, and
+			// keeping it in preference to a dated report would be a guess.
+			.sort((a, b) => (REPORT_STAMP.exec(a)?.[1] ?? "").localeCompare(REPORT_STAMP.exec(b)?.[1] ?? ""))
 			.reverse();
 		for (const stale of reports.slice(keep)) {
 			try { unlinkSync(join(dir, stale)); } catch { /* ignore */ }
@@ -447,12 +463,39 @@ export function pruneBootFailureReports(dir: string, keep = MAX_BOOT_FAILURE_REP
  */
 export const BOOT_FORENSICS_BUDGET_MS = 180_000;
 
+/**
+ * Why the capture ran, when the trigger was *not* a boot timeout.
+ *
+ * Boot-timeout captures explain themselves: `BootProbeStats` says what every
+ * readiness probe saw, and the whole window is the evidence. A failure *after*
+ * readiness has no such record — `restProbe` is null, the machine booted fine,
+ * and the interesting facts are which single request died and what state change
+ * immediately preceded it. That is #69: a connection accepted and reset on the
+ * first request following a credential transition. Without this field the report
+ * would show a healthy machine and never say what was being asked of it.
+ */
+export interface FailureTrigger {
+	/** The operation that failed, e.g. `GET /rest/system/resource`. */
+	operation: string;
+	/** The error as thrown, message and code. */
+	error: string;
+	/** ms from REST-ready to the failure, when derivable. Distinguishes a reset
+	 *  seconds after boot from one many operations later. */
+	sinceReadyMs?: number;
+	/** The credential/database change immediately preceding the failed request —
+	 *  #69's suspected precondition. Free text, e.g.
+	 *  `createUser(testuser) then auth as testuser`. Callers state what they did;
+	 *  nothing here infers it. */
+	credentialTransition?: string;
+}
+
 export interface BootFailureContext {
 	name: string;
 	machineDir: string;
 	arch: string;
 	accel: string;
-	bootTimeoutMs: number;
+	/** Omitted by non-boot captures, which have no boot budget to report. */
+	bootTimeoutMs?: number;
 	pid?: number;
 	httpPort?: number;
 	portBase?: number;
@@ -460,6 +503,8 @@ export interface BootFailureContext {
 	probe?: BootProbeStats;
 	/** Free-text marker for which call path failed, e.g. "start" / "_launchExisting". */
 	phase: string;
+	/** Set by post-readiness captures. See {@link FailureTrigger}. */
+	trigger?: FailureTrigger;
 	/** Durable directory for the report, OUTSIDE the machine directory.
 	 *
 	 *  It must outlive the machine: integration tests wrap their bodies in
@@ -568,11 +613,12 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 	const record = {
 		capturedAt: new Date().toISOString(),
 		phase: ctx.phase,
+		trigger: ctx.trigger ?? null,
 		machine: {
 			name: ctx.name,
 			arch: ctx.arch,
 			accel: ctx.accel,
-			bootTimeoutMs: ctx.bootTimeoutMs,
+			bootTimeoutMs: ctx.bootTimeoutMs ?? null,
 			machineDir: ctx.machineDir,
 			portBase: ctx.portBase,
 			httpPort: ctx.httpPort,
@@ -603,7 +649,12 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 		const dir = ctx.reportDir ?? ctx.machineDir;
 		mkdirSync(dir, { recursive: true });
 		const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-		reportPath = join(dir, `boot-failure-${ctx.name}-${stamp}.json`);
+		// The kind is in the filename, not only in the JSON: these land in a CI
+		// artifact as a flat directory listing, and "why is there a boot-failure
+		// report for a machine that booted?" is a question the name should not
+		// provoke. Both prefixes are in FAILURE_REPORT_PREFIXES so both prune.
+		const prefix = ctx.trigger ? "post-readiness-failure" : "boot-failure";
+		reportPath = join(dir, `${prefix}-${ctx.name}-${stamp}.json`);
 		writeFileSync(reportPath, `${JSON.stringify(record, null, 2)}\n`);
 		pruneBootFailureReports(dir);
 	} catch {
@@ -611,6 +662,17 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 	}
 
 	const lines: string[] = [];
+	// First, because on a post-readiness capture everything below it describes a
+	// machine that is working — the trigger is the only line that says what broke.
+	if (ctx.trigger) {
+		const since = ctx.trigger.sinceReadyMs !== undefined
+			? ` at +${(ctx.trigger.sinceReadyMs / 1000).toFixed(1)}s after REST-ready`
+			: "";
+		lines.push(`Failed after readiness: ${ctx.trigger.operation}${since} — ${ctx.trigger.error}`);
+		if (ctx.trigger.credentialTransition) {
+			lines.push(`Preceding credential transition: ${ctx.trigger.credentialTransition}`);
+		}
+	}
 	if (ctx.probe) lines.push(`REST probe: ${summarizeBootProbe(ctx.probe)}`);
 	lines.push(`QEMU process: ${record.host.qemuProcess}`);
 	if (record.hostfwd) lines.push(`hostfwd 127.0.0.1:${record.hostfwd.port}: ${record.hostfwd.tcpConnect}`);
