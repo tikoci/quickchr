@@ -62,6 +62,29 @@ name: Integration
 # IMPORTANT: every step that pipes `bun test … | tee` MUST run under
 # `set -eo pipefail` — without it tee's exit code masks bun's failure and the
 # step reports green (this bit us: arm64 run green with every test failing).
+#
+# ── EXPERIMENT LEVERS: qemu-version and accel ─────────────────────────────────
+# Two inputs exist so a controlled contrast can vary ONE factor and hold the
+# rest — the whole test/forensics/artifact path stays identical, which is what
+# makes two dispatches comparable at all. Both are inert when empty, which is
+# every normal run; nothing in main.yml, sweep.yml or release.yml sets them.
+#
+#   qemu-version   Linux only. Builds that exact upstream QEMU from source
+#                  (download.qemu.org) and puts it first on PATH, replacing the
+#                  distro package as the *system emulator only*. qemu-img, the
+#                  UEFI firmware and everything else stay on the distro build on
+#                  purpose: if the contrast flips, the emulator is the only thing
+#                  that changed. Costs ~10-15 min of build time per leg.
+#   accel          Pins QUICKCHR_ACCEL rather than letting detectAccel pick. The
+#                  linux legs "may fall back to TCG" depending on whether the
+#                  runner ships a writable /dev/kvm — fine normally, fatal for a
+#                  contrast, because the two arms could silently differ in the
+#                  variable you were trying to hold.
+#
+# Introduced for B9 of #110 (#79): `linux-arm64 · long-term · start-stop.test.ts`
+# has only ever failed under QEMU 8.2.2, while the arm64+TCG leg on QEMU 11.0.2
+# is green — a hypothesis the matrix could not test, because host OS changed with
+# it. Keep them general; they are not #79-specific.
 
 on:
   workflow_dispatch:
@@ -98,6 +121,14 @@ on:
         type: boolean
         description: "Append this run's boot/test timing to the ci-data branch (runs/*.ndjson + tested-versions.json). Default ON — a run without recorded results is a wasted run."
         default: true
+      qemu-version:
+        type: string
+        description: "EXPERIMENT LEVER (Linux only). Build this exact upstream QEMU from source and put it first on PATH instead of the distro package, e.g. '11.0.2'. Empty = distro QEMU (normal runs). Adds ~10-15 min to the leg."
+        default: ""
+      accel:
+        type: string
+        description: "EXPERIMENT LEVER. Pin QUICKCHR_ACCEL (tcg/kvm/hvf/auto) instead of letting detectAccel choose. Empty = auto-detect (normal runs). Use to hold the accelerator constant across a contrast whose legs might otherwise differ."
+        default: ""
   workflow_call:
     inputs:
       platforms:
@@ -129,6 +160,14 @@ on:
         type: string
         description: "Prefix for uploaded artifact names so parallel callers don't collide"
         default: "integration"
+      qemu-version:
+        type: string
+        description: "Experiment lever (Linux only) — build this upstream QEMU from source instead of the distro package. Empty = distro."
+        default: ""
+      accel:
+        type: string
+        description: "Experiment lever — pin QUICKCHR_ACCEL instead of auto-detecting. Empty = auto."
+        default: ""
 
 # Least-privilege: this workflow only runs tests and uploads artifacts.
 permissions:
@@ -152,6 +191,8 @@ jobs:
           TARGETS: ${{ inputs.routeros-targets }}
           TEST_FILTER: ${{ inputs.test-filter }}
           TCG_SMOKE: ${{ inputs.tcg-smoke }}
+          QEMU_VERSION: ${{ inputs.qemu-version }}
+          ACCEL_INPUT: ${{ inputs.accel }}
         run: |
           set -eo pipefail
           # id → label | runner | accel | budget
@@ -214,6 +255,31 @@ jobs:
               exit 1
             fi
           done
+          # Experiment levers, validated here so a bad one costs nothing. A lever
+          # that silently does nothing is worse than a typo: the run still goes
+          # green/red under a label claiming a factor was varied when it wasn't.
+          QV="${QEMU_VERSION// /}"
+          if [ -n "$QV" ]; then
+            if ! printf '%s' "$QV" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+              echo "::error::Invalid qemu-version '$QV' — expected an upstream release like 8.2.2 or 11.0.2 (it becomes https://download.qemu.org/qemu-<version>.tar.xz)"
+              exit 1
+            fi
+            # Source-building QEMU is implemented for Linux only. Accepting the
+            # input on a macOS/Windows leg would run the DISTRO qemu while the
+            # run is labelled with a version it never used.
+            case ",$LIST," in
+              *,macos-arm64,*|*,macos-x86,*|*,windows-x86,*)
+                echo "::error::qemu-version is Linux-only, but platforms resolved to '$LIST'. Restrict the dispatch to linux-x86 and/or linux-arm64, or drop qemu-version."
+                exit 1 ;;
+            esac
+          fi
+          ACCEL_PIN="${ACCEL_INPUT// /}"
+          if [ -n "$ACCEL_PIN" ]; then
+            case "$ACCEL_PIN" in
+              auto|tcg|hvf|kvm) ;;
+              *) echo "::error::Invalid accel '$ACCEL_PIN' — must be one of auto, tcg, hvf, kvm (quickchr's AccelMode)"; exit 1 ;;
+            esac
+          fi
           FILTER="${TEST_FILTER// /}"
           inc='[]'
           IFS=',' read -ra IDS <<< "$LIST"
@@ -246,6 +312,11 @@ jobs:
             # its evidence attached. (It does not rescue a runner that loses
             # communication with the server — nothing in-job can.)
             steptimeout=$((timeout - 10))
+            # A source QEMU build runs BEFORE the test step, so it eats the job
+            # budget without touching the step budget. Pad the outer number only
+            # — growing the step cap too would quietly buy a hang more rope,
+            # which is exactly the anti-pattern in this program's rule 5.
+            [ -n "$QV" ] && timeout=$((timeout + 20))
             for t in "${TARGET_ARR[@]}"; do
               [ -z "$t" ] && continue
               inc=$(printf '%s' "$inc" | jq -c \
@@ -324,6 +395,87 @@ jobs:
         if: ${{ runner.os == 'macOS' }}
         run: brew install qemu sshpass
 
+      # EXPERIMENT LEVER — see the header. Inert unless qemu-version is set.
+      - name: Build upstream QEMU from source (experiment lever)
+        if: ${{ runner.os == 'Linux' && inputs.qemu-version != '' }}
+        env:
+          QEMU_VERSION: ${{ inputs.qemu-version }}
+          QEMU_TARGET: ${{ matrix.id == 'linux-arm64' && 'aarch64-softmmu' || 'x86_64-softmmu' }}
+        run: |
+          set -eo pipefail
+          # Re-validated here and not only in plan: this string is interpolated
+          # into a download URL, and the step must be safe read on its own.
+          if ! printf '%s' "$QEMU_VERSION" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::Refusing to build QEMU from unvalidated version '$QEMU_VERSION'"
+            exit 1
+          fi
+          PREFIX="$HOME/qemu-$QEMU_VERSION"
+          # No actions/cache here on purpose: the repo cache is already over its
+          # 10 GB cap (#104/B3) and a multi-hundred-MB build tree would evict the
+          # CHR images these legs depend on. Rebuild each time until B3 lands.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential ninja-build pkg-config python3-venv \
+            libglib2.0-dev libpixman-1-dev libslirp-dev libfdt-dev zlib1g-dev flex bison
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 -o qemu.tar.xz "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz"
+          tar xf qemu.tar.xz
+          cd "qemu-${QEMU_VERSION}"
+          # meson is deliberately NOT apt-installed: QEMU ships a pinned meson
+          # wheel and bootstraps it into a venv when the system one is too old,
+          # so letting configure decide keeps the build reproducible across
+          # distro meson versions.
+          #
+          # --enable-slirp is not optional. quickchr's entire host↔guest path is
+          # SLiRP user networking + hostfwd, and QEMU has needed external
+          # libslirp since 7.2; a build without it would fail in a way that has
+          # nothing to do with the hypothesis under test.
+          #
+          # --disable-tools drops qemu-img and friends, so the DISTRO qemu-img
+          # keeps running. That is the point: only the system emulator changes,
+          # and image tooling cannot be blamed for a flip in the result. The
+          # aarch64 UEFI firmware (qemu-efi-aarch64) is likewise still the distro
+          # one — findEfiFirmware() reads /usr/share, not this prefix.
+          ./configure --prefix="$PREFIX" --target-list="$QEMU_TARGET" \
+            --enable-slirp --disable-docs --disable-gtk --disable-sdl \
+            --disable-vnc --disable-spice --disable-guest-agent --disable-tools
+          make -j"$(nproc)"
+          make install
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+          # Prove the build can do the one thing the tests need before spending
+          # 20 minutes discovering it cannot. A silently slirp-less QEMU would
+          # produce a "no REST" failure that looks exactly like #79.
+          bin="$PREFIX/bin/qemu-system-${QEMU_TARGET%-softmmu}"
+          "$bin" --version
+          # `-M none` is required: bare `-netdev help` exits with "No machine
+          # specified, and there is no default" and lists nothing, which made the
+          # first version of this guard fail a perfectly good build (run
+          # 30591946038). Capture the output and PRINT it — a guard that swallows
+          # the evidence for its own verdict is not diagnosable.
+          netdevs=$("$bin" -M none -netdev help 2>&1 || true)
+          printf '%s\n' "$netdevs" | sed 's/^/  /'
+          if ! printf '%s\n' "$netdevs" | grep -qw user; then
+            echo "::error::Built QEMU $QEMU_VERSION has no 'user' netdev — libslirp missing, the contrast would be meaningless"
+            exit 1
+          fi
+          echo "QUICKCHR_CI_QEMU_SOURCE=upstream-$QEMU_VERSION (built from source; qemu-img and UEFI firmware remain distro)" >> "$GITHUB_ENV"
+
+      # EXPERIMENT LEVER — pin the accelerator so a contrast cannot silently
+      # differ in it. Set via GITHUB_ENV rather than job-level env because an
+      # empty QUICKCHR_ACCEL is *defined* to the process and parseAccelMode()
+      # throws INVALID_SETTING_VALUE on "" — the default must be unset, not blank.
+      - name: Pin accelerator (experiment lever)
+        if: ${{ inputs.accel != '' }}
+        env:
+          ACCEL_INPUT: ${{ inputs.accel }}
+        run: |
+          set -eo pipefail
+          case "$ACCEL_INPUT" in
+            auto|tcg|hvf|kvm) ;;
+            *) echo "::error::Invalid accel '$ACCEL_INPUT' — must be one of auto, tcg, hvf, kvm"; exit 1 ;;
+          esac
+          echo "QUICKCHR_ACCEL=$ACCEL_INPUT" >> "$GITHUB_ENV"
+          echo "::notice::Accelerator pinned to '$ACCEL_INPUT' by the accel input — detectAccel is overridden on this leg"
+
       # No HVF/WHPX on GitHub Windows runners → QEMU falls back to TCG.
       - name: Install QEMU (Windows)
         if: ${{ runner.os == 'Windows' }}
@@ -364,6 +516,13 @@ jobs:
             bun --eval 'const os = await import("node:os"); const c = os.cpus(); console.log(`- Process: platform=${process.platform} arch=${process.arch} cpuCount=${c.length} cpuModel=${c[0]?.model ?? "unknown"} totalMemMiB=${Math.round(os.totalmem() / 1048576)} freeMemMiB=${Math.round(os.freemem() / 1048576)}`);'
             qemu-system-x86_64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
             qemu-system-aarch64 --version 2>/dev/null | head -1 | sed 's/^/- QEMU: /' || true
+            # Which QEMU actually got used is the whole point of a version
+            # contrast, so the artifact states it outright instead of leaving it
+            # to be inferred from a version string.
+            echo "- QEMU provenance: ${QUICKCHR_CI_QEMU_SOURCE:-distro package (qemu-version input not set)}"
+            qemu_path=$(command -v "qemu-system-$([ "$guest_arch" = arm64 ] && echo aarch64 || echo x86_64)" 2>/dev/null || echo "not found")
+            echo "- QEMU resolved on PATH: $qemu_path"
+            command -v qemu-img >/dev/null 2>&1 && qemu-img --version 2>/dev/null | head -1 | sed 's/^/- qemu-img: /' || true
             echo "- RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
             QUICKCHR_LOG_ARCH="$guest_arch" bun --eval 'const { detectAccel, isCrossArchEmulation, accelTimeoutFactor } = await import("./src/lib/platform.ts"); const arch = process.env.QUICKCHR_LOG_ARCH; const accel = await detectAccel(arch); const cross = isCrossArchEmulation(arch); console.log(`- quickchr detectAccel(${arch}): ${accel} (crossArch=${cross}, timeoutFactor=${accelTimeoutFactor(accel, cross)})`);'
             # ONE accel statement per leg, and it reports what was detected.
@@ -373,11 +532,16 @@ jobs:
             # not the detected value — drove the timeout and smoke planning.
             echo "- Accel: detected=$detected expected=$EXPECTED_ACCEL (guest $guest_arch) — budget class ${{ matrix.budget }}"
             if [ "$detected" != "$EXPECTED_ACCEL" ]; then
+              # An explicit pin is not drift and not a runner condition. Check it
+              # first, or a `-f accel=tcg` contrast on linux-arm64 would print the
+              # "no writable /dev/kvm" notice and record the wrong reason for TCG.
+              if [ -n "${QUICKCHR_ACCEL:-}" ]; then
+                echo "::notice::${{ matrix.id }} ran '$detected' because the accel input pinned QUICKCHR_ACCEL=$QUICKCHR_ACCEL — the matrix's '$EXPECTED_ACCEL' is deliberately overridden on this leg."
               # A Linux leg dropping kvm→tcg is a known runner condition, not a
               # wrong table: hosted runners sometimes ship without a writable
               # /dev/kvm (#79). Say so, but do not cry drift — a ::warning:: that
               # fires on an expected fallback is the noise that hides the real one.
-              if [ "${{ runner.os }}" = "Linux" ] && [ "$EXPECTED_ACCEL" = "kvm" ] && [ "$detected" = "tcg" ]; then
+              elif [ "${{ runner.os }}" = "Linux" ] && [ "$EXPECTED_ACCEL" = "kvm" ] && [ "$detected" = "tcg" ]; then
                 echo "::notice::${{ matrix.id }} fell back to TCG — no writable /dev/kvm on this runner. Expected-but-slow; see the KVM probe above."
               else
                 echo "::warning::Accel drift on ${{ matrix.id }}: detectAccel($guest_arch) returned '$detected' but the plan matrix expects '$EXPECTED_ACCEL' — update the platform table in integration.yml"
@@ -739,7 +903,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # +20 min when a source QEMU build precedes the examples, for the same reason
+    # the integration matrix pads its job budget — the build is not part of what
+    # the 60 min is meant to bound.
+    timeout-minutes: ${{ inputs.qemu-version != '' && 80 || 60 }}
     defaults:
       run:
         shell: bash
@@ -772,6 +939,64 @@ jobs:
       - name: Install QEMU + tools (macOS)
         if: ${{ runner.os == 'macOS' }}
         run: brew install qemu sshpass
+
+      # Same two experiment levers as the integration job — mirrored, not shared,
+      # because this file already keeps the per-OS install steps duplicated per
+      # job. A lever that applied to only one of the two jobs would make a
+      # `run-examples=true` dispatch test two different QEMUs in one run.
+      - name: Build upstream QEMU from source (experiment lever)
+        if: ${{ runner.os == 'Linux' && inputs.qemu-version != '' }}
+        env:
+          QEMU_VERSION: ${{ inputs.qemu-version }}
+          QEMU_TARGET: ${{ matrix.id == 'linux-arm64' && 'aarch64-softmmu' || 'x86_64-softmmu' }}
+        run: |
+          set -eo pipefail
+          if ! printf '%s' "$QEMU_VERSION" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::Refusing to build QEMU from unvalidated version '$QEMU_VERSION'"
+            exit 1
+          fi
+          PREFIX="$HOME/qemu-$QEMU_VERSION"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential ninja-build pkg-config python3-venv \
+            libglib2.0-dev libpixman-1-dev libslirp-dev libfdt-dev zlib1g-dev flex bison
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 -o qemu.tar.xz "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz"
+          tar xf qemu.tar.xz
+          cd "qemu-${QEMU_VERSION}"
+          # See the integration job's copy for why slirp is mandatory and why
+          # tools/firmware deliberately stay on the distro build.
+          ./configure --prefix="$PREFIX" --target-list="$QEMU_TARGET" \
+            --enable-slirp --disable-docs --disable-gtk --disable-sdl \
+            --disable-vnc --disable-spice --disable-guest-agent --disable-tools
+          make -j"$(nproc)"
+          make install
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+          bin="$PREFIX/bin/qemu-system-${QEMU_TARGET%-softmmu}"
+          "$bin" --version
+          # `-M none` is required — see the integration job's copy.
+          netdevs=$("$bin" -M none -netdev help 2>&1 || true)
+          printf '%s\n' "$netdevs" | sed 's/^/  /'
+          if ! printf '%s\n' "$netdevs" | grep -qw user; then
+            echo "::error::Built QEMU $QEMU_VERSION has no 'user' netdev — libslirp missing"
+            exit 1
+          fi
+          # Provenance, same as the integration job. This leg replaces the system
+          # emulator too, so a run must not have to infer from a version string
+          # alone which QEMU it actually exercised.
+          echo "QUICKCHR_CI_QEMU_SOURCE=upstream-$QEMU_VERSION (built from source; qemu-img and UEFI firmware remain distro)" >> "$GITHUB_ENV"
+
+      - name: Pin accelerator (experiment lever)
+        if: ${{ inputs.accel != '' }}
+        env:
+          ACCEL_INPUT: ${{ inputs.accel }}
+        run: |
+          set -eo pipefail
+          case "$ACCEL_INPUT" in
+            auto|tcg|hvf|kvm) ;;
+            *) echo "::error::Invalid accel '$ACCEL_INPUT' — must be one of auto, tcg, hvf, kvm"; exit 1 ;;
+          esac
+          echo "QUICKCHR_ACCEL=$ACCEL_INPUT" >> "$GITHUB_ENV"
+          echo "::notice::Accelerator pinned to '$ACCEL_INPUT' by the accel input — detectAccel is overridden on this leg"
 
       - name: Install QEMU (Windows)
         if: ${{ runner.os == 'Windows' }}
@@ -828,6 +1053,12 @@ jobs:
             echo "- Bun: $(bun --version)"
             echo "- RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
             echo "- Example filter: \`${EXAMPLE_FILTER:-curated subset}\`"
+            # This job can have its system emulator replaced by the qemu-version
+            # lever too, so it has to state which QEMU it ran. Without this the
+            # env marker set by the build step is invisible on this leg and a
+            # contrast could not be verified from the logs.
+            echo "- QEMU provenance: ${QUICKCHR_CI_QEMU_SOURCE:-distro package (qemu-version input not set)}"
+            echo "- Accel: ${QUICKCHR_ACCEL:-auto-detected (accel input not set)}"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The harness (test/integration/examples-smoke.test.ts) picks the right

@@ -151,6 +151,7 @@ gpt
 gre
 groupcheck
 gsub
+gtk
 haxm
 hdr
 highmem
@@ -176,6 +177,7 @@ ifname
 ifup
 ihl
 imagekey
+img
 initcall
 initialise
 insmod
@@ -194,7 +196,11 @@ lanbridge
 lastexitcode
 libc
 libexec
+libfdt
+libglib
+libpixman
 libsecret
+libslirp
 lic
 limactl
 listallhardwareports
@@ -341,6 +347,7 @@ savevm
 scaleway
 scp
 scriptable
+sdl
 seabios
 sed
 sendall
@@ -365,6 +372,7 @@ snapname
 sni
 snmp
 socat
+softmmu
 srand
 ssbd
 ssbs

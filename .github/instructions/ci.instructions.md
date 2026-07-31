@@ -226,6 +226,8 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 | `example-filter` | string | "" | Examples: comma-separated example names — e.g. `"quickstart,rollback"`; empty = curated subset. A typo fails fast (the harness validates against known names). |
 | `routeros-targets` | string | "" | Comma-separated RouterOS targets — channels (`stable`/`long-term`/`testing`/`development`) and/or pinned versions (`7.22.1`, `7.24beta2`). **Each target crosses with each platform** (matrix legs). Empty = stable. Feeds both integration and examples. |
 | `collect-metrics` | boolean | **true** (dispatch) | Push this run's boot/test timing to the `ci-data` branch. Default ON for dispatches — a run without recorded results is a wasted run. (`workflow_call` default is false; wrappers opt in explicitly.) |
+| `qemu-version` | string | "" | **Experiment lever, Linux only.** Build that upstream QEMU from source and put it first on `PATH` instead of the distro package. Empty = distro. See "Experiment levers" below. |
+| `accel` | string | "" | **Experiment lever.** Pin `QUICKCHR_ACCEL` (`tcg`/`kvm`/`hvf`/`auto`) instead of letting `detectAccel()` choose. Empty = auto-detect. |
 
 (`workflow_call` adds `artifact-prefix` so parallel callers don't collide on artifact names.)
 
@@ -235,9 +237,18 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 |-------------|--------|----------|-------|--------------------|
 | `linux-x86` | ubuntu-latest | x86 | KVM | 60 min |
 | `linux-arm64` | ubuntu-24.04-arm | arm64 | KVM if available; hosted runners may fall back to TCG | 60 min |
-| `macos-arm64` | macos-15 | arm64 | HVF | 60 min |
-| `macos-x86` | macos-15-intel | x86 | TCG | 300 min (90 with `tcg-smoke`/`test-filter`) |
+| `macos-arm64` | macos-15 | arm64 | **TCG** | 60 min |
+| `macos-x86` | macos-15-intel | x86 | **HVF** | 300 min (90 with `tcg-smoke`/`test-filter`) |
 | `windows-x86` | windows-latest | x86 | TCG | 300 min (90 with `tcg-smoke`/`test-filter`) |
+
+The two bold cells read HVF and TCG respectively until 2026-07-30; both were wrong
+and the `plan` job's own table already disagreed. `macos-arm64` is a hosted VM
+reporting `kern.hv_support=0`, and quickchr forces TCG for both guest arches on
+Apple Silicon anyway (#97) — a green `macos-arm64` leg is **not** evidence about
+the HVF path. `macos-x86` is bare metal and `detectAccel()` returns `hvf` there;
+its extended timeout is about #76, not about its accelerator. A source-built
+QEMU (`qemu-version`) adds **+20 min** to the affected leg's job budget; the test
+step's own cap is deliberately left unchanged.
 
 Every platform runs the **full suite by default** — TCG legs included (that is the
 "find out where windows/mac break" path). `tcg-smoke=true` is the only thing that
@@ -264,6 +275,66 @@ and local runs are unchanged). Tests that deliberately pin a version (provisioni
 `7.20.7`/`7.20.8`, library-api's `7.22.1`) ignore the override. Pinning an *old* target makes
 the version-gated provisioning/device-mode tests fail — expected, since channels all clear
 the 7.20.8 provisioning baseline.
+
+## Experiment levers (`qemu-version`, `accel`)
+
+Two dispatch inputs exist so a **controlled contrast** can vary one factor and hold
+everything else — same tests, same forensics, same artifacts, so two dispatches are
+actually comparable. Both are inert when empty, which is every normal run; nothing in
+`main.yml`, `sweep.yml` or `release.yml` sets them, and they are not part of the
+release gate.
+
+**`qemu-version`** downloads `https://download.qemu.org/qemu-<version>.tar.xz`, builds
+it, and prepends `$HOME/qemu-<version>/bin` to `PATH`. What it deliberately does **not**
+replace:
+
+- **`qemu-img`** — `--disable-tools` keeps the distro one, so image tooling can never be
+  blamed for a flip in the result. Only the system emulator changes.
+- **UEFI firmware** — `findEfiFirmware()` reads `/usr/share`, so `qemu-efi-aarch64` stays
+  the distro build.
+
+`--enable-slirp` is mandatory, not decorative: quickchr's whole host↔guest path is SLiRP
+user networking plus hostfwd, and QEMU has required external `libslirp` since 7.2. The
+step verifies `-netdev help` lists `user` and **fails the leg** if it doesn't — a
+slirp-less QEMU would produce a "REST never came up" failure indistinguishable from the
+bug under investigation.
+
+The build is **not** cached. The repo cache is already over its 10 GB cap (#104), and a
+build tree would evict the CHR images these legs depend on. Revisit once #104/B3 lands.
+
+Constraints, all enforced in the `plan` job so a mistake costs no runner minutes:
+
+- version must look like `8.2.2` / `11.0.2` (it goes into a URL);
+- Linux platforms only — accepting it on macOS/Windows would run the **distro** QEMU
+  under a run labelled with a version it never used;
+- `accel` must be one of `auto`/`tcg`/`hvf`/`kvm`.
+
+**`accel`** pins `QUICKCHR_ACCEL` via `GITHUB_ENV`, not job-level `env:` — an empty
+`QUICKCHR_ACCEL` is *defined* to the process and `parseAccelMode("")` throws
+`INVALID_SETTING_VALUE`, so the unset default has to stay genuinely unset. Use it when a
+contrast could otherwise differ in the accelerator: the Linux legs fall back to TCG
+depending on whether the runner ships a writable `/dev/kvm`, which is acceptable noise
+in a normal run and fatal to an experiment. When pinned, the platform log says so
+explicitly instead of printing the "no writable /dev/kvm" fallback notice.
+
+Worked example — the #79 QEMU-version contrast (B9 of #110), two dispatches differing
+in one input:
+
+```bash
+# arm A — reproduce the known-failing configuration
+gh workflow run integration.yml --ref <branch> \
+  -f platforms=linux-arm64 -f routeros-targets=7.21.5 \
+  -f test-filter=start-stop.test.ts -f run-examples=false -f accel=tcg
+
+# arm B — same everything, newer emulator
+gh workflow run integration.yml --ref <branch> \
+  -f platforms=linux-arm64 -f routeros-targets=7.21.5 \
+  -f test-filter=start-stop.test.ts -f run-examples=false -f accel=tcg \
+  -f qemu-version=11.0.2
+```
+
+Pin the RouterOS **version**, not the channel, in any contrast that spans days —
+`long-term` moves, and a moved channel silently varies a second factor.
 
 ## Integration Test Architecture Mapping
 
