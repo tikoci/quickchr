@@ -788,6 +788,16 @@ export type ErrorCode =
 	| "QGA_UNSUPPORTED"
 	| "QGA_TIMEOUT"
 	| "DOWNLOAD_FAILED"
+	// A transfer that received nothing for DOWNLOAD_STALL_MS. Retriable, and
+	// retried before this surfaces — a wedged socket usually moves on the next
+	// attempt (#116).
+	| "DOWNLOAD_STALLED"
+	// A transfer that kept moving but could not finish inside a budget derived
+	// from its content-length and COLD_DOWNLOAD_FLOOR_BYTES_PER_S. Terminal on
+	// purpose: retrying re-downloads from zero on a link already measured slower
+	// than the floor, which is the "one slow transfer becomes three" behavior
+	// #116 exists to remove.
+	| "DOWNLOAD_TOO_SLOW"
 	| "MACHINE_EXISTS"
 	| "MACHINE_NOT_FOUND"
 	| "MACHINE_RUNNING"

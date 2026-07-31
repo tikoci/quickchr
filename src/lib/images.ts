@@ -7,7 +7,7 @@ import { join, basename } from "node:path";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { chrDownloadUrl, chrImageBasename } from "./versions.ts";
-import { fetchResilient } from "./net.ts";
+import { downloadToFile } from "./download.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { extractZip } from "./zip.ts";
@@ -42,44 +42,8 @@ export async function downloadImage(
 	log.status(`Downloading CHR ${version} (${arch})...`);
 	log.status(`  ${url}`);
 
-	const MAX_RETRIES = 3;
-	let lastError: Error | undefined;
-
-	for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-		try {
-			const response = await fetchResilient(url, { signal: AbortSignal.timeout(120_000) });
-			// Non-retriable: client errors except 408 (request timeout) and 429
-			// (rate limited), which can be transient on CDNs.
-			if (response.status >= 400 && response.status < 500
-					&& response.status !== 408 && response.status !== 429) {
-				throw new QuickCHRError(
-					"DOWNLOAD_FAILED",
-					`Download failed: HTTP ${response.status} for ${url}`,
-				);
-			}
-			if (!response.ok) {
-				lastError = new Error(`HTTP ${response.status}`);
-			} else {
-				// Stream to disk via arrayBuffer (Bun.write with Response can hang on large files)
-				const buf = await response.arrayBuffer();
-				await Bun.write(zipPath, buf);
-				log.status(`  Saved (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-				return zipPath;
-			}
-		} catch (e) {
-			if (e instanceof QuickCHRError) throw e;
-			lastError = e instanceof Error ? e : new Error(String(e));
-		}
-		if (attempt < MAX_RETRIES) {
-			log.status(`  Download failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${attempt * 2}s...`);
-			await Bun.sleep(attempt * 2000);
-		}
-	}
-
-	throw new QuickCHRError(
-		"DOWNLOAD_FAILED",
-		`Download failed after ${MAX_RETRIES} attempts: ${lastError?.message ?? "unknown error"}`,
-	);
+	await downloadToFile(url, zipPath, { logger: log });
+	return zipPath;
 }
 
 /** Extract the .img from the ZIP. Returns path to the raw .img file. */

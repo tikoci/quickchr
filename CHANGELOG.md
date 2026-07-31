@@ -99,6 +99,30 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- **A healthy large download was reported as a timeout** (#116). Both download paths
+  bounded a transfer by *total duration*: `images.ts` aborted at a flat 120 s per
+  attempt and retried three times, `packages.ts` had no deadline and no retries at all.
+  A total-duration deadline cannot tell "slow" from "stuck" — it fires on a healthy
+  transfer whose only sin is being large, and the retry then re-downloads from zero,
+  turning one slow transfer into three. The old deadline sat *inside* the natural
+  variance of a healthy transfer, which is why it was intermittent: measured locally
+  against `download.mikrotik.com`, the same 52.2 MB all-packages zip took **118.4 s,
+  94.2 s, 123.5 s and 82.2 s** on four consecutive attempts over the same link (and
+  129.4 s on a fifth). All completed, but **one in four exceeded the flat 120 s** and
+  another cleared it by 1.6 s — so an unchanged healthy download passed or failed on
+  link jitter alone. CI's cold ~0.35 MB/s sits below that entire range, which is why a
+  hosted runner hit it far more often. A transfer
+  is now bounded by two deadlines and reports which one ended it — a **resettable stall
+  deadline** (30 s of silence, reset on every chunk, so a moving transfer is never
+  aborted for being slow) and an **outer transfer budget** derived from `content-length`
+  and a named floor throughput of 120 000 B/s (so a trickle still terminates; 465 s for
+  that same zip). Both paths now share one helper with one retry policy. Two new error
+  codes carry bytes/expected/elapsed/throughput: `DOWNLOAD_STALLED` (retriable — a
+  wedged socket usually moves on the next attempt) and `DOWNLOAD_TOO_SLOW` (terminal by
+  design — the budget is already ~3× the slowest throughput ever measured, so retrying
+  just spends it again on a link known to be slower than the floor). Downloads stream to
+  `<dest>.part` and are renamed only after a length-verified transfer, so an interrupted
+  download can no longer leave a truncated file that a later run treats as cached.
 - **The guest snapshot in a failure report could never log in.** Its per-query budget
   was sized on the ~0.3 s cost of a command on an already-open serial session, leaving
   the ~11.4 s RouterOS login unbudgeted — and the executor then divided that budget

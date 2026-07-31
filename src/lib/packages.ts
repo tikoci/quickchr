@@ -5,9 +5,8 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { Arch } from "./types.ts";
-import { QuickCHRError } from "./types.ts";
 import { packagesDownloadUrl } from "./versions.ts";
-import { fetchResilient } from "./net.ts";
+import { downloadToFile } from "./download.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { restPost } from "./rest.ts";
@@ -35,19 +34,14 @@ export async function downloadPackages(
 		return extractDir;
 	}
 
-	// Download if needed
+	// Download if needed. Same bounded path as the image download (#116) — this
+	// call site previously had neither a deadline nor retries, so its only bound
+	// was whatever the calling test happened to impose.
 	if (!existsSync(zipPath)) {
 		const log = logger ?? createLogger();
 		log.status(`Downloading packages for ${version} (${arch})...`);
-		const response = await fetchResilient(url);
-		if (!response.ok) {
-			throw new QuickCHRError(
-				"DOWNLOAD_FAILED",
-				`Failed to download packages: HTTP ${response.status} for ${url}`,
-			);
-		}
-		const buf = await response.arrayBuffer();
-		await Bun.write(zipPath, buf);
+		log.status(`  ${url}`);
+		await downloadToFile(url, zipPath, { logger: log });
 	}
 
 	// Extract
