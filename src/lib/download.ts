@@ -245,16 +245,13 @@ export async function downloadToFile(
 	}
 
 	const detail = lastError?.message ?? "unknown error";
+	// These messages land in CI logs and are the point of the bite, so say
+	// "1 attempt" rather than "all 1 attempts".
+	const tries = maxAttempts === 1 ? "1 attempt" : `all ${maxAttempts} attempts`;
 	if (lastError instanceof DownloadDeadlineError) {
-		throw new QuickCHRError(
-			"DOWNLOAD_STALLED",
-			`Download stalled on all ${maxAttempts} attempts: ${detail}`,
-		);
+		throw new QuickCHRError("DOWNLOAD_STALLED", `Download stalled on ${tries}: ${detail}`);
 	}
-	throw new QuickCHRError(
-		"DOWNLOAD_FAILED",
-		`Download failed after ${maxAttempts} attempts: ${detail}`,
-	);
+	throw new QuickCHRError("DOWNLOAD_FAILED", `Download failed after ${tries}: ${detail}`);
 }
 
 async function attemptDownload(
