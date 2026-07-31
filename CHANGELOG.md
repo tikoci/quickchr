@@ -50,6 +50,17 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Changed
 
+- CI: the CHR image cache is keyed by the **resolved** RouterOS version, and exactly one
+  configuration writes it. The `plan` job resolves each channel target to a concrete
+  version once per dispatch (`scripts/ci-cache-key.ts`, shared with the library's own
+  `resolveVersion()`), so the key is `chr-images-v3-{platform}-{version}` — no run id,
+  no channel alias — and an exact hit correctly means the entry already holds what the
+  leg needs. Only a full unfiltered integration leg writes; filtered/smoke legs and the
+  examples-smoke job restore read-only, because an entry's content must stay a function
+  of its key. The previous per-run rotation wrote a fresh 250-520 MB entry on every leg
+  of every run (~1 GB per push to main, 11.49 GB against a 10 GB quota, #104) and left
+  cold download an uncontrolled variable in every timing measurement (#106). Each leg
+  logs `Cache OWNER`/`Cache READER` with its key.
 - CI: the integration test step now carries its own `timeout-minutes`, 10 minutes under
   the job budget. A *job* timeout tears the runner down before any `if: always()` step
   runs, so the artifact upload is skipped and the leg produces no evidence at all — the
@@ -136,7 +147,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 - CI: the CHR image cache never re-saved. `actions/cache` skips its post-job save on an
   exact key hit, so the static `chr-images-{OS}-{arch}-v1` key meant any RouterOS
   version resolved after the cache was first populated re-downloaded on *every* run.
-  The primary key now rotates per run, with `restore-keys` doing the prefix fallback.
+  (The first fix rotated the key per run; see the cache-key entry under Changed for
+  what replaced that.)
 - CI: the examples smoke harness buffered child output until exit, so an example that
   hung until the per-test timeout produced no output at all. Output now streams with a
   per-example prefix, and both streams are printed on a non-zero exit.
