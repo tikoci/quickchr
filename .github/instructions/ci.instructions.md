@@ -555,8 +555,15 @@ key independently would both save and race, and one multi-hundred-MB upload
 would always be discarded. The reader's `::notice::` states which of the three
 reasons applies.
 
-`actions/cache` skips its post-job save whenever the primary key hit exactly.
-That is only sound while an entry's content is a **function of its key**, which
+Restore and save are separate steps (`actions/cache/restore` + a guarded
+`actions/cache/save`), not the combined action. An owner saves only when all
+three hold: it claimed the key in `plan`, the restore **missed** (an exact hit
+already holds this content), and the directory **verifies** against the key. The
+save step carries no `if: always()`, so reaching it at all means the test loop
+ran to completion — a leg torn down mid-suite holds a partial set and must never
+own the key.
+
+A cache entry is only trustworthy while its content is a **function of its key**, which
 is why exactly one configuration writes: the full suite is the only one that
 downloads the whole set (the resolved target *plus* the version-pinned images
 and package archives the suite fixes — 7.20.7/7.20.8, 7.22.1). If a filtered
@@ -579,11 +586,21 @@ Two consequences worth knowing:
   from a leg that *completed* the file loop but failed a test would be sound —
   it downloaded everything — but needs a marker distinguishing "loop finished"
   from "step timed out mid-loop", which is its own change.)
-- **A release published mid-dispatch drifts one run.** `plan` resolved
-  `stable` → 7.23.2; a leg starting 20 min later downloads 7.23.3 under the
-  7.23.2 key and (on an exact hit) does not save it. The next dispatch resolves
-  7.23.3, misses, and saves — self-healing within one cycle. Do not "fix" this
-  by rotating the key again.
+- **A release published mid-dispatch is caught by the drift guard, not by
+  luck.** `plan` fixes `matrix.resolved`, but a leg boots `matrix.target`, and a
+  channel target is re-resolved by *every* `start()`. So `stable` planned as
+  7.23.2 can have the leg downloading 7.23.3. On an exact hit nothing is written
+  and the drift is harmless — but on a **miss** the leg would save 7.23.3
+  content under the 7.23.2 key, and that never heals: every later leg pinned to
+  7.23.2 exact-hits an entry with no 7.23.2 image, re-downloads, and cannot save.
+  #91 again, permanently, for that key.
+
+  So the owner verifies before saving — the directory must hold an image of the
+  version the key names, read through the library's own cache parser
+  (`ci-cache-key.ts verify`). On a mismatch the save is skipped with a
+  `::warning::` naming the versions actually present. Nothing is poisoned, and
+  the next dispatch keys on the new version, misses, and saves correctly. Do not
+  "fix" any of this by rotating the key again.
 
 Bump `CACHE_KEY_GENERATION` in `scripts/ci-cache-key.ts` (currently `v3`) to
 invalidate wholesale — a changed content contract, or a corrupted image from a

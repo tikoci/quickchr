@@ -648,6 +648,16 @@ jobs:
       #
       # `path` is getCacheDir()'s answer rather than a literal, so the workflow
       # cannot drift from the directory quickchr actually downloads into.
+      #
+      # Restore and save are SEPARATE actions on purpose. `actions/cache`'s
+      # combined form saves in a post step whose only condition is job success,
+      # which is too blunt: `matrix.resolved` is fixed at planning time, but a
+      # channel target is re-resolved by every start(), so a release landing
+      # mid-dispatch has the leg downloading 7.23.3 under a key naming 7.23.2.
+      # An exact hit writes nothing and the drift is harmless; a MISS would save
+      # mislabelled content, and that never heals — later legs pinned to 7.23.2
+      # exact-hit an entry without their image forever. The explicit save below
+      # runs only after verifying the directory holds what the key claims.
       - name: Resolve cache identity
         id: cache
         env:
@@ -673,16 +683,8 @@ jobs:
             echo "::notice::Cache READER for ${PLATFORM} @ ${RESOLVED} — ${why}; readers never write (#104)"
           fi
 
-      - name: Cache CHR images (owner — full suite)
-        if: ${{ steps.cache.outputs.owner == 'true' }}
-        uses: actions/cache@v5
-        with:
-          path: ${{ steps.cache.outputs.path }}
-          key: ${{ steps.cache.outputs.key }}
-          restore-keys: ${{ steps.cache.outputs.restore_keys }}
-
-      - name: Restore CHR images (reader — filtered/smoke)
-        if: ${{ steps.cache.outputs.owner != 'true' }}
+      - name: Restore CHR images
+        id: restore
         uses: actions/cache/restore@v5
         with:
           path: ${{ steps.cache.outputs.path }}
@@ -783,6 +785,44 @@ jobs:
             pkill -KILL -f 'qemu-system-(x86_64|aarch64)' 2>/dev/null || true
           fi
           true
+
+      # ── the owner's save (#104) ───────────────────────────────────────────────
+      # Explicit rather than actions/cache's post step, so it can carry three
+      # conditions instead of one:
+      #
+      #   owner            — a full unfiltered leg that claimed this key in plan
+      #   restore missed   — an exact hit already holds this content; re-uploading
+      #                      several hundred MB to replace it with itself is waste
+      #   content verified — the directory really holds an image of the version
+      #                      the key names (see the drift guard in ci-cache-key.ts)
+      #
+      # No `if: always()`: reaching this step at all means the test loop ran to
+      # completion. A leg torn down mid-suite holds a partial set and must never
+      # own the key — the same reason a filtered leg cannot. That is why a
+      # platform whose suite never finishes never populates its entry (#76/B8).
+      - name: Verify cache content matches the key
+        id: verify
+        if: ${{ steps.cache.outputs.owner == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+        env:
+          RESOLVED: ${{ matrix.resolved }}
+        run: |
+          set -eo pipefail
+          bun scripts/ci-cache-key.ts verify --version "$RESOLVED"
+
+      - name: Save CHR images (owner)
+        if: ${{ steps.cache.outputs.owner == 'true' && steps.restore.outputs.cache-hit != 'true' && steps.verify.outputs.matches == 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.cache.outputs.path }}
+          key: ${{ steps.cache.outputs.key }}
+
+      - name: Report a skipped save
+        if: ${{ steps.cache.outputs.owner == 'true' && steps.restore.outputs.cache-hit != 'true' && steps.verify.outputs.matches != 'true' }}
+        env:
+          RESOLVED: ${{ matrix.resolved }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          echo "::warning::Not saving ${{ steps.cache.outputs.key }} — the cache holds no image for ${RESOLVED}. Target '${TARGET}' most likely re-resolved to a newer release after plan fixed the key. Nothing is poisoned; the next dispatch keys on the new version and saves. See the drift guard in scripts/ci-cache-key.ts."
 
       # Diagnostic regression guard, arm64 only (historical stale-REST bug). Its
       # failure is the signal being collected, so it never gates — the explicit
