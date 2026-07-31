@@ -980,6 +980,10 @@ jobs:
             echo "::error::Built QEMU $QEMU_VERSION has no 'user' netdev — libslirp missing"
             exit 1
           fi
+          # Provenance, same as the integration job. This leg replaces the system
+          # emulator too, so a run must not have to infer from a version string
+          # alone which QEMU it actually exercised.
+          echo "QUICKCHR_CI_QEMU_SOURCE=upstream-$QEMU_VERSION (built from source; qemu-img and UEFI firmware remain distro)" >> "$GITHUB_ENV"
 
       - name: Pin accelerator (experiment lever)
         if: ${{ inputs.accel != '' }}
@@ -992,6 +996,7 @@ jobs:
             *) echo "::error::Invalid accel '$ACCEL_INPUT' — must be one of auto, tcg, hvf, kvm"; exit 1 ;;
           esac
           echo "QUICKCHR_ACCEL=$ACCEL_INPUT" >> "$GITHUB_ENV"
+          echo "::notice::Accelerator pinned to '$ACCEL_INPUT' by the accel input — detectAccel is overridden on this leg"
 
       - name: Install QEMU (Windows)
         if: ${{ runner.os == 'Windows' }}
@@ -1048,6 +1053,12 @@ jobs:
             echo "- Bun: $(bun --version)"
             echo "- RouterOS target: \`${QUICKCHR_TEST_TARGET:-stable (default)}\`"
             echo "- Example filter: \`${EXAMPLE_FILTER:-curated subset}\`"
+            # This job can have its system emulator replaced by the qemu-version
+            # lever too, so it has to state which QEMU it ran. Without this the
+            # env marker set by the build step is invisible on this leg and a
+            # contrast could not be verified from the logs.
+            echo "- QEMU provenance: ${QUICKCHR_CI_QEMU_SOURCE:-distro package (qemu-version input not set)}"
+            echo "- Accel: ${QUICKCHR_ACCEL:-auto-detected (accel input not set)}"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The harness (test/integration/examples-smoke.test.ts) picks the right

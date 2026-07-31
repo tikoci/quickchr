@@ -1,16 +1,18 @@
-#
-# (British spellings), doc placeholders (my*), and one-off test sentinels live
-# (e.g. "respawn" -> "Respawning", "qemu" -> "QEMU"). Keep sorted; add a word
-# Canonical home for project vocabulary — QEMU, RouterOS, networking, and
-# `.vscode/settings.json` `cSpell.words` list, which the CLI could not see.
-# `bun run lint:cspell` / `bun run check`) read it. This replaces the old
-# cSpell matches case-insensitively, so the lowercase form covers all casings
-# cspell.json, so both the editor extension and CLI `cspell lint` (run via
-# here automatically (dictionaryDefinitions addWords: true). Locale variants
-# in cspell.json `ignoreWords`, not here.
 # quickchr project dictionary (cspell)
-# rather than tolerate noise. The editor "Add to dictionary" quick-fix appends
+#
+# Canonical home for project vocabulary — QEMU, RouterOS, networking, and
 # tikoci domain terms absent from the default en dictionary. Referenced from
+# cspell.json, so both the editor extension and CLI `cspell lint` (run via
+# `bun run lint:cspell` / `bun run check`) read it. This replaces the old
+# `.vscode/settings.json` `cSpell.words` list, which the CLI could not see.
+#
+# cSpell matches case-insensitively, so the lowercase form covers all casings
+# (e.g. "respawn" -> "Respawning", "qemu" -> "QEMU"). Keep sorted; add a word
+# rather than tolerate noise. The editor "Add to dictionary" quick-fix appends
+# here automatically (dictionaryDefinitions addWords: true). Locale variants
+# (British spellings), doc placeholders (my*), and one-off test sentinels live
+# in cspell.json `ignoreWords`, not here.
+
 aavmf
 accels
 ack
