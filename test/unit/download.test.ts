@@ -29,6 +29,7 @@ import {
 	COLD_DOWNLOAD_FLOOR_BYTES_PER_S,
 	DOWNLOAD_BUDGET_BASE_MS,
 	DOWNLOAD_NO_LENGTH_BUDGET_MS,
+	DOWNLOAD_MAX_BUDGET_MS,
 	DOWNLOAD_STALL_MS,
 	type TransferOutcome,
 } from "../../src/lib/download.ts";
@@ -56,6 +57,9 @@ interface StubOptions {
 	/** `Content-Length` to declare. `null` omits it (close-delimited body).
 	 *  Defaults to `size`. */
 	declareLength?: number | null;
+	/** Declare a raw `Content-Length` value verbatim — for the blank/malformed
+	 *  headers a numeric option cannot express. Wins over `declareLength`. */
+	declareLengthRaw?: string;
 	/** Bytes per write. Defaults to the whole body in one go. */
 	chunk?: number;
 	/** Delay between writes, ms. */
@@ -105,7 +109,12 @@ function startStub(opts: StubOptions): { url: string; attempts: () => number } {
 		}
 
 		const declared = opts.declareLength === undefined ? opts.size : opts.declareLength;
-		const lengthHeader = declared === null ? "" : `Content-Length: ${declared}\r\n`;
+		const lengthHeader =
+			opts.declareLengthRaw !== undefined
+				? `Content-Length:${opts.declareLengthRaw}\r\n`
+				: declared === null
+					? ""
+					: `Content-Length: ${declared}\r\n`;
 		sock.write(`HTTP/1.1 200 OK\r\n${lengthHeader}Connection: close\r\n\r\n`);
 		sock.flush();
 
@@ -403,6 +412,103 @@ describe("describeTransfer", () => {
 		expect(s).toContain("of unknown size");
 		expect(s).toContain("no content-length");
 	});
+});
+
+// --- Review findings from PR #119 (CodeRabbit). Each of these was a real defect
+// --- in the first cut of this module; the tests exist so they cannot come back.
+describe("review findings — #119", () => {
+	test("the budget is clamped below the 32-bit setTimeout ceiling", () => {
+		// A server-controlled content-length feeds this. Above 2^31-1 ms the delay
+		// overflows and setTimeout fires immediately, which would have produced an
+		// instant — and terminal, un-retried — DOWNLOAD_TOO_SLOW.
+		const absurd = 10 ** 15; // ~1 PB
+		expect(transferBudgetMs(absurd)).toBe(DOWNLOAD_MAX_BUDGET_MS);
+		expect(transferBudgetMs(Number.MAX_SAFE_INTEGER)).toBeLessThanOrEqual(DOWNLOAD_MAX_BUDGET_MS);
+		// The clamp must not disturb any real artifact.
+		expect(transferBudgetMs(52_216_933)).toBeLessThan(DOWNLOAD_MAX_BUDGET_MS);
+	});
+
+	test("a stall message names the deadline that actually fired, not the default", async () => {
+		const { url } = startStub({ size: 100_000, chunk: 1_000, silentAfter: 2_000 });
+		const dest = join(tempDir(), "artifact.zip");
+
+		const err = await expectQuickCHRError(
+			downloadToFile(url, dest, { logger: silentLogger, stallMs: 400, maxAttempts: 1 }),
+		);
+
+		// Was hardcoded to DOWNLOAD_STALL_MS, so an overridden deadline reported
+		// "30s" for a transfer aborted after 0.4s. The message is the deliverable
+		// of #116 — naming a deadline the transfer was never held to is the
+		// misleading evidence this program exists to remove.
+		expect(err.message).toContain("no data for 0.4s");
+		expect(err.message).not.toContain("no data for 30");
+	}, 30_000);
+
+	test("concurrent downloads of one artifact do not corrupt it", async () => {
+		// Both call sites guard only with existsSync(dest), so two `quickchr
+		// start`s or parallel tests reach downloadToFile together. On a shared
+		// `<dest>.part` they interleaved writes into one file and renameSync then
+		// published the corrupt result to the cache path — and a failing attempt's
+		// cleanup deleted the other's in-flight file.
+		const { url } = startStub({ size: 200_000, chunk: 4_096, gapMs: 2 });
+		const dest = join(tempDir(), "artifact.zip");
+
+		const outcomes = await Promise.all([
+			downloadToFile(url, dest, { logger: silentLogger }),
+			downloadToFile(url, dest, { logger: silentLogger }),
+			downloadToFile(url, dest, { logger: silentLogger }),
+		]);
+
+		for (const o of outcomes) expect(o.bytes).toBe(200_000);
+		// Whichever writer landed last, the published file is a complete one.
+		const published = readFileSync(dest);
+		expect(published.byteLength).toBe(200_000);
+		expect(published.every((b) => b === 65)).toBe(true);
+	}, 30_000);
+
+	// Bun's own handling of a malformed content-length, measured against the raw
+	// stub, is the context for these two:
+	//
+	//   "   "           -> header stripped to null,  body 0 bytes
+	//   "not-a-number"  -> header passed through,    body 0 bytes
+	//   "-5"            -> header passed through,    body 0 bytes
+	//   "4096.5"        -> header passed through,    body 0 bytes
+	//   "4096"          -> header passed through,    body 4096 bytes
+	//
+	// So `Number("")` is not reachable through this transport — Bun strips a blank
+	// header before we see it — and the parsing guard is defensive. What IS
+	// reachable is a passed-through malformed value with an empty body.
+	test("a malformed content-length does not become a bogus expected size", async () => {
+		// Without the isInteger/>=0 guard, "4096.5" parses finite and the
+		// truncation check then reports the (empty) transfer against a fractional
+		// expected size, which is a confusing way to describe a server fault.
+		const { url } = startStub({ size: 4_096, chunk: 1_024, declareLengthRaw: " 4096.5" });
+		const dest = join(tempDir(), "artifact.zip");
+
+		const err = await expectQuickCHRError(
+			downloadToFile(url, dest, { logger: silentLogger, maxAttempts: 1 }),
+		);
+
+		expect(err.message).toContain("empty transfer");
+		expect(err.message).not.toContain("4096.5");
+	}, 30_000);
+
+	test("a zero-byte body is never published to the cache path", async () => {
+		// Found while probing the above, and worse than the reported finding: an
+		// unknown-length response has no length to verify against, so a 0-byte body
+		// would have been renamed into the cache as a complete artifact and served
+		// as valid forever. No artifact quickchr downloads is empty.
+		const { url } = startStub({ size: 0, declareLength: null });
+		const dest = join(tempDir(), "artifact.zip");
+
+		const err = await expectQuickCHRError(
+			downloadToFile(url, dest, { logger: silentLogger, maxAttempts: 1 }),
+		);
+
+		expect(err.code).toBe("DOWNLOAD_FAILED");
+		expect(err.message).toContain("empty transfer");
+		expect(existsSync(dest)).toBe(false);
+	}, 30_000);
 });
 
 describe("the two deadlines are usefully different", () => {

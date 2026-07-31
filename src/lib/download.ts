@@ -47,6 +47,7 @@
  */
 
 import { unlinkSync, existsSync, renameSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { QuickCHRError } from "./types.ts";
 import { fetchResilient } from "./net.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
@@ -102,6 +103,20 @@ export const DOWNLOAD_NO_LENGTH_BUDGET_MS = 15 * 60_000;
 export const DOWNLOAD_MAX_ATTEMPTS = 3;
 
 /**
+ * Largest delay `setTimeout` can represent. Above this the 32-bit delay
+ * overflows and the timer fires **immediately**.
+ *
+ * This matters because the transfer budget is derived from a server-controlled
+ * `content-length`: a response declaring ~257 GB or more would otherwise produce
+ * an instant `transfer-budget` deadline, which this module treats as terminal
+ * `DOWNLOAD_TOO_SLOW` with no retry. Clamping turns an absurd declared size into
+ * a very long budget instead of an immediate bogus failure; the stall deadline
+ * still bounds a dead connection, and the callers' storage preflight still
+ * bounds what can actually be written.
+ */
+export const DOWNLOAD_MAX_BUDGET_MS = 2_147_483_647;
+
+/**
  * Transfer budget in ms for an artifact of `bytes`, or {@link
  * DOWNLOAD_NO_LENGTH_BUDGET_MS} when the size is unknown.
  *
@@ -117,7 +132,10 @@ export function transferBudgetMs(bytes: number | undefined): number {
 	if (bytes === undefined || !Number.isFinite(bytes) || bytes < 0) {
 		return DOWNLOAD_NO_LENGTH_BUDGET_MS;
 	}
-	return DOWNLOAD_BUDGET_BASE_MS + Math.ceil((bytes / COLD_DOWNLOAD_FLOOR_BYTES_PER_S) * 1000);
+	return Math.min(
+		DOWNLOAD_BUDGET_BASE_MS + Math.ceil((bytes / COLD_DOWNLOAD_FLOOR_BYTES_PER_S) * 1000),
+		DOWNLOAD_MAX_BUDGET_MS,
+	);
 }
 
 /** Which of the two bounds ended a transfer. */
@@ -156,10 +174,13 @@ export function describeTransfer(o: TransferOutcome): string {
  *  and for the retry decision — a stall is retriable, an exhausted budget is not. */
 export class DownloadDeadlineError extends Error {
 	readonly outcome: TransferOutcome;
-	constructor(outcome: TransferOutcome, url: string) {
+	/** `stallMs` is the deadline that was actually in force, not the default —
+	 *  a message naming a deadline the transfer was never held to is exactly the
+	 *  misleading evidence #116 exists to remove. */
+	constructor(outcome: TransferOutcome, url: string, stallMs: number = DOWNLOAD_STALL_MS) {
 		super(
 			outcome.deadline === "stall"
-				? `Download stalled: no data for ${(DOWNLOAD_STALL_MS / 1000).toFixed(0)}s — ${describeTransfer(outcome)} from ${url}`
+				? `Download stalled: no data for ${(stallMs / 1000).toFixed(1)}s — ${describeTransfer(outcome)} from ${url}`
 				: `Download exceeded its transfer budget — ${describeTransfer(outcome)} from ${url}`,
 		);
 		this.name = "DownloadDeadlineError";
@@ -212,7 +233,20 @@ export async function downloadToFile(
 	const log = opts.logger ?? createLogger();
 	const maxAttempts = opts.maxAttempts ?? DOWNLOAD_MAX_ATTEMPTS;
 	const stallMs = opts.stallMs ?? DOWNLOAD_STALL_MS;
-	const partPath = `${destPath}.part`;
+	// Unique per call, not a fixed `<dest>.part`. Both callers guard only with
+	// `existsSync(destPath)`, so two concurrent downloads of the same artifact —
+	// two `quickchr start`s, or parallel tests — reach this together. On a shared
+	// path they would interleave writes into one file, the length check could
+	// still pass, and `renameSync` would publish the corrupt result to the cache
+	// path that every later run treats as valid. A failing attempt's cleanup
+	// would also delete the other's in-flight file.
+	//
+	// A unique suffix removes the collision; it deliberately does not deduplicate
+	// the work. Two concurrent downloads both transfer and both rename, which is
+	// wasteful but correct (last writer wins, and either file is complete).
+	// Coalescing them needs a lock around the whole call at both call sites, which
+	// is a bigger design change than #116 is scoped for.
+	const partPath = `${destPath}.${process.pid}-${randomUUID().slice(0, 8)}.part`;
 
 	let lastError: Error | undefined;
 
@@ -301,6 +335,9 @@ async function attemptDownload(
 		const response = await fetchResilient(url, { signal: controller.signal });
 
 		if (!response.ok) {
+			// Release the connection rather than leaving the body for GC — the
+			// retriable branch would otherwise repeat that once per attempt.
+			await response.body?.cancel().catch(() => {});
 			// Non-retriable client errors are the server telling us the request is
 			// wrong; a retry cannot change that. Surface immediately.
 			if (!isRetriableStatus(response.status)) {
@@ -312,9 +349,15 @@ async function attemptDownload(
 			throw new Error(`HTTP ${response.status}`);
 		}
 
-		const lengthHeader = response.headers.get("content-length");
-		expected = lengthHeader === null ? undefined : Number(lengthHeader);
-		if (expected !== undefined && !Number.isFinite(expected)) expected = undefined;
+		// An absent, blank or malformed `content-length` means *unknown*, never
+		// zero. `Number("")` is 0 and finite, which would both collapse the budget
+		// to the base and make the truncation check below fire on the first byte —
+		// reporting a healthy transfer as truncated.
+		const lengthText = response.headers.get("content-length")?.trim();
+		expected = lengthText === undefined || lengthText === "" ? undefined : Number(lengthText);
+		if (expected !== undefined && (!Number.isInteger(expected) || expected < 0)) {
+			expected = undefined;
+		}
 		budgetMs = budgetOverrideMs ?? transferBudgetMs(expected);
 		budgetTimer = setTimeout(() => {
 			fired = "transfer-budget";
@@ -351,6 +394,17 @@ async function attemptDownload(
 			throw e;
 		}
 
+		// No artifact quickchr downloads is empty, so a zero-byte body is always a
+		// failure however the server framed it. Without this an unknown-length
+		// response — which is exactly what Bun hands back for a *malformed*
+		// content-length (measured: `4096.5` and `-5` both yield 0 bytes) — would
+		// have no length to verify against, and the empty file would be renamed
+		// into the cache as a complete artifact. Retriable: an empty body is
+		// usually a transient server or proxy fault.
+		if (bytes === 0) {
+			throw new Error(`empty transfer — server sent no body (${describeTransfer(outcome())})`);
+		}
+
 		// Defense in depth. Measured against a raw stub: when a server declares a
 		// length and then closes early, Bun's fetch already throws ECONNRESET while
 		// reading the body, so this rarely fires. It still has to be here — a
@@ -363,7 +417,7 @@ async function attemptDownload(
 		return outcome();
 	} catch (e) {
 		clearTimers();
-		if (fired !== undefined) throw new DownloadDeadlineError(outcome(), url);
+		if (fired !== undefined) throw new DownloadDeadlineError(outcome(), url, stallMs);
 		throw e;
 	}
 }
