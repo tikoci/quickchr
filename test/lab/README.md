@@ -18,11 +18,16 @@ Each subdirectory is a self-contained lab covering one subsystem:
 | `ssh-keys/` | SSH key provisioning and `exec --via=ssh` | — | `provisioning.instructions.md` |
 | `www-abort-damage/` | Does an aborted REST probe damage RouterOS `www`? (#79) | 5 | `qemu.instructions.md` |
 | `scripting-patterns/` | RouterOS scripting via REST `/execute` | — | — |
+| `full-suite-resource-trend/` | Does full-suite cost inflate with position, or stay flat? (#76) | — | `ci.instructions.md` |
 
 Each directory contains:
 
 - `*.test.ts` — Bun test files with inline findings as header comments
 - `REPORT.md` — Lab report: methodology, conclusions, open issues, links to skills
+
+`full-suite-resource-trend/` is the exception to the `*.test.ts` shape: it measures
+the *harness* rather than RouterOS, so it is a sampler plus a runner that
+reproduces the CI per-file loop. See its own README for how to run it.
 
 ## Running
 
