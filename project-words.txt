@@ -21,6 +21,7 @@ addrs
 aehd
 ahostsv
 amm
+apfs
 apk
 apkindex
 argjson
@@ -206,6 +207,7 @@ limactl
 listallhardwareports
 lldp
 llm
+loadavg
 loadvm
 localaddr
 localappdata
@@ -227,6 +229,8 @@ mcast
 mcfg
 mcp
 memmap
+memorystatus
+memsize
 mgmt
 mib
 mikropkl
@@ -242,6 +246,7 @@ mqtts
 mte
 mtree
 ncaps
+ncpu
 neoverse
 netboot
 netdev
@@ -285,6 +290,7 @@ perflevel
 pflash
 pfr
 pgrep
+physicalcpu
 pidfile
 piix
 pingable
@@ -300,9 +306,11 @@ pptp
 prereq
 prerouting
 printk
+procs
 proplist
 provpass
 publickey
+purgeable
 pxe
 pyc
 pycache
@@ -390,6 +398,7 @@ subtests
 sve
 svl
 svm
+swapusage
 syscalls
 sysfs
 sysinit

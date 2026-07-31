@@ -534,6 +534,25 @@ on one key within a run. Old entries age out under the repo's cache LRU cap.
 Cache misses cause a fresh download (~50-100 MB). Bump `-v2` to invalidate
 wholesale (e.g. a corrupted image from a partial download).
 
+**A cache miss is large enough to dominate a timing measurement, so treat cold
+download as a confound in any per-file comparison.** Measured locally on
+2026-07-31 (`test/lab/full-suite-resource-trend/REPORT.md`, B7 of #110):
+`provisioning.test.ts` ran **992 s against 502 s for the same file on
+`windows-x86` CI (1.98×)** purely because its version-pinned 7.20.7/7.20.8
+images were uncached — **619 s of those 992 s (62%) elapsed with zero QEMU
+processes running**, and both images needed two retries before succeeding.
+Excluding the download leaves 373 s of VM work, 0.74×, in line with every other
+file in the suite.
+
+Two consequences:
+
+- **Do not read a slow file as a slow file** without checking whether it was
+  downloading. The cheap discriminator is whether any `qemu-system` process was
+  alive; that single check is what kept the above from being misread as
+  cumulative resource leakage on the very file where such a story was expected.
+- **Timing data collected while cache keys still rotate per run carries this
+  variance**, which is why #104's key redesign gates #106's sample collection.
+
 ## Adding a New Runner
 
 1. Add a row to the `plan` job's platform table in `integration.yml` (id, label, runner,
