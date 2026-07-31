@@ -30,8 +30,8 @@ Artifacts in `outdir`:
 | `host.txt` | host/QEMU/accel/CPU/memory, target, SHA, start+finish stamps |
 | `timing.txt` | `<file> <seconds>s <status>` — same format `parseTimingFile()` reads |
 | `output.txt` | concatenated `bun test` output, one `=== <file>` banner per file |
-| `samples.ndjson` | one resource sample every 5 s, attributed to the running file |
-| `current-file` | marker the sampler reads; `(startup)` → file → `(done)` |
+| `samples.ndjson` | one resource sample every 5 s, attributed to the running file (or to an `(after …)` gap between files) |
+| `current-file` | marker the sampler reads; `(startup)` → file → `(after <file>)` → next file → … → `(done)` |
 
 ## Baseline hygiene
 

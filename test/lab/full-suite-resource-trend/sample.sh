@@ -31,12 +31,21 @@ while :; do
 	# free + inactive is the honest "reclaimable" figure on macOS; compressor
 	# pages are tracked separately because a steady climb there is the signature
 	# of accumulation that free-page counts alone hide.
-	eval "$(vm_stat | awk -v p="$PAGE" '
-		/Pages free/                  {gsub(/\./,"",$3); printf "VM_FREE=%d\n",      $3*p/1048576}
-		/Pages inactive/              {gsub(/\./,"",$3); printf "VM_INACTIVE=%d\n",  $3*p/1048576}
-		/Pages wired down/            {gsub(/\./,"",$4); printf "VM_WIRED=%d\n",     $4*p/1048576}
-		/occupied by compressor/      {gsub(/\./,"",$5); printf "VM_COMPRESSED=%d\n",$5*p/1048576}
-	')"
+	# awk emits four plain numbers and `read` consumes them, rather than awk
+	# emitting shell assignments for `eval`. vm_stat's output is not attacker-
+	# controlled, so the eval form was not exploitable — but it is a pattern that
+	# becomes an injection point the moment someone copies it onto a source that
+	# is, and static analysis flags it as CWE-78 either way.
+	VM_LINE=$(vm_stat | awk -v p="$PAGE" '
+		/Pages free/             {gsub(/\./,"",$3); f=$3*p/1048576}
+		/Pages inactive/         {gsub(/\./,"",$3); ia=$3*p/1048576}
+		/Pages wired down/       {gsub(/\./,"",$4); w=$4*p/1048576}
+		/occupied by compressor/ {gsub(/\./,"",$5); c=$5*p/1048576}
+		END                      {printf "%d %d %d %d", f, ia, w, c}
+	')
+	read -r VM_FREE VM_INACTIVE VM_WIRED VM_COMPRESSED <<-EOF
+		$VM_LINE
+	EOF
 
 	# "total = 3072.00M  used = 1671.00M  free = 1401.00M  (encrypted)"
 	#   $1=total $2== $3=3072.00M $4=used $5== $6=1671.00M — used is $6, not $7.
