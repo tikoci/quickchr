@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { accelTimeoutFactor, detectAccel, isCrossArchEmulation } from "../../src/lib/platform.ts";
 import { restGet } from "../../src/lib/rest.ts";
-import { basicAuth } from "./chr-rest.ts";
+import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
 
@@ -56,6 +56,11 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			const base = `http://127.0.0.1:${instance.ports.http}/rest`;
 			const auth = basicAuth("admin", "");
 
+			// One-shot reads below go through chrGet, so a reset after readiness produces
+			// a forensic report rather than a bare error (#69). fetchUntilHasKeys stays on
+			// plain restGet: it is *built* to catch errors and retry, and a capture per
+			// retry would cost BOOT_FORENSICS_BUDGET_MS each.
+			//
 			// RouterOS non-resource endpoints (identity, license, device-mode) may briefly
 			// return wrong data after boot even after waitForBoot declares the REST layer
 			// stable — waitForBoot only guards /system/resource. Poll until each endpoint
@@ -95,7 +100,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			expect(license).toHaveProperty("system-id");
 
 			// --- /user ---
-			const { status: userStatus, body: userBody } = await restGet(`${base}/user`, auth, 10_000);
+			const { status: userStatus, body: userBody } = await chrGet(instance, "/rest/user", auth);
 			expect(userStatus).toBe(200);
 			const users = JSON.parse(userBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(users)).toBe(true);
@@ -113,7 +118,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			expect(dm).toHaveProperty("mode");
 
 			// --- /ip/address ---
-			const { status: ipStatus, body: ipBody } = await restGet(`${base}/ip/address`, auth, 10_000);
+			const { status: ipStatus, body: ipBody } = await chrGet(instance, "/rest/ip/address", auth);
 			expect(ipStatus).toBe(200);
 			const ips = JSON.parse(ipBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(ips)).toBe(true);
@@ -123,7 +128,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 			}
 
 			// --- /interface ---
-			const { status: ifStatus, body: ifBody } = await restGet(`${base}/interface`, auth, 10_000);
+			const { status: ifStatus, body: ifBody } = await chrGet(instance, "/rest/interface", auth);
 			expect(ifStatus).toBe(200);
 			const ifaces = JSON.parse(ifBody) as Array<Record<string, unknown>>;
 			expect(Array.isArray(ifaces)).toBe(true);

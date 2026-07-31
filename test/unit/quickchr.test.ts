@@ -1,8 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { QuickCHR, acquireLock, captureRunningFailure } from "../../src/lib/quickchr.ts";
+import { QuickCHR, acquireLock, captureRunningFailure, credentialShareMs } from "../../src/lib/quickchr.ts";
 import type { MachineState } from "../../src/lib/types.ts";
+import { CONSOLE_LOGIN_COST_MS } from "../../src/lib/console.ts";
+import { GUEST_LOGIN_ALLOWANCE_MS, GUEST_QUERY_TIMEOUT_MS } from "../../src/lib/guest-snapshot.ts";
 
 function expectErrorCode(e: unknown, code: string) {
 	expect(e).toBeInstanceOf(Error);
@@ -11,14 +13,21 @@ function expectErrorCode(e: unknown, code: string) {
 
 const TEST_DIR = join(import.meta.dir, ".tmp-lock-test");
 
+// Snapshotted rather than deleted: a developer running with QUICKCHR_DATA_DIR
+// set in their own environment would otherwise have it silently unset for every
+// test after the first one here.
+let dataDirBefore: string | undefined;
+
 beforeEach(() => {
+	dataDirBefore = process.env.QUICKCHR_DATA_DIR;
 	rmSync(TEST_DIR, { recursive: true, force: true });
 	mkdirSync(TEST_DIR, { recursive: true });
 });
 
 afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
-	delete process.env.QUICKCHR_DATA_DIR;
+	if (dataDirBefore === undefined) delete process.env.QUICKCHR_DATA_DIR;
+	else process.env.QUICKCHR_DATA_DIR = dataDirBefore;
 });
 
 describe("QuickCHR.start name validation", () => {
@@ -445,5 +454,45 @@ describe("captureRunningFailure", () => {
 
 		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
 		expect(record.trigger.sinceReadyMs).toBe(1_234);
+	});
+});
+
+describe("credentialShareMs", () => {
+	// The #69/B10 fix itself. A share below the cost of a login cannot succeed, and
+	// a candidate that cannot succeed never becomes the working one — so the next
+	// query repeats the same division. Dividing below the floor is not "slower", it
+	// is permanently blind.
+	test("never gives a candidate less than one login costs", () => {
+		for (const candidates of [1, 2, 3, 4, 10]) {
+			expect(credentialShareMs(GUEST_QUERY_TIMEOUT_MS, candidates, false))
+				.toBeGreaterThanOrEqual(CONSOLE_LOGIN_COST_MS);
+		}
+	});
+
+	// The regression, stated as the arithmetic that used to hold: the old 5 s floor
+	// left every candidate short of the measured 11.4 s login.
+	test("the old floor could not have completed a login", () => {
+		expect(5_000).toBeLessThan(CONSOLE_LOGIN_COST_MS);
+		expect(Math.max(5_000, Math.floor(GUEST_QUERY_TIMEOUT_MS / 3))).toBeLessThan(CONSOLE_LOGIN_COST_MS);
+	});
+
+	// With the login allowance the snapshot grants until the console answers, the
+	// first query has to fit two candidates — stored credentials and factory
+	// admin:"", the pair that between them answer any machine we produce.
+	test("the first query fits two candidate logins", () => {
+		const firstQuery = GUEST_QUERY_TIMEOUT_MS + GUEST_LOGIN_ALLOWANCE_MS;
+		expect(credentialShareMs(firstQuery, 2, false) * 2).toBeLessThanOrEqual(firstQuery);
+		expect(credentialShareMs(firstQuery, 2, false)).toBeGreaterThanOrEqual(CONSOLE_LOGIN_COST_MS);
+	});
+
+	// Once a credential is known to work there is nothing left to search for, so
+	// the whole budget goes to it — that is what makes queries 2..N cheap.
+	test("a known-working credential gets the whole budget", () => {
+		expect(credentialShareMs(GUEST_QUERY_TIMEOUT_MS, 3, true)).toBe(GUEST_QUERY_TIMEOUT_MS);
+	});
+
+	// Defensive: an empty candidate list must not divide by zero.
+	test("tolerates a zero candidate count", () => {
+		expect(credentialShareMs(GUEST_QUERY_TIMEOUT_MS, 0, false)).toBe(CONSOLE_LOGIN_COST_MS);
 	});
 });

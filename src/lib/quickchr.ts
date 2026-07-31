@@ -984,6 +984,32 @@ function bootFailureReportDir(): string {
 	return join(getDataDir(), "failures");
 }
 
+/**
+ * How long one credential candidate gets inside a single guest-exec call.
+ *
+ * `timeoutMs` is a budget for the whole call, not per attempt: `captureGuestSnapshot()`
+ * sizes its own budget assuming one exec costs at most what it passed in, so N
+ * candidates × the full timeout would spend the snapshot's entire budget on the
+ * first query. Untried candidates therefore share it, and once a credential is
+ * known to work it gets all of it — which is every query after the first.
+ *
+ * The floor is {@link CONSOLE_LOGIN_COST_MS} rather than a round number, because
+ * a share below the cost of a login cannot succeed **by construction** — and a
+ * candidate that can never succeed also never becomes the working one, so every
+ * later query repeats the same doomed division. The floor used to be 5 s against
+ * a measured 11.4 s login, which is why forensics reported "console unreachable"
+ * for guests that were answering serial in 10 ms (#69). A share this large is
+ * affordable only because `captureGuestSnapshot()` adds a login allowance to its
+ * query budget until the console answers; see `GUEST_LOGIN_ALLOWANCE_MS`.
+ *
+ * Exported for tests: this is the arithmetic the #69/B10 fix turns on, and it is
+ * otherwise reachable only through a live serial socket.
+ */
+export function credentialShareMs(timeoutMs: number, candidateCount: number, haveWorking: boolean): number {
+	if (haveWorking) return timeoutMs;
+	return Math.max(CONSOLE_LOGIN_COST_MS, Math.floor(timeoutMs / Math.max(1, candidateCount)));
+}
+
 /** Serial-console executor for boot forensics, or null when there is no serial
  *  channel to talk to (foreground runs, or QEMU never got far enough).
  *
@@ -1018,25 +1044,11 @@ function bootFailureGuestExec(state: MachineState): { exec: GuestExec; users: st
 		candidates.push({ user: state.user.name, password: state.user.password });
 	}
 
-	// `timeoutMs` is a budget for the whole call, not per attempt: captureGuestSnapshot()
-	// sizes its own budget assuming one exec() costs at most what it passed in, so
-	// N candidates × the full timeout would burn the snapshot budget on the first
-	// query. Untried candidates therefore share the budget, and once a credential
-	// is known to work it gets all of it — which is every query after the first.
-	//
-	// The floor is CONSOLE_LOGIN_COST_MS and not a round number, because a share
-	// below the cost of a login cannot succeed *by construction* — and a candidate
-	// that can never succeed also never sets `working`, so every later query
-	// repeats the same doomed division. The floor was 5 s against a measured 11.4 s
-	// login, which is why this reported "console unreachable" for guests that were
-	// answering serial in 10 ms (#69). A share this large is only affordable
-	// because captureGuestSnapshot() adds a login allowance to its query budget
-	// until the console answers; see GUEST_LOGIN_ALLOWANCE_MS.
 	let working: { user: string; password: string } | undefined;
 	const exec: GuestExec = async (command, timeoutMs) => {
 		const order = working ? [working, ...candidates.filter((c) => c !== working)] : candidates;
 		const deadline = Date.now() + timeoutMs;
-		const share = working ? timeoutMs : Math.max(CONSOLE_LOGIN_COST_MS, Math.floor(timeoutMs / order.length));
+		const share = credentialShareMs(timeoutMs, order.length, working !== undefined);
 		let lastError: unknown = new Error("no credential candidates");
 		for (const cred of order) {
 			const remaining = deadline - Date.now();
