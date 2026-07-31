@@ -556,8 +556,20 @@ which would then skip its save and re-download the missing pinned images
 forever — #91 from the other direction. Each leg logs `Cache OWNER`/`Cache
 READER` with its key, so a run's own log answers "did this write?".
 
-Two consequences worth knowing:
+Three consequences worth knowing:
 
+- **A platform whose full suite never finishes never populates its entry.**
+  `actions/cache`'s post-job save is `post-if: success()`, so a red leg saves
+  nothing. That is deliberate — a leg torn down mid-suite holds partial content
+  and must not own the key — but it means `macos-x86`, whose full suite has
+  never completed (#76), stays permanently cold and pays the download on every
+  run. Under the old scheme its examples-smoke twin hid this by saving a `-ex-`
+  entry the integration leg could restore from; that entry was exactly the
+  duplicate write #104 is about. Folding the cold cost into #76/B8's measurement
+  is the honest fix; re-introducing a partial-content writer is not. (Saving
+  from a leg that *completed* the file loop but failed a test would be sound —
+  it downloaded everything — but needs a marker distinguishing "loop finished"
+  from "step timed out mid-loop", which is its own change.)
 - **Two owner legs in one dispatch can share a key** (e.g. targets
   `stable,7.23.2` when stable *is* 7.23.2). The second save loses the race and
   logs a "cache already exists" warning. That is deduplication working, not an
