@@ -106,10 +106,12 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   transfer whose only sin is being large, and the retry then re-downloads from zero,
   turning one slow transfer into three. The old deadline sat *inside* the natural
   variance of a healthy transfer, which is why it was intermittent: measured locally
-  against `download.mikrotik.com`, the same 52.2 MB all-packages zip took **129.4 s,
-  101.5 s, 118.4 s and 94.2 s** on consecutive attempts over the same link. All four
-  completed; only the first exceeded the flat 120 s and the third cleared it by 1.6 s,
-  so an unchanged healthy download passed or failed on link jitter alone. A transfer
+  against `download.mikrotik.com`, the same 52.2 MB all-packages zip took **118.4 s,
+  94.2 s, 123.5 s and 82.2 s** on four consecutive attempts over the same link (and
+  129.4 s on a fifth). All completed, but **one in four exceeded the flat 120 s** and
+  another cleared it by 1.6 s — so an unchanged healthy download passed or failed on
+  link jitter alone. CI's cold ~0.35 MB/s sits below that entire range, which is why a
+  hosted runner hit it far more often. A transfer
   is now bounded by two deadlines and reports which one ended it — a **resettable stall
   deadline** (30 s of silence, reset on every chunk, so a moving transfer is never
   aborted for being slow) and an **outer transfer budget** derived from `content-length`

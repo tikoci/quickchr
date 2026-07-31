@@ -66,11 +66,20 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
     A total-duration deadline cannot distinguish *slow* from *stuck*. It fires on a healthy transfer whose only sin is being large, and the retry path then re-downloads from zero — one slow transfer becomes three.
 
-    **The deadline sat inside the natural variance of a healthy transfer, which is why it was intermittent.** Measured locally 2026-07-31 — same 52.2 MB `all_packages-arm64-7.22.1.zip`, same link, consecutive attempts against `download.mikrotik.com`: **129.4 s** (0.385 MB/s), **101.5 s** (0.49 MB/s), **118.4 s** (0.421 MB/s), **94.2 s** (0.528 MB/s). Every one completed; only the first exceeded the old flat 120 s, and the third cleared it by 1.6 s. The deadline was in the middle of the distribution, so an unchanged healthy download passed or failed on link jitter alone.
+    **The deadline sat inside the natural variance of a healthy transfer, which is why it was intermittent.** Measured locally 2026-07-31 against `download.mikrotik.com` — same 52.2 MB `all_packages-arm64-7.22.1.zip`, same link, same client, four consecutive attempts:
 
-    That is a sharper statement of the defect than a clean abort would have been, and it is why CI saw "both images needed two retries" *sometimes* rather than always. The slowest local measurement is also the closest to CI's cold ~0.35 MB/s (→ ~149 s, comfortably over the deadline), which is why a hosted runner hit it more reliably than this laptop does — run 30606079288, and B7's local suite where `provisioning.test.ts` spent 619 s of 992 s downloading with zero QEMU processes alive.
+    | attempt | elapsed | throughput | under the old flat 120 s? |
+    |---|---|---|---|
+    | 1 | 118.4 s | 0.421 MB/s | yes, by 1.6 s |
+    | 2 | 94.2 s | 0.528 MB/s | yes |
+    | 3 | **123.5 s** | 0.403 MB/s | **no — aborted** |
+    | 4 | 82.2 s | 0.606 MB/s | yes |
 
-    ⚠️ **Do not restate this as "the old code aborted that download."** An earlier draft of this entry did, on the strength of the first measurement alone; the second disproved it as a general claim. One measurement of an intermittent is a signal, not a fact — the same rule the CI program runs on.
+    All four completed. **One in four exceeded the deadline**, and a fifth attempt through the new streaming path measured 129.4 s (0.385 MB/s) — so the range on one ordinary link is 82–129 s against a 120 s bound. The deadline was inside the distribution, and an unchanged healthy download therefore passed or failed on link jitter alone.
+
+    That is a sharper statement of the defect than a clean abort would have been, and it is why CI saw "both images needed two retries" *sometimes* rather than always. CI's cold ~0.35 MB/s (→ ~149 s) sits **below** this whole local range, which is why a hosted runner hit it far more reliably than this laptop does — run 30606079288, and B7's local suite where `provisioning.test.ts` spent 619 s of 992 s downloading with zero QEMU processes alive.
+
+    ⚠️ **Do not restate this as "the old code always aborted that download."** An earlier draft of this entry said so on the strength of a single 129.4 s measurement; the next attempt completed in 101.5 s and disproved it as a general claim. One measurement of an intermittent is a signal, not a fact — the same rule the CI program runs on.
 
     **Two deadlines, and the failure says which fired.** Neither alone is sufficient: stall detection alone would let a transfer trickling at one byte per second run forever, and a size-derived budget alone cannot fail a wedge quickly.
     - **Stall** (`DOWNLOAD_STALL_MS`, 30 s) — reset on every received chunk. Bounds *silence*, so a moving transfer is never aborted for being slow.
