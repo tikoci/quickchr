@@ -2,7 +2,12 @@ import { describe, test, expect } from "bun:test";
 import { accelTimeoutFactor } from "../../src/lib/platform.ts";
 import { defaultBootTimeout } from "../../src/lib/quickchr.ts";
 import { BOOT_FORENSICS_BUDGET_MS } from "../../src/lib/diagnostics.ts";
-import { bootTestTimeoutFor } from "../integration/timeouts.ts";
+import {
+	bootTestTimeoutFor,
+	COLD_DOWNLOAD_FLOOR_BYTES_PER_S,
+	coldDownloadTestTimeout,
+	DOWNLOAD_TEST_BASE_MS,
+} from "../integration/timeouts.ts";
 import type { Arch } from "../../src/lib/types.ts";
 
 describe("accelTimeoutFactor", () => {
@@ -46,5 +51,39 @@ describe("bootTestTimeout outlives the boot budget it is paired with", () => {
 	test("extraMs adds on top rather than replacing headroom", () => {
 		const base = bootTestTimeoutFor("x86", "tcg");
 		expect(bootTestTimeoutFor("x86", "tcg", { extraMs: 60_000 })).toBe(base + 60_000);
+	});
+});
+
+describe("coldDownloadTestTimeout budgets a cold artifact fetch", () => {
+	// Run 30606079288 (first genuinely cold cache after the #104 key redesign)
+	// is the data window: 9.8 MB took 16.2 s and 52.2 MB did not finish inside a
+	// flat 120 s, though it did finish. The budget has to cover the observed
+	// transfer with margin — a *completed* download must never read as a failure.
+	const ARM64_ZIP_BYTES = 52_216_933;
+	const X86_ZIP_BYTES = 9_821_339;
+
+	test("covers the observed cold transfer with margin", () => {
+		expect(coldDownloadTestTimeout(ARM64_ZIP_BYTES)).toBeGreaterThan(150_000);
+		expect(coldDownloadTestTimeout(X86_ZIP_BYTES)).toBeGreaterThan(16_200);
+	});
+
+	test("the arm64 zip's budget clears the flat 120 s that failed it", () => {
+		expect(coldDownloadTestTimeout(ARM64_ZIP_BYTES)).toBeGreaterThan(120_000);
+	});
+
+	test("scales with size — a bigger artifact gets a bigger budget", () => {
+		expect(coldDownloadTestTimeout(ARM64_ZIP_BYTES)).toBeGreaterThan(coldDownloadTestTimeout(X86_ZIP_BYTES));
+		const both = coldDownloadTestTimeout(ARM64_ZIP_BYTES + X86_ZIP_BYTES);
+		expect(both).toBeGreaterThan(coldDownloadTestTimeout(ARM64_ZIP_BYTES));
+	});
+
+	test("assumed throughput stays a floor, well under what CI observed", () => {
+		// 0.35 MB/s was the slowest observed; a floor at or above that would put
+		// the budget back where the flat number was.
+		expect(COLD_DOWNLOAD_FLOOR_BYTES_PER_S).toBeLessThan(350_000);
+	});
+
+	test("a zero-byte artifact still gets the fixed extraction/assertion base", () => {
+		expect(coldDownloadTestTimeout(0)).toBe(DOWNLOAD_TEST_BASE_MS);
 	});
 });

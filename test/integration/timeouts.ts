@@ -50,6 +50,52 @@ export const TEST_ACCEL: string = process.env.QUICKCHR_INTEGRATION ? await detec
  *  on a cold cache, REST round-trips, `stop()`/`remove()`, and the assertions. */
 export const TEST_BODY_HEADROOM_MS = 180_000;
 
+/**
+ * Throughput to assume when budgeting a COLD download from MikroTik, in bytes
+ * per second. Deliberately a floor, not an average.
+ *
+ * Grounded rather than guessed, in run 30606079288 — the first genuinely cold
+ * cache after #104 gave the image cache resolved-version keys (nothing to fall
+ * back to, so both all-packages zips downloaded fresh on a hosted linux-x86
+ * runner):
+ *
+ *   all_packages-x86-7.22.1.zip     9.8 MB   16.2 s   ~0.60 MB/s   passed
+ *   all_packages-arm64-7.22.1.zip  52.2 MB   >120 s   ~0.35 MB/s   blew a flat 120 s
+ *
+ * The arm64 transfer was healthy, just slow: the next test in the file logged
+ * `Using cached packages: 7.22.1 (arm64)`, so it finished — the *budget* was
+ * wrong, and it was wrong because it was a magic number that never had a
+ * measurement behind it. The floor below is roughly a third of the slower
+ * observation, which keeps a slow-but-moving link inside the budget while a
+ * wedged transfer still fails well inside the enclosing file and step budgets.
+ *
+ * This does NOT fix the download path itself. A flat 120 s abort also lives at
+ * `src/lib/images.ts` (per attempt, with retries) and is why B7 measured both
+ * pinned CHR images "needing two retries" on a cold cache. Replacing those
+ * total-duration deadlines with stall detection and a named download outcome is
+ * its own change (#116) — this constant only stops a test from calling a
+ * completed download a failure.
+ */
+export const COLD_DOWNLOAD_FLOOR_BYTES_PER_S = 120_000;
+
+/** Fixed slack on top of transfer time: zip extraction, enumeration and the
+ *  assertions. Extracting the 52.2 MB arm64 zip is the largest of these. */
+export const DOWNLOAD_TEST_BASE_MS = 60_000;
+
+/**
+ * Timeout for a test whose cost is dominated by downloading a known artifact on
+ * a cold cache. Pass the artifact's size in bytes — for version-pinned test
+ * fixtures that is a constant, not an estimate.
+ *
+ * ```ts
+ * test("arm64 packages match 7.22.1", async () => { ... },
+ *      coldDownloadTestTimeout(PACKAGES_ZIP_BYTES.arm64));
+ * ```
+ */
+export function coldDownloadTestTimeout(bytes: number): number {
+	return DOWNLOAD_TEST_BASE_MS + Math.ceil(bytes / COLD_DOWNLOAD_FLOOR_BYTES_PER_S) * 1000;
+}
+
 export interface BootTestTimeoutOptions {
 	/** How many full CHR boots the test performs. Default 1. */
 	boots?: number;
