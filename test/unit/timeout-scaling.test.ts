@@ -7,6 +7,7 @@ import {
 	COLD_DOWNLOAD_FLOOR_BYTES_PER_S,
 	coldDownloadTestTimeout,
 	DOWNLOAD_TEST_BASE_MS,
+	PACKAGES_ZIP_BYTES,
 } from "../integration/timeouts.ts";
 import type { Arch } from "../../src/lib/types.ts";
 
@@ -59,8 +60,10 @@ describe("coldDownloadTestTimeout budgets a cold artifact fetch", () => {
 	// is the data window: 9.8 MB took 16.2 s and 52.2 MB did not finish inside a
 	// flat 120 s, though it did finish. The budget has to cover the observed
 	// transfer with margin — a *completed* download must never read as a failure.
-	const ARM64_ZIP_BYTES = 52_216_933;
-	const X86_ZIP_BYTES = 9_821_339;
+	// The sizes come from the same fixture license.test.ts budgets against, so a
+	// re-measured artifact cannot leave this test pinning a stale number.
+	const ARM64_ZIP_BYTES = PACKAGES_ZIP_BYTES.arm64;
+	const X86_ZIP_BYTES = PACKAGES_ZIP_BYTES.x86;
 
 	test("covers the observed cold transfer with margin", () => {
 		expect(coldDownloadTestTimeout(ARM64_ZIP_BYTES)).toBeGreaterThan(150_000);
@@ -85,5 +88,14 @@ describe("coldDownloadTestTimeout budgets a cold artifact fetch", () => {
 
 	test("a zero-byte artifact still gets the fixed extraction/assertion base", () => {
 		expect(coldDownloadTestTimeout(0)).toBe(DOWNLOAD_TEST_BASE_MS);
+	});
+
+	test("transfer time rounds UP to the next whole second", () => {
+		// Pins ceil, not floor: flooring would under-budget by up to a second on
+		// every artifact, which is the direction that turns a completed download
+		// back into a test failure. Exactly one floor-second of bytes costs 1 s;
+		// one byte more costs 2 s.
+		expect(coldDownloadTestTimeout(COLD_DOWNLOAD_FLOOR_BYTES_PER_S)).toBe(DOWNLOAD_TEST_BASE_MS + 1_000);
+		expect(coldDownloadTestTimeout(COLD_DOWNLOAD_FLOOR_BYTES_PER_S + 1)).toBe(DOWNLOAD_TEST_BASE_MS + 2_000);
 	});
 });

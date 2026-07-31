@@ -78,6 +78,14 @@ export const TEST_BODY_HEADROOM_MS = 180_000;
  */
 export const COLD_DOWNLOAD_FLOOR_BYTES_PER_S = 120_000;
 
+/** Byte sizes of the all-packages artifacts the integration suite downloads.
+ *  `license.test.ts` pins 7.22.1, so these are constants of fixed artifacts
+ *  rather than estimates (measured 2026-07-31 via `curl -sI` against
+ *  download.mikrotik.com). They live here, next to the budget they feed, so the
+ *  test that downloads them and the unit test that pins the budget cannot drift
+ *  apart. Un-pinning the version in `license.test.ts` means re-measuring these. */
+export const PACKAGES_ZIP_BYTES = { arm64: 52_216_933, x86: 9_821_339 } as const;
+
 /** Fixed slack on top of transfer time: zip extraction, enumeration and the
  *  assertions. Extracting the 52.2 MB arm64 zip is the largest of these. */
 export const DOWNLOAD_TEST_BASE_MS = 60_000;

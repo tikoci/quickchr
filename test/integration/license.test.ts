@@ -1,12 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout, coldDownloadTestTimeout } from "./timeouts.ts";
-
-/** Byte sizes of the all-packages artifacts these tests download. The version is
- *  pinned to 7.22.1, so these are constants of a fixed artifact rather than
- *  estimates (measured 2026-07-31, `curl -sI` against download.mikrotik.com).
- *  Un-pinning the version means re-measuring them. */
-const PACKAGES_ZIP_BYTES = { arm64: 52_216_933, x86: 9_821_339 };
+import { bootTestTimeout, coldDownloadTestTimeout, PACKAGES_ZIP_BYTES } from "./timeouts.ts";
 
 /**
  * Integration tests for license and package install functionality.

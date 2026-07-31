@@ -349,6 +349,12 @@ jobs:
             # — growing the step cap too would quietly buy a hang more rope,
             # which is exactly the anti-pattern in this program's rule 5.
             [ -n "$QV" ] && timeout=$((timeout + 20))
+            # Resolved versions already claimed on THIS platform. Two targets can
+            # resolve to one version (`stable,7.23.2` when stable *is* 7.23.2),
+            # which would otherwise give two legs the same cache key and race
+            # them to save it — one upload of a few hundred MB always discarded.
+            # The first leg to claim a version owns it; the rest read.
+            claimed=""
             for t in "${TARGET_ARR[@]}"; do
               [ -z "$t" ] && continue
               # The concrete version behind this target, from the resolve step.
@@ -360,12 +366,19 @@ jobs:
                 echo "::error::Target '$t' has no resolved version — the resolve step and this matrix disagree"
                 exit 1
               fi
+              cacheowner=true
+              case " $claimed " in
+                *" $resolved "*)
+                  cacheowner=false
+                  echo "::notice::${id} · ${t} resolves to ${resolved}, already claimed on this platform — this leg reads the cache, it does not write it" ;;
+                *) claimed="$claimed $resolved" ;;
+              esac
               inc=$(printf '%s' "$inc" | jq -c \
                 --arg id "$id" --arg label "$label" --arg os "$runner" \
                 --arg target "$t" --arg resolved "$resolved" --arg accel "$accel" --arg budget "$budget" \
                 --argjson smoke "$smoke" --argjson timeout "$timeout" \
-                --argjson steptimeout "$steptimeout" \
-                '. + [{id:$id, label:$label, os:$os, accel:$accel, budget:$budget, smoke:$smoke, timeout:$timeout, steptimeout:$steptimeout, target:$target, resolved:$resolved}]')
+                --argjson steptimeout "$steptimeout" --argjson cacheowner "$cacheowner" \
+                '. + [{id:$id, label:$label, os:$os, accel:$accel, budget:$budget, smoke:$smoke, timeout:$timeout, steptimeout:$steptimeout, target:$target, resolved:$resolved, cacheowner:$cacheowner}]')
             done
           done
           if [ "$inc" = "[]" ]; then
@@ -642,15 +655,22 @@ jobs:
           SMOKE: ${{ matrix.smoke }}
           RESOLVED: ${{ matrix.resolved }}
           PLATFORM: ${{ matrix.id }}
+          CACHE_OWNER: ${{ matrix.cacheowner }}
         run: |
           set -eo pipefail
+          # Three ways to be a reader, and the log says which: this leg runs a
+          # subset (filter/smoke), or another leg in this dispatch already claimed
+          # the same platform+version (plan decides that, so it cannot be a race).
           owner=true
-          if [ -n "${TEST_FILTER// /}" ] || [ "$SMOKE" = "true" ]; then owner=false; fi
+          why=""
+          if [ -n "${TEST_FILTER// /}" ]; then owner=false; why="test-filter is set"; fi
+          if [ "$SMOKE" = "true" ]; then owner=false; why="tcg-smoke subset"; fi
+          if [ "$CACHE_OWNER" != "true" ]; then owner=false; why="another leg owns this platform+version"; fi
           bun scripts/ci-cache-key.ts leg --version "$RESOLVED" --platform "$PLATFORM" --owner "$owner"
           if [ "$owner" = "true" ]; then
             echo "::notice::Cache OWNER for ${PLATFORM} @ ${RESOLVED} — a miss here re-saves the full image set"
           else
-            echo "::notice::Cache READER for ${PLATFORM} @ ${RESOLVED} — filtered/smoke legs never write (#104)"
+            echo "::notice::Cache READER for ${PLATFORM} @ ${RESOLVED} — ${why}; readers never write (#104)"
           fi
 
       - name: Cache CHR images (owner — full suite)

@@ -542,9 +542,18 @@ path stays exercised.
 
 | Configuration | Cache action | Writes? |
 |---------------|--------------|---------|
-| Integration leg, full unfiltered suite | `actions/cache` | **yes — the owner** |
+| Integration leg, full unfiltered suite, first to claim its platform+version | `actions/cache` | **yes — the owner** |
 | Integration leg, `test-filter` or `tcg-smoke` | `actions/cache/restore` | no |
+| Integration leg whose platform+version another leg already claimed | `actions/cache/restore` | no |
 | `examples-smoke` leg (any) | `actions/cache/restore` | no |
+
+Ownership is decided in `plan`, not on the leg: two targets can resolve to one
+version (`stable,7.23.2` when stable *is* 7.23.2), and the first to claim a
+version on a platform gets `matrix.cacheowner`. Deciding it centrally is what
+makes "one owner" true rather than merely likely — two legs discovering the same
+key independently would both save and race, and one multi-hundred-MB upload
+would always be discarded. The reader's `::notice::` states which of the three
+reasons applies.
 
 `actions/cache` skips its post-job save whenever the primary key hit exactly.
 That is only sound while an entry's content is a **function of its key**, which
@@ -556,7 +565,7 @@ which would then skip its save and re-download the missing pinned images
 forever — #91 from the other direction. Each leg logs `Cache OWNER`/`Cache
 READER` with its key, so a run's own log answers "did this write?".
 
-Three consequences worth knowing:
+Two consequences worth knowing:
 
 - **A platform whose full suite never finishes never populates its entry.**
   `actions/cache`'s post-job save is `post-if: success()`, so a red leg saves
@@ -570,10 +579,6 @@ Three consequences worth knowing:
   from a leg that *completed* the file loop but failed a test would be sound —
   it downloaded everything — but needs a marker distinguishing "loop finished"
   from "step timed out mid-loop", which is its own change.)
-- **Two owner legs in one dispatch can share a key** (e.g. targets
-  `stable,7.23.2` when stable *is* 7.23.2). The second save loses the race and
-  logs a "cache already exists" warning. That is deduplication working, not an
-  error.
 - **A release published mid-dispatch drifts one run.** `plan` resolved
   `stable` → 7.23.2; a leg starting 20 min later downloads 7.23.3 under the
   7.23.2 key and (on an exact hit) does not save it. The next dispatch resolves
