@@ -9,6 +9,7 @@ import {
 	DOWNLOAD_TEST_BASE_MS,
 	PACKAGES_ZIP_BYTES,
 } from "../integration/timeouts.ts";
+import { transferBudgetMs } from "../../src/lib/download.ts";
 import type { Arch } from "../../src/lib/types.ts";
 
 describe("accelTimeoutFactor", () => {
@@ -87,15 +88,42 @@ describe("coldDownloadTestTimeout budgets a cold artifact fetch", () => {
 	});
 
 	test("a zero-byte artifact still gets the fixed extraction/assertion base", () => {
-		expect(coldDownloadTestTimeout(0)).toBe(DOWNLOAD_TEST_BASE_MS);
+		expect(coldDownloadTestTimeout(0)).toBe(DOWNLOAD_TEST_BASE_MS + transferBudgetMs(0));
 	});
 
-	test("transfer time rounds UP to the next whole second", () => {
-		// Pins ceil, not floor: flooring would under-budget by up to a second on
-		// every artifact, which is the direction that turns a completed download
-		// back into a test failure. Exactly one floor-second of bytes costs 1 s;
-		// one byte more costs 2 s.
-		expect(coldDownloadTestTimeout(COLD_DOWNLOAD_FLOOR_BYTES_PER_S)).toBe(DOWNLOAD_TEST_BASE_MS + 1_000);
-		expect(coldDownloadTestTimeout(COLD_DOWNLOAD_FLOOR_BYTES_PER_S + 1)).toBe(DOWNLOAD_TEST_BASE_MS + 2_000);
+	test("transfer time rounds UP, never down", () => {
+		// Pins ceil, not floor: flooring under-budgets, which is the direction that
+		// turns a completed download back into a failure — the #116 defect itself.
+		// Granularity is the millisecond (it was whole seconds while this was a
+		// test-only helper); what must not change is the direction.
+		const base = DOWNLOAD_TEST_BASE_MS + transferBudgetMs(0);
+		expect(coldDownloadTestTimeout(COLD_DOWNLOAD_FLOOR_BYTES_PER_S)).toBe(base + 1_000);
+		expect(coldDownloadTestTimeout(COLD_DOWNLOAD_FLOOR_BYTES_PER_S + 1)).toBe(base + 1_001);
+
+		// The exact-fit case is the one that matters: a transfer running at exactly
+		// the floor must still fit its own budget.
+		for (const bytes of [1, 999, COLD_DOWNLOAD_FLOOR_BYTES_PER_S * 7 + 3]) {
+			const transferOnly = transferBudgetMs(bytes) - transferBudgetMs(0);
+			expect(transferOnly).toBeGreaterThanOrEqual((bytes / COLD_DOWNLOAD_FLOOR_BYTES_PER_S) * 1000);
+		}
+	});
+
+	// #116/B13: the test timeout is now DERIVED from the budget the library
+	// enforces, so it cannot be set below it. This is one of #106's partial
+	// orders, pinned rather than left to coincidence — the previous arrangement
+	// (two independent computations from the same floor) happened to satisfy it
+	// by 30 s, which is exactly the kind of accidental margin B12 removes.
+	test("a test always outlives the library's own transfer budget for the same artifact", () => {
+		for (const bytes of [0, X86_ZIP_BYTES, ARM64_ZIP_BYTES, ARM64_ZIP_BYTES + X86_ZIP_BYTES]) {
+			expect(coldDownloadTestTimeout(bytes)).toBeGreaterThan(transferBudgetMs(bytes));
+		}
+	});
+
+	test("the margin over the library budget covers extraction and assertions", () => {
+		// Extracting the 52.2 MB arm64 zip is the largest non-transfer cost in
+		// these tests; 120 s of headroom is what DOWNLOAD_TEST_BASE_MS buys.
+		const margin = coldDownloadTestTimeout(ARM64_ZIP_BYTES) - transferBudgetMs(ARM64_ZIP_BYTES);
+		expect(margin).toBe(DOWNLOAD_TEST_BASE_MS);
+		expect(margin).toBeGreaterThanOrEqual(60_000);
 	});
 });

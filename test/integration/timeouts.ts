@@ -27,6 +27,7 @@
  */
 
 import { defaultBootTimeout } from "../../src/lib/quickchr.ts";
+import { transferBudgetMs } from "../../src/lib/download.ts";
 import { BOOT_FORENSICS_BUDGET_MS } from "../../src/lib/diagnostics.ts";
 import { detectAccel } from "../../src/lib/platform.ts";
 import type { Arch } from "../../src/lib/types.ts";
@@ -51,32 +52,17 @@ export const TEST_ACCEL: string = process.env.QUICKCHR_INTEGRATION ? await detec
 export const TEST_BODY_HEADROOM_MS = 180_000;
 
 /**
- * Throughput to assume when budgeting a COLD download from MikroTik, in bytes
- * per second. Deliberately a floor, not an average.
+ * The floor throughput the *library* budgets a cold download against, re-exported
+ * so tests and the download path cannot disagree about it.
  *
- * Grounded rather than guessed, in run 30606079288 — the first genuinely cold
- * cache after #104 gave the image cache resolved-version keys (nothing to fall
- * back to, so both all-packages zips downloaded fresh on a hosted linux-x86
- * runner):
- *
- *   all_packages-x86-7.22.1.zip     9.8 MB   16.2 s   ~0.60 MB/s   passed
- *   all_packages-arm64-7.22.1.zip  52.2 MB   >120 s   ~0.35 MB/s   blew a flat 120 s
- *
- * The arm64 transfer was healthy, just slow: the next test in the file logged
- * `Using cached packages: 7.22.1 (arm64)`, so it finished — the *budget* was
- * wrong, and it was wrong because it was a magic number that never had a
- * measurement behind it. The floor below is roughly a third of the slower
- * observation, which keeps a slow-but-moving link inside the budget while a
- * wedged transfer still fails well inside the enclosing file and step budgets.
- *
- * This does NOT fix the download path itself. A flat 120 s abort also lives at
- * `src/lib/images.ts` (per attempt, with retries) and is why B7 measured both
- * pinned CHR images "needing two retries" on a cold cache. Replacing those
- * total-duration deadlines with stall detection and a named download outcome is
- * its own change (#116) — this constant only stops a test from calling a
- * completed download a failure.
+ * It used to be defined here, with a note saying it did not fix the download
+ * path. #116 fixed that path, so the number moved to `src/lib/download.ts` next
+ * to the code that enforces it — see that file for the run-30606079288
+ * measurement it comes from. **Do not reintroduce a copy:** #116's done-when
+ * asks the library budget and the test budget not to drift, and two constants
+ * asked not to drift are how they drift.
  */
-export const COLD_DOWNLOAD_FLOOR_BYTES_PER_S = 120_000;
+export { COLD_DOWNLOAD_FLOOR_BYTES_PER_S } from "../../src/lib/download.ts";
 
 /** Byte sizes of the all-packages artifacts the integration suite downloads.
  *  `license.test.ts` pins 7.22.1, so these are constants of fixed artifacts
@@ -86,14 +72,25 @@ export const COLD_DOWNLOAD_FLOOR_BYTES_PER_S = 120_000;
  *  apart. Un-pinning the version in `license.test.ts` means re-measuring these. */
 export const PACKAGES_ZIP_BYTES = { arm64: 52_216_933, x86: 9_821_339 } as const;
 
-/** Fixed slack on top of transfer time: zip extraction, enumeration and the
- *  assertions. Extracting the 52.2 MB arm64 zip is the largest of these. */
-export const DOWNLOAD_TEST_BASE_MS = 60_000;
+/** Slack on top of the library's own transfer budget: zip extraction,
+ *  enumeration, and the assertions. Extracting the 52.2 MB arm64 zip is the
+ *  largest of these. */
+export const DOWNLOAD_TEST_BASE_MS = 120_000;
 
 /**
  * Timeout for a test whose cost is dominated by downloading a known artifact on
  * a cold cache. Pass the artifact's size in bytes — for version-pinned test
  * fixtures that is a constant, not an estimate.
+ *
+ * Derived from {@link transferBudgetMs}, the budget the library itself will
+ * enforce, rather than recomputing it from the floor throughput. That makes one
+ * of #106's partial orders structural instead of coincidental:
+ *
+ *   download stall + transfer deadline  <  test timeout
+ *
+ * A test can no longer be given less time than the download it is waiting on —
+ * which is the #91/#116 failure in its general form. `test/unit/timeouts.test.ts`
+ * pins the inequality.
  *
  * ```ts
  * test("arm64 packages match 7.22.1", async () => { ... },
@@ -101,7 +98,7 @@ export const DOWNLOAD_TEST_BASE_MS = 60_000;
  * ```
  */
 export function coldDownloadTestTimeout(bytes: number): number {
-	return DOWNLOAD_TEST_BASE_MS + Math.ceil(bytes / COLD_DOWNLOAD_FLOOR_BYTES_PER_S) * 1000;
+	return transferBudgetMs(bytes) + DOWNLOAD_TEST_BASE_MS;
 }
 
 export interface BootTestTimeoutOptions {

@@ -62,6 +62,24 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
     **Escape hatch.** Because the fallback is unconditional, `--accel <auto|tcg|hvf|kvm>` (and the `accel` setting / `QUICKCHR_ACCEL` env var) forces the accelerator verbatim and bypasses detection — so a fixed future image can be tested on HVF without a code change, and so forcing TCG stays possible for debugging elsewhere. `--accel hvf` on an arm64 guest still prints the panic caveat rather than silently obeying. This complements, and does not replace, the reactive respawn-once net in #8. Covered by `test/unit/platform.test.ts`. → [#97](https://github.com/tikoci/quickchr/issues/97)
 
+11. **A download is bounded by whether it is *moving*, not by a flat total** — `src/lib/download.ts` is the one download path for both `images.ts` and `packages.ts`. Before it, each caller had its own bound and they disagreed: images aborted at a flat `120_000` per attempt with three retries, packages had **no** deadline and **no** retries, so its only bound was whatever the calling test imposed.
+
+    A total-duration deadline cannot distinguish *slow* from *stuck*. It fires on a healthy transfer whose only sin is being large, and the retry path then re-downloads from zero — one slow transfer becomes three.
+
+    **The deadline sat inside the natural variance of a healthy transfer, which is why it was intermittent.** Measured locally 2026-07-31, same 52.2 MB `all_packages-arm64-7.22.1.zip`, same link, consecutive attempts: **129.4 s (0.385 MB/s)** then **101.5 s (0.49 MB/s)** — straddling the old flat 120 s. The same healthy download therefore passed or failed on nothing but link jitter. That is a sharper statement of the defect than a clean abort would have been, and it explains CI's "both images needed two retries *sometimes*" rather than always. It also matches CI's ~0.35 MB/s cold observation (run 30606079288, and B7's local suite where `provisioning.test.ts` spent 619 s of 992 s downloading with zero QEMU processes alive).
+
+    **Two deadlines, and the failure says which fired.** Neither alone is sufficient: stall detection alone would let a transfer trickling at one byte per second run forever, and a size-derived budget alone cannot fail a wedge quickly.
+    - **Stall** (`DOWNLOAD_STALL_MS`, 30 s) — reset on every received chunk. Bounds *silence*, so a moving transfer is never aborted for being slow.
+    - **Transfer budget** — `DOWNLOAD_BUDGET_BASE_MS` (30 s for connect/TLS/headers) plus `content-length ÷ COLD_DOWNLOAD_FLOOR_BYTES_PER_S`, a **floor** throughput of 120 000 B/s ≈ ⅓ of the slowest cold transfer ever measured. The 52.2 MB zip gets 465 s. When the server sends no `content-length` the stated `DOWNLOAD_NO_LENGTH_BUDGET_MS` (15 min) applies and the outcome says so — verified that `download.mikrotik.com` *does* send it on both image and package artifacts, so the size-derived budget is the production path.
+
+    **Retry policy follows from that split.** `DOWNLOAD_STALLED` is retriable — a wedged socket usually moves on the next attempt. `DOWNLOAD_TOO_SLOW` is **terminal on purpose**: the budget is already ~3× the slowest throughput on record, so retrying re-downloads from zero on a link measured slower than the floor, which is the exact behavior this decision removes. It is a signal that the floor is wrong (or the link genuinely is), not something to paper over with another attempt.
+
+    **The floor constant has one home.** It lives here and `test/integration/timeouts.ts` re-exports it; `coldDownloadTestTimeout()` is *derived from* `transferBudgetMs()` rather than recomputing it, which makes one of #106's partial orders (`download deadline < test timeout`) structural instead of coincidental. Two constants asked not to drift are how they drift.
+
+    **Partial transfers cannot poison the cache.** Downloads stream to `<dest>.part` and are renamed only after a length-verified transfer. Both callers gate on `existsSync(zipPath)`, so a truncated file left at the destination would be served as a complete cached artifact forever. Resuming with a `Range` request would be better than either deadline (MikroTik sends `accept-ranges: bytes`) and is deliberately out of scope — this decision bounds and classifies a transfer, it does not change the transport. Covered by `test/unit/download.test.ts`. → [#116](https://github.com/tikoci/quickchr/issues/116)
+
+    ⚠️ **Testing note.** `Bun.serve` **drops an explicit `content-length` when the body is a `ReadableStream`** and frames the response `transfer-encoding: chunked`, so a stub built on it cannot exercise the size-derived budget at all — every response looks unknown-length. The anchor tests use a raw `Bun.listen` HTTP stub for that reason.
+
 ## Port Layout
 
 | Offset | Service    | Guest Port |

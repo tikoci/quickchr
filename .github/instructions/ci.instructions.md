@@ -460,6 +460,9 @@ a new tracked issue.
 | First-run slower than 20 min | Cold cache — the pinned images (7.20.7, 7.20.8) and packages downloaded. Expected on a key miss (new resolved version, or the first run on a branch) | The leg's `Cache OWNER/READER` line + `cache-hit`; a *reader* leg cannot fix this by running again — only the full suite repopulates |
 | `BOOT_TIMEOUT` on KVM runner | `detectAccel()` race during udevadm (fixed in cb4d505) | Check qemu.log for `-accel tcg` vs `-accel kvm` |
 | `BOOT_TIMEOUT` after `respawning QEMU once` warn | Genuine boot failure — `start()` already retried a wedged nested-KVM/HVF boot once and it still didn't reach REST | `qemu.log` (both attempts appended); a *single* wedged boot is now auto-recovered, so a `BOOT_TIMEOUT` that survives the respawn is real |
+| `DOWNLOAD_STALLED` | The connection went silent for 30 s — a wedged socket, not a slow link. Already retried 3× before surfacing, so this is infrastructure | The message carries bytes/expected/elapsed/throughput; compare throughput against the runner's other downloads in the same job |
+| `DOWNLOAD_TOO_SLOW` | The transfer kept moving but could not finish inside `content-length ÷ 120 000 B/s`. **Terminal by design** — not retried, because the budget is already ~3× the slowest throughput on record | The message's throughput figure. Below ~0.12 MB/s means the runner's link genuinely underperformed everything measured; at or above it, the floor in `src/lib/download.ts` needs re-deriving, not the budget raising |
+| A download reported as a plain test timeout, naming nothing about bytes | Pre-#116 code, or a caller not using `downloadToFile()` | Both download paths go through `src/lib/download.ts`. A bare `timed out after 120000ms` on an artifact fetch is the old flat-total defect and should not reappear |
 
 ## Integration Test Parallelism
 
