@@ -27,6 +27,31 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /** Interval for polling the buffer in waitFor(). */
 const POLL_INTERVAL_MS = 250;
 
+/**
+ * What one *fresh* serial login costs, for callers that must budget for it.
+ *
+ * A login is not a round-trip — it is dominated by RouterOS, not by us.
+ * Measured 2026-07-31 on 7.23.2 / x86 / HVF with a raw socket and timestamped
+ * receives (tikoci/quickchr#69, bite B10 of #110):
+ *
+ *   banner → `Login:`              10–25 ms
+ *   username → `Password:`         54–56 ms
+ *   password → license `[Y/n]:`    **10,184 ms**   ← the whole cost
+ *   full fresh `consoleExec()`     11,364 / 11,360 ms
+ *   `consoleExec()` on an already-open session   306 ms
+ *
+ * So a budget sized on the ~0.3 s round-trip figure is ~40× short of what the
+ * first call needs, and a caller that divides such a budget across credential
+ * candidates can never complete even one. That is exactly what made
+ * `captureGuestSnapshot()` report `consoleReachable: false` against provably
+ * healthy guests. Anything that logs in must budget from this constant, not
+ * from the round-trip cost.
+ *
+ * 15 s is the measured 11.4 s plus ~30% margin; TCG and cross-arch guests are
+ * slower still, which is why callers stack it rather than treat it as a cap.
+ */
+export const CONSOLE_LOGIN_COST_MS = 15_000;
+
 /** Pre-prompt pattern: the "] > " suffix is version-proof since it
  *  covers [admin@MikroTik] > , [admin@CHR] > , and any custom identity. */
 const PROMPT_PATTERN = "] > ";

@@ -1,7 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { QuickCHR, acquireLock } from "../../src/lib/quickchr.ts";
+import { QuickCHR, acquireLock, captureRunningFailure } from "../../src/lib/quickchr.ts";
+import type { MachineState } from "../../src/lib/types.ts";
 
 function expectErrorCode(e: unknown, code: string) {
 	expect(e).toBeInstanceOf(Error);
@@ -17,6 +18,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	rmSync(TEST_DIR, { recursive: true, force: true });
+	delete process.env.QUICKCHR_DATA_DIR;
 });
 
 describe("QuickCHR.start name validation", () => {
@@ -361,5 +363,87 @@ describe("ChrInstance API surface (dryRun)", () => {
 			}
 			throw e;
 		}
+	});
+});
+
+describe("captureRunningFailure", () => {
+	// A machine that booted and then reset a request. Everything the capture can
+	// reach is deliberately absent here — no QEMU, no monitor, no serial socket —
+	// because that is the shape it has to survive: it runs on a failure path, and
+	// an exception raised while collecting evidence replaces the real error with
+	// a worse one.
+	function state(overrides: Partial<MachineState> = {}): MachineState {
+		return {
+			name: "ready-then-reset",
+			version: "7.22.1",
+			arch: "arm64",
+			cpu: 1,
+			mem: 512,
+			networks: [],
+			ports: {
+				http: { name: "http", host: 9100, guest: 80, proto: "tcp" },
+				ssh: { name: "ssh", host: 9102, guest: 22, proto: "tcp" },
+			},
+			packages: [],
+			portBase: 9100,
+			excludePorts: [],
+			extraPorts: [],
+			createdAt: new Date().toISOString(),
+			status: "running",
+			machineDir: join(TEST_DIR, "machine"),
+			lastAccel: "kvm",
+			...overrides,
+		};
+	}
+
+	test("derives sinceReadyMs from the recorded boot, and records the trigger", async () => {
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		// REST-ready 30 s ago: started 90 s ago, boot took 60 s.
+		const report = await captureRunningFailure(
+			state({ lastStartedAt: new Date(Date.now() - 90_000).toISOString(), lastBootMs: 60_000 }),
+			"post-readiness-rest",
+			{ operation: "GET /rest/system/resource", error: "Error: socket hang up code=ECONNRESET" },
+		);
+
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.phase).toBe("post-readiness-rest");
+		expect(record.trigger.operation).toBe("GET /rest/system/resource");
+		expect(record.trigger.sinceReadyMs).toBeGreaterThanOrEqual(30_000);
+		expect(record.trigger.sinceReadyMs).toBeLessThan(35_000);
+		expect(record.machine.accel).toBe("kvm");
+		expect(report.reportPath).toContain("post-readiness-failure-ready-then-reset-");
+		// Written under QUICKCHR_DATA_DIR/failures, not next to the machine — the
+		// caller keeps the machine running, but a later remove() must not be able
+		// to take the evidence with it.
+		expect(report.reportPath).toContain(join(TEST_DIR, "failures"));
+	});
+
+	// Omitted, not zero: a machine with no completed timed boot has no readiness
+	// moment to measure from, and "+0.0s after REST-ready" would read as a reset
+	// that happened the instant the machine came up.
+	test("omits sinceReadyMs when the machine has no recorded boot", async () => {
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		const report = await captureRunningFailure(
+			state({ lastStartedAt: undefined, lastBootMs: undefined }),
+			"post-readiness-rest",
+			{ operation: "GET /rest/user", error: "Error: restGet timeout after 10000ms" },
+		);
+
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.trigger.sinceReadyMs).toBeUndefined();
+		expect(report.summary).toContain("Failed after readiness: GET /rest/user —");
+		expect(report.summary).not.toContain("after REST-ready");
+	});
+
+	test("an explicit sinceReadyMs wins over the derived one", async () => {
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		const report = await captureRunningFailure(
+			state({ lastStartedAt: new Date(Date.now() - 90_000).toISOString(), lastBootMs: 60_000 }),
+			"post-readiness-rest",
+			{ operation: "GET /rest/user", error: "boom", sinceReadyMs: 1_234 },
+		);
+
+		const record = JSON.parse(readFileSync(report.reportPath as string, "utf-8"));
+		expect(record.trigger.sinceReadyMs).toBe(1_234);
 	});
 });

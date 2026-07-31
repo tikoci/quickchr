@@ -26,6 +26,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 - Temp directories: create in `import.meta.dir`, clean up in `afterEach`
 - Unix socket tests: use `join(tmpdir(), "quickchr-tmp-<name>")` from `node:os` — FUSE mounts (e.g. Multipass) don't support Unix domain sockets
 - Always clean up CHR instances in a `finally` block so failures don't leak machines
+- Reach CHR's REST API only through `test/integration/chr-rest.ts` — see below
 
 ## Running
 
@@ -50,6 +51,44 @@ QUICKCHR_TEST_TARGET=7.24beta2 QUICKCHR_INTEGRATION=1 bun test test/integration/
 Unset/empty → `stable` (unchanged behavior). Version-pinned tests (provisioning's
 `7.20.7`/`7.20.8`, library-api's `7.22.1`) ignore the override. An *old* pinned target will
 fail version-gated provisioning/device-mode tests by design.
+
+### Talking to CHR REST from an integration test
+
+Use `chrGet()` / `basicAuth()` from `test/integration/chr-rest.ts`. Do **not** call
+`fetch()`, and do not hand-roll a `node:http` request — both were present before
+#69's B10 bite, and both made "was that reset the client or the guest?"
+unanswerable on every `ECONNRESET`.
+
+```ts
+import { basicAuth, chrGet } from "./chr-rest.ts";
+
+const resp = await chrGet(instance, "/rest/system/resource", basicAuth("testuser", "TestPass1"), {
+  after: "createUser(testuser) during provisioning",
+});
+expect(resp.status).toBe(200);
+```
+
+Two things it buys:
+
+- **One client.** `chrGet` wraps `restGet` from `src/lib/rest.ts` — the same
+  `node:http` + `agent: false` + `Connection: close` path the library itself
+  uses. This is *confound removal*, not a fix: run 30507484030 reset through
+  `restGet` too, and `test/lab/bun-pool/` never reproduced the pooling bug.
+- **Evidence.** If the request *throws*, `chrGet` runs the full boot-failure
+  instrument set against the still-running machine and writes
+  `<dataDir>/failures/post-readiness-failure-<machine>-<ts>.json`. A `status` you
+  did not expect is not a throw — 401 is an answer, and several tests assert it —
+  so assertions on `status` stay the caller's job.
+
+`after:` is free text naming the credential or database change immediately
+preceding the request (#69's suspected precondition). State it or omit it; never
+guess. It is the field that turns "a reset happened" into "a reset happened right
+after this".
+
+**Use plain `restGet` instead when the call site expects to fail** — a
+field-presence polling loop, a retry-until-settled block. A capture costs up to
+`BOOT_FORENSICS_BUDGET_MS` (180 s), so one per retry would blow the test's
+timeout collecting reports on a condition the loop is designed to ride out.
 
 ### Diagnosing a boot that never becomes REST-ready
 
@@ -86,7 +125,21 @@ All three are plain `process.env` checks (like `QUICKCHR_DEBUG`), not managed
 
 #### Reading the report
 
-Read the fields in this order — they narrow from "where" to "what":
+Two prefixes land in `<dataDir>/failures/`, and they answer different questions:
+
+- `boot-failure-*` — the machine never became REST-ready. Start at `restProbe`.
+- `post-readiness-failure-*` — the machine booted fine and a later request died.
+  `restProbe` is `null` here (there was no readiness probe to fail); start at
+  `trigger`, which names the failed operation, the error with its `code`/`errno`,
+  `sinceReadyMs`, and the credential transition that preceded it. Everything
+  below describes a machine that was working, so without `trigger` the report
+  reads as a healthy machine and says nothing about what broke.
+
+Both share one 20-report cap on the directory (`MAX_BOOT_FAILURE_REPORTS`), and
+pruning orders by the timestamp in the filename, not by the filename — a prefix
+added to `FAILURE_REPORT_PREFIXES` without a stamp would prune first.
+
+Then read the fields in this order — they narrow from "where" to "what":
 
 1. **`forwardProbe.ports`** — every forwarded TCP port classified as `served` /
    `refused` / `dropped` / `not-forwarded`. **Every port `dropped` points at the

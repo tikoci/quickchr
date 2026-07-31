@@ -70,7 +70,7 @@ describe.skipIf(SKIP)("QUICKCHR_SECURE_LOGIN setting end-to-end", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { getInstanceCredentials } = await import("../../src/lib/credentials.ts");
 		const { QUICKCHR_USER } = await import("../../src/lib/provision.ts");
-		const { restGet } = await import("../../src/lib/rest.ts");
+		const { basicAuth, chrGet } = await import("./chr-rest.ts");
 
 		const instance = QuickCHR.get(MACHINE);
 		expect(instance).toBeDefined();
@@ -80,10 +80,11 @@ describe.skipIf(SKIP)("QUICKCHR_SECURE_LOGIN setting end-to-end", () => {
 		expect(creds?.password).toBeTruthy();
 
 		if (!instance || !creds) throw new Error("expected a running instance with managed credentials");
-		const resp = await restGet(
-			`http://127.0.0.1:${instance.ports.http}/rest/system/resource`,
-			`Basic ${btoa(`${creds.user}:${creds.password}`)}`,
-			10_000,
+		const resp = await chrGet(
+			instance,
+			"/rest/system/resource",
+			basicAuth(creds.user, creds.password),
+			{ after: "`quickchr settings set secure-login` provisioned the managed account" },
 		);
 		expect(resp.status).toBe(200);
 	}, bootTestTimeout());

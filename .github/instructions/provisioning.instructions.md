@@ -27,14 +27,14 @@ after boot, even after `waitForBoot` returns true.
 Each caller must handle this independently. The established pattern:
 
 ```typescript
-// Use node:http + agent:false (NOT fetch) — see "Bun Connection Pool" section below
-import { request as nodeRequest } from "node:http";
+// restGet is the shared node:http + agent:false client — see "Bun Connection Pool" below
+import { restGet } from "../../src/lib/rest.ts";
 
 // Retry until the response has the expected keys (up to N seconds)
 const deadline = Date.now() + 20_000;
 let lastBody = "";
 while (Date.now() < deadline) {
-    const { status, body } = await nodeGet(url, headers, 5_000); // nodeGet uses node:http
+    const { status, body } = await restGet(url, auth, 5_000);
     if (status >= 200 && status < 300) {
         lastBody = body;
         const data = JSON.parse(body);
@@ -64,38 +64,36 @@ Root cause: when one machine is stopped and a new machine is started on the same
 (possible when ports are recycled), Bun's pool may return responses from the prior
 machine's connections. Even `Bun.sleep(500)` between calls does not drain the pool.
 
-**The fix: use `node:http` with `agent: false` for any REST call to a CHR.**
+**The fix: use the shared client in `src/lib/rest.ts`** — `restGet`/`restPost`/
+`restPatch`/`restRequest`, all `node:http` with `agent: false` and
+`Connection: close`. **Do not hand-roll another one.**
 
 ```typescript
-import { request as nodeRequest } from "node:http";
-
-function nodeGet(url: string, headers: Record<string, string>, timeoutMs: number): Promise<{ status: number; body: string }> {
-    return new Promise((resolve, reject) => {
-        const parsed = new URL(url);
-        const req = nodeRequest(
-            { hostname: parsed.hostname, port: parsed.port, path: parsed.pathname + parsed.search,
-              method: "GET", headers, agent: false },
-            (res) => {
-                let body = "";
-                res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-                res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
-                res.on("error", reject);
-            },
-        );
-        req.setTimeout(timeoutMs, () => { req.destroy(new Error("timeout")); });
-        req.on("error", reject);
-        req.end();
-    });
-}
+import { restGet } from "./rest.ts";                 // library code
+import { basicAuth, chrGet } from "./chr-rest.ts";   // integration tests
 ```
+
+Two clients is worse than one wrong client. Until #69's B10 bite, three
+implementations reached CHR — `rest.ts`, Bun `fetch()` in `provisioning.test.ts`,
+and a private `nodeGet` copy in `anchor.test.ts` — so every `ECONNRESET` carried
+an unanswerable "was that the client or the guest?". The copies are gone; keep
+them gone. Note this is confound removal, **not** a proven fix: `test/lab/bun-pool/`
+never reproduced the pooling bug on Bun 1.3.11+, and run 30507484030 reset through
+`rest.ts` too.
+
+Integration tests go one step further and use `chrGet()` from
+`test/integration/chr-rest.ts`, which wraps `restGet` and captures a
+post-readiness forensic report when a request throws — see
+`testing.instructions.md`.
 
 Existing fixes using this pattern:
 - `exec.ts`: `restExecute` (commit `0c0f1b1`) — GET polling precedes the POST
 - `device-mode.ts`: `startDeviceModeUpdate` (commit `980ef4b`) — `waitForDeviceModeApi` GET loop pollutes the pool before the blocking POST
-- `test/integration/anchor.test.ts`: `nodeGet` helper (commit `980ef4b`) — test ports may be recycled from prior tests
 
-**Rule:** any integration test or library function that calls a CHR REST endpoint should
-use `node:http` + `agent: false`. Do NOT use `fetch()` for CHR REST calls.
+**Rule:** any integration test or library function that calls a CHR REST endpoint goes
+through `rest.ts`. Do NOT use `fetch()` for CHR REST calls, and do NOT write a second
+`node:http` wrapper. `fetch()` remains correct for *external* URLs (`versions.ts`,
+`images.ts`, `packages.ts`).
 
 ## Collecting RouterOS Logs for Debugging
 
@@ -147,6 +145,39 @@ boot forensics (`src/lib/guest-snapshot.ts`). Rules, all measured on 7.21.5/7.23
   re-applies stored provisioning options on a machine that never started
   (`lastStartedAt` unset), so a cleaned machine stays factory-fresh until the
   provisioning options are passed again.
+
+### A serial login costs ~11 s — budget it separately from the command
+
+Every budget over the serial console has two parts, and they differ by ~40×.
+Measured 2026-07-31 on 7.23.2 / x86 / HVF with a raw socket and timestamped
+receives (#69, bite B10 of #110):
+
+| phase | cost |
+|---|---|
+| banner → `Login:` | 10–25 ms |
+| username → `Password:` | 54–56 ms |
+| password → license `[Y/n]:` | **10,184 ms** |
+| whole fresh `consoleExec()` | 11,364 / 11,360 ms |
+| `consoleExec()` on an already-open session | 306 ms |
+
+RouterOS is not slow to *answer* — it answers the banner in 10 ms. It is slow to
+**complete a login**, and the whole cost sits in one phase after the password is
+accepted. Note this is 7.23.2 on hardware acceleration; TCG and cross-arch guests
+are slower still.
+
+Consequences, both of which were live bugs:
+
+- **Never size a console budget from the round-trip figure.** The ~0.3 s number is
+  what a command costs on a session that is *already* logged in. `src/lib/console.ts`
+  exports `CONSOLE_LOGIN_COST_MS` for the other case; budget from that.
+- **Never divide a budget across credential candidates without that floor.** An
+  executor that tries stored credentials → factory `admin` → `state.user` used to
+  split its 15 s query budget three ways, so no attempt could finish a login. It
+  therefore never marked a credential working, repeated the same split on every
+  later query, and spent the entire 60 s snapshot budget to report
+  `consoleReachable: false` about a guest answering serial in 10 ms. Queries now
+  carry a `GUEST_LOGIN_ALLOWANCE_MS` on top of the command budget until one of
+  them answers, and the per-candidate floor is `CONSOLE_LOGIN_COST_MS`.
 
 ### Where a console reply ends — use the sentinel, not the prompt
 
