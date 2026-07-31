@@ -185,10 +185,42 @@ jobs:
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+
+      # Resolve every channel target to a CONCRETE version, ONCE per dispatch,
+      # before any cache key is chosen (#104). Two reasons it happens here and
+      # not per leg:
+      #
+      #   1. The cache key names the version an entry holds, so it has to be
+      #      known before actions/cache runs — see scripts/ci-cache-key.ts for
+      #      why a version-keyed entry may safely skip its save and a rotating
+      #      one may not.
+      #   2. Resolving once means every leg of one dispatch agrees on what
+      #      "stable" meant, instead of each leg asking the upgrade server
+      #      minutes apart and a release landing mid-matrix splitting the run.
+      #
+      # A resolution failure fails the plan, deliberately: it costs one 20 s job
+      # instead of 15 legs that would each fail downloading from the same host.
+      # The leg still boots the TARGET (channel or pin) — QUICKCHR_TEST_TARGET is
+      # unchanged, so the channel-resolution path stays exercised in CI. The
+      # resolved value is used for the cache key and for reporting only.
+      - id: resolve
+        env:
+          TARGETS: ${{ inputs.routeros-targets }}
+        run: |
+          set -eo pipefail
+          LIST="${TARGETS// /}"
+          [ -z "$LIST" ] && LIST="stable"
+          MAP=$(bun scripts/ci-cache-key.ts resolve "$LIST")
+          echo "map=$MAP" >> "$GITHUB_OUTPUT"
+          echo "Resolved RouterOS targets: $MAP"
+
       - id: gen
         env:
           PLATFORMS: ${{ inputs.platforms }}
           TARGETS: ${{ inputs.routeros-targets }}
+          RESOLVED_MAP: ${{ steps.resolve.outputs.map }}
           TEST_FILTER: ${{ inputs.test-filter }}
           TCG_SMOKE: ${{ inputs.tcg-smoke }}
           QEMU_VERSION: ${{ inputs.qemu-version }}
@@ -317,14 +349,36 @@ jobs:
             # — growing the step cap too would quietly buy a hang more rope,
             # which is exactly the anti-pattern in this program's rule 5.
             [ -n "$QV" ] && timeout=$((timeout + 20))
+            # Resolved versions already claimed on THIS platform. Two targets can
+            # resolve to one version (`stable,7.23.2` when stable *is* 7.23.2),
+            # which would otherwise give two legs the same cache key and race
+            # them to save it — one upload of a few hundred MB always discarded.
+            # The first leg to claim a version owns it; the rest read.
+            claimed=""
             for t in "${TARGET_ARR[@]}"; do
               [ -z "$t" ] && continue
+              # The concrete version behind this target, from the resolve step.
+              # Carried on the matrix entry so the integration and examples legs
+              # derive the SAME cache key from the SAME resolution (#104) — the
+              # two jobs consume this one matrix, so they cannot disagree.
+              resolved=$(printf '%s' "$RESOLVED_MAP" | jq -r --arg t "$t" '.[$t] // empty')
+              if [ -z "$resolved" ]; then
+                echo "::error::Target '$t' has no resolved version — the resolve step and this matrix disagree"
+                exit 1
+              fi
+              cacheowner=true
+              case " $claimed " in
+                *" $resolved "*)
+                  cacheowner=false
+                  echo "::notice::${id} · ${t} resolves to ${resolved}, already claimed on this platform — this leg reads the cache, it does not write it" ;;
+                *) claimed="$claimed $resolved" ;;
+              esac
               inc=$(printf '%s' "$inc" | jq -c \
                 --arg id "$id" --arg label "$label" --arg os "$runner" \
-                --arg target "$t" --arg accel "$accel" --arg budget "$budget" \
+                --arg target "$t" --arg resolved "$resolved" --arg accel "$accel" --arg budget "$budget" \
                 --argjson smoke "$smoke" --argjson timeout "$timeout" \
-                --argjson steptimeout "$steptimeout" \
-                '. + [{id:$id, label:$label, os:$os, accel:$accel, budget:$budget, smoke:$smoke, timeout:$timeout, steptimeout:$steptimeout, target:$target}]')
+                --argjson steptimeout "$steptimeout" --argjson cacheowner "$cacheowner" \
+                '. + [{id:$id, label:$label, os:$os, accel:$accel, budget:$budget, smoke:$smoke, timeout:$timeout, steptimeout:$steptimeout, target:$target, resolved:$resolved, cacheowner:$cacheowner}]')
             done
           done
           if [ "$inc" = "[]" ]; then
@@ -410,9 +464,10 @@ jobs:
             exit 1
           fi
           PREFIX="$HOME/qemu-$QEMU_VERSION"
-          # No actions/cache here on purpose: the repo cache is already over its
-          # 10 GB cap (#104/B3) and a multi-hundred-MB build tree would evict the
-          # CHR images these legs depend on. Rebuild each time until B3 lands.
+          # No actions/cache here on purpose, and that survives #104's key
+          # redesign: this is an experiment lever that runs a handful of times per
+          # hypothesis, so a multi-hundred-MB build tree per QEMU version would
+          # spend quota the CHR image entries need more. Rebuild each time.
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             build-essential ninja-build pkg-config python3-venv \
             libglib2.0-dev libpixman-1-dev libslirp-dev libfdt-dev zlib1g-dev flex bison
@@ -574,32 +629,67 @@ jobs:
             fi
           } | tee "$HOME/platform-info.txt" | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # The primary key MUST rotate every run. actions/cache only saves when the
-      # primary key missed; with a static key (the old `…-v1`) an exact hit meant
-      # the post-job save was skipped, so a RouterOS version resolved *after* the
-      # cache was first populated re-downloaded on every run, forever (#91).
-      # `-int-` namespaces this against the examples-smoke job, which caches the
-      # same path in the same run; restore-keys still let the two share entries
-      # across runs, newest-first. Old entries age out under the repo LRU cap.
-      - name: Cache CHR images (POSIX)
-        if: ${{ runner.os != 'Windows' }}
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-int-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-
-            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-
+      # ── CHR image cache (#104) ────────────────────────────────────────────────
+      # The key names the platform and the CONCRETE version this leg boots — no
+      # run id, no channel alias — so an exact hit means the entry already holds
+      # what the leg needs and actions/cache is right to skip its save. The old
+      # `-v2-…-{run_id}-{run_attempt}` key rotated on purpose (a static key never
+      # re-saves, #91), but that made every leg write a fresh 250-520 MB entry:
+      # ~1 GB per push to main, past the 10 GB quota, with cold download left as
+      # an uncontrolled variable in every timing measurement (#106).
+      #
+      # ONE OWNER PER KEY. Only a full, unfiltered integration leg writes. It is
+      # the only configuration that downloads the whole set (resolved target +
+      # the suite's version-pinned images and package archives), so entry content
+      # stays a function of the key. A filtered/smoke leg or the examples-smoke
+      # job restores read-only: if a partial run owned the key, the next full run
+      # would hit it exactly, skip its save, and re-download the missing pinned
+      # images forever — #91 again, from the other direction.
+      #
+      # `path` is getCacheDir()'s answer rather than a literal, so the workflow
+      # cannot drift from the directory quickchr actually downloads into.
+      #
+      # Restore and save are SEPARATE actions on purpose. `actions/cache`'s
+      # combined form saves in a post step whose only condition is job success,
+      # which is too blunt: `matrix.resolved` is fixed at planning time, but a
+      # channel target is re-resolved by every start(), so a release landing
+      # mid-dispatch has the leg downloading 7.23.3 under a key naming 7.23.2.
+      # An exact hit writes nothing and the drift is harmless; a MISS would save
+      # mislabelled content, and that never heals — later legs pinned to 7.23.2
+      # exact-hit an entry without their image forever. The explicit save below
+      # runs only after verifying the directory holds what the key claims.
+      - name: Resolve cache identity
+        id: cache
+        env:
+          TEST_FILTER: ${{ inputs.test-filter }}
+          SMOKE: ${{ matrix.smoke }}
+          RESOLVED: ${{ matrix.resolved }}
+          PLATFORM: ${{ matrix.id }}
+          CACHE_OWNER: ${{ matrix.cacheowner }}
+        run: |
+          set -eo pipefail
+          # Three ways to be a reader, and the log says which: this leg runs a
+          # subset (filter/smoke), or another leg in this dispatch already claimed
+          # the same platform+version (plan decides that, so it cannot be a race).
+          owner=true
+          why=""
+          if [ -n "${TEST_FILTER// /}" ]; then owner=false; why="test-filter is set"; fi
+          if [ "$SMOKE" = "true" ]; then owner=false; why="tcg-smoke subset"; fi
+          if [ "$CACHE_OWNER" != "true" ]; then owner=false; why="another leg owns this platform+version"; fi
+          bun scripts/ci-cache-key.ts leg --version "$RESOLVED" --platform "$PLATFORM" --owner "$owner"
+          if [ "$owner" = "true" ]; then
+            echo "::notice::Cache OWNER for ${PLATFORM} @ ${RESOLVED} — a miss here re-saves the full image set"
+          else
+            echo "::notice::Cache READER for ${PLATFORM} @ ${RESOLVED} — ${why}; readers never write (#104)"
+          fi
 
-      - name: Cache CHR images (Windows)
-        if: ${{ runner.os == 'Windows' }}
-        uses: actions/cache@v5
+      - name: Restore CHR images
+        id: restore
+        uses: actions/cache/restore@v5
         with:
-          path: ~/AppData/Local/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-int-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-
-            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-
+          path: ${{ steps.cache.outputs.path }}
+          key: ${{ steps.cache.outputs.key }}
+          restore-keys: ${{ steps.cache.outputs.restore_keys }}
 
       - run: bun install --frozen-lockfile
 
@@ -695,6 +785,44 @@ jobs:
             pkill -KILL -f 'qemu-system-(x86_64|aarch64)' 2>/dev/null || true
           fi
           true
+
+      # ── the owner's save (#104) ───────────────────────────────────────────────
+      # Explicit rather than actions/cache's post step, so it can carry three
+      # conditions instead of one:
+      #
+      #   owner            — a full unfiltered leg that claimed this key in plan
+      #   restore missed   — an exact hit already holds this content; re-uploading
+      #                      several hundred MB to replace it with itself is waste
+      #   content verified — the directory really holds an image of the version
+      #                      the key names (see the drift guard in ci-cache-key.ts)
+      #
+      # No `if: always()`: reaching this step at all means the test loop ran to
+      # completion. A leg torn down mid-suite holds a partial set and must never
+      # own the key — the same reason a filtered leg cannot. That is why a
+      # platform whose suite never finishes never populates its entry (#76/B8).
+      - name: Verify cache content matches the key
+        id: verify
+        if: ${{ steps.cache.outputs.owner == 'true' && steps.restore.outputs.cache-hit != 'true' }}
+        env:
+          RESOLVED: ${{ matrix.resolved }}
+        run: |
+          set -eo pipefail
+          bun scripts/ci-cache-key.ts verify --version "$RESOLVED"
+
+      - name: Save CHR images (owner)
+        if: ${{ steps.cache.outputs.owner == 'true' && steps.restore.outputs.cache-hit != 'true' && steps.verify.outputs.matches == 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.cache.outputs.path }}
+          key: ${{ steps.cache.outputs.key }}
+
+      - name: Report a skipped save
+        if: ${{ steps.cache.outputs.owner == 'true' && steps.restore.outputs.cache-hit != 'true' && steps.verify.outputs.matches != 'true' }}
+        env:
+          RESOLVED: ${{ matrix.resolved }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          echo "::warning::Not saving ${{ steps.cache.outputs.key }} — the cache holds no image for ${RESOLVED}. Target '${TARGET}' most likely re-resolved to a newer release after plan fixed the key. Nothing is poisoned; the next dispatch keys on the new version and saves. See the drift guard in scripts/ci-cache-key.ts."
 
       # Diagnostic regression guard, arm64 only (historical stale-REST bug). Its
       # failure is the signal being collected, so it never gates — the explicit
@@ -1020,28 +1148,28 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
-      # Rotating primary key — see the integration job's cache step for why a
-      # static key never re-saves. `-ex-` keeps this job from colliding with the
-      # integration job's key within the same run.
-      - name: Cache CHR images (POSIX)
-        if: ${{ runner.os != 'Windows' }}
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-ex-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-
-            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-
+      # READ-ONLY (#104). This job used to write a `-ex-` twin of the integration
+      # job's entry for the same platform × version — the cache listing showed the
+      # pairs at identical sizes, because restore-keys handed it the integration
+      # job's content and it saved the same bytes back under a second key. It now
+      # restores and never saves; the full integration leg is the single owner
+      # (see the integration job's cache block). Examples run their own CHR boots,
+      # but every image they need is in the set that leg already downloads.
+      - name: Resolve cache identity
+        id: cache
+        env:
+          RESOLVED: ${{ matrix.resolved }}
+          PLATFORM: ${{ matrix.id }}
+        run: |
+          set -eo pipefail
+          bun scripts/ci-cache-key.ts leg --version "$RESOLVED" --platform "$PLATFORM" --owner false
 
-      - name: Cache CHR images (Windows)
-        if: ${{ runner.os == 'Windows' }}
-        uses: actions/cache@v5
+      - name: Restore CHR images (reader)
+        uses: actions/cache/restore@v5
         with:
-          path: ~/AppData/Local/quickchr/cache
-          key: chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-ex-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-${{ matrix.target }}-
-            chr-images-${{ runner.os }}-${{ runner.arch }}-v2-
+          path: ${{ steps.cache.outputs.path }}
+          key: ${{ steps.cache.outputs.key }}
+          restore-keys: ${{ steps.cache.outputs.restore_keys }}
 
       - run: bun install --frozen-lockfile
 

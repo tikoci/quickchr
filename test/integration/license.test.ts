@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout } from "./timeouts.ts";
+import { bootTestTimeout, coldDownloadTestTimeout, PACKAGES_ZIP_BYTES } from "./timeouts.ts";
 
 /**
  * Integration tests for license and package install functionality.
@@ -168,7 +168,7 @@ describe.skipIf(SKIP)("downloadAndListPackages — enumerate from zip", () => {
 		for (const pkg of KNOWN_PACKAGES_ARM64) {
 			expect(packages).toContain(pkg);
 		}
-	}, 120_000);
+	}, coldDownloadTestTimeout(PACKAGES_ZIP_BYTES.arm64));
 
 	test("x86 packages match 7.22.1 known list", async () => {
 		const { downloadAndListPackages } = await import("../../src/lib/packages.ts");
@@ -180,7 +180,7 @@ describe.skipIf(SKIP)("downloadAndListPackages — enumerate from zip", () => {
 		for (const pkg of KNOWN_PACKAGES_X86) {
 			expect(packages).toContain(pkg);
 		}
-	}, 120_000);
+	}, coldDownloadTestTimeout(PACKAGES_ZIP_BYTES.x86));
 
 	test("arm64 has more packages than x86", async () => {
 		const { downloadAndListPackages } = await import("../../src/lib/packages.ts");
@@ -189,5 +189,6 @@ describe.skipIf(SKIP)("downloadAndListPackages — enumerate from zip", () => {
 		const x86 = await downloadAndListPackages("7.22.1", "x86");
 
 		expect(arm64.length).toBeGreaterThan(x86.length);
-	}, 120_000);
+		// Both zips, in case this test is the one that runs first.
+	}, coldDownloadTestTimeout(PACKAGES_ZIP_BYTES.arm64 + PACKAGES_ZIP_BYTES.x86));
 });

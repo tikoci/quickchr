@@ -50,6 +50,7 @@ bubbletea
 buildx
 bunx
 bypassable
+cacheowner
 calea
 calltime
 catppuccin

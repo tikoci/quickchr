@@ -299,8 +299,10 @@ step verifies `-netdev help` lists `user` and **fails the leg** if it doesn't �
 slirp-less QEMU would produce a "REST never came up" failure indistinguishable from the
 bug under investigation.
 
-The build is **not** cached. The repo cache is already over its 10 GB cap (#104), and a
-build tree would evict the CHR images these legs depend on. Revisit once #104/B3 lands.
+The build is **not** cached, and that stands after #104's key redesign. The lever is an
+experiment lever: it runs a handful of times per hypothesis, so a multi-hundred-MB build
+tree per QEMU version would spend quota that the CHR image entries — restored by every
+leg of every run — need more. Rebuild each time.
 
 Constraints, all enforced in the `plan` job so a mistake costs no runner minutes:
 
@@ -455,7 +457,7 @@ a new tracked issue.
 | `MISSING_FIRMWARE` on arm64 | UEFI pkg not installed | `apt-get` step logs |
 | Port conflict | stale machine from prior run | `machine.json` port fields |
 | `sshpass` not found | missing dep | `apt-get`/`brew install` step |
-| First-run slower than 20 min | Initial download of versioned CHR images (7.20.7, 7.20.8) | Add those versions to the image cache key or wait for second run |
+| First-run slower than 20 min | Cold cache — the pinned images (7.20.7, 7.20.8) and packages downloaded. Expected on a key miss (new resolved version, or the first run on a branch) | The leg's `Cache OWNER/READER` line + `cache-hit`; a *reader* leg cannot fix this by running again — only the full suite repopulates |
 | `BOOT_TIMEOUT` on KVM runner | `detectAccel()` race during udevadm (fixed in cb4d505) | Check qemu.log for `-accel tcg` vs `-accel kvm` |
 | `BOOT_TIMEOUT` after `respawning QEMU once` warn | Genuine boot failure — `start()` already retried a wedged nested-KVM/HVF boot once and it still didn't reach REST | `qemu.log` (both attempts appended); a *single* wedged boot is now auto-recovered, so a `BOOT_TIMEOUT` that survives the respawn is real |
 
@@ -518,21 +520,100 @@ gh workflow run release.yml
 
 ## CHR Image Caching
 
-Downloaded RouterOS images are cached in `~/.local/share/quickchr/cache/` using
-`actions/cache` with key
-`chr-images-{OS}-{arch}-v2-{target}-{int|ex}-{run_id}-{run_attempt}` and
-`restore-keys` falling back to `…-v2-{target}-` then `…-v2-`.
+Downloaded RouterOS images live in the quickchr cache dir (`getCacheDir()` —
+`~/.local/share/quickchr/cache/`, `%LOCALAPPDATA%\quickchr\cache` on Windows).
+The key is built by `scripts/ci-cache-key.ts`, not written inline in the
+workflow:
 
-**The primary key must keep a rotating component.** `actions/cache` skips the
-post-job save whenever the primary key hit exactly, so the previous static
-`chr-images-{OS}-{arch}-v1` key meant any RouterOS version resolved *after* the
-cache was first populated re-downloaded on every single run, forever (#91). The
-`{run_id}-{run_attempt}` tail guarantees a miss, so every run re-saves; the
-`{int|ex}` segment keeps the integration and examples-smoke jobs from colliding
-on one key within a run. Old entries age out under the repo's cache LRU cap.
+```text
+key           chr-images-v3-{platform-id}-{resolved-version}
+restore-keys  chr-images-v3-{platform-id}-
+path          getCacheDir()          # not a literal — the workflow cannot drift
+```
 
-Cache misses cause a fresh download (~50-100 MB). Bump `-v2` to invalidate
-wholesale (e.g. a corrupted image from a partial download).
+`{resolved-version}` is a **concrete** RouterOS version. The `plan` job resolves
+every channel target once per dispatch (`ci-cache-key.ts resolve`) and carries
+the answer on each matrix entry as `matrix.resolved`, so the integration and
+examples legs derive the same key from the same resolution. The leg still boots
+`matrix.target` — `QUICKCHR_TEST_TARGET` is unchanged and the channel-resolution
+path stays exercised.
+
+### Key ownership (#104) — who may write
+
+| Configuration | Cache action | Writes? |
+|---------------|--------------|---------|
+| Integration leg, full unfiltered suite, first to claim its platform+version | `actions/cache` | **yes — the owner** |
+| Integration leg, `test-filter` or `tcg-smoke` | `actions/cache/restore` | no |
+| Integration leg whose platform+version another leg already claimed | `actions/cache/restore` | no |
+| `examples-smoke` leg (any) | `actions/cache/restore` | no |
+
+Ownership is decided in `plan`, not on the leg: two targets can resolve to one
+version (`stable,7.23.2` when stable *is* 7.23.2), and the first to claim a
+version on a platform gets `matrix.cacheowner`. Deciding it centrally is what
+makes "one owner" true rather than merely likely — two legs discovering the same
+key independently would both save and race, and one multi-hundred-MB upload
+would always be discarded. The reader's `::notice::` states which of the three
+reasons applies.
+
+Restore and save are separate steps (`actions/cache/restore` + a guarded
+`actions/cache/save`), not the combined action. An owner saves only when all
+three hold: it claimed the key in `plan`, the restore **missed** (an exact hit
+already holds this content), and the directory **verifies** against the key. The
+save step carries no `if: always()`, so reaching it at all means the test loop
+ran to completion — a leg torn down mid-suite holds a partial set and must never
+own the key.
+
+A cache entry is only trustworthy while its content is a **function of its key**, which
+is why exactly one configuration writes: the full suite is the only one that
+downloads the whole set (the resolved target *plus* the version-pinned images
+and package archives the suite fixes — 7.20.7/7.20.8, 7.22.1). If a filtered
+run owned the key, its thinner content would hit exactly on the next full run,
+which would then skip its save and re-download the missing pinned images
+forever — #91 from the other direction. Each leg logs `Cache OWNER`/`Cache
+READER` with its key, so a run's own log answers "did this write?".
+
+Two consequences worth knowing:
+
+- **A platform whose full suite never finishes never populates its entry.**
+  `actions/cache`'s post-job save is `post-if: success()`, so a red leg saves
+  nothing. That is deliberate — a leg torn down mid-suite holds partial content
+  and must not own the key — but it means `macos-x86`, whose full suite has
+  never completed (#76), stays permanently cold and pays the download on every
+  run. Under the old scheme its examples-smoke twin hid this by saving a `-ex-`
+  entry the integration leg could restore from; that entry was exactly the
+  duplicate write #104 is about. Folding the cold cost into #76/B8's measurement
+  is the honest fix; re-introducing a partial-content writer is not. (Saving
+  from a leg that *completed* the file loop but failed a test would be sound —
+  it downloaded everything — but needs a marker distinguishing "loop finished"
+  from "step timed out mid-loop", which is its own change.)
+- **A release published mid-dispatch is caught by the drift guard, not by
+  luck.** `plan` fixes `matrix.resolved`, but a leg boots `matrix.target`, and a
+  channel target is re-resolved by *every* `start()`. So `stable` planned as
+  7.23.2 can have the leg downloading 7.23.3. On an exact hit nothing is written
+  and the drift is harmless — but on a **miss** the leg would save 7.23.3
+  content under the 7.23.2 key, and that never heals: every later leg pinned to
+  7.23.2 exact-hits an entry with no 7.23.2 image, re-downloads, and cannot save.
+  #91 again, permanently, for that key.
+
+  So the owner verifies before saving — the directory must hold an image of the
+  version the key names, read through the library's own cache parser
+  (`ci-cache-key.ts verify`). On a mismatch the save is skipped with a
+  `::warning::` naming the versions actually present. Nothing is poisoned, and
+  the next dispatch keys on the new version, misses, and saves correctly. Do not
+  "fix" any of this by rotating the key again.
+
+Bump `CACHE_KEY_GENERATION` in `scripts/ci-cache-key.ts` (currently `v3`) to
+invalidate wholesale — a changed content contract, or a corrupted image from a
+partial download. Old generations age out under the repo LRU cap.
+
+**What this replaced, and why not to go back.** `-v1` was static *and*
+version-blind: once populated it hit forever, so any version resolved later
+re-downloaded on every run (#91). #101 fixed that by keying on
+`{run_id}-{run_attempt}` plus an `{int|ex}` split, which guaranteed a miss —
+and therefore a **write on every leg of every run**: 250-520 MB each, ~1 GB per
+push to main, 11.49 GB against a 10 GB quota (#104), plus six byte-identical
+`…-7.21.5-int-*` entries from one lab session. Rotation was the wrong knob; the
+version belongs *in* the key.
 
 **A cache miss is large enough to dominate a timing measurement, so treat cold
 download as a confound in any per-file comparison.** Measured locally on
@@ -550,8 +631,11 @@ Two consequences:
   downloading. The cheap discriminator is whether any `qemu-system` process was
   alive; that single check is what kept the above from being misread as
   cumulative resource leakage on the very file where such a story was expected.
-- **Timing data collected while cache keys still rotate per run carries this
-  variance**, which is why #104's key redesign gates #106's sample collection.
+- **Timing samples are only comparable once a leg's cache state is known.** The
+  per-run key rotation that made every run cold-ish is gone (above), which is
+  what unblocked #106's sample collection — but a leg whose log says
+  `Cache OWNER` on a *miss* still paid for downloads, so read the cache line
+  before comparing two runs' numbers.
 
 ## Adding a New Runner
 
