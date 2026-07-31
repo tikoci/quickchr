@@ -446,7 +446,14 @@ jobs:
           # produce a "no REST" failure that looks exactly like #79.
           bin="$PREFIX/bin/qemu-system-${QEMU_TARGET%-softmmu}"
           "$bin" --version
-          if ! "$bin" -netdev help 2>&1 | grep -qw user; then
+          # `-M none` is required: bare `-netdev help` exits with "No machine
+          # specified, and there is no default" and lists nothing, which made the
+          # first version of this guard fail a perfectly good build (run
+          # 30591946038). Capture the output and PRINT it — a guard that swallows
+          # the evidence for its own verdict is not diagnosable.
+          netdevs=$("$bin" -M none -netdev help 2>&1 || true)
+          printf '%s\n' "$netdevs" | sed 's/^/  /'
+          if ! printf '%s\n' "$netdevs" | grep -qw user; then
             echo "::error::Built QEMU $QEMU_VERSION has no 'user' netdev — libslirp missing, the contrast would be meaningless"
             exit 1
           fi
@@ -966,7 +973,10 @@ jobs:
           echo "$PREFIX/bin" >> "$GITHUB_PATH"
           bin="$PREFIX/bin/qemu-system-${QEMU_TARGET%-softmmu}"
           "$bin" --version
-          if ! "$bin" -netdev help 2>&1 | grep -qw user; then
+          # `-M none` is required — see the integration job's copy.
+          netdevs=$("$bin" -M none -netdev help 2>&1 || true)
+          printf '%s\n' "$netdevs" | sed 's/^/  /'
+          if ! printf '%s\n' "$netdevs" | grep -qw user; then
             echo "::error::Built QEMU $QEMU_VERSION has no 'user' netdev — libslirp missing"
             exit 1
           fi
