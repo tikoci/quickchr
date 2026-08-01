@@ -9,7 +9,7 @@
  *             library on every successful boot) + the per-file timing file
  *             (written by the workflow's test loop) and emits one NDJSON file:
  *               {kind:"boot",  ts, run_id, sha, platform, host, name, version, arch, accel, boot_ms}
- *               {kind:"test-file", …, file, duration_s, status}
+ *               {kind:"test-file", …, file, duration_s, status, outcome}
  *               {kind:"suite", …, scope: "full"|"filtered", conclusion: "pass"|"fail",
  *                target, files, failed}
  *             Env: PLATFORM_ID, SCOPE, SUITE_CONCLUSION, QUICKCHR_TEST_TARGET,
@@ -61,12 +61,42 @@ function arg(name: string): string | undefined {
 	return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
-/** Parse the workflow's timing file: one `<file> <seconds>s <pass|fail>` per line. */
-export function parseTimingFile(text: string): Array<{ file: string; duration_s: number; status: string }> {
-	const out: Array<{ file: string; duration_s: number; status: string }> = [];
+/** Outcomes `ci-file-watchdog.ts` writes, plus the two-value vocabulary the
+ *  loop used before it (#77 item 4). `fail` is the legacy spelling and is
+ *  normalized to `test-failure`, so a record from a run before B4 folds
+ *  identically to one after it. */
+const OUTCOME_ALIASES: Record<string, string> = { fail: "test-failure" };
+const KNOWN_OUTCOMES = new Set(["pass", "test-failure", "file-watchdog-timeout", "not-run"]);
+
+/**
+ * Parse the workflow's timing file: one `<file> <seconds>s <outcome>` per line.
+ *
+ * Every record carries BOTH `status` (`pass`/`fail`) and `outcome`. Keeping
+ * `status` is not redundancy — `tested-versions.json` and every historical
+ * `runs/*.ndjson` on the ci-data branch are built on it, and a widened
+ * vocabulary must not silently reclassify a year of stored results. `outcome`
+ * is where the new detail lives; anything that is not a pass is still a fail.
+ */
+export function parseTimingFile(
+	text: string,
+): Array<{ file: string; duration_s: number; status: string; outcome: string }> {
+	const out: Array<{ file: string; duration_s: number; status: string; outcome: string }> = [];
 	for (const line of text.split("\n")) {
-		const m = line.trim().match(/^(\S+)\s+(\d+)s\s+(pass|fail)$/);
-		if (m?.[1] && m[2] && m[3]) out.push({ file: m[1], duration_s: Number(m[2]), status: m[3] });
+		const m = line.trim().match(/^(\S+)\s+(\d+)s\s+([a-z-]+)$/);
+		if (!m?.[1] || !m[2] || !m[3]) continue;
+		const outcome = OUTCOME_ALIASES[m[3]] ?? m[3];
+		// An unrecognized token means the loop and this parser have drifted.
+		// Dropping the line would hide a file from the rollup, so keep it and let
+		// it read as a failure — the honest reading of "we do not know".
+		if (!KNOWN_OUTCOMES.has(outcome)) {
+			console.warn(`ci-metrics: unknown outcome '${m[3]}' for ${m[1]} — recording as a failure`);
+		}
+		out.push({
+			file: m[1],
+			duration_s: Number(m[2]),
+			status: outcome === "pass" ? "pass" : "fail",
+			outcome,
+		});
 	}
 	return out;
 }

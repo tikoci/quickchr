@@ -129,6 +129,10 @@ on:
         type: string
         description: "EXPERIMENT LEVER. Pin QUICKCHR_ACCEL (tcg/kvm/hvf/auto) instead of letting detectAccel choose. Empty = auto-detect (normal runs). Use to hold the accelerator constant across a contrast whose legs might otherwise differ."
         default: ""
+      watchdog-cap:
+        type: string
+        description: "EXPERIMENT LEVER. Force the per-file watchdog cap to this many seconds. It can only SHORTEN a cap, never lengthen one. Empty = the checked-in table (normal runs). Use to exercise the timeout path itself on a real runner without committing a test that hangs on purpose (#77)."
+        default: ""
   workflow_call:
     inputs:
       platforms:
@@ -167,6 +171,10 @@ on:
       accel:
         type: string
         description: "Experiment lever — pin QUICKCHR_ACCEL instead of auto-detecting. Empty = auto."
+        default: ""
+      watchdog-cap:
+        type: string
+        description: "Experiment lever — force the per-file watchdog cap (seconds). Shortens only. Empty = the checked-in table."
         default: ""
 
 # Least-privilege: this workflow only runs tests and uploads artifacts.
@@ -225,6 +233,7 @@ jobs:
           TCG_SMOKE: ${{ inputs.tcg-smoke }}
           QEMU_VERSION: ${{ inputs.qemu-version }}
           ACCEL_INPUT: ${{ inputs.accel }}
+          WATCHDOG_CAP_INPUT: ${{ inputs.watchdog-cap }}
         run: |
           set -eo pipefail
           # id → label | runner | accel | budget
@@ -311,6 +320,18 @@ jobs:
               auto|tcg|hvf|kvm) ;;
               *) echo "::error::Invalid accel '$ACCEL_PIN' — must be one of auto, tcg, hvf, kvm (quickchr's AccelMode)"; exit 1 ;;
             esac
+          fi
+          # Same rule as the levers above: validate here so a typo costs no runner
+          # minutes. A non-numeric value would be silently ignored by the script's
+          # Number() and the run would be labelled "watchdog forced" while running
+          # the ordinary caps — the flavour of lie this section exists to prevent.
+          WATCHDOG_CAP="${WATCHDOG_CAP_INPUT// /}"
+          if [ -n "$WATCHDOG_CAP" ]; then
+            if ! printf '%s' "$WATCHDOG_CAP" | grep -qE '^[1-9][0-9]*$'; then
+              echo "::error::Invalid watchdog-cap '$WATCHDOG_CAP' — expected a positive whole number of seconds (it can only SHORTEN a cap; values at or above the checked-in cap are ignored by scripts/ci-file-watchdog.ts)"
+              exit 1
+            fi
+            echo "::warning::watchdog-cap=${WATCHDOG_CAP}s is set — every test file is capped at or below ${WATCHDOG_CAP}s. This is an experiment lever for exercising the timeout path (#77); a normal run must not set it."
           fi
           FILTER="${TEST_FILTER// /}"
           inc='[]'
@@ -751,22 +772,41 @@ jobs:
         timeout-minutes: ${{ matrix.steptimeout }}
         env:
           FILE_LIST: ${{ steps.files.outputs.list }}
+          STEP_TIMEOUT_MIN: ${{ matrix.steptimeout }}
+          PLATFORM_ID: ${{ matrix.id }}
+          QUICKCHR_CI_WATCHDOG_CAP_S: ${{ inputs.watchdog-cap }}
         run: |
           set -eo pipefail
+          # The deadline this step will actually be killed at, resolved ONCE here
+          # rather than per file — a per-file recomputation would let a slow file
+          # quietly extend the window it is being measured against (#110 rule 4).
+          # scripts/ci-file-watchdog.ts holds a forensics reserve back from it so
+          # the reap / metrics / summary / upload steps below always still run.
+          deadline=$(( $(date +%s) + STEP_TIMEOUT_MIN * 60 ))
+          echo "::notice::step deadline in $STEP_TIMEOUT_MIN min (epoch $deadline)"
           echo "::group::Integration test output"
           : > "$HOME/integration-output.txt"
           : > "$HOME/integration-timing.txt"
           fail=0
           for f in $FILE_LIST; do
             echo "::notice::Running $f"
-            t0=$(date +%s)
-            status=pass
-            if ! QUICKCHR_INTEGRATION=1 bun test "./$f" 2>&1 | tee -a "$HOME/integration-output.txt"; then
-              fail=1
-              status=fail
-            fi
-            t1=$(date +%s)
-            echo "$(basename "$f") $((t1 - t0))s $status" >> "$HOME/integration-timing.txt"
+            # The watchdog owns the cap, the reap and the timing line; stdout and
+            # stderr stay inherited so this tee keeps producing byte-identical
+            # logs. Its exit code separates "red, keep going" from "stop".
+            rc=0
+            bun scripts/ci-file-watchdog.ts \
+              --file "$f" \
+              --timing "$HOME/integration-timing.txt" \
+              --report-dir "$HOME" \
+              --deadline "$deadline" 2>&1 | tee -a "$HOME/integration-output.txt" || rc=$?
+            case "$rc" in
+              0) ;;
+              1|2) fail=1 ;;
+              # 3 = the reap could not confirm the environment is clean, 4 = the
+              # step budget is spent. Running the remaining files in either state
+              # turns one root cause into a string of misleading failures (#77).
+              *) fail=1; echo "::error::Stopping the file loop after $f (watchdog rc=$rc)"; break ;;
+            esac
           done
           echo "::endgroup::"
           exit "$fail"
@@ -882,6 +922,19 @@ jobs:
             echo '```'
             cat "$HOME/integration-timing.txt" 2>/dev/null || echo "(no timing captured)"
             echo '```'
+            # A watchdog kill is the one outcome whose evidence is NOT in the test
+            # output — bun was killed mid-file, so the log just stops. The report
+            # carries the cap, the reap result and the host state instead.
+            if grep -q 'file-watchdog-timeout' "$HOME/integration-timing.txt" 2>/dev/null; then
+              echo ""
+              echo "### ⏱ File watchdog fired"
+              for r in "$HOME"/watchdog-*.json; do
+                [ -e "$r" ] || continue
+                echo '```json'
+                cat "$r"
+                echo '```'
+              done
+            fi
             if [ -s "$HOME/arm64-rest-repro.txt" ]; then
               echo ""
               echo "### arm64 REST ordering repro (diagnostic, non-gating)"
@@ -912,6 +965,7 @@ jobs:
             ~/platform-info.txt
             ~/integration-output.txt
             ~/integration-timing.txt
+            ~/watchdog-*.json
             ~/metrics.ndjson
             ~/issue69-*.ndjson
             ~/arm64-rest-repro.txt
@@ -931,6 +985,7 @@ jobs:
             ~/platform-info.txt
             ~/integration-output.txt
             ~/integration-timing.txt
+            ~/watchdog-*.json
             ~/metrics.ndjson
             ~/issue69-*.ndjson
             ~/AppData/Local/quickchr/boot-log.ndjson
