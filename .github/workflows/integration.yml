@@ -902,6 +902,12 @@ jobs:
         run: |
           {
             echo "## Integration — ${{ matrix.label }} · ${{ matrix.target }}"
+            # A watchdog kill leaves NO `(fail)` line: bun was killed mid-file, so
+            # the log simply stops. Without this the success branch below would
+            # print "all tests passed" directly above the timeout report — the
+            # exact false green this program exists to remove.
+            watchdog_fired=false
+            grep -qE 'file-watchdog-timeout|not-run' "$HOME/integration-timing.txt" 2>/dev/null && watchdog_fired=true
             if [ ! -s "$HOME/integration-output.txt" ]; then
               echo "❌ no test output captured — the run step likely failed before bun test"
             elif grep -qE '\(fail\)' "$HOME/integration-output.txt"; then
@@ -914,6 +920,8 @@ jobs:
               echo '```'
               grep -B1 -A4 -E '^error:|error\(' "$HOME/integration-output.txt" | tail -60 || true
               echo '```'
+            elif [ "$watchdog_fired" = "true" ]; then
+              echo "❌ a file was killed by the watchdog or never started — see below"
             else
               echo "✅ all selected integration tests passed"
             fi
@@ -925,7 +933,7 @@ jobs:
             # A watchdog kill is the one outcome whose evidence is NOT in the test
             # output — bun was killed mid-file, so the log just stops. The report
             # carries the cap, the reap result and the host state instead.
-            if grep -q 'file-watchdog-timeout' "$HOME/integration-timing.txt" 2>/dev/null; then
+            if [ "$watchdog_fired" = "true" ]; then
               echo ""
               echo "### ⏱ File watchdog fired"
               for r in "$HOME"/watchdog-*.json; do

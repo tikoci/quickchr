@@ -65,7 +65,9 @@ function arg(name: string): string | undefined {
  *  loop used before it (#77 item 4). `fail` is the legacy spelling and is
  *  normalized to `test-failure`, so a record from a run before B4 folds
  *  identically to one after it. */
-const OUTCOME_ALIASES: Record<string, string> = { fail: "test-failure" };
+// A Map, not an object literal: the token regex below accepts `constructor`,
+// and an object lookup would resolve it through Object.prototype to a function.
+const OUTCOME_ALIASES = new Map([["fail", "test-failure"]]);
 const KNOWN_OUTCOMES = new Set(["pass", "test-failure", "file-watchdog-timeout", "not-run"]);
 
 /**
@@ -84,7 +86,7 @@ export function parseTimingFile(
 	for (const line of text.split("\n")) {
 		const m = line.trim().match(/^(\S+)\s+(\d+)s\s+([a-z-]+)$/);
 		if (!m?.[1] || !m[2] || !m[3]) continue;
-		const outcome = OUTCOME_ALIASES[m[3]] ?? m[3];
+		const outcome = OUTCOME_ALIASES.get(m[3]) ?? m[3];
 		// An unrecognized token means the loop and this parser have drifted.
 		// Dropping the line would hide a file from the rollup, so keep it and let
 		// it read as a failure — the honest reading of "we do not know".

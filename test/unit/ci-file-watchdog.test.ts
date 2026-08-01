@@ -66,6 +66,21 @@ describe("capSecondsFor — the checked-in cap table", () => {
 		}
 	});
 
+	test("the watchdog-cap lever shortens a cap but can never lengthen one", () => {
+		// The lever is what makes the timeout path testable on a real runner, so
+		// its one safety property — shortens only — is worth pinning. A lever that
+		// could lengthen a cap would be a runtime-derived deadline wearing a
+		// dispatch input (#110 rule 4).
+		const table = capSecondsFor("provisioning.test.ts");
+		expect(capSecondsFor("provisioning.test.ts", 45)).toBe(45);
+		expect(capSecondsFor("provisioning.test.ts", table + 6000)).toBe(table);
+		expect(capSecondsFor("provisioning.test.ts", table)).toBe(table);
+		// Nonsense values fall back to the table rather than disabling the bound.
+		for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(capSecondsFor("provisioning.test.ts", bad)).toBe(table);
+		}
+	});
+
 	test("no cap can outlive the ~60 min boundary #76 dies at", () => {
 		// A single file must never be able to consume the whole runner-loss window
 		// on its own; that would leave the watchdog unable to name the wedge.

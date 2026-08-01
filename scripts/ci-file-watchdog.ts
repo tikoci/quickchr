@@ -37,8 +37,12 @@
  * ```sh
  * git fetch origin ci-data
  * git show origin/ci-data:runs/<run_id>-<platform>-<target>.ndjson \
- *   | jq -r 'select(.kind=="test-file")|"\(.file) \(.duration_s)s \(.status)"'
+ *   | jq -r 'select(.kind=="test-file")|"\(.file) \(.duration_s)s \(.outcome // .status)"'
  * ```
+ *
+ * Take only `pass` rows: a file this watchdog killed reports its cap, not its
+ * cost, and folding that back in would let the caps ratchet up off their own
+ * timeouts.
  *
  * `macos-x86` is ABSENT from that window and cannot be added while #76 stands —
  * it has never completed a full suite, which is the whole problem. So the caps
@@ -58,7 +62,7 @@
  * started at all and says so, rather than being launched into a cap that
  * guarantees a meaningless timeout.
  */
-import { existsSync, appendFileSync, writeFileSync } from "node:fs";
+import { existsSync, appendFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { cpus, freemem, loadavg, totalmem } from "node:os";
 
@@ -205,10 +209,14 @@ function arg(name: string): string | undefined {
 /** Count live QEMU processes. The cleanup verdict rests on this, so an
  *  unavailable tool must read as "unknown", never as "none left". */
 async function qemuProcessCount(): Promise<number | undefined> {
+	// No image-name filter on Windows: `/FI` takes a single image, and
+	// `reapQemu` kills two. Filtering on x86_64 alone would report
+	// `cleanup_verified: true` with a live aarch64 emulator — a false clean
+	// bill of health is worse than no check. Scan the full list and let the
+	// substring match below cover both, which also covers tasklist's
+	// "INFO: No tasks are running…" line without a special case.
 	const cmd =
-		process.platform === "win32"
-			? ["tasklist", "/FI", "IMAGENAME eq qemu-system-x86_64.exe", "/NH"]
-			: ["pgrep", "-f", "qemu-system-(x86_64|aarch64)"];
+		process.platform === "win32" ? ["tasklist", "/NH"] : ["pgrep", "-f", "qemu-system-(x86_64|aarch64)"];
 	try {
 		const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
 		const text = await new Response(proc.stdout).text();
@@ -349,7 +357,7 @@ async function main(): Promise<never> {
 		host: await hostSnapshot(),
 	};
 	const reportPath = join(reportDir, `watchdog-${basename(file)}.json`);
-	writeFileSync(reportPath, `${JSON.stringify(report, null, "\t")}\n`);
+	await Bun.write(reportPath, `${JSON.stringify(report, null, "\t")}\n`);
 
 	appendFileSync(timingPath, `${timingLine(file, elapsedS, "file-watchdog-timeout")}\n`);
 	console.error(

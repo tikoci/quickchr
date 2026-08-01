@@ -110,7 +110,7 @@ A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix
 
 Every integration job records per-file wall-clock timing to `integration-timing.txt` and assembles `metrics.ndjson` (both in the artifact) — see "CI metrics (ci-data)" below ([#30](https://github.com/tikoci/quickchr/issues/30)).
 
-## Per-file watchdog
+#### Per-file watchdog
 
 Each file in the sequential loop runs under `scripts/ci-file-watchdog.ts`, not under `bun test`
 directly ([#77](https://github.com/tikoci/quickchr/issues/77), B4 of #110). The step cap added in
@@ -136,8 +136,12 @@ legs, 168 `test-file` records. The cap is `clamp(observed × 2, 600 s, 1200 s)`.
 ```sh
 git fetch origin ci-data
 git show origin/ci-data:runs/<run_id>-<platform>-<target>.ndjson \
-  | jq -r 'select(.kind=="test-file")|"\(.file) \(.duration_s)s \(.status)"'
+  | jq -r 'select(.kind=="test-file")|"\(.file) \(.duration_s)s \(.outcome // .status)"'
 ```
+
+Filter to `pass` when refreshing `OBSERVED_MAX_S` — a file killed by the watchdog or cut short by
+the deadline reports its cap, not its cost, and folding that back in would let the caps ratchet
+upward off their own timeouts.
 
 Two things about that window matter when refreshing it. It must be drawn **after `2899be4`**
 (#116), or file durations carry download-retry inflation rather than cost — B7 measured

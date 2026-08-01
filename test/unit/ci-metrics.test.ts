@@ -35,6 +35,15 @@ describe("parseTimingFile", () => {
 		]);
 	});
 
+	test("an outcome token cannot resolve through Object.prototype", () => {
+		// The token regex accepts `constructor`, and an object-literal alias table
+		// would hand back `Object` for it — a function where a string belongs.
+		const parsed = parseTimingFile("exec.test.ts 5s constructor");
+		expect(parsed[0]?.outcome).toBe("constructor");
+		expect(typeof parsed[0]?.outcome).toBe("string");
+		expect(parsed[0]?.status).toBe("fail");
+	});
+
 	test("an unrecognized outcome is kept as a failure, never dropped", () => {
 		// Dropping the line would remove a file from the rollup entirely — a
 		// parser/loop drift would then read as a shorter suite that still passed.
