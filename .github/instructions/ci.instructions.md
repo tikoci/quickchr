@@ -157,7 +157,18 @@ suite): every file came in **at or below** the window above — `provisioning` 5
 Do **not** fold these into `OBSERVED_MAX_S` as a `macos-x86` row: they are group runs, and the
 caps are meant to stay generous on this platform while #76 is open. They are cited here because
 they answer a different question — the suite's own cost is **~30 min**, not the 62–65 min that
-`completed_at` reports, which is what makes a mid-suite wedge the leading hypothesis.
+`completed_at` reports, which is what made a mid-suite wedge the leading hypothesis.
+
+B8b then confirmed that hypothesis and dated it. Three full-suite `macos-x86 · stable` legs all
+wedged in **`provisioning.test.ts`** — file 10 of the alphabetical glob — after nine files in
+**772.9 s / 745.4 s (~12.5 min)**. So on this platform **`completed_at` runs ~50 min behind the
+wedge** (47.6 and 50.4 min measured, longer than the 44.6 min B5 measured on `linux-x86`), and the
+useful diagnostic boundary for #76 is **~13 min, not an hour**. Two consequences for anyone reading
+a lost leg: never quote `job_elapsed_s` as a wedge time — take `last_checkpoint_ts` from the
+ledger — and expect a targeted #76 repro to be cheap, because the leg dies long before the budget
+does. The runner also stops reporting *inside* the wedged file's own watchdog window (the 1200 s
+cap on `provisioning.test.ts` never fired on any of the three), which is the concrete demonstration
+that nothing in-job can bound a lost runner.
 
 **Outcomes** are written to `integration-timing.txt` as `<file> <seconds>s <outcome>` and folded
 into `metrics.ndjson` by `scripts/ci-metrics.ts`. B4 owns only what the watchdog observes
@@ -219,6 +230,16 @@ still left no record), `not-started` (no job, no checkpoint).
 steps all reached a terminal state is a *failed `close` PATCH*, not a lost runner — the checkpoint
 posts best-effort and tolerates its own failures, while the jobs API is server-side and
 unconditional. Reading that as runner loss would be an API hiccup wearing #76's clothes.
+
+**Known defect — an entry can be zeroed (#128).** `build` is **not idempotent**: finalizing a
+check run PATCHes `output` without `text`, which destroys the checkpoint payload, and
+`integration.yml` runs `build` twice (once at the ledger step, again inside the refold-retry push
+path). A leg whose push conflicts — i.e. under concurrent legs, which is every sweep — can
+therefore land in `attempted-legs.json` with `files_planned: 0` and **no `last_checkpoint_ts`**,
+while its check run still shows the real numbers. B8b lost one leg of three this way. Until #128
+lands: if a `runner-lost` entry has zero counts, the check run for that leg is the better record,
+and a missing `last_checkpoint_ts` means the instrument lost it, **not** that the leg died before
+its first file.
 
 `not-started` is not in #77's original vocabulary and is deliberate —
 without it, a leg that died in `Install QEMU` would be indistinguishable from one whose runner
