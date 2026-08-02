@@ -39,8 +39,13 @@ jobs:
     # contents: write flows down to integration.yml's aggregate job, which
     # pushes this run's metrics to the ci-data branch (reusable-workflow
     # permissions are capped by the calling job).
+    # checks: write + actions: read carry the leg checkpoint and the
+    # planned-vs-completed ledger (B5 of #110) — a leg cannot leave a marker the
+    # runner does not own without them, and the cap means granting them here.
     permissions:
       contents: write
+      checks: write
+      actions: read
     with:
       platforms: linux-x86,linux-arm64
       run-examples: true

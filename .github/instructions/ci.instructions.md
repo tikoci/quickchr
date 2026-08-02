@@ -153,9 +153,16 @@ under investigation. The tightest cap is 1.83× its worst observed run.
 **Outcomes** are written to `integration-timing.txt` as `<file> <seconds>s <outcome>` and folded
 into `metrics.ndjson` by `scripts/ci-metrics.ts`. B4 owns only what the watchdog observes
 first-hand: `pass`, `test-failure`, `file-watchdog-timeout`, `not-run`. `runner-lost` and
-`attempted-incomplete` need the server-visible ledger (B5) and are **not** implemented. Records
-carry both `outcome` and the original binary `status`, so `tested-versions.json` and historical
-`runs/*.ndjson` stay comparable across the vocabulary change.
+`attempted-incomplete` are **not** watchdog outcomes and never appear in `integration-timing.txt` —
+they are ledger verdicts about a leg, reached by the aggregate job after the fact (see
+"Incomplete-leg ledger" below). Records carry both `outcome` and the original binary `status`, so
+`tested-versions.json` and historical `runs/*.ndjson` stay comparable across the vocabulary change.
+
+The watchdog also writes `~/watchdog-last-file.json` after **every** file — a sidecar the loop
+hands to `ci-leg-checkpoint mark`. It exists so the outcome vocabulary keeps exactly one producer:
+the timing line's format is frozen (`ci-metrics.ts` parses it, and every historical
+`runs/*.ndjson` is built on it), so the cap cannot be added to it, and re-deriving the outcome in
+the workflow's shell loop would create a second definition free to drift.
 
 **On expiry** the watchdog SIGTERMs then SIGKILLs the test process, reaps QEMU children, counts
 them again to verify, and writes `~/watchdog-<file>.json` (cap, elapsed, cap source, QEMU counts
@@ -168,7 +175,62 @@ cause into a string of misleading failures (#77 §2).
 
 **What it does not do.** It does not make a lost runner diagnosable. #76's `macos-x86` legs die at
 ~62 min holding a 290-minute step budget; nothing running inside the job survives that, this
-script included. That is B5's ledger — do not read a green watchdog as progress on #76.
+script included. That is the ledger below — do not read a green watchdog as progress on #76.
+
+#### Incomplete-leg ledger
+
+A leg whose runner stops talking used to leave **nothing**: no artifact, no metrics record, no row
+anywhere. The 2026-07-31 sweep planned 15 integration legs and `ci-data` received 12 ndjson files,
+with no marker for the missing three. B5 of #110 gives that silence a name.
+
+**Two instruments, and the artifact outranks both.**
+
+1. `scripts/ci-leg-checkpoint.ts` opens a **check run** per leg and PATCHes it after every file,
+   carrying the last completed file, what it is running now, outcome/duration/cap, and a resource
+   sample (free memory, load, free disk, live QEMU count). A leg that dies leaves it un-closed —
+   *the absence of a terminal is the signal*.
+2. The **jobs API** is the free half: a vanished leg still records its test step as `in_progress`
+   with a start time and every later step as `pending`. Verified against run 30665449265, and
+   replayed as an anchor test from a checked-in fixture of those real job records.
+3. `scripts/ci-leg-ledger.ts build` runs in the `aggregate` job, compares `plan`'s matrix against
+   the legs that actually reached `ci-data/runs/`, and writes `ci-data/attempted-legs.json`.
+
+**A leg is `complete` because it produced a metrics record — never because a check run says so.**
+The checkpoint is best-effort (it warns and exits 0 on any API failure, so a fork PR's read-only
+token or a dropped PATCH cannot red a leg), which means trusting it first would let instrument
+failure fabricate a `runner-lost` for a leg that finished cleanly. The check run and the jobs API
+are consulted **only** to explain legs that produced no record. There is an anchor test for exactly
+this.
+
+Verdicts: `complete`, `runner-lost` (a step left running while the job is over — or a check run
+never closed **and no job that contradicts it**), `attempted-incomplete` (reached a terminal and
+still left no record), `not-started` (no job, no checkpoint).
+
+**When the two instruments disagree, the jobs API wins.** An un-closed check run on a job whose
+steps all reached a terminal state is a *failed `close` PATCH*, not a lost runner — the checkpoint
+posts best-effort and tolerates its own failures, while the jobs API is server-side and
+unconditional. Reading that as runner loss would be an API hiccup wearing #76's clothes.
+
+`not-started` is not in #77's original vocabulary and is deliberate —
+without it, a leg that died in `Install QEMU` would be indistinguishable from one whose runner
+vanished mid-suite, and mislabelling a setup failure as `runner-lost` sends #76 chasing a mechanism
+that was never involved.
+
+**Why not `tested-versions.json`** (maintainer decision, 2026-08-02): the version scheduler reads
+that file as a *presence* test (`ros-versions.yml:99`), so writing `incomplete` into `conclusion`
+would make an aborted run look tested and silently stop rescheduling that version — forever, with
+no error. Today's `macos-x86` case would not trip it (the scheduler only reads `linux-x86`), but the
+contract is one platform away from breaking. The ledger is therefore a **separate file**, and that
+jq is untouched.
+
+**Permissions.** The integration job needs `checks: write`; the aggregate job needs `checks: write`
+plus `actions: read`. Reusable-workflow permissions are capped by the calling job, so `main.yml` and
+`sweep.yml` grant both — a caller that forgets them gets warnings and an empty ledger, not a red run.
+
+**Job-name coupling.** The jobs API exposes no matrix values, so matching a job to a planned leg
+goes through the display-name string. `integrationJobName()` in `ci-leg-ledger.ts` is its one home,
+asserted against production job names by a unit test. If `integration.yml`'s `name:` is edited,
+update that function or every ledger entry silently degrades to `job_matched: false`.
 
 **`watchdog-cap` dispatch input** is an experiment lever that forces the cap to N seconds so the
 timeout path itself can be exercised on a real runner without committing a test that hangs on
@@ -206,9 +268,15 @@ never a second run, never affecting pass/fail:
    PR freshness gate block every PR over side-band data. The raw metrics remain in the
    run's artifacts either way.
 
+4. The same job then writes `attempted-legs.json` — planned-vs-completed for the run, keyed by
+   run id (see "Incomplete-leg ledger"). Completed legs are **counted, not listed**: they are
+   already in `runs/*.ndjson` in full, and repeating every green leg would grow a permanent file
+   without adding a fact. A run with no `incomplete` map had every planned leg finish.
+
 The ci-data branch README documents the schema + `gh`/jq/SQLite query recipes. Agents
 debugging "why is this platform slow" should read `tested-versions.json` and the recent
-`runs/*.ndjson` before theorizing.
+`runs/*.ndjson` before theorizing — and check `attempted-legs.json` before concluding a platform
+"has no data", which for `macos-x86` has always meant *the legs died*, not *the legs never ran*.
 
 ## Release Process
 

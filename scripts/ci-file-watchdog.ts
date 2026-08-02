@@ -62,9 +62,9 @@
  * started at all and says so, rather than being launched into a cap that
  * guarantees a meaningless timeout.
  */
-import { existsSync, appendFileSync } from "node:fs";
+import { existsSync, appendFileSync, writeFileSync } from "node:fs";
 import { join, basename } from "node:path";
-import { cpus, freemem, loadavg, totalmem } from "node:os";
+import { hostSnapshot, qemuProcessCount } from "./ci-host-snapshot.ts";
 
 /**
  * Worst observed healthy duration per file, in seconds, over the cited window.
@@ -203,37 +203,48 @@ export function timingLine(file: string, elapsedS: number, outcome: FileOutcome)
 	return `${basename(file)} ${Math.round(elapsedS)}s ${outcome}`;
 }
 
+/** Sidecar filename read by `ci-leg-checkpoint mark` (B5). */
+export const LAST_FILE_SIDECAR = "watchdog-last-file.json";
+
+/**
+ * Record the file just finished, for the leg checkpoint to post.
+ *
+ * A sidecar rather than a second parse of `integration-timing.txt`: the timing
+ * line's format is frozen (`ci-metrics.ts` parses it, and every historical
+ * `runs/*.ndjson` is built on it), so the cap cannot be added to it — and
+ * re-deriving the outcome in the workflow's shell loop would give the outcome
+ * vocabulary a second producer that could drift from this one.
+ */
+export function writeLastFileSidecar(
+	reportDir: string,
+	file: string,
+	elapsedS: number,
+	outcome: FileOutcome,
+	/** Omit when no cap was ever applied. A `not-run` file was never given one,
+	 *  and writing 0 would render in the checkpoint table as a 0-second timeout —
+	 *  a wedge that never happened, rather than "the budget was already spent". */
+	capS?: number,
+): void {
+	try {
+		writeFileSync(
+			join(reportDir, LAST_FILE_SIDECAR),
+			`${JSON.stringify({
+				file: basename(file),
+				elapsed_s: Math.round(elapsedS),
+				outcome,
+				...(capS === undefined ? {} : { cap_s: capS }),
+			})}\n`,
+		);
+	} catch {
+		/* the checkpoint degrades to "unknown outcome"; never worth failing a file over */
+	}
+}
+
 // --- runtime ------------------------------------------------------------------
 
 function arg(name: string): string | undefined {
 	const i = process.argv.indexOf(name);
 	return i >= 0 ? process.argv[i + 1] : undefined;
-}
-
-/** Count live QEMU processes. The cleanup verdict rests on this, so an
- *  unavailable tool must read as "unknown", never as "none left". */
-async function qemuProcessCount(): Promise<number | undefined> {
-	// No image-name filter on Windows: `/FI` takes a single image, and
-	// `reapQemu` kills two. Filtering on x86_64 alone would report
-	// `cleanup_verified: true` with a live aarch64 emulator — a false clean
-	// bill of health is worse than no check. Scan the full list and let the
-	// substring match below cover both, which also covers tasklist's
-	// "INFO: No tasks are running…" line without a special case.
-	const cmd =
-		process.platform === "win32" ? ["tasklist", "/NH"] : ["pgrep", "-f", "qemu-system-(x86_64|aarch64)"];
-	try {
-		const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
-		const text = await new Response(proc.stdout).text();
-		await proc.exited;
-		const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-		if (process.platform === "win32") {
-			return lines.filter((l) => l.toLowerCase().includes("qemu-system")).length;
-		}
-		// pgrep exits 1 with no output when nothing matches — that is a real zero.
-		return lines.length;
-	} catch {
-		return undefined;
-	}
 }
 
 /** Terminate QEMU children the killed test process left behind. TCG orphans
@@ -256,29 +267,6 @@ async function reapQemu(): Promise<void> {
 	await run(["pkill", "-TERM", "-f", "qemu-system-(x86_64|aarch64)"]);
 	await Bun.sleep(3000);
 	await run(["pkill", "-KILL", "-f", "qemu-system-(x86_64|aarch64)"]);
-}
-
-/** Host state at the moment of the kill — #77's list. Cheap and best-effort:
- *  a missing field must not cost us the rest of the report. */
-async function hostSnapshot(): Promise<Record<string, unknown>> {
-	const snapshot: Record<string, unknown> = {
-		platform: process.platform,
-		cpuCount: cpus().length,
-		totalMemMiB: Math.round(totalmem() / 1048576),
-		freeMemMiB: Math.round(freemem() / 1048576),
-		loadAvg: loadavg(),
-		uptimeS: Math.round(process.uptime()),
-	};
-	if (process.platform !== "win32") {
-		try {
-			const proc = Bun.spawn(["df", "-k", "."], { stdout: "pipe", stderr: "ignore" });
-			snapshot.df = (await new Response(proc.stdout).text()).trim().split("\n").slice(0, 2);
-			await proc.exited;
-		} catch {
-			/* best effort */
-		}
-	}
-	return snapshot;
 }
 
 async function main(): Promise<never> {
@@ -306,6 +294,7 @@ async function main(): Promise<never> {
 			`::error title=Budget exhausted::Not starting ${file} — ${plan.remainingS}s left in the step budget, which cannot fit a viable cap after the ${FORENSICS_RESERVE_S}s forensics reserve.`,
 		);
 		appendFileSync(timingPath, `${timingLine(file, 0, "not-run")}\n`);
+		writeLastFileSidecar(reportDir, file, 0, "not-run");
 		process.exit(EXIT.notRun);
 	}
 
@@ -335,6 +324,7 @@ async function main(): Promise<never> {
 	if (!timedOut) {
 		const outcome: FileOutcome = code === 0 ? "pass" : "test-failure";
 		appendFileSync(timingPath, `${timingLine(file, elapsedS, outcome)}\n`);
+		writeLastFileSidecar(reportDir, file, elapsedS, outcome, plan.capS);
 		process.exit(code === 0 ? EXIT.pass : EXIT.testFailure);
 	}
 
@@ -364,6 +354,7 @@ async function main(): Promise<never> {
 	await Bun.write(reportPath, `${JSON.stringify(report, null, "\t")}\n`);
 
 	appendFileSync(timingPath, `${timingLine(file, elapsedS, "file-watchdog-timeout")}\n`);
+	writeLastFileSidecar(reportDir, file, elapsedS, "file-watchdog-timeout", plan.capS);
 	console.error(
 		`::error title=File watchdog::${basename(file)} exceeded its ${plan.capS}s cap (${Math.round(elapsedS)}s elapsed, cap from ${plan.source}). QEMU processes ${beforeReap ?? "?"} before reap, ${afterReap ?? "?"} after. Report: ${reportPath}`,
 	);

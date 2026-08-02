@@ -20,7 +20,12 @@ import {
 	capSecondsFor,
 	effectiveCap,
 	timingLine,
+	writeLastFileSidecar,
+	LAST_FILE_SIDECAR,
 } from "../../scripts/ci-file-watchdog.ts";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("capSecondsFor — the checked-in cap table", () => {
 	test("the slowest measured file takes the ceiling", () => {
@@ -182,5 +187,34 @@ describe("timingLine — outcome serialization", () => {
 			{ file: "c.test.ts", duration_s: 30, status: "fail", outcome: "file-watchdog-timeout" },
 			{ file: "d.test.ts", duration_s: 0, status: "fail", outcome: "not-run" },
 		]);
+	});
+});
+
+describe("the leg-checkpoint sidecar", () => {
+	// One producer for the outcome vocabulary: the workflow loop hands this file
+	// straight to `ci-leg-checkpoint mark` rather than re-deriving the outcome in
+	// bash, where a second definition would be free to drift.
+	function write(outcome: Parameters<typeof writeLastFileSidecar>[3], capS?: number) {
+		const dir = mkdtempSync(join(tmpdir(), "watchdog-"));
+		writeLastFileSidecar(dir, "test/integration/exec.test.ts", 149, outcome, capS);
+		return JSON.parse(readFileSync(join(dir, LAST_FILE_SIDECAR), "utf-8"));
+	}
+
+	test("carries the file, elapsed, outcome and cap for a file that ran", () => {
+		expect(write("pass", 600)).toEqual({
+			file: "exec.test.ts",
+			elapsed_s: 149,
+			outcome: "pass",
+			cap_s: 600,
+		});
+	});
+
+	test("a file that never started reports NO cap, not a zero one", () => {
+		// `not-run` means the step budget was already spent, so no cap was ever
+		// applied. Writing 0 would render in the checkpoint table as a 0-second
+		// timeout — a wedge that never happened.
+		const rec = write("not-run");
+		expect(rec).not.toHaveProperty("cap_s");
+		expect(rec.outcome).toBe("not-run");
 	});
 });

@@ -227,6 +227,33 @@ incidentally; crediting those suppressed the scheduler for versions no full suit
 targeted). The per-run files are the source of truth; `ci-metrics refold` rebuilds the
 rollup after fold-logic changes.
 
+**What survives losing a runner (#76, #77)**: measured on run
+[30665449265](https://github.com/tikoci/quickchr/actions/runs/30665449265), whose three
+`macos-x86` legs stopped communicating mid-suite. This is the constraint every
+lost-runner instrument has to be designed around, so it is recorded rather than
+re-derived:
+
+| Evidence | Survives? |
+| --- | --- |
+| Uploaded artifacts | **No** — `if: always()` steps never run |
+| The archived job log | **No** — the blob returns `BlobNotFound`, even though a *normally failing* leg in the same run keeps its full log. Failure preserves the log; runner loss destroys it |
+| The jobs API step ledger | **Yes** — the test step stays `in_progress` with a start time, later steps `pending`, and the job carries a `completed_at` |
+| A check run PATCHed during the leg | **Yes** — it is server-side the moment it is written, and stays un-closed |
+
+So a progress marker has to be *pushed out of the runner as it goes*; nothing collected
+at the end can work. That is what `ci-leg-checkpoint.ts` (per-file check-run updates) and
+`ci-leg-ledger.ts` (planned-vs-completed reconciliation into `ci-data/attempted-legs.json`)
+implement. The ledger is a **separate file from `tested-versions.json` by decision**: the
+version scheduler reads that file as a presence test, so recording an aborted run there
+would make the version look tested and silently stop rescheduling it.
+
+The same run also pins down #76's shape: the three legs died **62.0 / 64.1 / 65.0 minutes
+into their own jobs**, staggered with their own start times across 14 minutes of
+wall-clock. So the boundary is per-job elapsed, not a shared external event and not a
+round 60-minute constant. Read `completed_at` as an **upper bound** on the wedge — it is
+when the service gave up on a silent runner, and the interval between the runner going
+quiet and that verdict is uncharacterized.
+
 **Merge policy**: squash-only, PR title → main commit subject (write PR titles as
 conventional commits), PR body → commit body, branches auto-delete. Review threads must
 be resolved before merge (`required_conversation_resolution`) and automated reviews must

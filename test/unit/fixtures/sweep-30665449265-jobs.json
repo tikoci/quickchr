@@ -1,0 +1,569 @@
+[
+	{
+		"name": "Integration (linux/x86_64 · testing)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:07:54Z",
+		"completed_at": "2026-07-31T21:28:15Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:55Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:57Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (macos/x86_64 · stable)",
+		"status": "completed",
+		"conclusion": "failure",
+		"started_at": "2026-07-31T21:07:55Z",
+		"completed_at": "2026-07-31T22:09:53Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:49Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:52Z"
+			},
+			{
+				"name": "Run oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:54Z"
+			},
+			{
+				"name": "Install QEMU + tools (Linux x86)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:07:57Z"
+			},
+			{
+				"name": "Install QEMU + tools (Linux arm64)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:07:57Z"
+			},
+			{
+				"name": "Install QEMU + tools (macOS)",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:57Z"
+			},
+			{
+				"name": "Build upstream QEMU from source (experiment lever)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:08:53Z"
+			},
+			{
+				"name": "Pin accelerator (experiment lever)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:08:53Z"
+			},
+			{
+				"name": "Install QEMU (Windows)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:08:53Z"
+			},
+			{
+				"name": "Enable KVM",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:08:53Z"
+			},
+			{
+				"name": "Log platform",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:08:53Z"
+			},
+			{
+				"name": "Resolve cache identity",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:08:54Z"
+			},
+			{
+				"name": "Restore CHR images",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:08:54Z"
+			},
+			{
+				"name": "Run bun install --frozen-lockfile",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:08:55Z"
+			},
+			{
+				"name": "Resolve test files",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:08:57Z"
+			},
+			{
+				"name": "Run integration tests (sequential per-file)",
+				"status": "in_progress",
+				"conclusion": null,
+				"started_at": "2026-07-31T21:08:57Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (linux/x86_64 · long-term)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:07:54Z",
+		"completed_at": "2026-07-31T21:29:51Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:55Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:56Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (linux/x86_64 · stable)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:07:54Z",
+		"completed_at": "2026-07-31T21:27:31Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:54Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:55Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (linux/aarch64 · testing)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:07:55Z",
+		"completed_at": "2026-07-31T21:38:20Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:56Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:57Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (macos/arm64 · long-term)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:07:54Z",
+		"completed_at": "2026-07-31T21:34:16Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:55Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:56Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (macos/x86_64 · testing)",
+		"status": "completed",
+		"conclusion": "failure",
+		"started_at": "2026-07-31T21:11:42Z",
+		"completed_at": "2026-07-31T22:15:46Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:44Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:47Z"
+			},
+			{
+				"name": "Run oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:50Z"
+			},
+			{
+				"name": "Install QEMU + tools (Linux x86)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:11:52Z"
+			},
+			{
+				"name": "Install QEMU + tools (Linux arm64)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:11:52Z"
+			},
+			{
+				"name": "Install QEMU + tools (macOS)",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:52Z"
+			},
+			{
+				"name": "Build upstream QEMU from source (experiment lever)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:12:52Z"
+			},
+			{
+				"name": "Pin accelerator (experiment lever)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:12:52Z"
+			},
+			{
+				"name": "Install QEMU (Windows)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:12:52Z"
+			},
+			{
+				"name": "Enable KVM",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:12:52Z"
+			},
+			{
+				"name": "Log platform",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:12:52Z"
+			},
+			{
+				"name": "Resolve cache identity",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:12:52Z"
+			},
+			{
+				"name": "Restore CHR images",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:12:52Z"
+			},
+			{
+				"name": "Run bun install --frozen-lockfile",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:12:53Z"
+			},
+			{
+				"name": "Resolve test files",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:12:54Z"
+			},
+			{
+				"name": "Run integration tests (sequential per-file)",
+				"status": "in_progress",
+				"conclusion": null,
+				"started_at": "2026-07-31T21:12:54Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (windows/x86_64 · long-term)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:07:55Z",
+		"completed_at": "2026-07-31T21:44:53Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:07:57Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:08:00Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (linux/aarch64 · long-term)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:11:35Z",
+		"completed_at": "2026-07-31T21:42:54Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:36Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:37Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (windows/x86_64 · testing)",
+		"status": "completed",
+		"conclusion": "failure",
+		"started_at": "2026-07-31T21:08:21Z",
+		"completed_at": "2026-07-31T21:42:31Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:08:23Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:08:24Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (macos/x86_64 · long-term)",
+		"status": "completed",
+		"conclusion": "failure",
+		"started_at": "2026-07-31T21:18:59Z",
+		"completed_at": "2026-07-31T22:24:01Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:19:01Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:19:05Z"
+			},
+			{
+				"name": "Run oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:19:12Z"
+			},
+			{
+				"name": "Install QEMU + tools (Linux x86)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:19:19Z"
+			},
+			{
+				"name": "Install QEMU + tools (Linux arm64)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:19:19Z"
+			},
+			{
+				"name": "Install QEMU + tools (macOS)",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:19:19Z"
+			},
+			{
+				"name": "Build upstream QEMU from source (experiment lever)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:20:30Z"
+			},
+			{
+				"name": "Pin accelerator (experiment lever)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:20:30Z"
+			},
+			{
+				"name": "Install QEMU (Windows)",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:20:30Z"
+			},
+			{
+				"name": "Enable KVM",
+				"status": "completed",
+				"conclusion": "skipped",
+				"started_at": "2026-07-31T21:20:30Z"
+			},
+			{
+				"name": "Log platform",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:20:30Z"
+			},
+			{
+				"name": "Resolve cache identity",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:20:31Z"
+			},
+			{
+				"name": "Restore CHR images",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:20:31Z"
+			},
+			{
+				"name": "Run bun install --frozen-lockfile",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:20:31Z"
+			},
+			{
+				"name": "Resolve test files",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:20:34Z"
+			},
+			{
+				"name": "Run integration tests (sequential per-file)",
+				"status": "in_progress",
+				"conclusion": null,
+				"started_at": "2026-07-31T21:20:34Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (macos/arm64 · testing)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:34:19Z",
+		"completed_at": "2026-07-31T21:58:12Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:34:20Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:34:22Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (macos/arm64 · stable)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:20:13Z",
+		"completed_at": "2026-07-31T21:45:17Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:20:13Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:20:15Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (windows/x86_64 · stable)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:10:59Z",
+		"completed_at": "2026-07-31T21:44:05Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:01Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:04Z"
+			}
+		]
+	},
+	{
+		"name": "Integration (linux/aarch64 · stable)",
+		"status": "completed",
+		"conclusion": "success",
+		"started_at": "2026-07-31T21:11:24Z",
+		"completed_at": "2026-07-31T21:39:01Z",
+		"steps": [
+			{
+				"name": "Set up job",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:25Z"
+			},
+			{
+				"name": "Run actions/checkout@v5",
+				"status": "completed",
+				"conclusion": "success",
+				"started_at": "2026-07-31T21:11:26Z"
+			}
+		]
+	}
+]

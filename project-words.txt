@@ -56,6 +56,7 @@ calltime
 catppuccin
 centrs
 chardev
+checkpointed
 choco
 cifs
 cleanuser
@@ -425,6 +426,7 @@ tzsp
 udevadm
 udp
 uefi
+uncharacterized
 unfiled
 unparseable
 unprovisioned
