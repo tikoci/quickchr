@@ -202,9 +202,16 @@ failure fabricate a `runner-lost` for a leg that finished cleanly. The check run
 are consulted **only** to explain legs that produced no record. There is an anchor test for exactly
 this.
 
-Verdicts: `complete`, `runner-lost` (a step left running while the job is over, or a check run
-never closed), `attempted-incomplete` (reached a terminal and still left no record), `not-started`
-(no job, no checkpoint). `not-started` is not in #77's original vocabulary and is deliberate —
+Verdicts: `complete`, `runner-lost` (a step left running while the job is over — or a check run
+never closed **and no job that contradicts it**), `attempted-incomplete` (reached a terminal and
+still left no record), `not-started` (no job, no checkpoint).
+
+**When the two instruments disagree, the jobs API wins.** An un-closed check run on a job whose
+steps all reached a terminal state is a *failed `close` PATCH*, not a lost runner — the checkpoint
+posts best-effort and tolerates its own failures, while the jobs API is server-side and
+unconditional. Reading that as runner loss would be an API hiccup wearing #76's clothes.
+
+`not-started` is not in #77's original vocabulary and is deliberate —
 without it, a leg that died in `Install QEMU` would be indistinguishable from one whose runner
 vanished mid-suite, and mislabelling a setup failure as `runner-lost` sends #76 chasing a mechanism
 that was never involved.
