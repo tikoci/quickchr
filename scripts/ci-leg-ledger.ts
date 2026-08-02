@@ -193,11 +193,18 @@ export function classifyLeg(
 		return entry;
 	}
 
-	// 3. Same conclusion from the other instrument, for when the job could not be
-	//    matched by name.
-	if (cp?.status === "in_progress") {
+	// 3. Same conclusion from the other instrument — but ONLY when the jobs API
+	//    is not available to contradict it. An un-closed check run on a job whose
+	//    steps all reached a terminal state does not mean the runner vanished; it
+	//    means the `close` PATCH failed, which is a transient API error wearing
+	//    runner loss's clothes. The jobs API wins that disagreement: it is
+	//    server-side and unconditional, while the checkpoint is best-effort by
+	//    design and silently tolerates its own failures.
+	if (cp?.status === "in_progress" && (!job || job.status !== "completed")) {
 		entry.terminal = "runner-lost";
-		entry.why = "the leg's checkpoint check run was never closed";
+		entry.why = job
+			? "the leg's checkpoint check run was never closed, and its job never reached a terminal state"
+			: "the leg's checkpoint check run was never closed, and no job could be matched to corroborate";
 		return entry;
 	}
 
@@ -206,7 +213,10 @@ export function classifyLeg(
 	//    (upload failed, assemble step skipped, job cancelled mid-flight).
 	if (cp) {
 		entry.terminal = "attempted-incomplete";
-		entry.why = "the leg checkpointed and closed, but no metrics record reached ci-data";
+		entry.why =
+			cp.status === "in_progress"
+				? "the leg's job completed every step, but its checkpoint was never closed and no metrics record reached ci-data — a failed close, not a lost runner"
+				: "the leg checkpointed and closed, but no metrics record reached ci-data";
 		return entry;
 	}
 	if (job) {

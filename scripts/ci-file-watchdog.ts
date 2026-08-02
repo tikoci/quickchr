@@ -215,17 +215,25 @@ export const LAST_FILE_SIDECAR = "watchdog-last-file.json";
  * re-deriving the outcome in the workflow's shell loop would give the outcome
  * vocabulary a second producer that could drift from this one.
  */
-function writeLastFileSidecar(
+export function writeLastFileSidecar(
 	reportDir: string,
 	file: string,
 	elapsedS: number,
 	outcome: FileOutcome,
-	capS: number,
+	/** Omit when no cap was ever applied. A `not-run` file was never given one,
+	 *  and writing 0 would render in the checkpoint table as a 0-second timeout —
+	 *  a wedge that never happened, rather than "the budget was already spent". */
+	capS?: number,
 ): void {
 	try {
 		writeFileSync(
 			join(reportDir, LAST_FILE_SIDECAR),
-			`${JSON.stringify({ file: basename(file), elapsed_s: Math.round(elapsedS), outcome, cap_s: capS })}\n`,
+			`${JSON.stringify({
+				file: basename(file),
+				elapsed_s: Math.round(elapsedS),
+				outcome,
+				...(capS === undefined ? {} : { cap_s: capS }),
+			})}\n`,
 		);
 	} catch {
 		/* the checkpoint degrades to "unknown outcome"; never worth failing a file over */
@@ -286,7 +294,7 @@ async function main(): Promise<never> {
 			`::error title=Budget exhausted::Not starting ${file} — ${plan.remainingS}s left in the step budget, which cannot fit a viable cap after the ${FORENSICS_RESERVE_S}s forensics reserve.`,
 		);
 		appendFileSync(timingPath, `${timingLine(file, 0, "not-run")}\n`);
-		writeLastFileSidecar(reportDir, file, 0, "not-run", 0);
+		writeLastFileSidecar(reportDir, file, 0, "not-run");
 		process.exit(EXIT.notRun);
 	}
 

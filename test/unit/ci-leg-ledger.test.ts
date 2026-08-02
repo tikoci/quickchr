@@ -107,6 +107,30 @@ describe("classifyLeg", () => {
 		expect(entry.last_file).toBe("exec.test.ts");
 	});
 
+	test("an un-closed check run on a job that finished every step is a failed close, not runner loss", () => {
+		// The `close` PATCH is best-effort and can fail transiently, leaving the
+		// check run `in_progress` on a leg whose job ran to the end. Reading that
+		// as runner loss would be an API hiccup wearing #76's clothes — the jobs
+		// API is server-side and unconditional, so it wins the disagreement.
+		const finishedJob = vanishedJob({
+			conclusion: "failure",
+			steps: [
+				{ name: TEST_STEP_NAME, status: "completed", conclusion: "failure", started_at: "2026-07-31T21:08:57Z" },
+				{ name: "Close leg checkpoint", status: "completed", conclusion: "success", started_at: "2026-07-31T21:20:00Z" },
+			],
+		});
+		const entry = classifyLeg(
+			LEG,
+			new Set(),
+			new Map([[legKey("macos-x86", "stable"), checkpoint({ status: "in_progress" })]]),
+			new Map([[legKey("macos-x86", "stable"), finishedJob]]),
+		);
+		expect(entry.terminal).toBe("attempted-incomplete");
+		expect(entry.why).toContain("failed close, not a lost runner");
+		// The forensics still survive — only the verdict changes.
+		expect(entry.last_file).toBe("exec.test.ts");
+	});
+
 	test("a closed checkpoint with no metrics record is attempted-incomplete, not runner-lost", () => {
 		// The leg ran to the end of its loop and then lost its evidence (a failed
 		// upload, a skipped assemble). Calling that runner loss would send #76
