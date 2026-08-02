@@ -122,7 +122,6 @@ const PAYLOAD_CLOSE = "-->";
 export function renderOutput(state: CheckpointState): { title: string; summary: string; text: string } {
 	const done = state.records.length;
 	const total = state.planned.length;
-	const last = state.records[done - 1];
 	const current = done < total ? state.planned[done] : undefined;
 
 	const title = current
