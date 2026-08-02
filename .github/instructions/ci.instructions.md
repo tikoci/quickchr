@@ -161,14 +161,20 @@ they answer a different question — the suite's own cost is **~30 min**, not th
 
 B8b then confirmed that hypothesis and dated it. Three full-suite `macos-x86 · stable` legs all
 wedged in **`provisioning.test.ts`** — file 10 of the alphabetical glob — after nine files in
-**772.9 s / 745.4 s (~12.5 min)**. So on this platform **`completed_at` runs ~50 min behind the
-wedge** (47.6 and 50.4 min measured, longer than the 44.6 min B5 measured on `linux-x86`), and the
-useful diagnostic boundary for #76 is **~13 min, not an hour**. Two consequences for anyone reading
-a lost leg: never quote `job_elapsed_s` as a wedge time — take `last_checkpoint_ts` from the
-ledger — and expect a targeted #76 repro to be cheap, because the leg dies long before the budget
-does. The runner also stops reporting *inside* the wedged file's own watchdog window (the 1200 s
-cap on `provisioning.test.ts` never fired on any of the three), which is the concrete demonstration
-that nothing in-job can bound a lost runner.
+**772.9 s / 745.4 s (~12.5 min)**, and a live capture of the streaming log put the freeze a further
+3.5–7.6 min *inside* that file, at its 5th/6th test. So the useful diagnostic boundary for #76 is
+**~16–20 min, not an hour**, and on this platform **`completed_at` runs ~40 min behind the actual
+freeze**. Two consequences for anyone reading a lost leg: never quote `job_elapsed_s` as a wedge
+time — take `last_checkpoint_ts` from the ledger, and treat it as the **file boundary before** the
+wedge, not the wedge itself — and expect a targeted #76 repro to be cheap, because the leg dies
+long before the budget does. The runner also stops reporting *inside* the wedged file's own
+watchdog window, with 12–16 min of the 1200 s cap unspent and no `file-watchdog-timeout` row on any
+leg, which is the concrete demonstration that nothing in-job can bound a lost runner.
+
+**The host snapshot has a blind spot at exactly the wrong place.** It samples at *file* boundaries
+only, so no run has ever recorded free disk, free memory or `qemuCount` **inside**
+`provisioning.test.ts` — the file every known #76 leg dies in. Do not read B8a's "111 GB free,
+`qemuCount` 0" as covering it; those are boundary samples from files that completed.
 
 **Outcomes** are written to `integration-timing.txt` as `<file> <seconds>s <outcome>` and folded
 into `metrics.ndjson` by `scripts/ci-metrics.ts`. B4 owns only what the watchdog observes
