@@ -252,7 +252,6 @@ export function buildRunLedger(
 	return ledger;
 }
 
-/** Deep-sort so the committed JSON is byte-stable for equal data. */
 /**
  * Fold one run's ledger into the persisted map, keyed by run id, leaving every
  * other run's entry untouched.
@@ -273,6 +272,7 @@ export function foldLedgerInto(
 	return sortKeysDeep({ ...existing, [runId]: ledger });
 }
 
+/** Deep-sort so the committed JSON is byte-stable for equal data. */
 export function sortKeysDeep<T>(value: T): T {
 	if (Array.isArray(value)) return value.map(sortKeysDeep) as T;
 	if (value !== null && typeof value === "object") {
