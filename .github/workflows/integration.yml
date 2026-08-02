@@ -419,6 +419,12 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
+    # `checks: write` is what lets a leg leave a progress marker the runner does
+    # not own (B5 of #110). A job-level block REPLACES the workflow-level one, so
+    # `contents: read` is restated rather than inherited.
+    permissions:
+      contents: read
+      checks: write
     defaults:
       run:
         shell: bash
@@ -574,6 +580,7 @@ jobs:
           fi
 
       - name: Log platform
+        id: platform
         env:
           EXPECTED_ACCEL: ${{ matrix.accel }}
         run: |
@@ -584,6 +591,10 @@ jobs:
           # Resolve the detected accelerator first, outside the reporting block,
           # so the summary can state it instead of restating a matrix constant.
           detected=$(QUICKCHR_LOG_ARCH="$guest_arch" bun --eval 'const { detectAccel } = await import("./src/lib/platform.ts"); process.stdout.write(await detectAccel(process.env.QUICKCHR_LOG_ARCH));' 2>/dev/null || echo unknown)
+          # Published so the leg checkpoint records the DETECTED accelerator, not
+          # the matrix's expectation — the two disagreed on macos-x86 for weeks
+          # (#76), and a ledger entry restating the table would hide a repeat.
+          echo "accel=$detected" >> "$GITHUB_OUTPUT"
           {
             echo "### Platform: ${{ matrix.label }} — target ${{ matrix.target }}"
             echo "- Matrix: id=${{ matrix.id }} runner=${{ matrix.os }} runner.os=${{ runner.os }} runner.arch=${{ runner.arch }}"
@@ -757,6 +768,26 @@ jobs:
           fi
           echo "list=$FILES" >> "$GITHUB_OUTPUT"
 
+      # ── the leg's server-side progress marker (B5 of #110) ───────────────────
+      # Opens a check run this leg PATCHes after every file. A runner that stops
+      # talking leaves it un-closed, and the aggregate turns that into a named
+      # `runner-lost` entry with the last file attached — the record #76 has
+      # never had. Best-effort by contract: the script warns and exits 0 on any
+      # API failure, because an instrument that reds the leg it is measuring is
+      # exactly the masked signal this program exists to stop.
+      - name: Open leg checkpoint
+        env:
+          FILE_LIST: ${{ steps.files.outputs.list }}
+          PLATFORM_ID: ${{ matrix.id }}
+          QUICKCHR_RESOLVED_VERSION: ${{ matrix.resolved }}
+          QUICKCHR_DETECTED_ACCEL: ${{ steps.platform.outputs.accel }}
+          GITHUB_TOKEN: ${{ github.token }}
+        # `--state` explicitly, like the watchdog's `--report-dir "$HOME"`: the
+        # shell is the single authority on where leg files live, so the state
+        # file, the sidecar and the artifact path cannot disagree about `$HOME`
+        # on Windows (workspace on D:, quickchr state on C:).
+        run: bun scripts/ci-leg-checkpoint.ts open --state "$HOME/leg-checkpoint.json" --files "$FILE_LIST" || true
+
       # Sequential per-file to avoid 4-way parallel CHR boot contention on 4-CPU
       # runners (boot timeouts under concurrent load — see testing.instructions.md
       # "Integration Test Parallelism"). Output + timing live under $HOME on every
@@ -775,6 +806,7 @@ jobs:
           STEP_TIMEOUT_MIN: ${{ matrix.steptimeout }}
           PLATFORM_ID: ${{ matrix.id }}
           QUICKCHR_CI_WATCHDOG_CAP_S: ${{ inputs.watchdog-cap }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eo pipefail
           # The deadline this step will actually be killed at, resolved ONCE here
@@ -799,6 +831,15 @@ jobs:
               --timing "$HOME/integration-timing.txt" \
               --report-dir "$HOME" \
               --deadline "$deadline" 2>&1 | tee -a "$HOME/integration-output.txt" || rc=$?
+            # Post this file's terminal state before deciding whether to keep
+            # going, so the marker exists even when the next line breaks the
+            # loop. Reads the watchdog's sidecar rather than re-deriving the
+            # outcome here — one producer for that vocabulary. Costs ~1 s of the
+            # step budget per file against a 50-290 min cap; `|| true` because a
+            # broken instrument must not end a suite that is still running.
+            bun scripts/ci-leg-checkpoint.ts mark \
+              --state "$HOME/leg-checkpoint.json" \
+              --from "$HOME/watchdog-last-file.json" || true
             case "$rc" in
               0) ;;
               1|2) fail=1 ;;
@@ -810,6 +851,22 @@ jobs:
           done
           echo "::endgroup::"
           exit "$fail"
+
+      # Terminal for the check run opened above. `always()`, so a red suite still
+      # closes it — an un-closed check run means "the runner vanished", and a
+      # normal test failure leaving one behind would make that signal a lie.
+      # Concludes `neutral` rather than `failure` when the suite went red: the
+      # leg's own job already carries that verdict, and a second red check would
+      # double-count one failure everywhere the commit's checks are read.
+      - name: Close leg checkpoint
+        if: always()
+        env:
+          PLATFORM_ID: ${{ matrix.id }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bun scripts/ci-leg-checkpoint.ts close \
+            --state "$HOME/leg-checkpoint.json" \
+            --conclusion "${{ steps.run.outcome == 'success' && 'success' || 'neutral' }}" || true
 
       # TCG QEMU orphans keep burning 100% CPU after a timeout/cancel, starving the
       # runner until it loses communication and later steps never run. Reap them
@@ -985,6 +1042,8 @@ jobs:
             ~/integration-output.txt
             ~/integration-timing.txt
             ~/watchdog-*.json
+
+            ~/leg-checkpoint.json
             ~/metrics.ndjson
             ~/issue69-*.ndjson
             ~/arm64-rest-repro.txt
@@ -1005,6 +1064,8 @@ jobs:
             ~/integration-output.txt
             ~/integration-timing.txt
             ~/watchdog-*.json
+
+            ~/leg-checkpoint.json
             ~/metrics.ndjson
             ~/issue69-*.ndjson
             ~/AppData/Local/quickchr/boot-log.ndjson
@@ -1033,6 +1094,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Read the legs' checkpoint check runs, and close the ones whose runner
+      # never got to (B5). Callers via workflow_call must grant this too.
+      checks: write
+      # The jobs API — the free half of the ledger. A vanished leg still records
+      # its test step as `in_progress`, which is how a lost runner is told apart
+      # from a leg that failed early in setup.
+      actions: read
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -1056,6 +1124,26 @@ jobs:
             echo "failed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # ── planned-vs-completed (B5 of #110) ─────────────────────────────────────
+      # Runs AFTER the fold, because "completed" is defined as "left a metrics
+      # record in ci-data/runs" — the artifact is the evidence, never the check
+      # run, so a checkpoint that failed to post cannot invent a `runner-lost`
+      # for a leg that actually finished.
+      #
+      # Deliberately NOT folded into tested-versions.json: the version scheduler
+      # reads that file as a presence test (ros-versions.yml:99), so an
+      # `incomplete` conclusion there would make an aborted run look tested and
+      # silently stop rescheduling that version. Maintainer decision, 2026-08-02.
+      - name: Reconcile planned legs against completed records
+        if: ${{ steps.fold.outputs.failed != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PLAN_MATRIX: ${{ needs.plan.outputs.matrix }}
+        run: |
+          printf '%s' "$PLAN_MATRIX" > plan-matrix.json
+          bun scripts/ci-leg-ledger.ts build --data ci-data --matrix plan-matrix.json || \
+            echo "::warning title=ci-data::leg ledger failed — planned-vs-completed is unrecorded for this run (see job log)"
+
       - name: Commit and push (rebase-retry, best-effort)
         if: ${{ steps.fold.outputs.failed != 'true' }}
         run: |
@@ -1064,6 +1152,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add runs tested-versions.json
+          # Separate and tolerant: the ledger step is best-effort like the rest
+          # of this job, and a `git add` on a file it did not write would abort
+          # the push of the metrics that ARE there.
+          git add attempted-legs.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "no metrics changes to record"
             exit 0

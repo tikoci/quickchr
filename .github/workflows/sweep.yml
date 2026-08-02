@@ -31,9 +31,14 @@ jobs:
   sweep:
     name: All-platform sweep
     uses: ./.github/workflows/integration.yml
-    # contents: write flows down to the aggregate job (ci-data metrics push).
+    # contents: write flows down to the aggregate job (ci-data metrics push);
+    # checks: write + actions: read carry the leg checkpoint and the
+    # planned-vs-completed ledger (B5 of #110). Reusable-workflow permissions are
+    # capped by the calling job, so they must be granted here.
     permissions:
       contents: write
+      checks: write
+      actions: read
     with:
       platforms: all
       run-examples: true
