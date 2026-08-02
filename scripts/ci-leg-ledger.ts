@@ -252,6 +252,26 @@ export function buildRunLedger(
 	return ledger;
 }
 
+/**
+ * Fold one run's ledger into the persisted map, keyed by run id, leaving every
+ * other run's entry untouched.
+ *
+ * Extracted and pure because the `ci-data` push loop **depends** on this being
+ * a merge rather than a replace (#126). When two runs land together, the loser
+ * resets its worktree to the freshly fetched branch head and re-runs this fold,
+ * which is only correct if re-applying its own key preserves the winner's. If
+ * this ever became a wholesale overwrite, that retry would start silently
+ * destroying the other run's verdict — the precise failure the ledger exists to
+ * prevent. The test for this is an anchor test, not a nicety.
+ */
+export function foldLedgerInto(
+	existing: Record<string, RunLedger>,
+	runId: string,
+	ledger: RunLedger,
+): Record<string, RunLedger> {
+	return sortKeysDeep({ ...existing, [runId]: ledger });
+}
+
 /** Deep-sort so the committed JSON is byte-stable for equal data. */
 export function sortKeysDeep<T>(value: T): T {
 	if (Array.isArray(value)) return value.map(sortKeysDeep) as T;
@@ -493,8 +513,7 @@ async function build(): Promise<void> {
 			console.log(`::warning title=ci-data ledger::${path} is unparseable, starting a new ledger: ${err}`);
 		}
 	}
-	all[runId] = ledger;
-	await Bun.write(path, `${JSON.stringify(sortKeysDeep(all), null, "\t")}\n`);
+	await Bun.write(path, `${JSON.stringify(foldLedgerInto(all, runId, ledger), null, "\t")}\n`);
 
 	console.log(`ci-leg-ledger: ${ledger.complete}/${ledger.planned} legs complete`);
 	for (const [key, entry] of Object.entries(ledger.incomplete ?? {})) {

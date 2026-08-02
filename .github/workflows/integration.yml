@@ -1079,8 +1079,9 @@ jobs:
   # run's timing/conclusion is exactly what tested-versions.json must record so
   # the ros-versions scheduler can re-flag the version. Callers via workflow_call
   # must grant `contents: write` (reusable-workflow perms are capped by the
-  # calling job). Per-run filenames avoid push conflicts; the rebase-retry loop
-  # covers the shared tested-versions.json rollup.
+  # calling job). Per-run filenames avoid push conflicts; the refold-retry loop
+  # covers the shared rollups (tested-versions.json, attempted-legs.json), which
+  # DO conflict when runs land together — see #126 at that step.
   #
   # BEST-EFFORT BY CONTRACT: metrics are side-band. This job goes green with a
   # loud ::warning:: + summary note when folding/pushing fails, because a red
@@ -1144,33 +1145,126 @@ jobs:
           bun scripts/ci-leg-ledger.ts build --data ci-data --matrix plan-matrix.json || \
             echo "::warning title=ci-data::leg ledger failed — planned-vs-completed is unrecorded for this run (see job log)"
 
-      - name: Commit and push (rebase-retry, best-effort)
+      # Refold-retry, NOT rebase-retry (#126). A push race is resolved by
+      # recomputing this run's contribution on top of the newest remote tree —
+      # never by merging two versions of a shared aggregate textually.
+      #
+      # Why the old `git pull --rebase … || true` could not work: `runs/*.ndjson`
+      # is unique per leg and cannot conflict, but `attempted-legs.json` (B5) and
+      # `tested-versions.json` are shared aggregates every concurrent run
+      # rewrites. A content conflict left the rebase mid-flight with unmerged
+      # files and `|| true` swallowed it, so every later attempt died on
+      # "Pulling is not possible because you have unmerged files" — all four
+      # burned in 1.1 s. Measured on run 30760428239 (B8a of #110), which
+      # completed a leg cleanly and still lost its metrics.
+      #
+      # Refolding is correct because both writers are read-modify-write keyed by
+      # identity: `ci-leg-ledger` keys `attempted-legs.json` by run id, and
+      # `ci-metrics` folds `tested-versions.json` by version/platform. Re-running
+      # them against a freshly fetched tree yields the union with no merge at
+      # all, which is why the reset below is safe to do unconditionally.
+      - name: Commit and push (refold-retry, best-effort)
         if: ${{ steps.fold.outputs.failed != 'true' }}
+        env:
+          # The ledger re-run reads the jobs API and the legs' check runs.
+          GITHUB_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -o pipefail
-          cd ci-data
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add runs tested-versions.json
-          # Separate and tolerant: the ledger step is best-effort like the rest
-          # of this job, and a `git add` on a file it did not write would abort
-          # the push of the metrics that ARE there.
-          git add attempted-legs.json 2>/dev/null || true
-          if git diff --cached --quiet; then
-            echo "no metrics changes to record"
-            exit 0
-          fi
-          git commit -m "metrics: run ${{ github.run_id }} (${{ github.event_name }})"
-          for attempt in 1 2 3; do
-            if git push origin ci-data; then
+          git -C ci-data config user.name "github-actions[bot]"
+          git -C ci-data config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Returns non-zero when there is nothing to record, exactly as the
+          # original inline sequence did.
+          # 1 = nothing staged (a legitimate no-op), 2 = the commit itself failed.
+          # The caller must not read those as the same thing: "nothing to record"
+          # is a clean exit, a failed commit is a problem that has to be said out
+          # loud rather than exited 0 over.
+          stage_and_commit() {
+            git -C ci-data add runs tested-versions.json
+            # Separate and tolerant: the ledger step is best-effort like the rest
+            # of this job, and a `git add` on a file it did not write would abort
+            # the push of the metrics that ARE there.
+            git -C ci-data add attempted-legs.json 2>/dev/null || true
+            if git -C ci-data diff --cached --quiet; then
+              return 1
+            fi
+            git -C ci-data commit -m "metrics: run ${RUN_ID} (${EVENT_NAME})" || return 2
+          }
+
+          # Non-zero when EITHER fold failed. Both matter: `ci-metrics` owns this
+          # run's runs/*.ndjson and tested-versions.json, `ci-leg-ledger` owns its
+          # attempted-legs.json entry. Treating a half-refold as success would let
+          # the loop commit and push partial data and then exit 0 — silent metrics
+          # loss, which is #126's own failure shape one level up.
+          refold() {
+            rc=0
+            bun scripts/ci-metrics.ts aggregate --data ci-data --artifacts artifacts || {
+              echo "::warning title=ci-data::refold: metrics aggregate failed on retry"
+              rc=1
+            }
+            # Written by the reconcile step, which shares this step's `if:`.
+            if [ -f plan-matrix.json ]; then
+              bun scripts/ci-leg-ledger.ts build --data ci-data --matrix plan-matrix.json || {
+                echo "::warning title=ci-data::refold: leg ledger failed on retry"
+                rc=1
+              }
+            fi
+            return "$rc"
+          }
+
+          stage_and_commit
+          case $? in
+            1) echo "no metrics changes to record"; exit 0 ;;
+            2) echo "::warning title=ci-data::could not commit metrics — this run's timing is only in the artifacts"; exit 0 ;;
+          esac
+          have_commit=true
+
+          for attempt in 1 2 3 4; do
+            # Guarded on purpose. A reset below discards this run's commit, so if
+            # the refold that should rebuild it failed, HEAD equals the remote and
+            # `git push` would print "Everything up-to-date" and exit 0 — reporting
+            # success while this run's metrics are gone. Never push a no-op.
+            if [ "$have_commit" = true ] && git -C ci-data push origin ci-data; then
               exit 0
             fi
-            echo "push attempt $attempt failed — rebasing onto remote ci-data"
-            git pull --rebase origin ci-data || true
+            if [ "$attempt" = 4 ]; then break; fi
+            echo "push attempt $attempt failed — refolding onto the current remote head"
+            # Unconditional: leaving unmerged files behind is the whole of #126,
+            # so never assume the tree is clean on the way into a retry.
+            git -C ci-data rebase --abort 2>/dev/null || true
+            git -C ci-data merge --abort 2>/dev/null || true
+            # Real backoff. Four attempts in 1.1 s never waited out anything.
+            sleep $((attempt * 5))
+            # A fetch that fails leaves FETCH_HEAD stale, and resetting onto a
+            # stale head would rebuild this run's commit against the wrong base.
+            # Keep the commit we already have and just retry the push.
+            if ! git -C ci-data fetch origin ci-data; then
+              echo "::warning title=ci-data::fetch failed — retrying the push without refolding"
+              continue
+            fi
+            if ! git -C ci-data reset --hard FETCH_HEAD; then
+              echo "::warning title=ci-data::reset onto the fetched head failed — retrying"
+              have_commit=false
+              continue
+            fi
+            # From here the commit is gone by construction; only a clean refold
+            # earns it back.
+            have_commit=false
+            if ! refold; then
+              echo "::warning title=ci-data::refold incomplete — retrying rather than committing partial data"
+              continue
+            fi
+            stage_and_commit
+            case $? in
+              0) have_commit=true ;;
+              1) echo "nothing left to record after refold — another run already carried it"; exit 0 ;;
+              2) echo "::warning title=ci-data::could not commit after refold — retrying" ;;
+            esac
           done
-          if ! git push origin ci-data; then
-            echo "::warning title=ci-data::could not push metrics after 4 attempts — this run's timing is only in the artifacts"
-          fi
+
+          echo "::warning title=ci-data::could not push metrics after 4 attempts — this run's timing is only in the artifacts"
           exit 0
 
       - name: Write aggregate summary

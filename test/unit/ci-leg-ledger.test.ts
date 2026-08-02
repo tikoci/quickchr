@@ -7,6 +7,7 @@ import {
 	buildRunLedger,
 	classifyLeg,
 	completedLegs,
+	foldLedgerInto,
 	integrationJobName,
 	mapJobsToLegs,
 	TEST_STEP_NAME,
@@ -239,6 +240,46 @@ describe("buildRunLedger", () => {
 			expect(entry.terminal).toBe("runner-lost");
 			expect(entry.last_file).toBe("exec.test.ts");
 		}
+	});
+});
+
+describe("foldLedgerInto", () => {
+	// The `ci-data` push loop resolves a race by resetting to the freshly
+	// fetched branch head and re-running the fold (#126). That is only safe
+	// while re-applying one run's key preserves every other run's — so these
+	// pin the property the retry rests on, not merely today's behaviour.
+	const mine = { planned: 2, complete: 2, ...META };
+	const theirs = { planned: 3, complete: 1, ...META };
+
+	test("re-applying one run's key preserves another run's entry", () => {
+		const merged = foldLedgerInto({ "30760422176": theirs }, "30760428239", mine);
+		expect(Object.keys(merged).sort()).toEqual(["30760422176", "30760428239"]);
+		expect(merged["30760422176"]).toEqual(theirs);
+		expect(merged["30760428239"]).toEqual(mine);
+	});
+
+	test("folding the same run twice is idempotent — a retry cannot duplicate or drift", () => {
+		const once = foldLedgerInto({ "30760422176": theirs }, "30760428239", mine);
+		const twice = foldLedgerInto(once, "30760428239", mine);
+		expect(twice).toEqual(once);
+	});
+
+	test("a later fold of the same run id replaces that run's own verdict only", () => {
+		const first = foldLedgerInto({}, "30760428239", theirs);
+		const second = foldLedgerInto(first, "30760428239", mine);
+		expect(second["30760428239"]).toEqual(mine);
+		expect(Object.keys(second)).toEqual(["30760428239"]);
+	});
+
+	test("does not mutate the map it was given", () => {
+		const existing = { "30760422176": theirs };
+		foldLedgerInto(existing, "30760428239", mine);
+		expect(Object.keys(existing)).toEqual(["30760422176"]);
+	});
+
+	test("keys come out sorted, so a merge is a byte-stable diff", () => {
+		const merged = foldLedgerInto({ "30760434527": theirs, "30760416093": theirs }, "30760422176", mine);
+		expect(Object.keys(merged)).toEqual(["30760416093", "30760422176", "30760434527"]);
 	});
 });
 

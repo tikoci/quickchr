@@ -150,6 +150,15 @@ absent from it**, because it has never completed a full suite (#76); the caps ar
 generous rather than tight so the watchdog cannot become a masking device on the one platform
 under investigation. The tightest cap is 1.83× its worst observed run.
 
+B8a of #110 has since measured `macos-x86` per-file cost in **bounded groups** (never a full
+suite): every file came in **at or below** the window above — `provisioning` 589 s, `start-stop`
+363 s, `device-mode` 283 s, `exec` 136 s, `anchor` 127 s, `disk` 75–80 s, `license` 63 s,
+`settings-secure-login-cli` 52 s, `forward-cli` 38 s, `file-transfer` 34 s, `library-api` 1 s.
+Do **not** fold these into `OBSERVED_MAX_S` as a `macos-x86` row: they are group runs, and the
+caps are meant to stay generous on this platform while #76 is open. They are cited here because
+they answer a different question — the suite's own cost is **~30 min**, not the 62–65 min that
+`completed_at` reports, which is what makes a mid-suite wedge the leading hypothesis.
+
 **Outcomes** are written to `integration-timing.txt` as `<file> <seconds>s <outcome>` and folded
 into `metrics.ndjson` by `scripts/ci-metrics.ts`. B4 owns only what the watchdog observes
 first-hand: `pass`, `test-failure`, `file-watchdog-timeout`, `not-run`. `runner-lost` and
@@ -273,6 +282,20 @@ never a second run, never affecting pass/fail:
    already in `runs/*.ndjson` in full, and repeating every green leg would grow a permanent file
    without adding a fact. A run with no `incomplete` map had every planned leg finish.
 
+5. **The push retry refolds; it never rebases** ([#126](https://github.com/tikoci/quickchr/issues/126)).
+   `runs/*.ndjson` is unique per leg and cannot conflict, but `tested-versions.json` and
+   `attempted-legs.json` are shared rollups that every concurrent run rewrites — so runs landing
+   together **do** hit a content conflict. The loop therefore resets the `ci-data` worktree to the
+   freshly fetched head and re-runs the fold, rather than merging two versions of a rollup
+   textually. That is correct only because both writers are read-modify-write keyed by identity
+   (`foldLedgerInto` by run id, `ci-metrics` by version/platform), which
+   `test/unit/ci-leg-ledger.test.ts` pins with anchor tests. **If you add another shared file to
+   this push, it must fold the same way** — a writer that replaces rather than merges would make
+   the retry destroy the other run's data. The old `git pull --rebase … || true` left a conflicted
+   rebase in place, so every later attempt died on "Pulling is not possible because you have
+   unmerged files" and all four burned in ~1 s; run 30760428239 lost a cleanly completed leg's
+   metrics that way.
+
 The ci-data branch README documents the schema + `gh`/jq/SQLite query recipes. Agents
 debugging "why is this platform slow" should read `tested-versions.json` and the recent
 `runs/*.ndjson` before theorizing — and check `attempted-legs.json` before concluding a platform
@@ -384,6 +407,15 @@ the HVF path. `macos-x86` is bare metal and `detectAccel()` returns `hvf` there;
 its extended timeout is about #76, not about its accelerator. A source-built
 QEMU (`qemu-version`) adds **+20 min** to the affected leg's job budget; the test
 step's own cap is deliberately left unchanged.
+
+**Hosted `macos-15-intel` is 4 CPUs / 14336 MiB** — measured by B8a of #110 from
+the leg checkpoint's host snapshot, across four runners. That is half the cores
+and 22% of the RAM of the maintainer's Intel Mac (8 cores / 64 GiB), the machine
+B7's local full-suite baseline ran on. It is nevertheless **faster per file**
+than that laptop, so the size difference is not a reason to expect hosted legs to
+be slower, and "no memory pressure at 64 GiB" no longer needs the untested-carry
+caveat for this platform up to ~11 min of sustained load. Boot there is 29.8–40.4 s
+under HVF (29 boots, mean ≈34 s).
 
 Every platform runs the **full suite by default** — TCG legs included (that is the
 "find out where windows/mac break" path). `tcg-smoke=true` is the only thing that
