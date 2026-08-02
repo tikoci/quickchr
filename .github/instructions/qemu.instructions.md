@@ -116,7 +116,7 @@ range form `name:hostStart-hostEnd[:guestStart-guestEnd][/proto]`).
 
 ## Process model — QEMU outlives its parent by design
 
-`spawnQemu()` detaches QEMU deliberately (`src/lib/qemu.ts`): `proc.unref()` on POSIX, so it
+`spawnQemu()` detaches QEMU deliberately when `background: true` (`src/lib/qemu.ts`): `proc.unref()` on POSIX, so it
 is orphaned and adopted by init/launchd; `node:child_process` with `detached: true` on Windows,
 because `Bun.spawn().unref()` does **not** escape the Windows Job Object and the VM would die
 with the CLI. That is the point — `quickchr start` must return while the VM keeps running.
