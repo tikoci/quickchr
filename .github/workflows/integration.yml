@@ -902,12 +902,21 @@ jobs:
         run: |
           {
             echo "## Integration — ${{ matrix.label }} · ${{ matrix.target }}"
-            # A watchdog kill leaves NO `(fail)` line: bun was killed mid-file, so
-            # the log simply stops. Without this the success branch below would
-            # print "all tests passed" directly above the timeout report — the
-            # exact false green this program exists to remove.
+            # Three independent ways this step can fail WITHOUT leaving a `(fail)`
+            # line, all of which used to reach the success branch:
+            #   1. a watchdog kill — bun is killed mid-file, the log just stops;
+            #   2. a startup/import error — bun exits non-zero having printed no
+            #      test result at all;
+            #   3. the watchdog script itself failing, leaving no timing row.
+            # (1) and (2) are visible in the timing file, (3) only in the step
+            # outcome, so the success line is gated on both.
             watchdog_fired=false
             grep -qE 'file-watchdog-timeout|not-run' "$HOME/integration-timing.txt" 2>/dev/null && watchdog_fired=true
+            timing_all_pass=true
+            if [ -s "$HOME/integration-timing.txt" ] && awk 'NF && $3 != "pass" { found = 1 } END { exit !found }' "$HOME/integration-timing.txt"; then
+              timing_all_pass=false
+            fi
+            run_outcome="${{ steps.run.outcome }}"
             if [ ! -s "$HOME/integration-output.txt" ]; then
               echo "❌ no test output captured — the run step likely failed before bun test"
             elif grep -qE '\(fail\)' "$HOME/integration-output.txt"; then
@@ -922,6 +931,8 @@ jobs:
               echo '```'
             elif [ "$watchdog_fired" = "true" ]; then
               echo "❌ a file was killed by the watchdog or never started — see below"
+            elif [ "$run_outcome" != "success" ] || [ "$timing_all_pass" != "true" ]; then
+              echo "❌ the integration step failed without a per-test \`(fail)\` line (startup/import error, or the watchdog itself) — see the output and timing below"
             else
               echo "✅ all selected integration tests passed"
             fi

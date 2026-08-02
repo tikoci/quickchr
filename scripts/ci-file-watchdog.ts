@@ -149,7 +149,11 @@ export function capSecondsFor(file: string, overrideS?: number): number {
 	const scaled =
 		observed === undefined ? CAP_FLOOR_S : Math.min(Math.max(observed * CAP_MULTIPLIER, CAP_FLOOR_S), CAP_CEILING_S);
 	const derived = Math.ceil(scaled / 60) * 60;
-	if (overrideS !== undefined && Number.isFinite(overrideS) && overrideS > 0) {
+	// `>= 1`, not `> 0`: the floor below would turn `--cap 0.5` into a 0-second
+	// cap, i.e. a deadline that has already expired when the file starts. A
+	// nonsense lever value must fall back to the table, never disable the bound
+	// or fabricate an instant timeout.
+	if (overrideS !== undefined && Number.isFinite(overrideS) && overrideS >= 1) {
 		return Math.min(derived, Math.floor(overrideS));
 	}
 	return derived;

@@ -75,10 +75,13 @@ describe("capSecondsFor — the checked-in cap table", () => {
 		expect(capSecondsFor("provisioning.test.ts", 45)).toBe(45);
 		expect(capSecondsFor("provisioning.test.ts", table + 6000)).toBe(table);
 		expect(capSecondsFor("provisioning.test.ts", table)).toBe(table);
-		// Nonsense values fall back to the table rather than disabling the bound.
-		for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+		// Nonsense values fall back to the table rather than disabling the bound —
+		// including a positive fraction, which `Math.floor` would otherwise turn
+		// into a 0-second cap, i.e. a deadline already expired at launch.
+		for (const bad of [0, -5, 0.5, 0.999, Number.NaN, Number.POSITIVE_INFINITY]) {
 			expect(capSecondsFor("provisioning.test.ts", bad)).toBe(table);
 		}
+		expect(capSecondsFor("provisioning.test.ts", 1)).toBe(1);
 	});
 
 	test("no cap can outlive the ~60 min boundary #76 dies at", () => {
