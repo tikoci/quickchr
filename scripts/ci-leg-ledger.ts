@@ -4,7 +4,7 @@
  * record, and give the difference a name (issue #77, B5 of #110).
  *
  *   bun scripts/ci-leg-ledger.ts build --data <ci-data-dir> \
- *     --artifacts <dir> --matrix <plan matrix json file>
+ *     --matrix <plan matrix json file>
  *
  * WHY THIS EXISTS. "Attempted and incomplete" had no representation anywhere.
  * The 2026-07-31 sweep planned 15 integration legs and `ci-data` received 12
@@ -411,7 +411,14 @@ async function finalizeLostCheckRuns(ledger: RunLedger, checkpoints: ReadonlyMap
 				},
 				body: JSON.stringify({
 					status: "completed",
-					conclusion: "failure",
+					// `neutral`, for the same reason `close()` uses it (ci-leg-checkpoint.ts):
+					// the leg's own job already carries the red. A lost runner is no
+					// exception — GitHub does eventually conclude the job, ~45 min late
+					// but red (`job_conclusion: "failure"` in run 30750979859's ledger
+					// entry), so `failure` here would double-count one dead leg in every
+					// branch-protection and PR-status view. The verdict this check run
+					// carries is its title and summary, not its color.
+					conclusion: "neutral",
 					completed_at: new Date().toISOString(),
 					output: {
 						title: `${entry.terminal} — last file ${entry.last_file ?? "(none reported)"}`,
