@@ -110,6 +110,72 @@ A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix
 
 Every integration job records per-file wall-clock timing to `integration-timing.txt` and assembles `metrics.ndjson` (both in the artifact) — see "CI metrics (ci-data)" below ([#30](https://github.com/tikoci/quickchr/issues/30)).
 
+#### Per-file watchdog
+
+Each file in the sequential loop runs under `scripts/ci-file-watchdog.ts`, not under `bun test`
+directly ([#77](https://github.com/tikoci/quickchr/issues/77), B4 of #110). The step cap added in
+#108 is 10 minutes under the job budget — 290 minutes on the extended-budget platforms — which is
+far too coarse to say *which file* wedged. This puts the bound at file granularity, where the
+answer is.
+
+**A file is bounded twice**, by whichever is smaller (#110 rule 5 — timeouts nest):
+
+```text
+file cap  +  reap/forensics reserve (300 s)  <  remaining step budget
+```
+
+so the reap, metrics, summary and upload steps always still run.
+
+**The caps are checked in, never derived at runtime** — a runtime lookup would let a hang inflate
+its own next deadline (#110 rule 4). `OBSERVED_MAX_S` in that script holds the worst healthy
+duration per file over a **named** window: runs
+[30657533896](https://github.com/tikoci/quickchr/actions/runs/30657533896) and
+[30665449265](https://github.com/tikoci/quickchr/actions/runs/30665449265), both at `2899be4` — 14
+legs, 168 `test-file` records. The cap is `clamp(observed × 2, 600 s, 1200 s)`. Re-derive with:
+
+```sh
+git fetch origin ci-data
+git show origin/ci-data:runs/<run_id>-<platform>-<target>.ndjson \
+  | jq -r 'select(.kind=="test-file")|"\(.file) \(.duration_s)s \(.outcome // .status)"'
+```
+
+Filter to `pass` when refreshing `OBSERVED_MAX_S` — a file killed by the watchdog or cut short by
+the deadline reports its cap, not its cost, and folding that back in would let the caps ratchet
+upward off their own timeouts.
+
+Two things about that window matter when refreshing it. It must be drawn **after `2899be4`**
+(#116), or file durations carry download-retry inflation rather than cost — B7 measured
+`provisioning.test.ts` at 992 s of which 619 s had no QEMU alive at all. And **`macos-x86` is
+absent from it**, because it has never completed a full suite (#76); the caps are deliberately
+generous rather than tight so the watchdog cannot become a masking device on the one platform
+under investigation. The tightest cap is 1.83× its worst observed run.
+
+**Outcomes** are written to `integration-timing.txt` as `<file> <seconds>s <outcome>` and folded
+into `metrics.ndjson` by `scripts/ci-metrics.ts`. B4 owns only what the watchdog observes
+first-hand: `pass`, `test-failure`, `file-watchdog-timeout`, `not-run`. `runner-lost` and
+`attempted-incomplete` need the server-visible ledger (B5) and are **not** implemented. Records
+carry both `outcome` and the original binary `status`, so `tested-versions.json` and historical
+`runs/*.ndjson` stay comparable across the vocabulary change.
+
+**On expiry** the watchdog SIGTERMs then SIGKILLs the test process, reaps QEMU children, counts
+them again to verify, and writes `~/watchdog-<file>.json` (cap, elapsed, cap source, QEMU counts
+before/after, host memory/load/disk) into the artifact and the job summary. Killing `bun` alone
+does **not** stop QEMU — it is spawned detached, verified locally: 1 process alive after the test
+process died, 0 after the reap. Exit codes drive the loop: `0` pass, `1` test failure, `2` timed
+out but reaped clean (keep going, leg red), `3` timed out with QEMU surviving, `4` budget spent.
+**3 and 4 stop the loop** — running on through a possibly poisoned environment turns one root
+cause into a string of misleading failures (#77 §2).
+
+**What it does not do.** It does not make a lost runner diagnosable. #76's `macos-x86` legs die at
+~62 min holding a 290-minute step budget; nothing running inside the job survives that, this
+script included. That is B5's ledger — do not read a green watchdog as progress on #76.
+
+**`watchdog-cap` dispatch input** is an experiment lever that forces the cap to N seconds so the
+timeout path itself can be exercised on a real runner without committing a test that hangs on
+purpose. It can only **shorten** a cap — a value at or above the checked-in one is ignored — so it
+cannot be used to buy a hang more rope. The `plan` job validates it and emits a `::warning::` when
+it is set; no normal run sets it.
+
 ## CI metrics (ci-data)
 
 CHR boot timing and test outcomes are collected as a **byproduct** of integration runs —
@@ -228,6 +294,7 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 | `collect-metrics` | boolean | **true** (dispatch) | Push this run's boot/test timing to the `ci-data` branch. Default ON for dispatches — a run without recorded results is a wasted run. (`workflow_call` default is false; wrappers opt in explicitly.) |
 | `qemu-version` | string | "" | **Experiment lever, Linux only.** Build that upstream QEMU from source and put it first on `PATH` instead of the distro package. Empty = distro. See "Experiment levers" below. |
 | `accel` | string | "" | **Experiment lever.** Pin `QUICKCHR_ACCEL` (`tcg`/`kvm`/`hvf`/`auto`) instead of letting `detectAccel()` choose. Empty = auto-detect. |
+| `watchdog-cap` | string | "" | **Experiment lever.** Force the per-file watchdog cap to N seconds. **Shortens only** — a value at or above the checked-in cap is ignored. Empty = the checked-in table. See "Per-file watchdog" above. |
 
 (`workflow_call` adds `artifact-prefix` so parallel callers don't collide on artifact names.)
 

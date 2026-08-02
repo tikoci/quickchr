@@ -11,14 +11,44 @@ import {
 // scheduler consumes.
 
 describe("parseTimingFile", () => {
-	test("parses the workflow's '<file> <n>s <status>' lines, ignoring noise", () => {
+	test("parses the workflow's '<file> <n>s <outcome>' lines, ignoring noise", () => {
 		const parsed = parseTimingFile(
 			["start-stop.test.ts 247s pass", "exec.test.ts 121s fail", "", "garbage line", "weird 12x pass"].join("\n"),
 		);
 		expect(parsed).toEqual([
-			{ file: "start-stop.test.ts", duration_s: 247, status: "pass" },
-			{ file: "exec.test.ts", duration_s: 121, status: "fail" },
+			{ file: "start-stop.test.ts", duration_s: 247, status: "pass", outcome: "pass" },
+			// legacy `fail` normalizes to the widened vocabulary (#77 B4)
+			{ file: "exec.test.ts", duration_s: 121, status: "fail", outcome: "test-failure" },
 		]);
+	});
+
+	test("watchdog outcomes keep `status` binary so historical ci-data stays comparable", () => {
+		// tested-versions.json and every stored runs/*.ndjson are built on
+		// pass/fail. Widening the vocabulary must add detail, not reclassify a
+		// year of results — so anything that is not a pass is still a fail.
+		const parsed = parseTimingFile(
+			["provisioning.test.ts 1200s file-watchdog-timeout", "license.test.ts 0s not-run"].join("\n"),
+		);
+		expect(parsed).toEqual([
+			{ file: "provisioning.test.ts", duration_s: 1200, status: "fail", outcome: "file-watchdog-timeout" },
+			{ file: "license.test.ts", duration_s: 0, status: "fail", outcome: "not-run" },
+		]);
+	});
+
+	test("an outcome token cannot resolve through Object.prototype", () => {
+		// The token regex accepts `constructor`, and an object-literal alias table
+		// would hand back `Object` for it — a function where a string belongs.
+		const parsed = parseTimingFile("exec.test.ts 5s constructor");
+		expect(parsed[0]?.outcome).toBe("constructor");
+		expect(typeof parsed[0]?.outcome).toBe("string");
+		expect(parsed[0]?.status).toBe("fail");
+	});
+
+	test("an unrecognized outcome is kept as a failure, never dropped", () => {
+		// Dropping the line would remove a file from the rollup entirely — a
+		// parser/loop drift would then read as a shorter suite that still passed.
+		const parsed = parseTimingFile("exec.test.ts 12s something-new");
+		expect(parsed).toEqual([{ file: "exec.test.ts", duration_s: 12, status: "fail", outcome: "something-new" }]);
 	});
 });
 
