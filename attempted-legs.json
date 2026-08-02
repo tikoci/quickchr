@@ -6,5 +6,31 @@
 		"planned": 1,
 		"sha": "9e9652517591d9bfd906f5e70c13533a89652b83",
 		"ts": "2026-08-02T13:54:43.404Z"
+	},
+	"30750979859": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"linux-x86|stable": {
+				"current_file": "exec.test.ts",
+				"files_planned": 2,
+				"files_reported": 1,
+				"job_conclusion": "failure",
+				"job_elapsed_s": 2760,
+				"job_matched": true,
+				"last_checkpoint_ts": "2026-08-02T13:57:25.584Z",
+				"last_file": "disk.test.ts",
+				"platform": "linux-x86",
+				"resolved": "7.23.2",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "stable",
+				"terminal": "runner-lost",
+				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
+			}
+		},
+		"planned": 1,
+		"sha": "cb1c1e403475060c63f9d37fe4c897c450c8d00c",
+		"ts": "2026-08-02T14:42:16.473Z"
 	}
 }
