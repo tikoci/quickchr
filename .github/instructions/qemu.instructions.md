@@ -114,6 +114,23 @@ not the guest's `10.0.2.15`), so a connected socket filters it out. Lab evidence
 host→guest (incl. dynamic/range ports) use `hostfwd` (`--forward`/`extraPorts`,
 range form `name:hostStart-hostEnd[:guestStart-guestEnd][/proto]`).
 
+## Process model — QEMU outlives its parent by design
+
+`spawnQemu()` detaches QEMU deliberately (`src/lib/qemu.ts`): `proc.unref()` on POSIX, so it
+is orphaned and adopted by init/launchd; `node:child_process` with `detached: true` on Windows,
+because `Bun.spawn().unref()` does **not** escape the Windows Job Object and the VM would die
+with the CLI. That is the point — `quickchr start` must return while the VM keeps running.
+
+The consequence for anything that kills a quickchr process: **terminating the parent does not
+stop the VM.** Killing a `bun test` run, a CLI invocation, or a CI step leaves QEMU alive,
+burning CPU (100% per orphan under TCG) until something reaps it by name. Measured on both an
+Intel Mac under HVF and a hosted Linux runner: one QEMU process still alive *after* the test
+process died, zero after a `pkill -f 'qemu-system-(x86_64|aarch64)'`.
+
+So a timeout/cancel path must reap explicitly and then **re-count to verify**, rather than
+assume the kill cascaded. `scripts/ci-file-watchdog.ts` and the workflow's own reap step both do
+this; see `ci.instructions.md` "Per-file watchdog" for the CI side.
+
 ## Channels (background mode)
 
 - Monitor: Unix socket, readline protocol. Wait for `(qemu)` prompt before sending commands.
