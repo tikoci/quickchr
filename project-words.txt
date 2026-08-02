@@ -340,6 +340,7 @@ retriable
 reuseaddr
 reuseport
 rollup
+rollups
 romfile
 romon
 rootfs
