@@ -51,7 +51,7 @@
  * for legs that produced none — so a checkpoint that silently failed to post
  * cannot fabricate a `runner-lost` for a leg that actually finished.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { hostSnapshot, type HostSnapshot } from "./ci-host-snapshot.ts";
 
@@ -250,8 +250,8 @@ function loadState(): CheckpointState | undefined {
 	}
 }
 
-function saveState(state: CheckpointState): void {
-	writeFileSync(statePath(), `${JSON.stringify(state, null, "\t")}\n`);
+async function saveState(state: CheckpointState): Promise<void> {
+	await Bun.write(statePath(), `${JSON.stringify(state, null, "\t")}\n`);
 }
 
 async function open(): Promise<void> {
@@ -275,7 +275,7 @@ async function open(): Promise<void> {
 		state.checkRunId = created.id;
 		console.log(`::notice::leg checkpoint open — check run ${created.id} for ${legKey(leg.platform, leg.target)}`);
 	}
-	saveState(state);
+	await saveState(state);
 }
 
 async function mark(): Promise<void> {
@@ -313,7 +313,7 @@ async function mark(): Promise<void> {
 		ts: new Date().toISOString(),
 		host: await hostSnapshot(true),
 	});
-	saveState(state);
+	await saveState(state);
 	if (state.checkRunId) await api(`/check-runs/${state.checkRunId}`, "PATCH", { output: renderOutput(state) });
 }
 

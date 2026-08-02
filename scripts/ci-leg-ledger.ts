@@ -37,7 +37,7 @@
  * check run and the jobs API are consulted ONLY to explain legs that produced
  * no record.
  */
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { legKey, parseExternalId, parsePayload, type CheckpointRecord } from "./ci-leg-checkpoint.ts";
 
@@ -314,23 +314,37 @@ async function fetchCheckpoints(sha: string, runId: string, attempt: string): Pr
 	return out;
 }
 
-/** This run's jobs, keyed by leg via {@link integrationJobName}. */
-async function fetchJobs(runId: string, attempt: string, planned: readonly PlannedLeg[]): Promise<Map<string, JobView>> {
+/**
+ * Join a run's jobs to its planned legs by display name.
+ *
+ * Exported and pure so the anchor test drives the SAME join production does. A
+ * test that rebuilt this by hand could keep passing while the real join broke —
+ * and since a broken join degrades silently to `job_matched: false` rather than
+ * erroring, that is precisely the failure a test here has to be able to catch.
+ */
+export function mapJobsToLegs(planned: readonly PlannedLeg[], jobs: readonly JobView[]): Map<string, JobView> {
 	const byName = new Map<string, JobView>();
-	for (let page = 1; page <= 10; page += 1) {
-		const body = await ghJson<{ jobs: JobView[] }>(
-			`/actions/runs/${runId}/attempts/${attempt}/jobs?per_page=100&page=${page}`,
-		);
-		const jobs = body?.jobs ?? [];
-		for (const j of jobs) byName.set(j.name, j);
-		if (jobs.length < 100) break;
-	}
+	for (const j of jobs) byName.set(j.name, j);
 	const out = new Map<string, JobView>();
 	for (const leg of planned) {
 		const job = byName.get(integrationJobName(leg.label, leg.target));
 		if (job) out.set(legKey(leg.id, leg.target), job);
 	}
 	return out;
+}
+
+/** This run's jobs, keyed by leg via {@link mapJobsToLegs}. */
+async function fetchJobs(runId: string, attempt: string, planned: readonly PlannedLeg[]): Promise<Map<string, JobView>> {
+	const all: JobView[] = [];
+	for (let page = 1; page <= 10; page += 1) {
+		const body = await ghJson<{ jobs: JobView[] }>(
+			`/actions/runs/${runId}/attempts/${attempt}/jobs?per_page=100&page=${page}`,
+		);
+		const jobs = body?.jobs ?? [];
+		all.push(...jobs);
+		if (jobs.length < 100) break;
+	}
+	return mapJobsToLegs(planned, all);
 }
 
 /** Leg keys that reached ci-data this run — read from the freshly written
@@ -349,7 +363,17 @@ export function completedLegs(dataDir: string, runId: string): Set<string> {
 		// but are not guaranteed to stay that way.
 		for (const line of readFileSync(file, "utf-8").split("\n")) {
 			if (!line) continue;
-			const rec = JSON.parse(line) as { kind?: string; platform?: string; target?: string };
+			// Guarded per line, not per file. An unguarded throw here would escape
+			// build(), so no ledger would be written AND the lost-runner check runs
+			// would never be finalized — this script failing shut in exactly the
+			// circumstances it exists for. One unreadable line costs one line.
+			let rec: { kind?: string; platform?: string; target?: string };
+			try {
+				rec = JSON.parse(line);
+			} catch {
+				console.log(`::warning title=ci-data ledger::skipping an unparseable line in runs/${name}`);
+				continue;
+			}
 			if (rec.kind === "suite" && rec.platform && rec.target) out.add(legKey(rec.platform, rec.target));
 		}
 	}
@@ -367,7 +391,7 @@ async function finalizeLostCheckRuns(ledger: RunLedger, checkpoints: ReadonlyMap
 		const cp = checkpoints.get(key);
 		if (!cp?.checkRunId || cp.status === "completed") continue;
 		try {
-			await fetch(`${base}/repos/${repo}/check-runs/${cp.checkRunId}`, {
+			const res = await fetch(`${base}/repos/${repo}/check-runs/${cp.checkRunId}`, {
 				method: "PATCH",
 				headers: {
 					authorization: `Bearer ${token}`,
@@ -396,6 +420,14 @@ async function finalizeLostCheckRuns(ledger: RunLedger, checkpoints: ReadonlyMap
 				}),
 				signal: AbortSignal.timeout(30_000),
 			});
+			// `fetch` rejects only on network failure — a 403 or 422 resolves
+			// normally. Without this the check run silently stays `in_progress`,
+			// which is the exact state this function exists to clear.
+			if (!res.ok) {
+				console.log(
+					`::warning title=ci-data ledger::could not finalize check run for ${key} — HTTP ${res.status} ${(await res.text()).slice(0, 200)}`,
+				);
+			}
 		} catch (err) {
 			console.log(`::warning title=ci-data ledger::could not finalize check run for ${key}: ${err}`);
 		}
@@ -432,9 +464,20 @@ async function build(): Promise<void> {
 	});
 
 	const path = join(dataDir, "attempted-legs.json");
-	const all = existsSync(path) ? (JSON.parse(readFileSync(path, "utf-8")) as Record<string, RunLedger>) : {};
+	// Guarded: this file persists and accumulates across runs, so one corrupt
+	// write would otherwise break the ledger permanently rather than for a run.
+	// Starting from {} loses history but keeps THIS run's verdict recorded, and
+	// the warning says which happened.
+	let all: Record<string, RunLedger> = {};
+	if (existsSync(path)) {
+		try {
+			all = JSON.parse(readFileSync(path, "utf-8")) as Record<string, RunLedger>;
+		} catch (err) {
+			console.log(`::warning title=ci-data ledger::${path} is unparseable, starting a new ledger: ${err}`);
+		}
+	}
 	all[runId] = ledger;
-	writeFileSync(path, `${JSON.stringify(sortKeysDeep(all), null, "\t")}\n`);
+	await Bun.write(path, `${JSON.stringify(sortKeysDeep(all), null, "\t")}\n`);
 
 	console.log(`ci-leg-ledger: ${ledger.complete}/${ledger.planned} legs complete`);
 	for (const [key, entry] of Object.entries(ledger.incomplete ?? {})) {
@@ -463,7 +506,10 @@ async function build(): Promise<void> {
 					`| \`${e.platform}\` | \`${e.target}\` | **${e.terminal}** | \`${e.last_file ?? "—"}\` | \`${e.current_file ?? "—"}\` | ${e.files_reported ?? 0}/${e.files_planned ?? "?"} | ${e.stalled_step ?? "—"} | ${e.job_elapsed_s ?? "?"}s |`,
 			),
 		];
-		writeFileSync(summary, `${readFileSync(summary, "utf-8")}${lines.join("\n")}\n`);
+		// Append, rather than read-modify-write: the step summary is an append-only
+		// sink, and re-reading it only to write it back risks clobbering whatever
+		// another writer added between the two calls.
+		appendFileSync(summary, `${lines.join("\n")}\n`);
 	}
 
 	await finalizeLostCheckRuns(ledger, checkpoints);

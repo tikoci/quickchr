@@ -8,6 +8,7 @@ import {
 	classifyLeg,
 	completedLegs,
 	integrationJobName,
+	mapJobsToLegs,
 	TEST_STEP_NAME,
 	type CheckpointView,
 	type JobView,
@@ -256,6 +257,26 @@ describe("completedLegs", () => {
 	test("a run that wrote nothing yields an empty set, not a throw", () => {
 		expect(completedLegs(mkdtempSync(join(tmpdir(), "ledger-")), "999").size).toBe(0);
 	});
+
+	test("a truncated line costs that line, not the whole reconciliation", () => {
+		// An unguarded parse here would escape build(): no ledger written AND the
+		// lost-runner check runs never finalized — the script failing shut in
+		// exactly the circumstances it exists for. A half-written trailing record
+		// is the most plausible corruption, so the good legs must still survive it.
+		const dir = dataDir({
+			"999-linux-x86-stable.ndjson": suite("linux-x86", "stable"),
+			"999-macos-x86-stable.ndjson": `${suite("macos-x86", "stable")}{"kind":"suite"`,
+		});
+		expect([...completedLegs(dir, "999")].sort()).toEqual([
+			legKey("linux-x86", "stable"),
+			legKey("macos-x86", "stable"),
+		]);
+	});
+
+	test("a file whose every line is garbage yields no legs and no throw", () => {
+		const dir = dataDir({ "999-linux-x86-stable.ndjson": "not json\n{oops\n" });
+		expect(completedLegs(dir, "999").size).toBe(0);
+	});
 });
 
 describe("replay of sweep 30665449265 — the run that made this bite exist", () => {
@@ -282,15 +303,11 @@ describe("replay of sweep 30665449265 — the run that made this bite exist", ()
 		for (const target of ["stable", "testing", "long-term"]) sweepPlan.push({ id, label, target });
 	}
 
-	function realJobMap(): Map<string, JobView> {
-		const byName = new Map(realJobs.map((j) => [j.name, j]));
-		const out = new Map<string, JobView>();
-		for (const leg of sweepPlan) {
-			const job = byName.get(integrationJobName(leg.label, leg.target));
-			if (job) out.set(legKey(leg.id, leg.target), job);
-		}
-		return out;
-	}
+	// The PRODUCTION join, not a copy of it. Rebuilding the name lookup here
+	// would let this suite keep passing while the real join broke — and a broken
+	// join degrades silently to `job_matched: false` rather than erroring, so a
+	// test that cannot catch it is worth very little.
+	const realJobMap = (): Map<string, JobView> => mapJobsToLegs(sweepPlan, realJobs);
 
 	test("every planned leg matches a real job by name", () => {
 		// The one silent-degradation risk in this design: the jobs API exposes no
