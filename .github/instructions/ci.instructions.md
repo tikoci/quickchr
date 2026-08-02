@@ -161,7 +161,8 @@ they answer a different question — the suite's own cost is **~30 min**, not th
 
 B8b then confirmed that hypothesis and dated it. Three full-suite `macos-x86 · stable` legs all
 wedged in **`provisioning.test.ts`** — file 10 of the alphabetical glob — after nine files in
-**772.9 s / 745.4 s (~12.5 min)**, and a live capture of the streaming log put the freeze a further
+**772.9 s and 745.4 s (~12.5 min)**; those are the *two* legs whose records survived, the third
+having been zeroed by #128 below. A live capture of the streaming log put the freeze a further
 3.5–7.6 min *inside* that file, at its 5th/6th test. So the useful diagnostic boundary for #76 is
 **~16–20 min, not an hour**, and on this platform **`completed_at` runs ~40 min behind the actual
 freeze**. Two consequences for anyone reading a lost leg: never quote `job_elapsed_s` as a wedge
@@ -242,10 +243,14 @@ check run PATCHes `output` without `text`, which destroys the checkpoint payload
 `integration.yml` runs `build` twice (once at the ledger step, again inside the refold-retry push
 path). A leg whose push conflicts — i.e. under concurrent legs, which is every sweep — can
 therefore land in `attempted-legs.json` with `files_planned: 0` and **no `last_checkpoint_ts`**,
-while its check run still shows the real numbers. B8b lost one leg of three this way. Until #128
-lands: if a `runner-lost` entry has zero counts, the check run for that leg is the better record,
-and a missing `last_checkpoint_ts` means the instrument lost it, **not** that the leg died before
-its first file.
+while its check run still shows the real numbers. B8b lost one leg of three this way.
+
+**`files_planned` is what separates the two ways a timestamp goes missing**, so do not read a bare
+absent `last_checkpoint_ts` either way. `open` writes the planned list before the first file runs
+and `buildEntry` takes `files_planned` from it, so a leg that genuinely died before completing its
+first file reports `files_planned: 12, files_reported: 0` — while the #128 corruption drops the
+payload wholesale and reports **both** as `0`. Until #128 lands: on a `runner-lost` entry with zero
+*planned*, the check run is the better record and the ledger's silence is instrument loss.
 
 `not-started` is not in #77's original vocabulary and is deliberate —
 without it, a leg that died in `Install QEMU` would be indistinguishable from one whose runner
