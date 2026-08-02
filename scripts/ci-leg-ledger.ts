@@ -452,12 +452,15 @@ async function build(): Promise<void> {
 			"",
 			`### Incomplete legs — ${ledger.complete}/${ledger.planned} completed`,
 			"",
-			"| leg | terminal | last file | was running | files | stalled step | job elapsed |",
-			"|-----|----------|-----------|-------------|-------|--------------|-------------|",
-			...Object.entries(ledger.incomplete).map(
-				// The leg key contains a literal `|`, which would split the cell.
-				([key, e]) =>
-					`| \`${key.replace(/\|/g, "\\|")}\` | **${e.terminal}** | \`${e.last_file ?? "—"}\` | \`${e.current_file ?? "—"}\` | ${e.files_reported ?? 0}/${e.files_planned ?? "?"} | ${e.stalled_step ?? "—"} | ${e.job_elapsed_s ?? "?"}s |`,
+			"| platform | target | terminal | last file | was running | files | stalled step | job elapsed |",
+			"|----------|--------|----------|-----------|-------------|-------|--------------|-------------|",
+			// Platform and target get their own cells rather than the `|`-joined
+			// leg key: escaping that separator back out of a markdown table is the
+			// kind of partial encoding that is wrong the moment a value contains a
+			// backslash, and the split table reads better anyway.
+			...Object.values(ledger.incomplete).map(
+				(e) =>
+					`| \`${e.platform}\` | \`${e.target}\` | **${e.terminal}** | \`${e.last_file ?? "—"}\` | \`${e.current_file ?? "—"}\` | ${e.files_reported ?? 0}/${e.files_planned ?? "?"} | ${e.stalled_step ?? "—"} | ${e.job_elapsed_s ?? "?"}s |`,
 			),
 		];
 		writeFileSync(summary, `${readFileSync(summary, "utf-8")}${lines.join("\n")}\n`);
