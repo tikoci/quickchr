@@ -419,8 +419,6 @@ export function completedLegs(dataDir: string, runId: string): Set<string> {
 	return out;
 }
 
-/** Close a check run the runner never got to close, so the commit does not
- *  carry a check that claims to still be running weeks later. */
 /**
  * Render the `output` a lost leg's check run is closed with.
  *
@@ -456,6 +454,8 @@ export function renderFinalizedOutput(
 	};
 }
 
+/** Close a check run the runner never got to close, so the commit does not
+ *  carry a check that claims to still be running weeks later. */
 async function finalizeLostCheckRuns(ledger: RunLedger, checkpoints: ReadonlyMap<string, CheckpointView>): Promise<void> {
 	const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
 	const repo = process.env.GITHUB_REPOSITORY;

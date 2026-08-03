@@ -263,6 +263,18 @@ describe("closing a lost leg's check run is a round-trip (#128)", () => {
 		}).text;
 	}
 
+	/** The same block carrying a field this file does not model, and indentation
+	 *  `renderOutput` never emits. `parsePayload` alone cannot tell a verbatim
+	 *  hand-off from a re-render off `cp.payload` — a re-render reproduces every
+	 *  modeled field and normalises both of these away silently. */
+	function driftedPayloadTextFor(cp: CheckpointView): string {
+		const text = payloadTextFor(cp);
+		const open = text.indexOf("{");
+		const close = text.lastIndexOf("}") + 1;
+		const payload = { ...JSON.parse(text.slice(open, close)), future_checkpoint_field: { keep: true } };
+		return text.slice(0, open) + JSON.stringify(payload, null, 1) + text.slice(close);
+	}
+
 	/** One `build`: classify, then close the check run the way the aggregate does. */
 	function build(cp: CheckpointView) {
 		const key = legKey(LEG.id, LEG.target);
@@ -275,11 +287,15 @@ describe("closing a lost leg's check run is a round-trip (#128)", () => {
 		return { status: "completed", checkRunId: 42, payload: parsePayload(output.text), payloadText: output.text };
 	}
 
-	test("the close carries the payload forward instead of erasing it", () => {
+	test("the close carries the payload forward verbatim instead of erasing it", () => {
 		const cp = checkpoint();
-		const { output } = build({ ...cp, payloadText: payloadTextFor(cp) });
+		const payloadText = driftedPayloadTextFor(cp);
+		const { output } = build({ ...cp, payloadText });
 
-		expect(output.text).toBeDefined();
+		// Byte-for-byte. The block is handed on, not rebuilt, so a checkpoint
+		// writer that starts recording more than this file models still reaches
+		// the next build intact.
+		expect(output.text).toBe(payloadText);
 		expect(parsePayload(output.text)?.records).toHaveLength(2);
 		// The decisive field: #76's wedge is dated by this and nothing else.
 		expect(parsePayload(output.text)?.records.at(-1)?.ts).toBe("2026-07-31T21:14:14Z");
