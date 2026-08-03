@@ -84,7 +84,15 @@ async function freeDiskMiB(target = "."): Promise<number | undefined> {
 			);
 			const text = await new Response(proc.stdout).text();
 			await proc.exited;
-			const bytes = Number(text.trim());
+			// A failed PowerShell expression writes its error to stderr and leaves
+			// stdout EMPTY — and `Number("")` is 0, which `Number.isFinite` accepts.
+			// Without the emptiness check this reports "0 MiB free" for a reading it
+			// never took: a fabricated disk-exhaustion signal, on the platform where
+			// the workspace and quickchr volumes actually differ, feeding the one
+			// hypothesis this snapshot exists to test. Absent must stay absent.
+			const raw = text.trim();
+			if (!raw) return undefined;
+			const bytes = Number(raw);
 			return Number.isFinite(bytes) ? Math.round(bytes / 1048576) : undefined;
 		}
 		const proc = Bun.spawn(["df", "-k", dir], { stdout: "pipe", stderr: "ignore" });

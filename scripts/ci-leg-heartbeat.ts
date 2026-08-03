@@ -46,10 +46,11 @@
  *
  * ── This instrument must never turn a green leg red ─────────────────────────
  * Same contract as `ci-leg-checkpoint.ts`: every API failure is a loud
- * `::warning::` and exit 0, and XX * ignores its status. It also self-terminates at the step deadline, so a leg
+ * `::warning::` and exit 0, and the workflow runs this as a background job and
+ * ignores its status. It also self-terminates at the step deadline, so a leg
  * whose test step is killed cannot leave a sampler running into the next steps.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 import { getDataDir } from "../src/lib/state.ts";
 import { hostSnapshot, type HostSnapshot } from "./ci-host-snapshot.ts";
@@ -328,6 +329,11 @@ async function main(): Promise<void> {
 		warn("could not open the heartbeat check run — sampling to the local file only");
 	}
 
+	// Truncate rather than append to whatever a previous process left — the file
+	// is appended to per tick below, and a stale prefix would date-stamp another
+	// leg's samples into this one's record.
+	if (outPath) rmSync(outPath, { force: true });
+
 	const startMs = Date.parse(state.startedAt);
 	let lastLocation: ReturnType<typeof locate>;
 	// Backoff exists for one failure mode: the token's hourly budget running out.
@@ -351,7 +357,12 @@ async function main(): Promise<void> {
 		// The local copy dies with the runner — that is the whole reason the check
 		// run exists — but it is the readable one for a leg that finishes, and it
 		// keeps every sample rather than the trailing window.
-		if (outPath) await Bun.write(outPath, `${state.samples.map((s) => JSON.stringify(s)).join("\n")}\n`);
+		//
+		// APPEND, never rewrite. Re-encoding the whole array each tick is O(n²)
+		// over a leg, and a sampler whose own cost grows with elapsed time would
+		// perturb exactly the late-in-the-leg window this instrument exists to
+		// measure — it would look like accumulation it caused itself.
+		if (outPath) appendFileSync(outPath, `${JSON.stringify(sample)}\n`);
 
 		if (state.checkRunId) {
 			const ok = await api(`/check-runs/${state.checkRunId}`, "PATCH", { output: renderOutput(state) });
