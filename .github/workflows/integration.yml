@@ -133,6 +133,10 @@ on:
         type: string
         description: "EXPERIMENT LEVER. Force the per-file watchdog cap to this many seconds. It can only SHORTEN a cap, never lengthen one. Empty = the checked-in table (normal runs). Use to exercise the timeout path itself on a real runner without committing a test that hangs on purpose (#77)."
         default: ""
+      heartbeat-interval:
+        type: string
+        description: "EXPERIMENT LEVER. Sample host state (free disk/memory/swap/load/qemu count) every N seconds from INSIDE the running test file and post it to a check run that survives runner loss (#76). Empty = off (normal runs). Keep to 1-3 legs: at 30s this is 120 API writes/hour per leg against a 1000/hour repository budget shared with the leg checkpoint."
+        default: ""
   workflow_call:
     inputs:
       platforms:
@@ -175,6 +179,10 @@ on:
       watchdog-cap:
         type: string
         description: "Experiment lever — force the per-file watchdog cap (seconds). Shortens only. Empty = the checked-in table."
+        default: ""
+      heartbeat-interval:
+        type: string
+        description: "Experiment lever — in-file host sampling every N seconds to a check run (#76). Empty = off. Rate-limited resource; keep to 1-3 legs."
         default: ""
 
 # Least-privilege: this workflow only runs tests and uploads artifacts.
@@ -234,6 +242,7 @@ jobs:
           QEMU_VERSION: ${{ inputs.qemu-version }}
           ACCEL_INPUT: ${{ inputs.accel }}
           WATCHDOG_CAP_INPUT: ${{ inputs.watchdog-cap }}
+          HEARTBEAT_INPUT: ${{ inputs.heartbeat-interval }}
         run: |
           set -eo pipefail
           # id → label | runner | accel | budget
@@ -332,6 +341,28 @@ jobs:
               exit 1
             fi
             echo "::warning::watchdog-cap=${WATCHDOG_CAP}s is set — every test file is capped at or below ${WATCHDOG_CAP}s. This is an experiment lever for exercising the timeout path (#77); a normal run must not set it."
+          fi
+          # Same validate-early rule. The extra clause is the leg count: this lever
+          # spends a REPOSITORY-wide budget (1000 GITHUB_TOKEN writes/hour, shared
+          # with the leg checkpoint and the aggregate), so a wide dispatch would
+          # throttle the durable record to feed a diagnostic. Refuse rather than
+          # warn — a throttled checkpoint is invisible until someone needs it.
+          HEARTBEAT="${HEARTBEAT_INPUT// /}"
+          if [ -n "$HEARTBEAT" ]; then
+            if ! printf '%s' "$HEARTBEAT" | grep -qE '^[1-9][0-9]*$'; then
+              echo "::error::Invalid heartbeat-interval '$HEARTBEAT' — expected a positive whole number of seconds (10 or more; scripts/ci-leg-heartbeat.ts floors it at 10)"
+              exit 1
+            fi
+            # Legs, not platforms: the matrix is platforms × targets, and each leg
+            # runs its own sampler.
+            PLATFORM_COUNT=$(printf '%s' "$LIST" | tr ',' '\n' | grep -c . || true)
+            TARGET_COUNT=$(printf '%s' "$TARGET_LIST" | tr ',' '\n' | grep -c . || true)
+            LEG_COUNT=$((PLATFORM_COUNT * TARGET_COUNT))
+            if [ "$LEG_COUNT" -gt 3 ]; then
+              echo "::error::heartbeat-interval is set for $LEG_COUNT legs ($PLATFORM_COUNT platforms × $TARGET_COUNT targets). At ${HEARTBEAT}s each leg posts $((3600 / HEARTBEAT)) writes/hour against a 1000/hour repository budget shared with the leg checkpoint (B5) and the aggregate. Restrict the dispatch to at most 3 legs."
+              exit 1
+            fi
+            echo "::warning::heartbeat-interval=${HEARTBEAT}s is set — each leg samples host state from inside the running test file and posts it to its own 'hb:' check run (#76). Experiment lever; a normal run must not set it."
           fi
           FILTER="${TEST_FILTER// /}"
           inc='[]'
@@ -830,6 +861,9 @@ jobs:
           STEP_TIMEOUT_MIN: ${{ matrix.steptimeout }}
           PLATFORM_ID: ${{ matrix.id }}
           QUICKCHR_CI_WATCHDOG_CAP_S: ${{ inputs.watchdog-cap }}
+          HEARTBEAT_INTERVAL: ${{ inputs.heartbeat-interval }}
+          QUICKCHR_RESOLVED_VERSION: ${{ matrix.resolved }}
+          QUICKCHR_DETECTED_ACCEL: ${{ steps.platform.outputs.accel }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eo pipefail
@@ -840,6 +874,35 @@ jobs:
           # the reap / metrics / summary / upload steps below always still run.
           deadline=$(( $(date +%s) + STEP_TIMEOUT_MIN * 60 ))
           echo "::notice::step deadline in $STEP_TIMEOUT_MIN min (epoch $deadline)"
+          # ── in-file host sampling (B8d of #110, for #76) ──────────────────────
+          # Off unless heartbeat-interval is set. Started as a background job here rather than in
+          # a step of its own because this is the only place the step deadline
+          # exists, and the sampler must not outlive the step it is measuring:
+          # it exits at that deadline even if the stop file below never appears
+          # (a step killed by ITS timeout does not get to run the stop).
+          rm -f "$HOME/heartbeat.stop"
+          hb_pid=""
+          if [ -n "${HEARTBEAT_INTERVAL// /}" ]; then
+            bun scripts/ci-leg-heartbeat.ts \
+              --interval "$HEARTBEAT_INTERVAL" \
+              --deadline "$deadline" \
+              --state "$HOME/leg-checkpoint.json" \
+              --stop-file "$HOME/heartbeat.stop" \
+              --out "$HOME/heartbeat-samples.ndjson" \
+              > "$HOME/heartbeat-log.txt" 2>&1 &
+            hb_pid=$!
+            echo "::notice::in-file heartbeat sampling every ${HEARTBEAT_INTERVAL}s (pid $hb_pid) — see the 'hb:' check run"
+          fi
+          # Stop it however the loop ends: normal exit, a red file, or the `break`
+          # after an unclean reap. Without this a `set -e` exit would leave the
+          # sampler running into the forensic steps, sampling their idle host and
+          # overwriting the last rows before the wedge with reassuring ones.
+          stop_heartbeat() {
+            [ -n "$hb_pid" ] || return 0
+            : > "$HOME/heartbeat.stop"
+            wait "$hb_pid" 2>/dev/null || true
+          }
+          trap stop_heartbeat EXIT
           echo "::group::Integration test output"
           : > "$HOME/integration-output.txt"
           : > "$HOME/integration-timing.txt"
@@ -1068,6 +1131,8 @@ jobs:
             ~/watchdog-*.json
 
             ~/leg-checkpoint.json
+            ~/heartbeat-samples.ndjson
+            ~/heartbeat-log.txt
             ~/metrics.ndjson
             ~/issue69-*.ndjson
             ~/arm64-rest-repro.txt
@@ -1090,6 +1155,8 @@ jobs:
             ~/watchdog-*.json
 
             ~/leg-checkpoint.json
+            ~/heartbeat-samples.ndjson
+            ~/heartbeat-log.txt
             ~/metrics.ndjson
             ~/issue69-*.ndjson
             ~/AppData/Local/quickchr/boot-log.ndjson

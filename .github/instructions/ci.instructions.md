@@ -315,6 +315,44 @@ purpose. It can only **shorten** a cap — a value at or above the checked-in on
 cannot be used to buy a hang more rope. The `plan` job validates it and emits a `::warning::` when
 it is set; no normal run sets it.
 
+#### In-file heartbeat (`heartbeat-interval`)
+
+The checkpoint above marks **file boundaries**. That is what named #76's wedge — every known leg dies
+in `provisioning.test.ts` — and it is structurally unable to describe it, because the freeze is
+3.5–7.6 min *inside* that file. Free disk, free memory, load and `qemuCount` had therefore never been
+read anywhere in the window the leg actually dies in; B8a's reassuring "111 GB free, `qemuCount` 0" is
+a boundary reading from a leg that never reached position 10. `scripts/ci-leg-heartbeat.ts` (B8d)
+closes that: with `heartbeat-interval=N` set, each leg samples the host every N seconds and posts a
+trailing window to a check run of its own, attributing every sample to the file the leg is inside and
+how deep into it the reading is.
+
+- **It is a second check run, not an extra row on the checkpoint's.** Two read-modify-write writers of
+  one payload would open a race whose worst case is a stale PATCH dropping the newest file record —
+  the durable evidence B5 exists to preserve, lost exactly when the runner dies. The heartbeat never
+  writes the checkpoint's state; it only reads it.
+- Its `external_id` carries a fifth segment (`…/hb`), and `parseExternalId` takes exactly four, so the
+  ledger skips heartbeats with no special case and can never build a `runner-lost` out of one.
+- Same best-effort contract as the checkpoint: every API failure is a `::warning::` and exit 0, and
+  failed posts are counted into the check's own summary so a gap in the series is attributable to the
+  instrument rather than misread as the host going quiet.
+- **It is opt-in and capped at 3 legs, and that is a budget decision, not caution.** `GITHUB_TOKEN`
+  allows **1000 requests/hour/repository**, shared with the checkpoint and the aggregate. At 30 s a leg
+  posts 120 writes/hour: fine for the 1–3 leg dispatches that chase #76 (every known wedge is bounded
+  to ~16–20 min, so those are cheap), and ~1800/hour across a 15-leg sweep — which would throttle the
+  durable record to feed a diagnostic. The `plan` job **errors** rather than warns above 3 legs.
+- Samples also land in `~/heartbeat-samples.ndjson` in the leg's artifact, which is the readable copy
+  for a leg that *finishes*. For one that does not, the check run is the only copy — that is the point.
+- macOS legs additionally carry `memFreePct` (`memory_pressure -Q`) and `swapUsedMiB`
+  (`vm.swapusage`). `os.freemem()` alone cannot separate "gigabytes of purgeable cache" from "swapping
+  to death"; both report a small number. #77's checkpoint list said "free memory / memory pressure" and
+  only the first half had ever been built.
+
+```bash
+# One full-sequence macos-x86 leg, sampled every 30 s from inside every file.
+gh workflow run integration.yml -f platforms=macos-x86 -f routeros-targets=stable \
+  -f run-examples=false -f heartbeat-interval=30
+```
+
 ## CI metrics (ci-data)
 
 CHR boot timing and test outcomes are collected as a **byproduct** of integration runs —
@@ -470,6 +508,7 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 | `qemu-version` | string | "" | **Experiment lever, Linux only.** Build that upstream QEMU from source and put it first on `PATH` instead of the distro package. Empty = distro. See "Experiment levers" below. |
 | `accel` | string | "" | **Experiment lever.** Pin `QUICKCHR_ACCEL` (`tcg`/`kvm`/`hvf`/`auto`) instead of letting `detectAccel()` choose. Empty = auto-detect. |
 | `watchdog-cap` | string | "" | **Experiment lever.** Force the per-file watchdog cap to N seconds. **Shortens only** — a value at or above the checked-in cap is ignored. Empty = the checked-in table. See "Per-file watchdog" above. |
+| `heartbeat-interval` | string | "" | **Experiment lever.** Sample host state every N seconds from *inside* the running test file to a check run that survives runner loss (#76). Empty = off. **Errors above 3 legs** — it spends a repository-wide API budget shared with the leg checkpoint. See "In-file heartbeat" above. |
 
 (`workflow_call` adds `artifact-prefix` so parallel callers don't collide on artifact names.)
 
