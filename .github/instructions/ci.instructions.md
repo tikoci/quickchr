@@ -390,7 +390,23 @@ TCG-only, full suite by default (300-min timeout); a red job is a real failure
 (no `continue-on-error`). Narrow with `test-filter`, or pass `tcg-smoke=true` for
 just the anchor boot+REST pulse.
 QEMU is installed with `choco install qemu` and runs under TCG (no HVF/WHPX on GitHub
-Windows runners). **Result (2026-06-07, run 27097457831): the full suite passed on
+Windows runners).
+
+**`choco install` exits 0 when it installs nothing, so the step must verify, not trust.**
+On 2026-08-03 (run [30798858483](https://github.com/tikoci/quickchr/actions/runs/30798858483))
+a 504 from `community.chocolatey.org` produced `Chocolatey installed 0/0 packages` and a
+**green** install step; the leg then failed two minutes later inside `anchor.test.ts` with
+`MISSING_QEMU`, and the leg ledger recorded `outcome: test-failure` for a leg that never had
+QEMU on it. A misattributed infra failure is worse than a loud one — it pollutes exactly the
+per-platform rollups #106/#110 read. The step therefore retries the install 3× (the 504 is
+transient — the 2026-07-27 sweep installed 1/1 from the same feed) and then **asserts
+`qemu-system-x86_64.exe` and `qemu-img.exe` exist**, failing with `::error::` naming it
+infrastructure if they do not. It is written in `bash`, not `pwsh`: the rest of the job is
+bash, and #102 is this repo's precedent for an unlinted inline PowerShell block failing
+silently. Same reasoning as `not-started` in the B5 ledger — a setup failure must never
+masquerade as something that ran.
+
+**Result (2026-06-07, run 27097457831): the full suite passed on
 windows-latest/TCG — 56 pass / 0 fail / 3 skip.** Validated end-to-end: CHR boot, monitor
 (+6) and serial (+7) channels, SLiRP networking + port-forward, REST
 exec/license/device-mode/anchor, and **scp upload/download — which works on Windows
