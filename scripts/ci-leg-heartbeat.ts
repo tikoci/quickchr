@@ -142,7 +142,7 @@ export function renderOutput(state: HeartbeatState): { title: string; summary: s
 
 	const last = samples[samples.length - 1];
 	const title = last
-		? `${samples.length} samples — ${last.file ?? "no file yet"} @ ${last.elapsed_s}s`
+		? `${samples.length} sample${samples.length === 1 ? "" : "s"} — ${last.file ?? "no file yet"} @ ${last.elapsed_s}s`
 		: "no samples yet";
 
 	// Humans read the tail; the machine record above holds the whole window.
@@ -276,10 +276,38 @@ function identity(): LegIdentity {
 	};
 }
 
+/**
+ * Parse B5's checkpoint state, rejecting anything that is not actually one.
+ *
+ * **A cast is not a check, and here that difference is load-bearing.** This file
+ * is written by another process while this one reads it, so a parseable-but-
+ * partial object is reachable — and `locate()` reads `.records.length` and
+ * `.planned.length`, so a missing field would throw and take the sampler down
+ * with it. That happens at the one moment the sampler is the only instrument
+ * still reporting. The doc on `locate()` promises a torn read costs a sample's
+ * *attribution*, never the sample; this is what makes that true.
+ *
+ * Pure, so the guard is testable without touching the filesystem.
+ */
+export function parseCheckpoint(text: string | undefined): CheckpointState | undefined {
+	if (!text) return undefined;
+	let raw: Partial<CheckpointState>;
+	try {
+		raw = JSON.parse(text) as Partial<CheckpointState>;
+	} catch {
+		return undefined;
+	}
+	if (typeof raw !== "object" || raw === null) return undefined;
+	if (typeof raw.startedAt !== "string") return undefined;
+	if (!Array.isArray(raw.planned) || !raw.planned.every((f) => typeof f === "string")) return undefined;
+	if (!Array.isArray(raw.records)) return undefined;
+	return raw as CheckpointState;
+}
+
 function readCheckpoint(path: string): CheckpointState | undefined {
 	if (!existsSync(path)) return undefined;
 	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as CheckpointState;
+		return parseCheckpoint(readFileSync(path, "utf-8"));
 	} catch {
 		return undefined;
 	}

@@ -6,6 +6,7 @@ import {
 	locate,
 	MAX_SAMPLES,
 	MAX_TEXT_BYTES,
+	parseCheckpoint,
 	parsePayload,
 	renderOutput,
 	type HeartbeatSample,
@@ -85,7 +86,8 @@ describe("external_id", () => {
 
 describe("renderOutput", () => {
 	test("the title names the file and how far in — a wedged leg's epitaph", () => {
-		expect(renderOutput(state()).title).toBe("1 samples — provisioning.test.ts @ 930s");
+		expect(renderOutput(state()).title).toBe("1 sample — provisioning.test.ts @ 930s");
+		expect(renderOutput(state({ samples: [sample(), sample()] })).title).toContain("2 samples —");
 	});
 
 	test("the summary says outright what an un-closed check means", () => {
@@ -218,5 +220,51 @@ describe("locate", () => {
 		const cp = checkpoint(9);
 		(cp.records[8] as { ts: string }).ts = "2027-01-01T00:00:00.000Z";
 		expect(locate(cp, NOW)?.startedAtMs).toBeNull();
+	});
+});
+
+describe("parseCheckpoint", () => {
+	const NOW = Date.parse("2026-08-03T21:20:00.000Z");
+	const good = JSON.stringify({
+		leg: LEG,
+		planned: ["a.test.ts", "b.test.ts"],
+		startedAt: "2026-08-03T21:00:00.000Z",
+		records: [],
+	});
+
+	test("accepts a real checkpoint", () => {
+		expect(parseCheckpoint(good)?.planned).toEqual(["a.test.ts", "b.test.ts"]);
+	});
+
+	test("a parseable but partial checkpoint is rejected, not cast", () => {
+		// The whole point of the guard. This file is written by ANOTHER process
+		// while the sampler reads it, so a valid-JSON-but-incomplete object is
+		// reachable — and `locate()` reads `.records.length` / `.planned.length`.
+		// A cast would let that throw and kill the sampler at exactly the moment
+		// it is the only instrument still reporting.
+		for (const bad of [
+			'{"startedAt":"x","planned":["a"]}', // no records
+			'{"startedAt":"x","records":[]}', // no planned
+			'{"planned":["a"],"records":[]}', // no startedAt
+			'{"startedAt":"x","planned":"a","records":[]}', // planned not an array
+			'{"startedAt":"x","planned":[1,2],"records":[]}', // planned not strings
+			'{"startedAt":1,"planned":["a"],"records":[]}', // startedAt not a string
+			"[]",
+			"null",
+			"7",
+			"not json at all",
+			"",
+			undefined,
+		]) {
+			expect(parseCheckpoint(bad)).toBeUndefined();
+		}
+	});
+
+	test("locate survives every rejected shape, because it never sees one", () => {
+		// The guard and its consumer, together: a rejected checkpoint reaches
+		// `locate()` as `undefined`, which is the documented "keep your previous
+		// answer" path rather than a throw.
+		expect(() => locate(parseCheckpoint('{"startedAt":"x","planned":["a"]}'), NOW)).not.toThrow();
+		expect(locate(parseCheckpoint('{"startedAt":"x","planned":["a"]}'), NOW)).toBeUndefined();
 	});
 });

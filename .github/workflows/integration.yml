@@ -349,7 +349,7 @@ jobs:
           # warn — a throttled checkpoint is invisible until someone needs it.
           HEARTBEAT="${HEARTBEAT_INPUT// /}"
           if [ -n "$HEARTBEAT" ]; then
-            if ! printf '%s' "$HEARTBEAT" | grep -qE '^[1-9][0-9]*$'; then
+            if ! printf '%s' "$HEARTBEAT" | grep -qE '^[1-9][0-9]*$' || [ "$HEARTBEAT" -lt 10 ]; then
               echo "::error::Invalid heartbeat-interval '$HEARTBEAT' — expected a positive whole number of seconds (10 or more; scripts/ci-leg-heartbeat.ts floors it at 10)"
               exit 1
             fi
