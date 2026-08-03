@@ -177,8 +177,8 @@ only, so no run has ever recorded free disk, free memory or `qemuCount` **inside
 `provisioning.test.ts` — the file every known #76 leg dies in. Do not read B8a's "111 GB free,
 `qemuCount` 0" as covering it; those are boundary samples from files that completed.
 
-**`provisioning.test.ts` is not the defect — position 10 is (B8c).** Three concurrent
-`macos-x86 · stable` dispatches of that file *alone* on `main` @ `1fe3a9c`
+**`provisioning.test.ts` is not the defect — every known wedge is at position 10 (B8c).**
+Three concurrent `macos-x86 · stable` dispatches of that file *alone* on `main` @ `1fe3a9c`
 ([30844433241](https://github.com/tikoci/quickchr/actions/runs/30844433241),
 [30844443047](https://github.com/tikoci/quickchr/actions/runs/30844443047),
 [30844453803](https://github.com/tikoci/quickchr/actions/runs/30844453803)) passed **3/3** in
