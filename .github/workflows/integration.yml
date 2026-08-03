@@ -561,10 +561,34 @@ jobs:
       # No HVF/WHPX on GitHub Windows runners → QEMU falls back to TCG.
       - name: Install QEMU (Windows)
         if: ${{ runner.os == 'Windows' }}
-        shell: pwsh
+        shell: bash
         run: |
-          choco install qemu -y --no-progress
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\qemu"
+          # `choco install` can exit 0 having installed nothing. On 2026-08-03 a
+          # 504 from the community feed printed "Chocolatey installed 0/0
+          # packages", left this step GREEN, and the leg died two minutes later
+          # inside a test with MISSING_QEMU — so the ledger recorded
+          # `test-failure` for a leg that never had QEMU on it (run
+          # 30798858483). A toolchain that did not install must fail HERE, named
+          # as infrastructure, or it gets attributed to the product.
+          #
+          # bash, not pwsh: every other step in this job is bash, and #102 is
+          # this repo's precedent for an inline PowerShell block that no linter
+          # covers failing silently.
+          qemu_dir="/c/Program Files/qemu"
+          for attempt in 1 2 3; do
+            choco install qemu -y --no-progress || true
+            [ -x "$qemu_dir/qemu-system-x86_64.exe" ] && break
+            echo "::warning::choco install qemu produced no binary (attempt $attempt/3)"
+            [ "$attempt" -lt 3 ] && sleep "$((20 * attempt))"
+          done
+          for bin in qemu-system-x86_64.exe qemu-img.exe; do
+            if [ ! -x "$qemu_dir/$bin" ]; then
+              echo "::error::QEMU toolchain install failed — $bin absent from C:\\Program Files\\qemu after 3 attempts. Infrastructure failure, not a product defect: no test on this leg ran."
+              exit 1
+            fi
+          done
+          echo 'C:\Program Files\qemu' >> "$GITHUB_PATH"
+          "$qemu_dir/qemu-system-x86_64.exe" --version
 
       - name: Enable KVM
         if: ${{ runner.os == 'Linux' }}
@@ -1388,10 +1412,34 @@ jobs:
 
       - name: Install QEMU (Windows)
         if: ${{ runner.os == 'Windows' }}
-        shell: pwsh
+        shell: bash
         run: |
-          choco install qemu -y --no-progress
-          Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\qemu"
+          # `choco install` can exit 0 having installed nothing. On 2026-08-03 a
+          # 504 from the community feed printed "Chocolatey installed 0/0
+          # packages", left this step GREEN, and the leg died two minutes later
+          # inside a test with MISSING_QEMU — so the ledger recorded
+          # `test-failure` for a leg that never had QEMU on it (run
+          # 30798858483). A toolchain that did not install must fail HERE, named
+          # as infrastructure, or it gets attributed to the product.
+          #
+          # bash, not pwsh: every other step in this job is bash, and #102 is
+          # this repo's precedent for an inline PowerShell block that no linter
+          # covers failing silently.
+          qemu_dir="/c/Program Files/qemu"
+          for attempt in 1 2 3; do
+            choco install qemu -y --no-progress || true
+            [ -x "$qemu_dir/qemu-system-x86_64.exe" ] && break
+            echo "::warning::choco install qemu produced no binary (attempt $attempt/3)"
+            [ "$attempt" -lt 3 ] && sleep "$((20 * attempt))"
+          done
+          for bin in qemu-system-x86_64.exe qemu-img.exe; do
+            if [ ! -x "$qemu_dir/$bin" ]; then
+              echo "::error::QEMU toolchain install failed — $bin absent from C:\\Program Files\\qemu after 3 attempts. Infrastructure failure, not a product defect: no test on this leg ran."
+              exit 1
+            fi
+          done
+          echo 'C:\Program Files\qemu' >> "$GITHUB_PATH"
+          "$qemu_dir/qemu-system-x86_64.exe" --version
 
       # uv runs the Python example representative (mndp.py) the documented way.
       - name: Install uv (Linux/macOS)
