@@ -17,6 +17,7 @@ import {
 	selectActiveChannels,
 	resolveActiveChannels,
 	resolveChannelStatuses,
+	VERSION_RESOLVE_MAX_ATTEMPTS,
 } from "../../src/lib/versions.ts";
 import { CHANNELS } from "../../src/lib/types.ts";
 import type { Channel } from "../../src/lib/types.ts";
@@ -260,6 +261,130 @@ describe("resolveVersion", () => {
 		);
 		const version = await resolveVersion("stable");
 		expect(version).toBe("7.22.1");
+	});
+
+	// --- Retry policy (#121) ---
+	//
+	// The stub is the mocked `fetch` above, not a live server: a test must never
+	// depend on MikroTik's host actually being flaky to exercise the retry.
+
+	test("retries a connection-class failure and succeeds on a later attempt", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			if (calls < 3) {
+				return Promise.reject(
+					Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" }),
+				);
+			}
+			return Promise.resolve(new Response("7.22.1 1774276515"));
+		});
+		// retryDelayMs keeps the backoff out of the test's wall clock.
+		expect(await resolveVersion("stable", { retryDelayMs: 1 })).toBe("7.22.1");
+		expect(calls).toBe(3);
+	});
+
+	test("gives up after maxAttempts, naming the attempts and the last failure", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.reject(
+				Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" }),
+			);
+		});
+		await expect(
+			resolveVersion("testing", { maxAttempts: 3, retryDelayMs: 1 }),
+		).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+			message: expect.stringContaining("on all 3 attempts"),
+		});
+		expect(calls).toBe(3);
+		// The hint has to name the host — the message may only carry the fallback's
+		// IP literal when fetchResilient's public-DNS path is what failed last.
+		await expect(
+			resolveVersion("testing", { maxAttempts: 1, retryDelayMs: 1 }),
+		).rejects.toMatchObject({
+			message: expect.stringContaining("on 1 attempt"),
+			installHint: expect.stringContaining("upgrade.mikrotik.com"),
+		});
+	});
+
+	test("does not retry an HTTP error status — a bad channel stays fast and terminal", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.resolve(new Response("Not Found", { status: 404 }));
+		});
+		await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+		});
+		expect(calls).toBe(1);
+	});
+
+	test("retries a body that fails after the headers arrived", async () => {
+		// The response can die mid-body (a reset after 200 OK). That is a transport
+		// failure like any other and must be retried, not escape the loop unwrapped.
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			if (calls < 2) {
+				return Promise.resolve(
+					new Response(
+						new ReadableStream({
+							pull(controller) {
+								controller.error(
+									Object.assign(new Error("The socket connection was closed unexpectedly"), {
+										code: "ConnectionClosed",
+									}),
+								);
+							},
+						}),
+					),
+				);
+			}
+			return Promise.resolve(new Response("7.22.1 1774276515"));
+		});
+		expect(await resolveVersion("stable", { retryDelayMs: 1 })).toBe("7.22.1");
+		expect(calls).toBe(2);
+	});
+
+	test("falls back to the defaults for NaN / nonsense options", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.reject(
+				Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" }),
+			);
+		});
+		// `Math.max(1, NaN)` is NaN, which would skip the loop entirely and report
+		// "all NaN attempts: undefined" — a failure message describing nothing.
+		await expect(
+			resolveVersion("stable", { maxAttempts: Number.NaN, retryDelayMs: 0 }),
+		).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+			message: expect.stringContaining(`all ${VERSION_RESOLVE_MAX_ATTEMPTS} attempts`),
+		});
+		expect(calls).toBe(VERSION_RESOLVE_MAX_ATTEMPTS);
+		// A fractional count is floored to a whole number of attempts, never used raw.
+		calls = 0;
+		await expect(resolveVersion("stable", { maxAttempts: 2.7, retryDelayMs: 0 })).rejects.toThrow(
+			"all 2 attempts",
+		);
+		expect(calls).toBe(2);
+	});
+
+	test("does not retry an abort — the caller gave up", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			const abort = new Error("The operation timed out.");
+			abort.name = "AbortError";
+			return Promise.reject(abort);
+		});
+		await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toThrow(
+			"The operation timed out.",
+		);
+		expect(calls).toBe(1);
 	});
 });
 

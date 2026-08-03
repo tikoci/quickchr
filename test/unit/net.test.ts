@@ -1,6 +1,11 @@
 import { describe, test, expect, spyOn, mock, afterEach } from "bun:test";
 import { promises as dns } from "node:dns";
-import { fetchResilient, isConnectionFailure, toIpv4Url } from "../../src/lib/net.ts";
+import {
+	fetchResilient,
+	isConnectionFailure,
+	ResilientFetchError,
+	toIpv4Url,
+} from "../../src/lib/net.ts";
 
 /** Spy the public-DNS A-record lookup that fetchResilient performs. */
 function mockResolve4(impl: { resolve?: string[]; reject?: unknown }) {
@@ -33,6 +38,18 @@ describe("isConnectionFailure", () => {
 		expect(isConnectionFailure(Object.assign(new TypeError("Unable to connect"), { errno: 0 }))).toBe(
 			true,
 		);
+	});
+
+	test("true for a ResilientFetchError — both transports failed to connect", () => {
+		// Constructed only after a direct failure that already passed this test, so a
+		// caller retrying connection failures must keep retrying this one (#121).
+		const both = new ResilientFetchError(
+			"https://h.example/x",
+			"9.9.9.9",
+			Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" }),
+			Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" }),
+		);
+		expect(isConnectionFailure(both)).toBe(true);
 	});
 
 	test("false for aborts, plain TypeErrors, and non-error values", () => {
@@ -114,6 +131,38 @@ describe("fetchResilient", () => {
 		}) as unknown as typeof fetch);
 		await expect(fetchResilient("https://h.example/x")).rejects.toThrow("Unable to connect");
 		expect(fetchSpy).toHaveBeenCalledTimes(1); // normal attempt only; IPv4 path never reached
+	});
+
+	test("reports host, both transports' errors and the fallback address when both fail", async () => {
+		mockResolve4({ resolve: ["159.148.147.251"] });
+		let call = 0;
+		spyOn(globalThis, "fetch").mockImplementation((async () => {
+			call++;
+			throw call === 1
+				? Object.assign(new Error("Unable to connect via system resolver"), {
+						code: "ConnectionRefused",
+					})
+				: Object.assign(new Error("Unable to connect. Is the computer able to access the url?"), {
+						code: "ConnectionRefused",
+					});
+		}) as unknown as typeof fetch);
+
+		// Anchor on the message: the whole point of #121's gap 2 is that a log which
+		// names only the IP literal cannot say which transport failed or where the
+		// address came from.
+		const err = (await fetchResilient(
+			"https://upgrade.mikrotik.com/routeros/NEWESTa7.testing",
+		).catch((e) => e)) as ResilientFetchError;
+
+		expect(err).toBeInstanceOf(ResilientFetchError);
+		expect(err.host).toBe("upgrade.mikrotik.com");
+		expect(err.address).toBe("159.148.147.251");
+		expect(err.message).toContain("https://upgrade.mikrotik.com/routeros/NEWESTa7.testing");
+		expect(err.message).toContain("system resolver — ConnectionRefused: Unable to connect via system resolver");
+		expect(err.message).toContain("public DNS (1.1.1.1, 8.8.8.8, 1.0.0.1) → 159.148.147.251");
+		expect(err.message).toContain("Is the computer able to access the url?");
+		// The direct failure stays reachable programmatically, not just in the text.
+		expect((err.cause as { code?: string }).code).toBe("ConnectionRefused");
 	});
 
 	test("rethrows non-connection errors (e.g. timeouts) without a fallback", async () => {

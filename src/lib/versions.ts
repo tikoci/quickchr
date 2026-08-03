@@ -4,7 +4,7 @@
 
 import type { Arch, Channel } from "./types.ts";
 import { CHANNELS, QuickCHRError } from "./types.ts";
-import { fetchResilient } from "./net.ts";
+import { fetchResilient, isConnectionFailure } from "./net.ts";
 
 const UPGRADE_BASE = "https://upgrade.mikrotik.com/routeros/NEWESTa7";
 const DOWNLOAD_BASE = "https://download.mikrotik.com/routeros";
@@ -65,35 +65,112 @@ export function provisioningSupportHint(minimumVersion = MIN_PROVISION_VERSION):
 	return `Use --channel long-term or --version ${minimumVersion}+ for ${PROVISIONING_FEATURE_SUMMARY}, or keep the older version without provisioning options.`;
 }
 
-/** Fetch the latest version for a given channel from MikroTik's upgrade server. */
-export async function resolveVersion(channel: Channel): Promise<string> {
+/** Attempts for a connection-class failure while resolving a channel version. */
+export const VERSION_RESOLVE_MAX_ATTEMPTS = 3;
+
+/** Backoff base: attempt N waits N × this before N+1. Mirrors `downloadToFile`. */
+const VERSION_RESOLVE_RETRY_MS = 2000;
+
+export interface ResolveVersionOptions {
+	/** Attempts for connection-class failures. Defaults to {@link VERSION_RESOLVE_MAX_ATTEMPTS}. */
+	maxAttempts?: number;
+	/**
+	 * Override the backoff base. A test lever, like `downloadToFile`'s `stallMs`:
+	 * the real backoff spends 6 s of wall clock exhausting the default attempts.
+	 * Production callers should not set it.
+	 */
+	retryDelayMs?: number;
+}
+
+/** A whole count of at least 1, or `fallback` for anything that isn't one. */
+function positiveInt(value: number | undefined, fallback: number): number {
+	if (value === undefined || !Number.isFinite(value)) return fallback;
+	return Math.max(1, Math.floor(value));
+}
+
+/** A finite, non-negative delay in ms, or `fallback` for anything that isn't one. */
+function nonNegativeMs(value: number | undefined, fallback: number): number {
+	if (value === undefined || !Number.isFinite(value)) return fallback;
+	return Math.max(0, value);
+}
+
+/**
+ * Fetch the latest version for a given channel from MikroTik's upgrade server.
+ *
+ * Retried on a connection-class failure only — a transient refusal at
+ * `upgrade.mikrotik.com` used to fail a whole `quickchr start`, since this sits
+ * on the critical path of `start()`, the wizard and the CLI while only the
+ * download path had a retry policy (#121). An HTTP answer is the server's verdict
+ * and stays terminal on the first attempt: a 404 for a bad channel must fail fast.
+ */
+export async function resolveVersion(
+	channel: Channel,
+	opts: ResolveVersionOptions = {},
+): Promise<string> {
 	const url = `${UPGRADE_BASE}.${channel}`;
+	// Sanitized, not just clamped: these are public options, and `Math.max(1, NaN)`
+	// is NaN — the loop would never run, and the failure would read "all NaN
+	// attempts: undefined" instead of doing anything.
+	const maxAttempts = positiveInt(opts.maxAttempts, VERSION_RESOLVE_MAX_ATTEMPTS);
+	const retryDelayMs = nonNegativeMs(opts.retryDelayMs, VERSION_RESOLVE_RETRY_MS);
+	let lastError: unknown;
 
-	const response = await fetchResilient(url);
-	if (!response.ok) {
-		throw new QuickCHRError(
-			"DOWNLOAD_FAILED",
-			`Failed to fetch version for channel "${channel}": HTTP ${response.status}`,
-		);
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		let text: string;
+		try {
+			const response = await fetchResilient(url);
+			if (!response.ok) {
+				// An HTTP answer is the server's verdict. Thrown as a QuickCHRError so
+				// the catch below can tell it from a transport failure and let it out.
+				throw new QuickCHRError(
+					"DOWNLOAD_FAILED",
+					`Failed to fetch version for channel "${channel}": HTTP ${response.status}`,
+				);
+			}
+			// Inside the try: the body can fail *after* the headers arrive (a reset
+			// mid-response), which is a transport failure like any other and must be
+			// retried rather than escaping the loop unwrapped.
+			text = await response.text();
+		} catch (err) {
+			// Only "could not reach the host at all" is retried. An HTTP verdict, an
+			// abort (the caller gave up) or a real bug surfaces immediately.
+			if (err instanceof QuickCHRError) throw err;
+			if (!isConnectionFailure(err)) throw err;
+			lastError = err;
+			if (attempt < maxAttempts) await Bun.sleep(attempt * retryDelayMs);
+			continue;
+		}
+
+		// Parsing is terminal: the server answered, and answering with something
+		// unparseable is not a condition another attempt can improve.
+		// Response format: "7.22.1 1774276515" (version + unix timestamp)
+		const version = text.trim().split(/\s+/)[0]?.trim();
+		if (!version || !isValidVersion(version)) {
+			throw new QuickCHRError(
+				"INVALID_VERSION",
+				`Unexpected version format for channel "${channel}": "${text.trim()}"`,
+			);
+		}
+
+		return version;
 	}
 
-	const text = await response.text();
-	// Response format: "7.22.1 1774276515" (version + unix timestamp)
-	const version = text.trim().split(/\s+/)[0]?.trim();
-	if (!version || !isValidVersion(version)) {
-		throw new QuickCHRError(
-			"INVALID_VERSION",
-			`Unexpected version format for channel "${channel}": "${text.trim()}"`,
-		);
-	}
-
-	return version;
+	// Says "1 attempt" rather than "all 1 attempts" — these land in CI logs.
+	const tries = maxAttempts === 1 ? "1 attempt" : `all ${maxAttempts} attempts`;
+	throw new QuickCHRError(
+		"DOWNLOAD_FAILED",
+		`Failed to fetch version for channel "${channel}" on ${tries}: ` +
+			`${lastError instanceof Error ? lastError.message : String(lastError)}`,
+		`Check network access to ${new URL(url).hostname}, or pass an explicit --version to skip channel resolution.`,
+	);
 }
 
 /** Fetch latest versions for all channels in parallel. */
-export async function resolveAllVersions(): Promise<Record<Channel, string>> {
+export async function resolveAllVersions(
+	opts: ResolveVersionOptions = {},
+): Promise<Record<Channel, string>> {
 	const results = await Promise.all(
-		CHANNELS.map(async (ch) => [ch, await resolveVersion(ch)] as const),
+		CHANNELS.map(async (ch) => [ch, await resolveVersion(ch, opts)] as const),
 	);
 	return Object.fromEntries(results) as Record<Channel, string>;
 }

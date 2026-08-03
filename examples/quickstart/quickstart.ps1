@@ -1,5 +1,6 @@
 # quickstart (CLI, Windows) - boot a CHR, read resource + descriptor, tear down.
 # PowerShell mirror of quickstart.sh. try/finally guarantees teardown.
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'quickstart'

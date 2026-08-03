@@ -14,7 +14,7 @@ against a CHR, showing both the **CLI and the library API**.
 |---|---|---|
 | `<name>.ts` | **Primary** — runnable Bun script, library API. `#!/usr/bin/env bun`; `if (import.meta.main) main()`; `try…finally` teardown; `process.exitCode = 1` on failure. | always (except `grounding`) |
 | `<name>.sh` | CLI version — POSIX `sh`, sources `../common.sh`. | most |
-| `<name>.ps1` | PowerShell CLI mirror, dot-sources `../common.ps1`. | **all new** examples; existing where the CLI flow is simple |
+| `<name>.ps1` | PowerShell CLI mirror. Sets `$ErrorActionPreference = 'Stop'` **before** dot-sourcing `../common.ps1` (see "Exit 0 is not evidence"). | **all new** examples; existing where the CLI flow is simple |
 | `<name>.py` | Python CLI driver, run with `uv run` (stdlib only). | where a non-TS audience adds value |
 | `<name>.test.ts` | `bun:test` — only when assertions ARE the documentation. | `grounding` only |
 | `README.md` | from `_template/README.md`. | always |
@@ -49,6 +49,47 @@ in [`COVERAGE.md`](../../examples/COVERAGE.md) (mark docs/test-only with a reaso
   (`test/integration/examples-smoke.test.ts`) + PowerShell `Invoke-ScriptAnalyzer`
   run in extended verification, across the supported-OS matrix. `trial-license`
   is manual-only (rate limits).
+
+## Exit 0 is not evidence ([#102](https://github.com/tikoci/quickchr/issues/102))
+
+An example that exits 0 and prints *something* is not a passing example. Two
+instances shipped green for months:
+
+- A `ParserError` in `common.ps1` took out the whole file, so every helper in
+  `quickstart.ps1` was undefined. No quickchr command ran; the script printed one
+  line and exited 0.
+- `mndp.py`'s "no announcement received" branch used a bare `return`, which leaves
+  `main()` through the `finally` and never reaches its `sys.exit(rc)` — so the
+  failure path exited 0.
+
+Three rules, each holding one end of that:
+
+- **The smoke harness asserts output markers**, not just `code === 0` and
+  `out.length > 0`. Each entry in `examples-smoke.test.ts`'s `RUNNABLE` names
+  substrings only a working run produces — including one from the END of the script
+  and one the CLI/library emitted rather than the example's own `echo`.
+- **`.ps1` sets `$ErrorActionPreference = 'Stop'` before dot-sourcing `common.ps1`**,
+  duplicating what `common.ps1` sets. Load-bearing, not stylistic: if `common.ps1`
+  fails to load, its own preference never takes effect and each undefined helper is
+  a non-terminating `CommandNotFound`. Reproduced 2026-08-03 (pwsh 7.4.6, Intel
+  macOS) against the real files with #102's defect reinstated: rc=0 without the
+  guard, rc=1 with it. Enforced by `scripts/validate-examples.ts`.
+- **A failure path must exit non-zero.** In Python `raise SystemExit(msg)`, never a
+  bare `return` past a trailing `sys.exit(rc)`. Same run: rc=0 before, rc=1 after.
+- **A `Start-Job` block sets both preferences itself.** `Start-Job` runs in a
+  separate process and inherits no preference variables, so the caller's and
+  `common.ps1`'s copies do not reach inside it. Without
+  `$ErrorActionPreference = 'Stop'` **and**
+  `$PSNativeCommandUseErrorActionPreference = $true` in the block, a `quickchr` call
+  that exits non-zero *without writing to stderr* is invisible: `Receive-Job`
+  returns, the script continues, the example exits 0 having booted nothing. Measured
+  (pwsh 7.4.6): a silent `exit 3` in a job gives **rc=0** unset, **rc=1** with both
+  set. A job whose command *does* write to stderr happens to propagate — do not rely
+  on that, it is the stderr-to-error-record mapping, not the exit code.
+
+`lint-powershell.yml` parses every `.ps1` with PowerShell's own parser before
+PSScriptAnalyzer, because a `Severity = @('Error','Warning')` filter does not
+surface `ParserError` — a file that cannot be parsed at all passed that gate.
 
 ## A failing example is a quickchr bug until proven otherwise
 

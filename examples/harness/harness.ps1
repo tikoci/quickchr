@@ -1,6 +1,7 @@
 # harness (CLI, Windows) - hand a CHR's connection env to an external tool.
 # PowerShell can't eval the shell-quoted `env` output, so use --json and set
 # $env:* explicitly. This is the natural Windows showcase for env-passing.
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'harness'

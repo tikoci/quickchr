@@ -42,7 +42,21 @@ QUICKCHR = ["quickchr"]  # overridden by --quickchr / $QUICKCHR
 
 
 def run_quickchr(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run([*QUICKCHR, *args], capture_output=True, text=True, check=check)
+    # check=False: this wrapper does its own returncode handling below, because
+    # subprocess.run's own check= raises without the output (see next comment).
+    proc = subprocess.run([*QUICKCHR, *args], capture_output=True, text=True, check=False)
+    if check and proc.returncode != 0:
+        # subprocess.run(check=True) raises a CalledProcessError naming the command
+        # and the exit code and DISCARDING both streams -- and those streams are the
+        # only place quickchr says what actually went wrong. Run 30852139131
+        # (linux/aarch64) failed here on `/system/identity/set` and reported nothing
+        # but "returned non-zero exit status 1", which is not enough to diagnose it.
+        raise SystemExit(
+            f"FAIL: quickchr {' '.join(args)} exited {proc.returncode}\n"
+            f"--- stdout ---\n{proc.stdout}"
+            f"--- stderr ---\n{proc.stderr}"
+        )
+    return proc
 
 
 # ── frame parsing ────────────────────────────────────────────────────────────
@@ -234,8 +248,10 @@ def main() -> None:
             time.sleep(1)
 
         if not got:
-            print(f"FAIL: no MNDP announcement with identity '{IDENTITY}' within {args.timeout}s", file=sys.stderr)
-            return
+            # `raise`, not `return`: a bare return leaves main() through the finally
+            # and never reaches `sys.exit(rc)` below, so the failure would exit 0 —
+            # the same silent false green as #102's PowerShell example.
+            raise SystemExit(f"FAIL: no MNDP announcement with identity '{IDENTITY}' within {args.timeout}s")
         print("\nMNDP received over L2 (socket-connect):")
         for k in ("identity", "version", "platform", "board", "ifname", "ipv4", "uptime", "mac", "softwareId"):
             if k in got:

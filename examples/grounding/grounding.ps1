@@ -1,5 +1,6 @@
 # grounding (CLI, Windows) - apply RouterOS config, read it back, prove it took.
 # PowerShell mirror of grounding.sh.
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'grounding'
