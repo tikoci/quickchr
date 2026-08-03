@@ -1,9 +1,16 @@
 # Shared helpers for quickchr CLI examples (PowerShell - the Windows mirror of common.sh).
 #
 # Dot-source at the top of <name>.ps1, then wrap the body in try/finally:
+#   $ErrorActionPreference = 'Stop'
 #   . "$PSScriptRoot/../common.ps1"
 #   $name = Get-ExampleName 'quickstart'; Register-Cleanup $name
 #   try { Invoke-Qc start $name --channel stable; ... } finally { Invoke-QcCleanup }
+#
+# The caller sets $ErrorActionPreference BEFORE the dot-source even though this
+# file sets it too, and that duplication is load-bearing: if THIS file fails to
+# load, the preference it sets never takes effect, every helper call below it is
+# an ordinary non-terminating CommandNotFound, and the example exits 0 having done
+# nothing - the silent false green in #102. Enforced by scripts/validate-examples.ts.
 #
 # Resolution rule mirrors common.sh: prefer an explicit $env:QUICKCHR override,
 # else the repo source CLI (so CI/local runs exercise THIS checkout), else a

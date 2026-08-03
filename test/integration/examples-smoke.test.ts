@@ -47,7 +47,25 @@ interface Runnable {
 	env?: Record<string, string>;
 	// Restrict to these platforms (process.platform). Omitted = all.
 	os?: NodeJS.Platform[];
+	/**
+	 * Substrings that must appear in stdout for the run to count as a pass.
+	 *
+	 * Exit code plus non-empty output is not evidence an example worked: in #102
+	 * a ParserError left every helper in `common.ps1` undefined, so
+	 * `quickstart.ps1` ran no quickchr command at all — and still printed one line
+	 * and exited 0, which the smoke test reported green for months.
+	 *
+	 * So each entry names output only a working run produces, and always includes
+	 * something from the END of the script (a mid-run silent failure must not
+	 * pass) and something the CLI/library itself emitted (not just the example's
+	 * own `echo`). The interpolated `examples-<slug>-` machine name is deliberate:
+	 * the tell in #102 was a double space where that name should have been.
+	 */
+	expect: string[];
 }
+
+/** Emitted by `quickchr inspect` — proof the CLI ran, not just the example's echo. */
+const INSPECT_MARKER = '"descriptorVersion": 1';
 
 // One representative per language, selected per OS so the CLI mirror that actually
 // ships for the current platform is the one exercised:
@@ -56,14 +74,25 @@ interface Runnable {
 //   - .ps1 on Windows (where the .sh/.py mirrors aren't the documented path).
 // Kept small — each entry boots a real CHR.
 const RUNNABLE: Runnable[] = [
-	{ name: "quickstart", lang: "ts", cmd: ["bun", "run", "examples/quickstart/quickstart.ts"] },
-	{ name: "rollback", lang: "ts", cmd: ["bun", "run", "examples/rollback/rollback.ts"] },
+	{
+		name: "quickstart",
+		lang: "ts",
+		cmd: ["bun", "run", "examples/quickstart/quickstart.ts"],
+		expect: ["RouterOS ", 'ethernet interface(s); identity "'],
+	},
+	{
+		name: "rollback",
+		lang: "ts",
+		cmd: ["bun", "run", "examples/rollback/rollback.ts"],
+		expect: ['saved snapshot "baseline"', 'rolled back; identity="before-snapshot"'],
+	},
 	{
 		name: "quickstart-sh",
 		lang: "sh",
 		cmd: ["sh", "examples/quickstart/quickstart.sh"],
 		env: QUICKCHR_ENV,
 		os: ["linux", "darwin"],
+		expect: ["starting examples-quickstart-", "connection descriptor", INSPECT_MARKER],
 	},
 	{
 		name: "mndp-py",
@@ -71,6 +100,9 @@ const RUNNABLE: Runnable[] = [
 		cmd: ["uv", "run", "examples/mndp/mndp.py", "--timeout", "45"],
 		env: QUICKCHR_ENV,
 		os: ["linux", "darwin"],
+		// "mndp-example" is the identity the script set on the router and then read
+		// back out of a captured L2 frame — router-sourced, not the script's own echo.
+		expect: ["MNDP received over L2", "mndp-example", "removed 'examples-mndp-"],
 	},
 	{
 		name: "quickstart-ps1",
@@ -78,6 +110,7 @@ const RUNNABLE: Runnable[] = [
 		cmd: ["pwsh", "examples/quickstart/quickstart.ps1"],
 		env: QUICKCHR_ENV,
 		os: ["win32"],
+		expect: ["starting examples-quickstart-", "connection descriptor", INSPECT_MARKER],
 	},
 ];
 
@@ -176,7 +209,11 @@ describe.skipIf(SKIP)("examples smoke", () => {
 					console.error(`[${r.name}] exit ${code} ${detail}`);
 				}
 				expect(code).toBe(0);
-				expect(out.length).toBeGreaterThan(0);
+				// Reported as the list of what was missing rather than one toContain per
+				// marker: the failure then names every marker the run failed to produce,
+				// which is what distinguishes "wrong result" from "did nothing at all".
+				// Subsumes the old `out.length > 0` check, which #102 sailed through.
+				expect(r.expect.filter((marker) => !out.includes(marker))).toEqual([]);
 			},
 			PER_TEST_TIMEOUT,
 		);

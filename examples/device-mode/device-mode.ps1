@@ -1,4 +1,5 @@
 # device-mode (CLI, Windows) - enable a device-mode feature on first boot, read it back.
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'device-mode'

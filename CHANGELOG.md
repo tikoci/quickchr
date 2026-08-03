@@ -99,6 +99,45 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- **One refused connection to `upgrade.mikrotik.com` failed a whole `quickchr start`**
+  (#121). `resolveVersion()` had no retry at all: `fetchResilient()` is one attempt per
+  transport (system resolver, then a public-DNS IPv4 fallback), and if the fallback also
+  threw, the error propagated. #116/#119 gave the *download* path a retry policy and left
+  version resolution — which sits on the critical path of `start()`, the wizard and the
+  CLI — with a single shot. Observed on a `platforms=all` run: `Integration
+  (windows/x86_64 · testing)` went red on one `ConnectionRefused`, on a leg where nothing
+  about RouterOS, QEMU or the platform was involved. `resolveVersion()` now retries a
+  connection-class failure up to 3 times with the same backoff shape as `downloadToFile`,
+  and reports the attempt count plus the host when it exhausts them. An HTTP status is
+  still terminal on the first attempt — a 404 for a bad channel stays fast.
+- **The version-resolution error named an IP address nobody configured** (#121).
+  `fetchResilient()` discarded the direct attempt's error whenever the IPv4 fallback
+  itself threw, so the surfaced message read `path: "https://159.148.147.251/routeros/…"`
+  with no hostname — leaving "the system resolver was broken", "the host refused us" and
+  "public DNS handed back a bad address" indistinguishable, which is exactly the question
+  the log has to answer. That fallback fires routinely on hosted runners (their stub
+  resolver fails slowly, 2–26 s), so its error was often the only one visible. Both
+  failures are now raised together as a `ResilientFetchError` naming the URL, each
+  transport's error, the address the fallback used and which resolvers produced it, with
+  the direct failure kept as `cause`.
+- **Every PowerShell example was a silent false green** (#102). A `ParserError` in
+  `examples/common.ps1` took out the entire file — PowerShell parses `$LASTEXITCODE:` as
+  a scope-qualified variable reference — so every helper it defines was undefined for the
+  caller and `quickstart.ps1` ran no quickchr command at all. It exited 0 having printed
+  one line, and the smoke harness (`code === 0` and `out.length > 0`) reported `(pass)`
+  for months. The parse itself was fixed in #101; the false-green *class* is closed here:
+  the smoke harness now asserts per-example output markers — substrings only a working
+  run produces, including one from the end of the script and one the CLI itself emitted —
+  and each `.ps1` sets `$ErrorActionPreference = 'Stop'` **before** dot-sourcing
+  `common.ps1`, so a `common.ps1` that fails to load can no longer leave the example
+  running past it. Reproduced locally against the real files (pwsh 7.4.6, Intel macOS):
+  with #102's defect reinstated, rc=0 unguarded and rc=1 guarded. `validate-examples`
+  enforces the guard.
+- **`examples/mndp/mndp.py` exited 0 when no MNDP announcement arrived.** The failure
+  branch used a bare `return`, which leaves `main()` through the `finally` and never
+  reaches the trailing `sys.exit(rc)` — the same false green as #102, in a different
+  language. It now raises `SystemExit`; cleanup still runs. Measured with the identity
+  match forced to fail: rc=0 before, rc=1 after.
 - **A healthy large download was reported as a timeout** (#116). Both download paths
   bounded a transfer by *total duration*: `images.ts` aborted at a flat 120 s per
   attempt and retried three times, `packages.ts` had no deadline and no retries at all.

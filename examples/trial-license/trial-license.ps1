@@ -1,5 +1,6 @@
 # trial-license (CLI, Windows) - apply a CHR trial license, read it back. MANUAL-ONLY.
 # MikroTik rate-limits trial requests, so this is excluded from CI.
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'trial-license'

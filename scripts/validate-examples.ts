@@ -7,10 +7,11 @@
  *   - no Makefile / stray files (only .ts/.test.ts/.sh/.ps1/.py/.md + known subdirs)
  *   - the primary script is named after its directory
  *   - every relative link and run-command file reference in the README resolves
+ *   - each .ps1 sets $ErrorActionPreference before dot-sourcing common.ps1
  *
  * Wired into `bun run check`. Exits non-zero on any violation.
  */
-import { readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -77,6 +78,24 @@ for (const name of dirs) {
 		if ([".ts", ".sh", ".ps1", ".py"].includes(ext)) {
 			const base = f.replace(/\.(test\.)?(ts|sh|ps1|py)$/, "");
 			if (base !== name) err(where, `script "${f}" should be named "${name}${ext}"`);
+		}
+	}
+
+	// PowerShell examples must arm $ErrorActionPreference themselves, BEFORE
+	// dot-sourcing common.ps1. A common.ps1 that fails to load leaves the
+	// preference at 'Continue', so every undefined helper is a non-terminating
+	// error and the example exits 0 having run no quickchr command at all — the
+	// false green in #102, reproduced locally 2026-08-03 (pwsh 7.4.6: rc=0 without
+	// the guard, rc=1 with it).
+	for (const f of files.filter((x) => x.endsWith(".ps1"))) {
+		const lines = readFileSync(join(dir, f), "utf8").split(/\r?\n/);
+		const dotSource = lines.findIndex((l) => /^\s*\.\s+["']\$PSScriptRoot/.test(l));
+		if (dotSource < 0) continue; // self-contained script, nothing to guard against
+		const armed = lines
+			.slice(0, dotSource)
+			.some((l) => /^\s*\$ErrorActionPreference\s*=\s*'Stop'/.test(l));
+		if (!armed) {
+			err(where, `"${f}" must set $ErrorActionPreference = 'Stop' BEFORE dot-sourcing common.ps1`);
 		}
 	}
 

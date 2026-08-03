@@ -19,7 +19,9 @@
  * error), we retry by resolving the A record against a public DNS server
  * directly (~10 ms), bypassing the host's resolv.conf, and connecting to the
  * IPv4 literal with the `Host` header and TLS SNI preserved so certificate
- * validation still passes.
+ * validation still passes. If that attempt fails too, both failures are reported
+ * together as a `ResilientFetchError` — the fallback's own error names only an IP
+ * literal, which on its own reads as a host nobody configured.
  *
  * Only connection-class failures trigger the fallback; HTTP responses (incl.
  * 5xx) and aborts (`AbortError`, e.g. from `AbortSignal.timeout`) pass through
@@ -32,6 +34,49 @@ import { promises as dns } from "node:dns";
 const PUBLIC_DNS_SERVERS = ["1.1.1.1", "8.8.8.8", "1.0.0.1"];
 const DNS_TIMEOUT_MS = 3000;
 
+/** `CODE: message` when the error carries a code, else just the message. */
+function describeError(err: unknown): string {
+	if (!err || typeof err !== "object") return String(err);
+	const e = err as { name?: string; message?: string; code?: string; cause?: { code?: string } };
+	const code = e.code ?? e.cause?.code;
+	const label = code ?? e.name;
+	const message = e.message ?? String(err);
+	return label ? `${label}: ${message}` : message;
+}
+
+/**
+ * Both transports failed: the direct fetch with a connection-class error, and
+ * then the public-DNS/IPv4 fallback too.
+ *
+ * It exists because the fallback's own error is unreadable on its own — it names
+ * an IP literal nobody configured and no hostname, so a log cannot distinguish
+ * "the system resolver was broken" from "the host refused us" from "public DNS
+ * handed back a bad address" (#121). The message carries the URL, both failures,
+ * and which address the fallback tried; the direct failure is also the `cause`.
+ */
+export class ResilientFetchError extends Error {
+	/** The hostname both transports were aiming at. */
+	readonly host: string;
+	/** The IPv4 literal the fallback connected to, from public DNS. */
+	readonly address: string;
+	/** The fallback transport's failure. The direct attempt's is `cause`. */
+	readonly fallbackError: unknown;
+
+	constructor(url: string, address: string, directError: unknown, fallbackError: unknown) {
+		const host = new URL(url).hostname;
+		super(
+			`Fetch failed for ${url} on both transports: ` +
+				`system resolver — ${describeError(directError)}; ` +
+				`public DNS (${PUBLIC_DNS_SERVERS.join(", ")}) → ${address} — ${describeError(fallbackError)}`,
+			{ cause: directError },
+		);
+		this.name = "ResilientFetchError";
+		this.host = host;
+		this.address = address;
+		this.fallbackError = fallbackError;
+	}
+}
+
 /**
  * True for the connection-class failures raised when a socket cannot be opened
  * (e.g. IPv4 blocked on an IPv6-only network, or Bun's `errno: 0`
@@ -39,9 +84,14 @@ const DNS_TIMEOUT_MS = 3000;
  * the standard connect errors. Excludes `AbortError` (aborts/`AbortSignal`
  * timeouts) and HTTP-level outcomes (those carry a Response and never throw
  * here). Used to decide whether to fall back from the normal fetch to the
- * public-DNS IPv4 attempt.
+ * public-DNS IPv4 attempt, and by callers deciding whether a failure is worth
+ * another attempt.
  */
 export function isConnectionFailure(err: unknown): boolean {
+	// Connection-class by construction: fetchResilient raises this only after a
+	// direct failure that already passed this test. Callers retrying on a
+	// connection failure must keep retrying once the fallback also fails.
+	if (err instanceof ResilientFetchError) return true;
 	if (!err || typeof err !== "object") return false;
 	const e = err as { name?: string; code?: string; errno?: number; cause?: { code?: string } };
 	if (e.name === "AbortError") return false;
@@ -142,6 +192,12 @@ export async function fetchResilient(url: string, init?: BunFetchRequestInit): P
 		const address = await resolveIpv4(new URL(url).hostname);
 		// Public DNS can't help (unreachable / no answer) — surface the original failure.
 		if (address === undefined) throw err;
-		return fetchOverIpv4(url, address, init);
+		try {
+			return await fetchOverIpv4(url, address, init);
+		} catch (fallbackErr) {
+			// Never let the fallback's error stand alone: it names only an IP literal,
+			// which is the one thing the reader cannot map back to what was attempted.
+			throw new ResilientFetchError(url, address, err, fallbackErr);
+		}
 	}
 }

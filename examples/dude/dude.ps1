@@ -1,5 +1,6 @@
 # dude (CLI, Windows) - install the dude package on first boot, enable it, read it back.
 # PowerShell mirror of dude.sh.
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'dude'

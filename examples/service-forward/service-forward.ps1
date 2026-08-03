@@ -1,4 +1,5 @@
 # service-forward (CLI, Windows) - pin a guest service to a chosen host port.
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'service-forward'

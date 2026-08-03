@@ -2,6 +2,7 @@
 # PowerShell mirror of version-matrix.sh (parallel start via background jobs).
 param([switch]$Lite)
 
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $channels = if ($Lite) { @('long-term', 'stable') } else { @('long-term', 'stable', 'testing', 'development') }

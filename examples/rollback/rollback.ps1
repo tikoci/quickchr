@@ -1,4 +1,5 @@
 # rollback (CLI, Windows) - snapshot a CHR, change it, restore the snapshot.
+$ErrorActionPreference = 'Stop'  # before the dot-source - see common.ps1 (#102)
 . "$PSScriptRoot/../common.ps1"
 
 $name = Get-ExampleName 'rollback'

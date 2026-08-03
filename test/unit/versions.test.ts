@@ -261,6 +261,78 @@ describe("resolveVersion", () => {
 		const version = await resolveVersion("stable");
 		expect(version).toBe("7.22.1");
 	});
+
+	// --- Retry policy (#121) ---
+	//
+	// The stub is the mocked `fetch` above, not a live server: a test must never
+	// depend on MikroTik's host actually being flaky to exercise the retry.
+
+	test("retries a connection-class failure and succeeds on a later attempt", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			if (calls < 3) {
+				return Promise.reject(
+					Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" }),
+				);
+			}
+			return Promise.resolve(new Response("7.22.1 1774276515"));
+		});
+		// retryDelayMs keeps the backoff out of the test's wall clock.
+		expect(await resolveVersion("stable", { retryDelayMs: 1 })).toBe("7.22.1");
+		expect(calls).toBe(3);
+	});
+
+	test("gives up after maxAttempts, naming the attempts and the last failure", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.reject(
+				Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" }),
+			);
+		});
+		await expect(
+			resolveVersion("testing", { maxAttempts: 3, retryDelayMs: 1 }),
+		).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+			message: expect.stringContaining("on all 3 attempts"),
+		});
+		expect(calls).toBe(3);
+		// The hint has to name the host — the message may only carry the fallback's
+		// IP literal when fetchResilient's public-DNS path is what failed last.
+		await expect(
+			resolveVersion("testing", { maxAttempts: 1, retryDelayMs: 1 }),
+		).rejects.toMatchObject({
+			message: expect.stringContaining("on 1 attempt"),
+			installHint: expect.stringContaining("upgrade.mikrotik.com"),
+		});
+	});
+
+	test("does not retry an HTTP error status — a bad channel stays fast and terminal", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.resolve(new Response("Not Found", { status: 404 }));
+		});
+		await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+		});
+		expect(calls).toBe(1);
+	});
+
+	test("does not retry an abort — the caller gave up", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			const abort = new Error("The operation timed out.");
+			abort.name = "AbortError";
+			return Promise.reject(abort);
+		});
+		await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toThrow(
+			"The operation timed out.",
+		);
+		expect(calls).toBe(1);
+	});
 });
 
 describe("resolveAllVersions", () => {
