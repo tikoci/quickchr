@@ -177,6 +177,32 @@ only, so no run has ever recorded free disk, free memory or `qemuCount` **inside
 `provisioning.test.ts` — the file every known #76 leg dies in. Do not read B8a's "111 GB free,
 `qemuCount` 0" as covering it; those are boundary samples from files that completed.
 
+**`provisioning.test.ts` is not the defect — position 10 is (B8c).** Three concurrent
+`macos-x86 · stable` dispatches of that file *alone* on `main` @ `1fe3a9c`
+([30844433241](https://github.com/tikoci/quickchr/actions/runs/30844433241),
+[30844443047](https://github.com/tikoci/quickchr/actions/runs/30844443047),
+[30844453803](https://github.com/tikoci/quickchr/actions/runs/30844453803)) passed **3/3** in
+**769 s / 774 s / 666 s**. The durations are the point: each ran well past the 3.5–7.6 min *inside*
+the file where B8b's live capture placed the freeze, and completed all ten of the file's VM boots.
+With B8a's position-1 green that is **4/4 green outside position 10 against 4/4 wedged at it**
+(Fisher exact p ≈ 0.029 two-sided — small n, quoted as a number rather than as "conclusive"). The
+unconditioned fatal-intermittent hypothesis does not survive that; a fatal intermittent whose rate
+is conditioned on position is position-sensitivity under another name. **Practical consequence:**
+do not quarantine, `skip` or reorder this file to green the platform — it is where a host-level
+condition becomes visible, and it is the only reliable reproduction #76 has.
+
+**What B8c could not separate**, because running the file alone removes both causes at once: the
+*elapsed load* before position 10, and the *residue of the nine specific predecessors*. That needs
+the same file at position 10 behind a different predecessor set reaching comparable elapsed time.
+
+**First within-file trend on record** (one leg, ten boots, solo): 30.6, 30.8, 31.1, 31.4, 33.9,
+38.8, 39.0, 38.9, 38.9, 35.6 s — boot cost drifts up ~27% across the file, then eases. **Not a
+mechanism claim**; it is boot time, not the resource snapshot the blind spot above describes, and
+the file completed. It is recorded because it is the only in-file trend anyone has, and because a
+27% drift in isolation is the kind of thing that would compound behind nine prior files. Note these
+rows are assembled and pushed *post-hoc*, so they do **not** survive a wedge — closing the blind
+spot needs a sampler that PATCHes server-side while the file runs, the channel B5 proved survives.
+
 **Outcomes** are written to `integration-timing.txt` as `<file> <seconds>s <outcome>` and folded
 into `metrics.ndjson` by `scripts/ci-metrics.ts`. B4 owns only what the watchdog observes
 first-hand: `pass`, `test-failure`, `file-watchdog-timeout`, `not-run`. `runner-lost` and
