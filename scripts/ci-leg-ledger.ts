@@ -59,6 +59,13 @@ export interface CheckpointView {
 		startedAt?: string;
 	};
 	checkRunId?: number;
+	/** The check run's `output.text`, verbatim — the block `payload` was parsed
+	 *  from. Carried so `finalizeLostCheckRuns` can PATCH it back untouched
+	 *  instead of dropping it (#128): GitHub replaces the whole `output` object,
+	 *  so a close that omits `text` erases every per-file record the aggregate
+	 *  just read. Kept as raw text rather than re-rendered from `payload` so the
+	 *  round-trip cannot drift as the payload's shape changes. */
+	payloadText?: string;
 }
 
 /** A workflow job, reduced. Survives runner loss — verified against run
@@ -333,10 +340,12 @@ async function fetchCheckpoints(sha: string, runId: string, attempt: string): Pr
 		for (const cr of runs) {
 			const ext = parseExternalId(cr.external_id as string | null);
 			if (!ext || ext.run_id !== runId || ext.attempt !== attempt) continue;
+			const text = (cr.output as { text?: string } | undefined)?.text;
 			out.set(legKey(ext.platform, ext.target), {
 				status: String(cr.status),
 				checkRunId: cr.id as number,
-				payload: parsePayload((cr.output as { text?: string } | undefined)?.text),
+				payload: parsePayload(text),
+				payloadText: text ?? undefined,
 			});
 		}
 		if (runs.length < 100) break;
@@ -410,6 +419,41 @@ export function completedLegs(dataDir: string, runId: string): Set<string> {
 	return out;
 }
 
+/**
+ * Render the `output` a lost leg's check run is closed with.
+ *
+ * Pure, and exported, because the property that matters is a round-trip: what
+ * this writes must parse back into the same `CheckpointView` classification
+ * just consumed. `build` runs twice in the refold-retry push path
+ * (`integration.yml`), so a close that drops the payload makes the second build
+ * read a check run the first one emptied — #128, which cost B8b one of three
+ * `last_checkpoint_ts` values, the single field #76 exists to obtain.
+ *
+ * `text` is the leg's own payload passed straight through. The human-facing
+ * title and summary are rewritten to state the verdict; the machine-readable
+ * block underneath them is not ours to rewrite.
+ */
+export function renderFinalizedOutput(
+	entry: LegLedgerEntry,
+	cp: CheckpointView,
+): { title: string; summary: string; text?: string } {
+	return {
+		title: `${entry.terminal} — last file ${entry.last_file ?? "(none reported)"}`,
+		summary: [
+			`**${entry.terminal}** · ${entry.why}`,
+			"",
+			`- last completed file: \`${entry.last_file ?? "—"}\``,
+			`- was running: \`${entry.current_file ?? "—"}\``,
+			`- files reported: ${entry.files_reported ?? 0}/${entry.files_planned ?? "?"}`,
+			`- stalled step: ${entry.stalled_step ?? "—"}`,
+			`- job elapsed: ${entry.job_elapsed_s ?? "?"}s (upper bound on the wedge — see #76)`,
+			"",
+			"Closed by the aggregate job; the leg's own runner never reported a terminal.",
+		].join("\n"),
+		text: cp.payloadText,
+	};
+}
+
 /** Close a check run the runner never got to close, so the commit does not
  *  carry a check that claims to still be running weeks later. */
 async function finalizeLostCheckRuns(ledger: RunLedger, checkpoints: ReadonlyMap<string, CheckpointView>): Promise<void> {
@@ -440,20 +484,7 @@ async function finalizeLostCheckRuns(ledger: RunLedger, checkpoints: ReadonlyMap
 					// carries is its title and summary, not its color.
 					conclusion: "neutral",
 					completed_at: new Date().toISOString(),
-					output: {
-						title: `${entry.terminal} — last file ${entry.last_file ?? "(none reported)"}`,
-						summary: [
-							`**${entry.terminal}** · ${entry.why}`,
-							"",
-							`- last completed file: \`${entry.last_file ?? "—"}\``,
-							`- was running: \`${entry.current_file ?? "—"}\``,
-							`- files reported: ${entry.files_reported ?? 0}/${entry.files_planned ?? "?"}`,
-							`- stalled step: ${entry.stalled_step ?? "—"}`,
-							`- job elapsed: ${entry.job_elapsed_s ?? "?"}s (upper bound on the wedge — see #76)`,
-							"",
-							"Closed by the aggregate job; the leg's own runner never reported a terminal.",
-						].join("\n"),
-					},
+					output: renderFinalizedOutput(entry, cp),
 				}),
 				signal: AbortSignal.timeout(30_000),
 			});
