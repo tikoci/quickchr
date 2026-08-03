@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { legKey } from "../../scripts/ci-leg-checkpoint.ts";
+import { legKey, parsePayload, renderOutput } from "../../scripts/ci-leg-checkpoint.ts";
 import {
 	buildRunLedger,
 	classifyLeg,
@@ -10,6 +10,7 @@ import {
 	foldLedgerInto,
 	integrationJobName,
 	mapJobsToLegs,
+	renderFinalizedOutput,
 	TEST_STEP_NAME,
 	type CheckpointView,
 	type JobView,
@@ -240,6 +241,87 @@ describe("buildRunLedger", () => {
 			expect(entry.terminal).toBe("runner-lost");
 			expect(entry.last_file).toBe("exec.test.ts");
 		}
+	});
+});
+
+// #128: `build` runs twice in the refold-retry push path, and build 1 closes the
+// check run build 2 then re-reads. Closing used to PATCH `output` without
+// `text` — GitHub replaces the whole object, so the per-file payload was erased
+// and build 2 produced a zeroed entry that overwrote the good one. The loss is
+// invisible in the UI (title and summary survive), so the guard has to be a
+// round-trip, not an eyeball.
+describe("closing a lost leg's check run is a round-trip (#128)", () => {
+	/** The payload block a real leg writes, produced by the writer production
+	 *  uses — so this test fails if either side of the contract drifts. */
+	function payloadTextFor(cp: CheckpointView): string {
+		return renderOutput({
+			checkRunId: cp.checkRunId,
+			leg: { platform: LEG.id, target: LEG.target, run_id: "30767207011", attempt: "1", sha: META.sha },
+			planned: cp.payload?.planned ?? [],
+			startedAt: cp.payload?.startedAt ?? "",
+			records: cp.payload?.records ?? [],
+		}).text;
+	}
+
+	/** One `build`: classify, then close the check run the way the aggregate does. */
+	function build(cp: CheckpointView) {
+		const key = legKey(LEG.id, LEG.target);
+		const entry = classifyLeg(LEG, new Set(), new Map([[key, cp]]), new Map([[key, vanishedJob()]]));
+		return { entry, output: renderFinalizedOutput(entry, cp) };
+	}
+
+	/** What the NEXT build reads back from the check run the previous one closed. */
+	function reread(output: { text?: string }): CheckpointView {
+		return { status: "completed", checkRunId: 42, payload: parsePayload(output.text), payloadText: output.text };
+	}
+
+	test("the close carries the payload forward instead of erasing it", () => {
+		const cp = checkpoint();
+		const { output } = build({ ...cp, payloadText: payloadTextFor(cp) });
+
+		expect(output.text).toBeDefined();
+		expect(parsePayload(output.text)?.records).toHaveLength(2);
+		// The decisive field: #76's wedge is dated by this and nothing else.
+		expect(parsePayload(output.text)?.records.at(-1)?.ts).toBe("2026-07-31T21:14:14Z");
+	});
+
+	test("building twice against the same leg yields the same entry", () => {
+		const cp = checkpoint();
+		const first = build({ ...cp, payloadText: payloadTextFor(cp) });
+		const second = build(reread(first.output));
+
+		expect(second.entry).toEqual(first.entry);
+		// Named explicitly: these are what #128 actually zeroed on the durable record.
+		expect(second.entry.last_file).toBe("exec.test.ts");
+		expect(second.entry.current_file).toBe("provisioning.test.ts");
+		expect(second.entry.last_checkpoint_ts).toBe("2026-07-31T21:14:14Z");
+		expect(second.entry.files_reported).toBe(2);
+		expect(second.entry.files_planned).toBe(3);
+	});
+
+	test("a third build still agrees — the close is a fixed point, not a one-shot repair", () => {
+		const cp = checkpoint();
+		const first = build({ ...cp, payloadText: payloadTextFor(cp) });
+		const third = build(reread(build(reread(first.output)).output));
+
+		expect(third.entry).toEqual(first.entry);
+	});
+
+	test("the pre-fix behaviour — dropping `text` — is what zeroed the entry", () => {
+		const cp = checkpoint();
+		const first = build({ ...cp, payloadText: payloadTextFor(cp) });
+		// Reproduce the old close: `output` PATCHed with no `text` at all.
+		const zeroed = build(reread({ text: undefined }));
+
+		expect(zeroed.entry).not.toEqual(first.entry);
+		// Exactly what run 30767207011 committed to attempted-legs.json (#128).
+		expect(zeroed.entry.last_file).toBeUndefined();
+		expect(zeroed.entry.files_reported).toBe(0);
+		expect(zeroed.entry.files_planned).toBe(0);
+		expect(zeroed.entry.last_checkpoint_ts).toBeUndefined();
+		// Still classified runner-lost, which is why the loss went unnoticed:
+		// the verdict survived, only the evidence dating it did not.
+		expect(zeroed.entry.terminal).toBe("runner-lost");
 	});
 });
 
