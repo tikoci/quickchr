@@ -172,10 +172,87 @@ long before the budget does. The runner also stops reporting *inside* the wedged
 watchdog window, with 12–16 min of the 1200 s cap unspent and no `file-watchdog-timeout` row on any
 leg, which is the concrete demonstration that nothing in-job can bound a lost runner.
 
-**The host snapshot has a blind spot at exactly the wrong place.** It samples at *file* boundaries
-only, so no run has ever recorded free disk, free memory or `qemuCount` **inside**
-`provisioning.test.ts` — the file every known #76 leg dies in. Do not read B8a's "111 GB free,
-`qemuCount` 0" as covering it; those are boundary samples from files that completed.
+**The host snapshot samples at *file* boundaries only** — B8a's "111 GB free, `qemuCount` 0" is a
+boundary reading from files that completed, and never covered the inside of `provisioning.test.ts`.
+**B8d closed that with the in-file heartbeat, and the answer is that the host is fine.** Three
+full-sequence legs on `bbadc9c` wedged 3/3 (position 10 now stands at **7/7**), and the last sample
+before each went silent reads:
+
+| leg | in-file | free mem | **mem free %** | **swap** | **free data-disk** | load (4 cores) | qemu |
+|---|---|---|---|---|---|---|---|
+| [30858745297](https://github.com/tikoci/quickchr/actions/runs/30858745297) | 234 s | 4681 MiB | 89 | **0** | **110828 MiB** | 6.10 | 1 |
+| [30858737759](https://github.com/tikoci/quickchr/actions/runs/30858737759) | 308 s | 4798 MiB | 89 | **0** | **110888 MiB** | 1.62 | 1 |
+| [30858752349](https://github.com/tikoci/quickchr/actions/runs/30858752349) | 531 s | 4850 MiB | 89 | **0** | **110874 MiB** | 2.22 | 1 |
+
+So **disk exhaustion and memory exhaustion are both refuted**, measured rather than inferred: ~108 GB
+free throughout, kernel memory pressure flat at 89% free, zero swap, one QEMU process, and the leg
+dies *during* a VM's life. Three further things follow, and all three retire assumptions this program
+was carrying:
+
+- **"~16–20 min" is a range, not a deadline.** `hostUptimeS` makes three independent clocks
+  checkable and none is constant at the freeze — test-step elapsed **16.8 / 19.9 / 24.6 min**, host
+  uptime **29.5 / 33.9 / 55.1 min**, in-file **234 / 308 / 531 s**, absolute wall-clock unaligned. No
+  undocumented runner-side timer fires here; do not go looking for one.
+- **Suite growth is why legs *reach* position 10, not why they die there.** On `1fe3a9c`,
+  `windows-x86` (TCG) completed 12/12 in ~28.5 min of test step and `macos-arm64` in ~22.7 min — both
+  *longer* than `macos-x86` survives, same commit, same day. The condition is specific to
+  `macos-15-intel`/HVF, not to elapsed length.
+- **A load precursor does not replicate.** One leg climbed 1.38 → 6.31 over the four minutes before
+  freezing; the other two froze flat at 1.62 and 2.22. Recorded because opening a single wedged leg
+  makes that climb look like the answer.
+
+**Runner age is now measurable and is not the gate.** `hostUptimeS` at test-step start exposes how long
+the machine ran *before* the job (4.9 / 17.1 / 35.1 min across the three legs — the older ones had done
+~30 min of unrelated work first). The essentially-fresh runner wedged too. Weakly, it lasted longest
+(531 s vs 234/308 s in-file), which is n=3 and an observation, not a finding. B8b cannot be
+retro-checked against this: its legs' checkpoint payloads read `(no payload)` — the #128 corruption,
+fixed by #132 one run too late, which is the concrete cost of that defect.
+
+**What this means for the next instrument.** All five quantities #77 named are now sampled inside the
+fatal window and the host looks ordinary in every one of them 30 s before it stops talking, so **more
+host-level sampling will not find this**. The open direction is per-process detail (top-N by CPU *and*
+state, `R` vs uninterruptible `D`) — the one host-level reading that would show a hypervisor call
+blocked. Per operating rule 7, the bite that *consumes* such a sample must exist before it is added.
+
+### The accelerator is the variable — TCG completes what HVF never has
+
+A one-factor contrast on `04b9be4`: three `macos-x86 · stable` legs identical to the B8d dispatch
+except **`accel=tcg`**. [30861486665](https://github.com/tikoci/quickchr/actions/runs/30861486665)
+**completed 12/12, all `pass`, in 1939 s** — the first recorded full-suite completion on this platform —
+with `provisioning.test.ts` passing **at position 10** in **604 s**, and a second leg passing the same
+file at the same position in 810 s. Ordinary durations, not watchdog kills (cap 1200 s).
+**HVF 0/7 through position 10, TCG 2/2** (Fisher two-sided p ≈ 0.056; ≈ 0.017 at 3/3).
+
+**The speed confound does not apply, and that is what makes the contrast usable.** Per-file cost under
+TCG is within noise of HVF here — nine files cumulative **910 s vs 769 / 883 / 937 s** — because CHR
+boot and this suite are **not CPU-bound**; they are dominated by I/O and RouterOS's own startup waits,
+so full emulation costs about 7%. Do not assume TCG is slow on this workload without measuring: the
+TCG legs reproduced the elapsed-load condition and performed the same ten in-file VM boots, so the
+condition was held constant and only the accelerator changed. (The pin is real, not a relabelling:
+`QUICKCHR_ACCEL=tcg` → `detectAccel()` → `qemu.ts` emits `-accel tcg,tb-size=256`, and the check run
+reports the *detected* value.)
+
+**Triangulated against B7, which bounds the claim:**
+
+| accelerator | host | result |
+|---|---|---|
+| HVF | maintainer's Intel Mac, 8c / 64 GiB (B7) | **12/12 pass, 1818 s** |
+| HVF | hosted `macos-15-intel`, 4c / 14 GiB | **0/7 — runner lost at position 10** |
+| TCG | hosted `macos-15-intel` | **12/12 pass, 1939 s** |
+
+So this is **not "HVF is broken"** and not a defect Intel Mac users hit — real Intel hardware runs the
+same suite under HVF to completion. It is **HVF on the hosted runner**. (1818 s vs 1939 s independently
+confirms the ~7% emulation cost.)
+
+**Do not pin `accel=tcg` on `macos-x86` to green the platform.** It would delete the only reproduction
+of a real host-level defect — the same move this file already forbids for quarantining
+`provisioning.test.ts`, arriving through a different door — and it costs the project its only HVF
+coverage. If that trade is ever taken it is a maintainer decision recorded as a **deliberate loss of
+coverage**, not a fix.
+
+**What it unlocks.** B8c could not separate *elapsed load* from *predecessor residue*, because running
+the file alone removed both at once. `accel` can now be varied against a fixed position-10 condition,
+so that separation is a two-arm experiment rather than a one-arm observation.
 
 **`provisioning.test.ts` is not itself the defect — it passes in isolation, and every known wedge
 is at position 10 (B8c).**
@@ -314,6 +391,44 @@ timeout path itself can be exercised on a real runner without committing a test 
 purpose. It can only **shorten** a cap — a value at or above the checked-in one is ignored — so it
 cannot be used to buy a hang more rope. The `plan` job validates it and emits a `::warning::` when
 it is set; no normal run sets it.
+
+#### In-file heartbeat (`heartbeat-interval`)
+
+The checkpoint above marks **file boundaries**. That is what named #76's wedge — every known leg dies
+in `provisioning.test.ts` — and it is structurally unable to describe it, because the freeze is
+3.5–7.6 min *inside* that file. Free disk, free memory, load and `qemuCount` had therefore never been
+read anywhere in the window the leg actually dies in; B8a's reassuring "111 GB free, `qemuCount` 0" is
+a boundary reading from a leg that never reached position 10. `scripts/ci-leg-heartbeat.ts` (B8d)
+closes that: with `heartbeat-interval=N` set, each leg samples the host every N seconds and posts a
+trailing window to a check run of its own, attributing every sample to the file the leg is inside and
+how deep into it the reading is.
+
+- **It is a second check run, not an extra row on the checkpoint's.** Two read-modify-write writers of
+  one payload would open a race whose worst case is a stale PATCH dropping the newest file record —
+  the durable evidence B5 exists to preserve, lost exactly when the runner dies. The heartbeat never
+  writes the checkpoint's state; it only reads it.
+- Its `external_id` carries a fifth segment (`…/hb`), and `parseExternalId` takes exactly four, so the
+  ledger skips heartbeats with no special case and can never build a `runner-lost` out of one.
+- Same best-effort contract as the checkpoint: every API failure is a `::warning::` and exit 0, and
+  failed posts are counted into the check's own summary so a gap in the series is attributable to the
+  instrument rather than misread as the host going quiet.
+- **It is opt-in and capped at 3 legs, and that is a budget decision, not caution.** `GITHUB_TOKEN`
+  allows **1000 requests/hour/repository**, shared with the checkpoint and the aggregate. At 30 s a leg
+  posts 120 writes/hour: fine for the 1–3 leg dispatches that chase #76 (every known wedge is bounded
+  to ~16–20 min, so those are cheap), and ~1800/hour across a 15-leg sweep — which would throttle the
+  durable record to feed a diagnostic. The `plan` job **errors** rather than warns above 3 legs.
+- Samples also land in `~/heartbeat-samples.ndjson` in the leg's artifact, which is the readable copy
+  for a leg that *finishes*. For one that does not, the check run is the only copy — that is the point.
+- macOS legs additionally carry `memFreePct` (`memory_pressure -Q`) and `swapUsedMiB`
+  (`vm.swapusage`). `os.freemem()` alone cannot separate "gigabytes of purgeable cache" from "swapping
+  to death"; both report a small number. #77's checkpoint list said "free memory / memory pressure" and
+  only the first half had ever been built.
+
+```bash
+# One full-sequence macos-x86 leg, sampled every 30 s from inside every file.
+gh workflow run integration.yml -f platforms=macos-x86 -f routeros-targets=stable \
+  -f run-examples=false -f heartbeat-interval=30
+```
 
 ## CI metrics (ci-data)
 
@@ -470,6 +585,7 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 | `qemu-version` | string | "" | **Experiment lever, Linux only.** Build that upstream QEMU from source and put it first on `PATH` instead of the distro package. Empty = distro. See "Experiment levers" below. |
 | `accel` | string | "" | **Experiment lever.** Pin `QUICKCHR_ACCEL` (`tcg`/`kvm`/`hvf`/`auto`) instead of letting `detectAccel()` choose. Empty = auto-detect. |
 | `watchdog-cap` | string | "" | **Experiment lever.** Force the per-file watchdog cap to N seconds. **Shortens only** — a value at or above the checked-in cap is ignored. Empty = the checked-in table. See "Per-file watchdog" above. |
+| `heartbeat-interval` | string | "" | **Experiment lever.** Sample host state every N seconds from *inside* the running test file to a check run that survives runner loss (#76). Empty = off. **Errors above 3 legs** — it spends a repository-wide API budget shared with the leg checkpoint. See "In-file heartbeat" above. |
 
 (`workflow_call` adds `artifact-prefix` so parallel callers don't collide on artifact names.)
 

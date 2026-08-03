@@ -12,6 +12,8 @@
  * caller a field, never the rest of its report — these run on the failure path,
  * which is exactly when a tool is most likely to be unavailable.
  */
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
 import { cpus, freemem, loadavg, totalmem, uptime } from "node:os";
 
 /**
@@ -46,21 +48,54 @@ export async function qemuProcessCount(): Promise<number | undefined> {
 	}
 }
 
-/** Free disk on the working filesystem, in MiB. `undefined` when unreadable. */
-async function freeDiskMiB(): Promise<number | undefined> {
+/**
+ * Nearest existing ancestor of `dir`.
+ *
+ * `df` and `Get-PSDrive` both fail on a path that does not exist yet, and the
+ * quickchr data dir does not exist until the first machine is created — which on
+ * a cold leg is minutes in. Reporting `undefined` there would put a hole in the
+ * series that reads like a failed measurement rather than "same volume, nothing
+ * written to it yet".
+ */
+function nearestExisting(dir: string): string {
+	let p = dir;
+	for (let i = 0; i < 16 && !existsSync(p); i += 1) {
+		const up = dirname(p);
+		if (up === p) return ".";
+		p = up;
+	}
+	return existsSync(p) ? p : ".";
+}
+
+/** Free disk in MiB on the filesystem holding `dir`. `undefined` when unreadable. */
+async function freeDiskMiB(target = "."): Promise<number | undefined> {
+	const dir = nearestExisting(target);
 	try {
 		if (process.platform === "win32") {
 			// `wmic` is gone on current windows-latest images; PowerShell is not.
 			const proc = Bun.spawn(
-				["powershell", "-NoProfile", "-Command", "(Get-PSDrive -Name (Get-Location).Drive.Name).Free"],
+				[
+					"powershell",
+					"-NoProfile",
+					"-Command",
+					`(Get-PSDrive -Name (Get-Item -LiteralPath '${dir.replace(/'/g, "''")}').PSDrive.Name).Free`,
+				],
 				{ stdout: "pipe", stderr: "ignore" },
 			);
 			const text = await new Response(proc.stdout).text();
 			await proc.exited;
-			const bytes = Number(text.trim());
+			// A failed PowerShell expression writes its error to stderr and leaves
+			// stdout EMPTY — and `Number("")` is 0, which `Number.isFinite` accepts.
+			// Without the emptiness check this reports "0 MiB free" for a reading it
+			// never took: a fabricated disk-exhaustion signal, on the platform where
+			// the workspace and quickchr volumes actually differ, feeding the one
+			// hypothesis this snapshot exists to test. Absent must stay absent.
+			const raw = text.trim();
+			if (!raw) return undefined;
+			const bytes = Number(raw);
 			return Number.isFinite(bytes) ? Math.round(bytes / 1048576) : undefined;
 		}
-		const proc = Bun.spawn(["df", "-k", "."], { stdout: "pipe", stderr: "ignore" });
+		const proc = Bun.spawn(["df", "-k", dir], { stdout: "pipe", stderr: "ignore" });
 		const text = await new Response(proc.stdout).text();
 		await proc.exited;
 		// Second line, fourth column: 1K-blocks available.
@@ -69,6 +104,51 @@ async function freeDiskMiB(): Promise<number | undefined> {
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * macOS memory pressure and swap — the two readings `os.freemem()` cannot give.
+ *
+ * #77's per-checkpoint list said "free memory / memory pressure" and only the
+ * first half was ever built. On macOS that half is close to meaningless on its
+ * own: `freemem()` counts only genuinely free pages, so a host with gigabytes of
+ * purgeable cache reports a number that looks like exhaustion and is not, while
+ * a host that is actually swapping to death reports the same number. #76's leg
+ * dies host-level with the guest holding ~2 GiB on a 14 GiB runner, so "is it
+ * running out of memory" is a live hypothesis that free-pages alone cannot
+ * answer either way.
+ *
+ * `memory_pressure -Q` gives the kernel's own system-wide free percentage and
+ * `vm.swapusage` gives swap actually in use. Both are one cheap spawn, both are
+ * best-effort, and both are absent on other platforms — a missing field here
+ * means "not measured", never "zero".
+ */
+async function macMemoryDetail(): Promise<{ memFreePct?: number; swapUsedMiB?: number }> {
+	if (process.platform !== "darwin") return {};
+	const out: { memFreePct?: number; swapUsedMiB?: number } = {};
+	try {
+		const proc = Bun.spawn(["memory_pressure", "-Q"], { stdout: "pipe", stderr: "ignore" });
+		const text = await new Response(proc.stdout).text();
+		await proc.exited;
+		const pct = Number(/free percentage:\s*(\d+)/.exec(text)?.[1]);
+		if (Number.isFinite(pct)) out.memFreePct = pct;
+	} catch {
+		// leave undefined
+	}
+	try {
+		const proc = Bun.spawn(["sysctl", "-n", "vm.swapusage"], { stdout: "pipe", stderr: "ignore" });
+		const text = await new Response(proc.stdout).text();
+		await proc.exited;
+		// `total = 3072.00M  used = 1596.25M  free = 1475.75M  (encrypted)`
+		const used = /used\s*=\s*([\d.]+)(G|M|K)/.exec(text);
+		if (used?.[1]) {
+			const scale = used[2] === "G" ? 1024 : used[2] === "K" ? 1 / 1024 : 1;
+			out.swapUsedMiB = Math.round(Number(used[1]) * scale);
+		}
+	} catch {
+		// leave undefined
+	}
+	return out;
 }
 
 export interface HostSnapshot {
@@ -88,6 +168,20 @@ export interface HostSnapshot {
 	 */
 	hostUptimeS: number;
 	qemuCount?: number;
+	/**
+	 * Free disk on the volume holding quickchr's data dir, in MiB.
+	 *
+	 * Separate from `freeDiskMiB` (the workspace) because they are not the same
+	 * volume everywhere: on Windows the workspace is on `D:` while quickchr state
+	 * is on `C:`, and it is the *quickchr* volume that fills with images, machine
+	 * disks and snapshots. On macOS and Linux runners they usually coincide, and
+	 * reporting both makes that a measurement rather than an assumption.
+	 */
+	freeDataDiskMiB?: number;
+	/** macOS only — kernel's system-wide free percentage (`memory_pressure -Q`). */
+	memFreePct?: number;
+	/** macOS only — swap in use, MiB (`vm.swapusage`). */
+	swapUsedMiB?: number;
 }
 
 /**
@@ -96,8 +190,11 @@ export interface HostSnapshot {
  * `withQemuCount` is opt-in because the count costs a process spawn, and the
  * watchdog takes its own counts either side of the reap rather than folding one
  * into the snapshot.
+ *
+ * `dataDir` is likewise opt-in: resolving it costs a second `df`, which the
+ * boundary-marking callers do not need but the in-file heartbeat (B8d) does.
  */
-export async function hostSnapshot(withQemuCount = false): Promise<HostSnapshot> {
+export async function hostSnapshot(withQemuCount = false, dataDir?: string): Promise<HostSnapshot> {
 	const snapshot: HostSnapshot = {
 		platform: process.platform,
 		cpuCount: cpus().length,
@@ -106,7 +203,9 @@ export async function hostSnapshot(withQemuCount = false): Promise<HostSnapshot>
 		freeDiskMiB: await freeDiskMiB(),
 		loadAvg: loadavg(),
 		hostUptimeS: Math.round(uptime()),
+		...(await macMemoryDetail()),
 	};
 	if (withQemuCount) snapshot.qemuCount = await qemuProcessCount();
+	if (dataDir) snapshot.freeDataDiskMiB = await freeDiskMiB(dataDir);
 	return snapshot;
 }
