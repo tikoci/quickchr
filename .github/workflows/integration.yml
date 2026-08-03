@@ -572,8 +572,8 @@ jobs:
           # as infrastructure, or it gets attributed to the product.
           #
           # bash, not pwsh: every other step in this job is bash, and #102 is
-          # this repo's precedent for an unlinted inline PowerShell block
-          # failing silently.
+          # this repo's precedent for an inline PowerShell block that no linter
+          # covers failing silently.
           qemu_dir="/c/Program Files/qemu"
           for attempt in 1 2 3; do
             choco install qemu -y --no-progress || true
@@ -1423,8 +1423,8 @@ jobs:
           # as infrastructure, or it gets attributed to the product.
           #
           # bash, not pwsh: every other step in this job is bash, and #102 is
-          # this repo's precedent for an unlinted inline PowerShell block
-          # failing silently.
+          # this repo's precedent for an inline PowerShell block that no linter
+          # covers failing silently.
           qemu_dir="/c/Program Files/qemu"
           for attempt in 1 2 3; do
             choco install qemu -y --no-progress || true

@@ -402,8 +402,8 @@ per-platform rollups #106/#110 read. The step therefore retries the install 3× 
 transient — the 2026-07-27 sweep installed 1/1 from the same feed) and then **asserts
 `qemu-system-x86_64.exe` and `qemu-img.exe` exist**, failing with `::error::` naming it
 infrastructure if they do not. It is written in `bash`, not `pwsh`: the rest of the job is
-bash, and #102 is this repo's precedent for an unlinted inline PowerShell block failing
-silently. Same reasoning as `not-started` in the B5 ledger — a setup failure must never
+bash, and #102 is this repo's precedent for an inline PowerShell block that no linter covers
+failing silently. Same reasoning as `not-started` in the B5 ledger — a setup failure must never
 masquerade as something that ran.
 
 **Result (2026-06-07, run 27097457831): the full suite passed on
