@@ -210,10 +210,49 @@ fixed by #132 one run too late, which is the concrete cost of that defect.
 
 **What this means for the next instrument.** All five quantities #77 named are now sampled inside the
 fatal window and the host looks ordinary in every one of them 30 s before it stops talking, so **more
-host-level sampling will not find this**. The open directions are per-process detail (top-N by CPU
-*and* state, `R` vs uninterruptible `D`), the HVF/hypervisor layer where a host-level kill on bare
-metal most plausibly originates, and a shorter sampling interval now that a wedge costs ~25 min to
-reproduce. Per operating rule 7, the bite that *consumes* such a sample must exist before it is added.
+host-level sampling will not find this**. The open direction is per-process detail (top-N by CPU *and*
+state, `R` vs uninterruptible `D`) — the one host-level reading that would show a hypervisor call
+blocked. Per operating rule 7, the bite that *consumes* such a sample must exist before it is added.
+
+### The accelerator is the variable — TCG completes what HVF never has
+
+A one-factor contrast on `04b9be4`: three `macos-x86 · stable` legs identical to the B8d dispatch
+except **`accel=tcg`**. [30861486665](https://github.com/tikoci/quickchr/actions/runs/30861486665)
+**completed 12/12, all `pass`, in 1939 s** — the first recorded full-suite completion on this platform —
+with `provisioning.test.ts` passing **at position 10** in **604 s**, and a second leg passing the same
+file at the same position in 810 s. Ordinary durations, not watchdog kills (cap 1200 s).
+**HVF 0/7 through position 10, TCG 2/2** (Fisher two-sided p ≈ 0.056; ≈ 0.017 at 3/3).
+
+**The speed confound does not apply, and that is what makes the contrast usable.** Per-file cost under
+TCG is within noise of HVF here — nine files cumulative **910 s vs 769 / 883 / 937 s** — because CHR
+boot and this suite are **not CPU-bound**; they are dominated by I/O and RouterOS's own startup waits,
+so full emulation costs about 7%. Do not assume TCG is slow on this workload without measuring: the
+TCG legs reproduced the elapsed-load condition and performed the same ten in-file VM boots, so the
+condition was held constant and only the accelerator changed. (The pin is real, not a relabelling:
+`QUICKCHR_ACCEL=tcg` → `detectAccel()` → `qemu.ts` emits `-accel tcg,tb-size=256`, and the check run
+reports the *detected* value.)
+
+**Triangulated against B7, which bounds the claim:**
+
+| accelerator | host | result |
+|---|---|---|
+| HVF | maintainer's Intel Mac, 8c / 64 GiB (B7) | **12/12 pass, 1818 s** |
+| HVF | hosted `macos-15-intel`, 4c / 14 GiB | **0/7 — runner lost at position 10** |
+| TCG | hosted `macos-15-intel` | **12/12 pass, 1939 s** |
+
+So this is **not "HVF is broken"** and not a defect Intel Mac users hit — real Intel hardware runs the
+same suite under HVF to completion. It is **HVF on the hosted runner**. (1818 s vs 1939 s independently
+confirms the ~7% emulation cost.)
+
+**Do not pin `accel=tcg` on `macos-x86` to green the platform.** It would delete the only reproduction
+of a real host-level defect — the same move this file already forbids for quarantining
+`provisioning.test.ts`, arriving through a different door — and it costs the project its only HVF
+coverage. If that trade is ever taken it is a maintainer decision recorded as a **deliberate loss of
+coverage**, not a fix.
+
+**What it unlocks.** B8c could not separate *elapsed load* from *predecessor residue*, because running
+the file alone removed both at once. `accel` can now be varied against a fixed position-10 condition,
+so that separation is a two-arm experiment rather than a one-arm observation.
 
 **`provisioning.test.ts` is not itself the defect — it passes in isolation, and every known wedge
 is at position 10 (B8c).**
