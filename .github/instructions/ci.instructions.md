@@ -172,10 +172,48 @@ long before the budget does. The runner also stops reporting *inside* the wedged
 watchdog window, with 12–16 min of the 1200 s cap unspent and no `file-watchdog-timeout` row on any
 leg, which is the concrete demonstration that nothing in-job can bound a lost runner.
 
-**The host snapshot has a blind spot at exactly the wrong place.** It samples at *file* boundaries
-only, so no run has ever recorded free disk, free memory or `qemuCount` **inside**
-`provisioning.test.ts` — the file every known #76 leg dies in. Do not read B8a's "111 GB free,
-`qemuCount` 0" as covering it; those are boundary samples from files that completed.
+**The host snapshot samples at *file* boundaries only** — B8a's "111 GB free, `qemuCount` 0" is a
+boundary reading from files that completed, and never covered the inside of `provisioning.test.ts`.
+**B8d closed that with the in-file heartbeat, and the answer is that the host is fine.** Three
+full-sequence legs on `bbadc9c` wedged 3/3 (position 10 now stands at **7/7**), and the last sample
+before each went silent reads:
+
+| leg | in-file | free mem | **mem free %** | **swap** | **free data-disk** | load (4 cores) | qemu |
+|---|---|---|---|---|---|---|---|
+| [30858745297](https://github.com/tikoci/quickchr/actions/runs/30858745297) | 234 s | 4681 MiB | 89 | **0** | **110828 MiB** | 6.10 | 1 |
+| [30858737759](https://github.com/tikoci/quickchr/actions/runs/30858737759) | 308 s | 4798 MiB | 89 | **0** | **110888 MiB** | 1.62 | 1 |
+| [30858752349](https://github.com/tikoci/quickchr/actions/runs/30858752349) | 531 s | 4850 MiB | 89 | **0** | **110874 MiB** | 2.22 | 1 |
+
+So **disk exhaustion and memory exhaustion are both refuted**, measured rather than inferred: ~108 GB
+free throughout, kernel memory pressure flat at 89% free, zero swap, one QEMU process, and the leg
+dies *during* a VM's life. Three further things follow, and all three retire assumptions this program
+was carrying:
+
+- **"~16–20 min" is a range, not a deadline.** `hostUptimeS` makes three independent clocks
+  checkable and none is constant at the freeze — test-step elapsed **16.8 / 19.9 / 24.6 min**, host
+  uptime **29.5 / 33.9 / 55.1 min**, in-file **234 / 308 / 531 s**, absolute wall-clock unaligned. No
+  undocumented runner-side timer fires here; do not go looking for one.
+- **Suite growth is why legs *reach* position 10, not why they die there.** On `1fe3a9c`,
+  `windows-x86` (TCG) completed 12/12 in ~28.5 min of test step and `macos-arm64` in ~22.7 min — both
+  *longer* than `macos-x86` survives, same commit, same day. The condition is specific to
+  `macos-15-intel`/HVF, not to elapsed length.
+- **A load precursor does not replicate.** One leg climbed 1.38 → 6.31 over the four minutes before
+  freezing; the other two froze flat at 1.62 and 2.22. Recorded because opening a single wedged leg
+  makes that climb look like the answer.
+
+**Runner age is now measurable and is not the gate.** `hostUptimeS` at test-step start exposes how long
+the machine ran *before* the job (4.9 / 17.1 / 35.1 min across the three legs — the older ones had done
+~30 min of unrelated work first). The essentially-fresh runner wedged too. Weakly, it lasted longest
+(531 s vs 234/308 s in-file), which is n=3 and an observation, not a finding. B8b cannot be
+retro-checked against this: its legs' checkpoint payloads read `(no payload)` — the #128 corruption,
+fixed by #132 one run too late, which is the concrete cost of that defect.
+
+**What this means for the next instrument.** All five quantities #77 named are now sampled inside the
+fatal window and the host looks ordinary in every one of them 30 s before it stops talking, so **more
+host-level sampling will not find this**. The open directions are per-process detail (top-N by CPU
+*and* state, `R` vs uninterruptible `D`), the HVF/hypervisor layer where a host-level kill on bare
+metal most plausibly originates, and a shorter sampling interval now that a wedge costs ~25 min to
+reproduce. Per operating rule 7, the bite that *consumes* such a sample must exist before it is added.
 
 **`provisioning.test.ts` is not itself the defect — it passes in isolation, and every known wedge
 is at position 10 (B8c).**
