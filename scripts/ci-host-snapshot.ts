@@ -12,6 +12,8 @@
  * caller a field, never the rest of its report — these run on the failure path,
  * which is exactly when a tool is most likely to be unavailable.
  */
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
 import { cpus, freemem, loadavg, totalmem, uptime } from "node:os";
 
 /**
@@ -46,8 +48,28 @@ export async function qemuProcessCount(): Promise<number | undefined> {
 	}
 }
 
+/**
+ * Nearest existing ancestor of `dir`.
+ *
+ * `df` and `Get-PSDrive` both fail on a path that does not exist yet, and the
+ * quickchr data dir does not exist until the first machine is created — which on
+ * a cold leg is minutes in. Reporting `undefined` there would put a hole in the
+ * series that reads like a failed measurement rather than "same volume, nothing
+ * written to it yet".
+ */
+function nearestExisting(dir: string): string {
+	let p = dir;
+	for (let i = 0; i < 16 && !existsSync(p); i += 1) {
+		const up = dirname(p);
+		if (up === p) return ".";
+		p = up;
+	}
+	return existsSync(p) ? p : ".";
+}
+
 /** Free disk in MiB on the filesystem holding `dir`. `undefined` when unreadable. */
-async function freeDiskMiB(dir = "."): Promise<number | undefined> {
+async function freeDiskMiB(target = "."): Promise<number | undefined> {
+	const dir = nearestExisting(target);
 	try {
 		if (process.platform === "win32") {
 			// `wmic` is gone on current windows-latest images; PowerShell is not.
