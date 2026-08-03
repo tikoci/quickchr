@@ -7,10 +7,15 @@
 #   try { Invoke-Qc start $name --channel stable; ... } finally { Invoke-QcCleanup }
 #
 # The caller sets $ErrorActionPreference BEFORE the dot-source even though this
-# file sets it too, and that duplication is load-bearing: if THIS file fails to
-# load, the preference it sets never takes effect, every helper call below it is
-# an ordinary non-terminating CommandNotFound, and the example exits 0 having done
-# nothing - the silent false green in #102. Enforced by scripts/validate-examples.ts.
+# file sets it too, and that duplication is load-bearing. If THIS file fails to
+# load, the preference it sets never takes effect - so unless the CALLER already
+# set it, the preference stays at its 'Continue' default, every helper call below
+# is an ordinary non-terminating CommandNotFound, and the example exits 0 having
+# done nothing: the silent false green in #102. The caller's copy is what makes a
+# failed load terminate. Enforced by scripts/validate-examples.ts.
+#
+# Start-Job runs in a separate process and inherits neither preference, so a job
+# script block must set both itself (see version-matrix.ps1).
 #
 # Resolution rule mirrors common.sh: prefer an explicit $env:QUICKCHR override,
 # else the repo source CLI (so CI/local runs exercise THIS checkout), else a

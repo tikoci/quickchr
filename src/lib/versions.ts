@@ -82,6 +82,18 @@ export interface ResolveVersionOptions {
 	retryDelayMs?: number;
 }
 
+/** A whole count of at least 1, or `fallback` for anything that isn't one. */
+function positiveInt(value: number | undefined, fallback: number): number {
+	if (value === undefined || !Number.isFinite(value)) return fallback;
+	return Math.max(1, Math.floor(value));
+}
+
+/** A finite, non-negative delay in ms, or `fallback` for anything that isn't one. */
+function nonNegativeMs(value: number | undefined, fallback: number): number {
+	if (value === undefined || !Number.isFinite(value)) return fallback;
+	return Math.max(0, value);
+}
+
 /**
  * Fetch the latest version for a given channel from MikroTik's upgrade server.
  *
@@ -96,31 +108,41 @@ export async function resolveVersion(
 	opts: ResolveVersionOptions = {},
 ): Promise<string> {
 	const url = `${UPGRADE_BASE}.${channel}`;
-	const maxAttempts = Math.max(1, opts.maxAttempts ?? VERSION_RESOLVE_MAX_ATTEMPTS);
-	const retryDelayMs = opts.retryDelayMs ?? VERSION_RESOLVE_RETRY_MS;
+	// Sanitized, not just clamped: these are public options, and `Math.max(1, NaN)`
+	// is NaN — the loop would never run, and the failure would read "all NaN
+	// attempts: undefined" instead of doing anything.
+	const maxAttempts = positiveInt(opts.maxAttempts, VERSION_RESOLVE_MAX_ATTEMPTS);
+	const retryDelayMs = nonNegativeMs(opts.retryDelayMs, VERSION_RESOLVE_RETRY_MS);
 	let lastError: unknown;
 
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-		let response: Response;
+		let text: string;
 		try {
-			response = await fetchResilient(url);
+			const response = await fetchResilient(url);
+			if (!response.ok) {
+				// An HTTP answer is the server's verdict. Thrown as a QuickCHRError so
+				// the catch below can tell it from a transport failure and let it out.
+				throw new QuickCHRError(
+					"DOWNLOAD_FAILED",
+					`Failed to fetch version for channel "${channel}": HTTP ${response.status}`,
+				);
+			}
+			// Inside the try: the body can fail *after* the headers arrive (a reset
+			// mid-response), which is a transport failure like any other and must be
+			// retried rather than escaping the loop unwrapped.
+			text = await response.text();
 		} catch (err) {
-			// Only "could not reach the host at all" is retried. An abort (the caller
-			// gave up) or a real bug surfaces immediately rather than being repeated.
+			// Only "could not reach the host at all" is retried. An HTTP verdict, an
+			// abort (the caller gave up) or a real bug surfaces immediately.
+			if (err instanceof QuickCHRError) throw err;
 			if (!isConnectionFailure(err)) throw err;
 			lastError = err;
 			if (attempt < maxAttempts) await Bun.sleep(attempt * retryDelayMs);
 			continue;
 		}
 
-		if (!response.ok) {
-			throw new QuickCHRError(
-				"DOWNLOAD_FAILED",
-				`Failed to fetch version for channel "${channel}": HTTP ${response.status}`,
-			);
-		}
-
-		const text = await response.text();
+		// Parsing is terminal: the server answered, and answering with something
+		// unparseable is not a condition another attempt can improve.
 		// Response format: "7.22.1 1774276515" (version + unix timestamp)
 		const version = text.trim().split(/\s+/)[0]?.trim();
 		if (!version || !isValidVersion(version)) {

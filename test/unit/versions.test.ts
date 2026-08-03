@@ -17,6 +17,7 @@ import {
 	selectActiveChannels,
 	resolveActiveChannels,
 	resolveChannelStatuses,
+	VERSION_RESOLVE_MAX_ATTEMPTS,
 } from "../../src/lib/versions.ts";
 import { CHANNELS } from "../../src/lib/types.ts";
 import type { Channel } from "../../src/lib/types.ts";
@@ -318,6 +319,58 @@ describe("resolveVersion", () => {
 			code: "DOWNLOAD_FAILED",
 		});
 		expect(calls).toBe(1);
+	});
+
+	test("retries a body that fails after the headers arrived", async () => {
+		// The response can die mid-body (a reset after 200 OK). That is a transport
+		// failure like any other and must be retried, not escape the loop unwrapped.
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			if (calls < 2) {
+				return Promise.resolve(
+					new Response(
+						new ReadableStream({
+							pull(controller) {
+								controller.error(
+									Object.assign(new Error("The socket connection was closed unexpectedly"), {
+										code: "ConnectionClosed",
+									}),
+								);
+							},
+						}),
+					),
+				);
+			}
+			return Promise.resolve(new Response("7.22.1 1774276515"));
+		});
+		expect(await resolveVersion("stable", { retryDelayMs: 1 })).toBe("7.22.1");
+		expect(calls).toBe(2);
+	});
+
+	test("falls back to the defaults for NaN / nonsense options", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.reject(
+				Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" }),
+			);
+		});
+		// `Math.max(1, NaN)` is NaN, which would skip the loop entirely and report
+		// "all NaN attempts: undefined" — a failure message describing nothing.
+		await expect(
+			resolveVersion("stable", { maxAttempts: Number.NaN, retryDelayMs: 0 }),
+		).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+			message: expect.stringContaining(`all ${VERSION_RESOLVE_MAX_ATTEMPTS} attempts`),
+		});
+		expect(calls).toBe(VERSION_RESOLVE_MAX_ATTEMPTS);
+		// A fractional count is floored to a whole number of attempts, never used raw.
+		calls = 0;
+		await expect(resolveVersion("stable", { maxAttempts: 2.7, retryDelayMs: 0 })).rejects.toThrow(
+			"all 2 attempts",
+		);
+		expect(calls).toBe(2);
 	});
 
 	test("does not retry an abort — the caller gave up", async () => {

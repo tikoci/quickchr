@@ -42,7 +42,9 @@ QUICKCHR = ["quickchr"]  # overridden by --quickchr / $QUICKCHR
 
 
 def run_quickchr(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-    proc = subprocess.run([*QUICKCHR, *args], capture_output=True, text=True)
+    # check=False: this wrapper does its own returncode handling below, because
+    # subprocess.run's own check= raises without the output (see next comment).
+    proc = subprocess.run([*QUICKCHR, *args], capture_output=True, text=True, check=False)
     if check and proc.returncode != 0:
         # subprocess.run(check=True) raises a CalledProcessError naming the command
         # and the exit code and DISCARDING both streams -- and those streams are the

@@ -76,6 +76,16 @@ Three rules, each holding one end of that:
   guard, rc=1 with it. Enforced by `scripts/validate-examples.ts`.
 - **A failure path must exit non-zero.** In Python `raise SystemExit(msg)`, never a
   bare `return` past a trailing `sys.exit(rc)`. Same run: rc=0 before, rc=1 after.
+- **A `Start-Job` block sets both preferences itself.** `Start-Job` runs in a
+  separate process and inherits no preference variables, so the caller's and
+  `common.ps1`'s copies do not reach inside it. Without
+  `$ErrorActionPreference = 'Stop'` **and**
+  `$PSNativeCommandUseErrorActionPreference = $true` in the block, a `quickchr` call
+  that exits non-zero *without writing to stderr* is invisible: `Receive-Job`
+  returns, the script continues, the example exits 0 having booted nothing. Measured
+  (pwsh 7.4.6): a silent `exit 3` in a job gives **rc=0** unset, **rc=1** with both
+  set. A job whose command *does* write to stderr happens to propagate — do not rely
+  on that, it is the stderr-to-error-record mapping, not the exit code.
 
 `lint-powershell.yml` parses every `.ps1` with PowerShell's own parser before
 PSScriptAnalyzer, because a `Severity = @('Error','Warning')` filter does not
