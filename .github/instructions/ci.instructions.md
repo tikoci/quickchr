@@ -238,19 +238,25 @@ steps all reached a terminal state is a *failed `close` PATCH*, not a lost runne
 posts best-effort and tolerates its own failures, while the jobs API is server-side and
 unconditional. Reading that as runner loss would be an API hiccup wearing #76's clothes.
 
-**Known defect — an entry can be zeroed (#128).** `build` is **not idempotent**: finalizing a
-check run PATCHes `output` without `text`, which destroys the checkpoint payload, and
-`integration.yml` runs `build` twice (once at the ledger step, again inside the refold-retry push
-path). A leg whose push conflicts — i.e. under concurrent legs, which is every sweep — can
-therefore land in `attempted-legs.json` with `files_planned: 0` and **no `last_checkpoint_ts`**,
-while its check run still shows the real numbers. B8b lost one leg of three this way.
+**`build` must stay idempotent, and it is guarded (#128, fixed).** `integration.yml` runs `build`
+**twice** — once at the ledger step, again inside the refold-retry push path — so anything the
+first build mutates, the second one re-reads. Finalizing a check run used to PATCH `output`
+without `text`, which destroyed the checkpoint payload the aggregate had just read; the second
+build then wrote a zeroed entry over the good one, and a leg whose push conflicted (i.e. under
+concurrent legs, which is every sweep) landed in `attempted-legs.json` with `files_planned: 0` and
+**no `last_checkpoint_ts`** while its check run still showed the real numbers. B8b lost one leg of
+three that way. The close now carries `output.text` through verbatim, and the round-trip
+(build → close → re-read → build) is an anchor test in `test/unit/ci-leg-ledger.test.ts`.
+**If you add anything to the close path, that test is the contract** — the double build is
+structural, not incidental.
 
-**`files_planned` is what separates the two ways a timestamp goes missing**, so do not read a bare
-absent `last_checkpoint_ts` either way. `open` writes the planned list before the first file runs
-and `buildEntry` takes `files_planned` from it, so a leg that genuinely died before completing its
-first file reports `files_planned: 12, files_reported: 0` — while the #128 corruption drops the
-payload wholesale and reports **both** as `0`. Until #128 lands: on a `runner-lost` entry with zero
-*planned*, the check run is the better record and the ledger's silence is instrument loss.
+**Reading records written before the fix:** `files_planned` separates the two ways a timestamp
+goes missing, so do not read a bare absent `last_checkpoint_ts` either way. `open` writes the
+planned list before the first file runs and `buildEntry` takes `files_planned` from it, so a leg
+that genuinely died before completing its first file reports `files_planned: 12,
+files_reported: 0` — while the #128 corruption dropped the payload wholesale and reported **both**
+as `0`. On such an entry the check run is the better record and the ledger's silence is instrument
+loss.
 
 `not-started` is not in #77's original vocabulary and is deliberate —
 without it, a leg that died in `Install QEMU` would be indistinguishable from one whose runner
