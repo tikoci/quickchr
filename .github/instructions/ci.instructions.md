@@ -157,7 +157,25 @@ suite): every file came in **at or below** the window above — `provisioning` 5
 Do **not** fold these into `OBSERVED_MAX_S` as a `macos-x86` row: they are group runs, and the
 caps are meant to stay generous on this platform while #76 is open. They are cited here because
 they answer a different question — the suite's own cost is **~30 min**, not the 62–65 min that
-`completed_at` reports, which is what makes a mid-suite wedge the leading hypothesis.
+`completed_at` reports, which is what made a mid-suite wedge the leading hypothesis.
+
+B8b then confirmed that hypothesis and dated it. Three full-suite `macos-x86 · stable` legs all
+wedged in **`provisioning.test.ts`** — file 10 of the alphabetical glob — after nine files in
+**772.9 s and 745.4 s (~12.5 min)**; those are the *two* legs whose records survived, the third
+having been zeroed by #128 below. A live capture of the streaming log put the freeze a further
+3.5–7.6 min *inside* that file, at its 5th/6th test. So the useful diagnostic boundary for #76 is
+**~16–20 min, not an hour**, and on this platform **`completed_at` runs ~40 min behind the actual
+freeze**. Two consequences for anyone reading a lost leg: never quote `job_elapsed_s` as a wedge
+time — take `last_checkpoint_ts` from the ledger, and treat it as the **file boundary before** the
+wedge, not the wedge itself — and expect a targeted #76 repro to be cheap, because the leg dies
+long before the budget does. The runner also stops reporting *inside* the wedged file's own
+watchdog window, with 12–16 min of the 1200 s cap unspent and no `file-watchdog-timeout` row on any
+leg, which is the concrete demonstration that nothing in-job can bound a lost runner.
+
+**The host snapshot has a blind spot at exactly the wrong place.** It samples at *file* boundaries
+only, so no run has ever recorded free disk, free memory or `qemuCount` **inside**
+`provisioning.test.ts` — the file every known #76 leg dies in. Do not read B8a's "111 GB free,
+`qemuCount` 0" as covering it; those are boundary samples from files that completed.
 
 **Outcomes** are written to `integration-timing.txt` as `<file> <seconds>s <outcome>` and folded
 into `metrics.ndjson` by `scripts/ci-metrics.ts`. B4 owns only what the watchdog observes
@@ -219,6 +237,20 @@ still left no record), `not-started` (no job, no checkpoint).
 steps all reached a terminal state is a *failed `close` PATCH*, not a lost runner — the checkpoint
 posts best-effort and tolerates its own failures, while the jobs API is server-side and
 unconditional. Reading that as runner loss would be an API hiccup wearing #76's clothes.
+
+**Known defect — an entry can be zeroed (#128).** `build` is **not idempotent**: finalizing a
+check run PATCHes `output` without `text`, which destroys the checkpoint payload, and
+`integration.yml` runs `build` twice (once at the ledger step, again inside the refold-retry push
+path). A leg whose push conflicts — i.e. under concurrent legs, which is every sweep — can
+therefore land in `attempted-legs.json` with `files_planned: 0` and **no `last_checkpoint_ts`**,
+while its check run still shows the real numbers. B8b lost one leg of three this way.
+
+**`files_planned` is what separates the two ways a timestamp goes missing**, so do not read a bare
+absent `last_checkpoint_ts` either way. `open` writes the planned list before the first file runs
+and `buildEntry` takes `files_planned` from it, so a leg that genuinely died before completing its
+first file reports `files_planned: 12, files_reported: 0` — while the #128 corruption drops the
+payload wholesale and reports **both** as `0`. Until #128 lands: on a `runner-lost` entry with zero
+*planned*, the check run is the better record and the ledger's silence is instrument loss.
 
 `not-started` is not in #77's original vocabulary and is deliberate —
 without it, a leg that died in `Install QEMU` would be indistinguishable from one whose runner
