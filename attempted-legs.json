@@ -246,6 +246,32 @@
 		"sha": "5136c223307d8c10b3bf242e6a69c534b9515fec",
 		"ts": "2026-08-03T22:35:36.389Z"
 	},
+	"30858737759": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"macos-x86|stable": {
+				"current_file": "provisioning.test.ts",
+				"files_planned": 12,
+				"files_reported": 9,
+				"job_conclusion": "failure",
+				"job_elapsed_s": 3967,
+				"job_matched": true,
+				"last_checkpoint_ts": "2026-08-03T22:44:56.781Z",
+				"last_file": "license.test.ts",
+				"platform": "macos-x86",
+				"resolved": "7.23.3",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "stable",
+				"terminal": "runner-lost",
+				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
+			}
+		},
+		"planned": 1,
+		"sha": "bbadc9ccf34212a4fcf08e805e4cacd9acd2e7dd",
+		"ts": "2026-08-03T23:35:10.735Z"
+	},
 	"30858745297": {
 		"attempt": "1",
 		"complete": 0,
