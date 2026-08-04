@@ -221,7 +221,7 @@ except **`accel=tcg`**. [30861486665](https://github.com/tikoci/quickchr/actions
 **completed 12/12, all `pass`, in 1939 s** — the first recorded full-suite completion on this platform —
 with `provisioning.test.ts` passing **at position 10** in **604 s**, and a second leg passing the same
 file at the same position in 810 s. Ordinary durations, not watchdog kills (cap 1200 s).
-**HVF 0/7 through position 10, TCG 3/3** — Fisher two-sided **p = 0.0167**. All three TCG legs
+**HVF 0/7 through position 10, TCG 3/3** — Fisher exact two-sided **p = 0.0083**. All three TCG legs
 completed **12/12 with job conclusion `success`** (1939 / 2263 / 1862 s; `provisioning.test.ts` at
 604 / 810 / 644 s), and `ci-data/tested-versions.json` gained **`macos-x86: pass` for 7.23.3 — the
 first row this platform has ever had**. The fold accepts only `scope:"full"` records, which is
