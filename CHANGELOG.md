@@ -8,6 +8,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.7] — 2026-08-04
+
 ### Added
 
 - **Boot-failure reports.** A `BOOT_TIMEOUT` now writes a self-contained
