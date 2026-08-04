@@ -354,6 +354,8 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-console");
 		}
+		await cleanupMachine("integration-prov-corner-invalid-group");
+		await cleanupMachine("integration-prov-corner-default-group");
 	}, bootTestTimeout());
 });
 
