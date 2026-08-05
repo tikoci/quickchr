@@ -354,6 +354,8 @@ describe.skipIf(SKIP)("console provisioning", () => {
 			}
 			await cleanupMachine("integration-prov-console");
 		}
+		await cleanupMachine("integration-prov-corner-invalid-group");
+		await cleanupMachine("integration-prov-corner-default-group");
 	}, bootTestTimeout());
 });
 
@@ -406,9 +408,15 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 			instance = await QuickCHR.start({
 				...imageTarget(),
 				arch: process.arch === "arm64" ? "arm64" : "x86",
+			const instanceCreds = await instance.getInstanceCredentials();
 				background: true,
 				name: machineName,
-				user: { name: "groupcheck", password: "GroupPass1" },
+				{
+					headers: {
+						Authorization: `Basic ${btoa(`${instanceCreds.username}:${instanceCreds.password}`)}`,
+					},
+					signal: AbortSignal.timeout(10_000),
+				},
 			});
 
 			// Confirm the user is in the "full" group by querying the user list as admin.
