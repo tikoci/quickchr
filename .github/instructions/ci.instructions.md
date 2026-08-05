@@ -489,6 +489,14 @@ debugging "why is this platform slow" should read `tested-versions.json` and the
 `runs/*.ndjson` before theorizing — and check `attempted-legs.json` before concluding a platform
 "has no data", which for `macos-x86` has always meant *the legs died*, not *the legs never ran*.
 
+For a combined cross-platform view (every platform × accel × RouterOS version in one table,
+not just the single-platform "Boot timing" table each job's own summary writes), use
+`scripts/ci-boot-report.ts` against a `ci-data` checkout:
+`git worktree add /tmp/ci-data ci-data && bun scripts/ci-boot-report.ts --data /tmp/ci-data --trim-outliers`
+(`--format json`, `--run-id`, `--since` narrow it; `--trim-outliers` drops boots over 2x a
+group's median — the occasional wedged-runner stall, not the routine cache-hit/cache-miss
+spread, see the script's header for why a plain IQR fence was rejected).
+
 ## Release Process
 
 ```bash
