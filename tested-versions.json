@@ -243,7 +243,7 @@
 	"7.25beta3": {
 		"linux-arm64": {
 			"conclusion": "fail",
-			"date": "2026-09-03T17:36:54.717Z",
+			"date": "2026-09-03T19:30:28.461Z",
 			"run_id": "33769650323"
 		},
 		"linux-x86": {
@@ -252,8 +252,8 @@
 			"run_id": "33769650323"
 		},
 		"macos-arm64": {
-			"conclusion": "fail",
-			"date": "2026-09-03T17:32:42.685Z",
+			"conclusion": "pass",
+			"date": "2026-09-03T19:26:04.830Z",
 			"run_id": "33769650323"
 		},
 		"macos-x86": {
