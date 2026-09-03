@@ -241,10 +241,30 @@
 		}
 	},
 	"7.25beta3": {
+		"linux-arm64": {
+			"conclusion": "fail",
+			"date": "2026-09-03T15:42:23.694Z",
+			"run_id": "33769650323"
+		},
 		"linux-x86": {
-			"conclusion": "pass",
-			"date": "2026-09-03T09:19:03.426Z",
-			"run_id": "33736137818"
+			"conclusion": "fail",
+			"date": "2026-09-03T15:21:48.058Z",
+			"run_id": "33769650323"
+		},
+		"macos-arm64": {
+			"conclusion": "fail",
+			"date": "2026-09-03T15:35:51.005Z",
+			"run_id": "33769650323"
+		},
+		"macos-x86": {
+			"conclusion": "fail",
+			"date": "2026-09-03T16:14:03.272Z",
+			"run_id": "33769650323"
+		},
+		"windows-x86": {
+			"conclusion": "fail",
+			"date": "2026-09-03T15:57:28.358Z",
+			"run_id": "33769650323"
 		}
 	}
 }
