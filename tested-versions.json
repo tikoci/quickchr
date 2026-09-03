@@ -243,17 +243,17 @@
 	"7.25beta3": {
 		"linux-arm64": {
 			"conclusion": "fail",
-			"date": "2026-09-03T15:42:23.694Z",
+			"date": "2026-09-03T17:36:54.717Z",
 			"run_id": "33769650323"
 		},
 		"linux-x86": {
-			"conclusion": "fail",
-			"date": "2026-09-03T15:21:48.058Z",
+			"conclusion": "pass",
+			"date": "2026-09-03T17:16:47.470Z",
 			"run_id": "33769650323"
 		},
 		"macos-arm64": {
 			"conclusion": "fail",
-			"date": "2026-09-03T15:35:51.005Z",
+			"date": "2026-09-03T17:32:42.685Z",
 			"run_id": "33769650323"
 		},
 		"macos-x86": {
@@ -262,8 +262,8 @@
 			"run_id": "33769650323"
 		},
 		"windows-x86": {
-			"conclusion": "fail",
-			"date": "2026-09-03T15:57:28.358Z",
+			"conclusion": "pass",
+			"date": "2026-09-03T17:42:16.518Z",
 			"run_id": "33769650323"
 		}
 	}
