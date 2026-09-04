@@ -242,8 +242,8 @@
 	},
 	"7.25beta3": {
 		"linux-arm64": {
-			"conclusion": "fail",
-			"date": "2026-09-03T19:30:28.461Z",
+			"conclusion": "pass",
+			"date": "2026-09-04T00:22:28.532Z",
 			"run_id": "33769650323"
 		},
 		"linux-x86": {
