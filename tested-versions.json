@@ -140,6 +140,28 @@
 			"run_id": "33955070025"
 		}
 	},
+	"7.23.7": {
+		"linux-arm64": {
+			"conclusion": "pass",
+			"date": "2026-09-16T19:06:18.411Z",
+			"run_id": "35135008624"
+		},
+		"linux-x86": {
+			"conclusion": "pass",
+			"date": "2026-09-16T18:57:43.816Z",
+			"run_id": "35135008624"
+		},
+		"macos-arm64": {
+			"conclusion": "fail",
+			"date": "2026-09-16T18:58:41.004Z",
+			"run_id": "35135008624"
+		},
+		"windows-x86": {
+			"conclusion": "fail",
+			"date": "2026-09-16T19:19:11.536Z",
+			"run_id": "35135008624"
+		}
+	},
 	"7.24": {
 		"linux-arm64": {
 			"conclusion": "pass",
@@ -189,6 +211,28 @@
 			"conclusion": "pass",
 			"date": "2026-09-14T11:20:22.767Z",
 			"run_id": "34835616046"
+		}
+	},
+	"7.24.4": {
+		"linux-arm64": {
+			"conclusion": "pass",
+			"date": "2026-09-16T19:05:01.512Z",
+			"run_id": "35135008624"
+		},
+		"linux-x86": {
+			"conclusion": "pass",
+			"date": "2026-09-16T18:53:37.042Z",
+			"run_id": "35135008624"
+		},
+		"macos-arm64": {
+			"conclusion": "fail",
+			"date": "2026-09-16T19:00:00.592Z",
+			"run_id": "35135008624"
+		},
+		"windows-x86": {
+			"conclusion": "fail",
+			"date": "2026-09-16T19:23:14.575Z",
+			"run_id": "35135008624"
 		}
 	},
 	"7.24beta3": {
@@ -299,10 +343,25 @@
 		}
 	},
 	"7.25beta4": {
+		"linux-arm64": {
+			"conclusion": "pass",
+			"date": "2026-09-16T19:03:38.398Z",
+			"run_id": "35135008624"
+		},
 		"linux-x86": {
 			"conclusion": "pass",
-			"date": "2026-09-16T09:41:17.070Z",
-			"run_id": "35078702752"
+			"date": "2026-09-16T18:57:28.497Z",
+			"run_id": "35135008624"
+		},
+		"macos-arm64": {
+			"conclusion": "pass",
+			"date": "2026-09-16T19:02:08.572Z",
+			"run_id": "35135008624"
+		},
+		"windows-x86": {
+			"conclusion": "fail",
+			"date": "2026-09-16T19:25:19.420Z",
+			"run_id": "35135008624"
 		}
 	}
 }
