@@ -7,8 +7,9 @@
  *     --timing "$HOME/integration-timing.txt" --report-dir "$HOME"
  *
  * WHY THIS EXISTS. `integration.yml` runs test files sequentially and the step
- * carries a cap 10 min under the job budget (#108). Both bounds are far too
- * coarse to say *which file* wedged: on the extended-budget platforms the step
+ * carries a cap 10 min under its test-only budget (#108). Cache owners add a
+ * separate outer acquisition/upload reserve that does not widen this step.
+ * Both bounds are far too coarse to say *which file* wedged: on the extended-budget platforms the step
  * cap is 290 minutes, so a single hung file can burn the whole leg and the
  * failure arrives as "the step ran out of time" with no name attached. This
  * puts the control at file granularity, where the answer is.
@@ -92,10 +93,9 @@ export const CAP_MULTIPLIER = 2;
 
 /**
  * Floor. Nothing gets a cap under 10 minutes, however cheap it looks in the
- * window: `macos-x86` has no cache writer while #76 stands (#104/B3), so every
- * one of its files may pay a cold image download the window never measured —
- * up to 465 s of legitimate transfer budget for the 52.2 MB artifact (#116).
- * A 2× cap on a 51-second file would kill that healthy download outright.
+ * historical window. #144 moved the declared cold downloads before the test
+ * loop, but these checked-in caps deliberately retain margin until a named
+ * download-free observation window justifies re-deriving them (#106).
  */
 export const CAP_FLOOR_S = 600;
 

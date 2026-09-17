@@ -392,6 +392,31 @@ shell completions if not yet configured.
 
 Print or install shell completions. With no arg, detects current shell.
 
+#### `cache [add|key|list|prune|clear]`
+
+Manage downloaded CHR images. `cache add` resolves and downloads an image only;
+it does not check QEMU, create a machine, or boot RouterOS. A cache hit is an
+idempotent success.
+
+```bash
+quickchr cache add --channel stable --arch x86
+quickchr cache add --version 7.24.4 --arch arm64 --json
+quickchr cache key --channel stable --arch x86
+# dir=/Users/me/.local/share/quickchr/cache
+# version=7.24.4
+# arch=x86
+quickchr cache key --version 7.24.4 --arch x86 --json
+# {"dir":".../quickchr/cache","version":"7.24.4","arch":"x86"}
+```
+
+`--channel` and `--version` are mutually exclusive. When neither is supplied,
+`default-channel` applies; both subcommands use `default-arch`. A pinned
+version makes no network request in `cache key`. If channel resolution is
+offline, `cache key` prints the stable `unresolved` sentinel and exits 0 so a CI
+cache lookup cannot red the job; `cache add` fails because it cannot download an
+unknown image. Without `--json`, `cache key` emits `key=value` lines that can be
+appended directly to `$GITHUB_OUTPUT`.
+
 #### `settings [print|get|set|reset] [key] [value] [--json]`
 
 Manage quickchr's own global preferences — repeated flags/defaults that
@@ -683,6 +708,24 @@ The entry also re-exports the lower-level version helpers for pre-flight checks:
 `resolveVersion`, `parseVersionParts`, `isValidVersion`, and
 `isProvisioningSupportedVersion` (validate a version against the provisioning floor
 before calling `start()`).
+
+### Cache helpers
+
+`cacheKey()` and `cacheAdd()` are the library equivalents of the CLI cache
+subcommands:
+
+```ts
+import { cacheAdd, cacheKey, CACHE_VERSION_UNRESOLVED } from "@tikoci/quickchr";
+
+const { dir, version, arch } = await cacheKey({ channel: "stable", arch: "x86" });
+if (version !== CACHE_VERSION_UNRESOLVED) {
+  await cacheAdd({ version, arch });
+}
+```
+
+`cacheKey({ version })` validates the pin without resolving a channel.
+`cacheAdd()` returns `{ dir, version, arch, path, cacheHit }`; it only downloads
+and extracts the image and never creates or boots a machine.
 
 ---
 

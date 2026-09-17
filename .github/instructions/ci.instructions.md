@@ -856,7 +856,7 @@ a new tracked issue.
 | `MISSING_FIRMWARE` on arm64 | UEFI pkg not installed | `apt-get` step logs |
 | Port conflict | stale machine from prior run | `machine.json` port fields |
 | `sshpass` not found | missing dep | `apt-get`/`brew install` step |
-| First-run slower than 20 min | Cold cache — the pinned images (7.20.7, 7.20.8) and packages downloaded. Expected on a key miss (new resolved version, or the first run on a branch) | The leg's `Cache OWNER/READER` line + `cache-hit`; a *reader* leg cannot fix this by running again — only the full suite repopulates |
+| `Prefetch CHR images and packages` is slow or red | Cold cache or external download failure. This named step owns acquisition; test-file timing has not started yet | The manifest lines and `DOWNLOAD_STALLED` / `DOWNLOAD_TOO_SLOW` detail in that step |
 | `BOOT_TIMEOUT` on KVM runner | `detectAccel()` race during udevadm (fixed in cb4d505) | Check qemu.log for `-accel tcg` vs `-accel kvm` |
 | `BOOT_TIMEOUT` after `respawning QEMU once` warn | Genuine boot failure — `start()` already retried a wedged nested-KVM/HVF boot once and it still didn't reach REST | `qemu.log` (both attempts appended); a *single* wedged boot is now auto-recovered, so a `BOOT_TIMEOUT` that survives the respawn is real |
 | `DOWNLOAD_STALLED` | The connection went silent for 30 s — a wedged socket, not a slow link. Already retried 3× before surfacing, so this is infrastructure | The message carries bytes/expected/elapsed/throughput; compare throughput against the runner's other downloads in the same job |
@@ -874,12 +874,18 @@ a new tracked issue.
 for f in test/integration/*.test.ts; do QUICKCHR_INTEGRATION=1 bun test "$f" || break; done
 ```
 
-**Version-specific images**: `provisioning.test.ts` downloads CHR 7.20.7 and 7.20.8 in addition to stable. These are cached after the first run. First CI run after a cache miss will be slower.
+**Version-specific images**: `provisioning.test.ts` boots CHR 7.20.7 and 7.20.8
+in addition to the matrix target. Full cache-owner legs prefetch both fixtures
+before the test loop; a download for either one inside a hosted full-suite test
+is a manifest/cache-contract failure. Local and read-only filtered runs may
+still acquire a missing fixture on demand.
 
-**Integration test timeout**: 50 minutes in CI. This covers:
+**Integration test timeout**: 50 minutes in standard CI. This covers:
 - Up to 4 parallel CHR boots with KVM (~60s each)
-- First-run old-version image downloads (7.20.7, 7.20.8)
 - TCG fallback if KVM unavailable (significantly slower)
+
+Cold image/package acquisition has its own 45-minute prefetch step and an outer
+job reserve; it is not charged to this test timeout.
 
 ## Coverage Thresholds
 
@@ -928,8 +934,8 @@ The key is built by `scripts/ci-cache-key.ts`, not written inline in the
 workflow:
 
 ```text
-key           chr-images-v3-{platform-id}-{resolved-version}
-restore-keys  chr-images-v3-{platform-id}-
+key           chr-images-v4-{platform-id}-{resolved-version}
+restore-keys  chr-images-v4-{platform-id}-
 path          getCacheDir()          # not a literal — the workflow cannot drift
 ```
 
@@ -958,55 +964,39 @@ would always be discarded. The reader's `::notice::` states which of the three
 reasons applies.
 
 Restore and save are separate steps (`actions/cache/restore` + a guarded
-`actions/cache/save`), not the combined action. An owner saves only when all
-three hold: it claimed the key in `plan`, the restore **missed** (an exact hit
-already holds this content), and the directory **verifies** against the key. The
-save step carries no `if: always()`, so reaching it at all means the test loop
-ran to completion — a leg torn down mid-suite holds a partial set and must never
-own the key.
+`actions/cache/save`), not the combined action. An owner saves only when it
+claimed the key in `plan`, the restore **missed**, and
+`scripts/ci-cache-manifest.ts` has prefetched and verified every declared
+artifact. The save happens immediately after acquisition, before tests. An
+exact hit is also verified before use because GitHub cache entries are
+immutable: a partial exact hit cannot be repaired under the same key.
 
-A cache entry is only trustworthy while its content is a **function of its key**, which
-is why exactly one configuration writes: the full suite is the only one that
-downloads the whole set (the resolved target *plus* the version-pinned images
-and package archives the suite fixes — 7.20.7/7.20.8, 7.22.1). If a filtered
-run owned the key, its thinner content would hit exactly on the next full run,
-which would then skip its save and re-download the missing pinned images
-forever — #91 from the other direction. Each leg logs `Cache OWNER`/`Cache
-READER` with its key, so a run's own log answers "did this write?".
+A cache entry is only trustworthy while its required content is a **function of
+its key**, which is why exactly one configuration writes. The checked-in
+manifest names the resolved target image and package archive, the 7.20.7 and
+7.20.8 compatibility images, and both 7.22.1 package archives used by the
+license tests. After a restore-key fallback, the prefetch step removes
+recognized prior-target image/package paths outside that manifest; otherwise
+old targets would accumulate until auto-prune evicted the fixed fixtures back
+into test-time downloads. If a filtered run owned the key, its thinner content would hit
+exactly on the next full run and re-download omissions forever — #91 from the
+other direction. Each leg logs `Cache OWNER`/`Cache READER` with its key.
 
 Two consequences worth knowing:
 
-- **A platform whose full suite never finishes never populates its entry.**
-  `actions/cache`'s post-job save is `post-if: success()`, so a red leg saves
-  nothing. That is deliberate — a leg torn down mid-suite holds partial content
-  and must not own the key — but it means `macos-x86`, whose full suite has
-  never completed (#76), stays permanently cold and pays the download on every
-  run. Under the old scheme its examples-smoke twin hid this by saving a `-ex-`
-  entry the integration leg could restore from; that entry was exactly the
-  duplicate write #104 is about. Folding the cold cost into #76/B8's measurement
-  is the honest fix; re-introducing a partial-content writer is not. (Saving
-  from a leg that *completed* the file loop but failed a test would be sound —
-  it downloaded everything — but needs a marker distinguishing "loop finished"
-  from "step timed out mid-loop", which is its own change.)
-- **A release published mid-dispatch is caught by the drift guard, not by
-  luck.** `plan` fixes `matrix.resolved`, but a leg boots `matrix.target`, and a
-  channel target is re-resolved by *every* `start()`. So `stable` planned as
-  7.23.2 can have the leg downloading 7.23.3. On an exact hit nothing is written
-  and the drift is harmless — but on a **miss** the leg would save 7.23.3
-  content under the 7.23.2 key, and that never heals: every later leg pinned to
-  7.23.2 exact-hits an entry with no 7.23.2 image, re-downloads, and cannot save.
-  #91 again, permanently, for that key.
+- **A later test failure does not keep a platform cold.** The cache is complete
+  and saved before QEMU starts, so a red product test or a lost runner cannot
+  strand `macos-x86` without an entry. Acquisition failure still reds the owner
+  leg before any test runs; a failed manifest is never saved.
+- **A release published mid-dispatch cannot poison the planned key.** `plan`
+  fixes `matrix.resolved`; prefetch uses that concrete pin, while tests still
+  boot `matrix.target` and may independently see a newer channel release. The
+  immutable entry remains a complete cache for the version its key names, and
+  the next dispatch resolves and populates the newer key.
 
-  So the owner verifies before saving — the directory must hold an image of the
-  version the key names, read through the library's own cache parser
-  (`ci-cache-key.ts verify`). On a mismatch the save is skipped with a
-  `::warning::` naming the versions actually present. Nothing is poisoned, and
-  the next dispatch keys on the new version, misses, and saves correctly. Do not
-  "fix" any of this by rotating the key again.
-
-Bump `CACHE_KEY_GENERATION` in `scripts/ci-cache-key.ts` (currently `v3`) to
-invalidate wholesale — a changed content contract, or a corrupted image from a
-partial download. Old generations age out under the repo LRU cap.
+Bump `CACHE_KEY_GENERATION` in `scripts/ci-cache-key.ts` (currently `v4`) when
+`integrationCacheManifest()` changes or an immutable generation must be
+invalidated. Old generations age out under the repo LRU cap.
 
 **What this replaced, and why not to go back.** `-v1` was static *and*
 version-blind: once populated it hit forever, so any version resolved later
@@ -1017,8 +1007,8 @@ push to main, 11.49 GB against a 10 GB quota (#104), plus six byte-identical
 `…-7.21.5-int-*` entries from one lab session. Rotation was the wrong knob; the
 version belongs *in* the key.
 
-**A cache miss is large enough to dominate a timing measurement, so treat cold
-download as a confound in any per-file comparison.** Measured locally on
+**A cache miss is large enough to dominate a job, which is why acquisition is a
+named, separately timed pre-test step.** Before #144, measured locally on
 2026-07-31 (`test/lab/full-suite-resource-trend/REPORT.md`, B7 of #110):
 `provisioning.test.ts` ran **992 s against 502 s for the same file on
 `windows-x86` CI (1.98×)** purely because its version-pinned 7.20.7/7.20.8
@@ -1029,15 +1019,12 @@ file in the suite.
 
 Two consequences:
 
-- **Do not read a slow file as a slow file** without checking whether it was
-  downloading. The cheap discriminator is whether any `qemu-system` process was
-  alive; that single check is what kept the above from being misread as
-  cumulative resource leakage on the very file where such a story was expected.
-- **Timing samples are only comparable once a leg's cache state is known.** The
-  per-run key rotation that made every run cold-ish is gone (above), which is
-  what unblocked #106's sample collection — but a leg whose log says
-  `Cache OWNER` on a *miss* still paid for downloads, so read the cache line
-  before comparing two runs' numbers.
+- **Current per-file timings exclude the declared acquisition set.** Read the
+  prefetch step when diagnosing network cost and the test-file rows when
+  diagnosing product cost; they now have separate owners and deadlines.
+- **An unexpected download inside a test is a manifest coverage finding.** Add
+  the artifact to `integrationCacheManifest()` and bump the cache generation;
+  do not widen a test or watchdog timeout to absorb it.
 
 ## Adding a New Runner
 

@@ -141,6 +141,10 @@ quickchr settings set default-channel long-term
 quickchr settings set secure-login true
 quickchr settings print
 
+# Resolve/cache an image without creating or booting a machine
+quickchr cache key --channel stable
+quickchr cache add --channel stable --arch x86
+
 # Reset disk to fresh image
 quickchr clean my-chr
 
@@ -376,6 +380,25 @@ await resolveActiveChannels();
 `compareRouterOsVersion` orders pre-release suffixes (`7.24beta2` < `7.24rc1` <
 `7.24` < `7.24.1`). The same map is available from the CLI via
 `quickchr version --json`. See [MANUAL.md](./MANUAL.md) → *Version & channel helpers*.
+
+### Cache API
+
+CI can resolve cache identity and download an image without booting QEMU:
+
+```typescript
+import { CACHE_VERSION_UNRESOLVED, cacheAdd, cacheKey } from "@tikoci/quickchr";
+
+const identity = await cacheKey({ channel: "stable", arch: "x86" });
+// { dir: "/home/runner/.local/share/quickchr/cache", version: "7.24.4", arch: "x86" }
+
+if (identity.version !== CACHE_VERSION_UNRESOLVED) {
+  await cacheAdd({ version: identity.version, arch: "x86" });
+}
+```
+
+An explicit version never performs channel resolution. Offline channel lookup
+returns `version: "unresolved"` from `cacheKey`; `cacheAdd` remains strict and
+fails when it cannot resolve or download the requested image.
 
 ### Use in Tests
 

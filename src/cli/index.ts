@@ -2418,6 +2418,45 @@ async function cmdCache(argv: string[]) {
 	};
 
 	switch (sub) {
+		case "add": {
+			const { cacheAdd } = await import("../lib/cache-api.ts");
+			const { resolveSetting } = await import("../lib/settings.ts");
+			const version = flag(flags, "version");
+			const explicitChannel = flag(flags, "channel") as Channel | undefined;
+			const channel = version || explicitChannel
+				? explicitChannel
+				: resolveSetting("default-channel").value as Channel;
+			const arch = (flag(flags, "arch") ?? resolveSetting("default-arch").value) as Arch | "auto";
+			const asJson = flagBool(flags, "json");
+			const quiet = { status() {}, debug() {}, warn() {} };
+			const result = await cacheAdd({ version, channel, arch, logger: asJson ? quiet : undefined });
+			if (asJson) {
+				console.log(JSON.stringify(result));
+			} else {
+				console.log(`${result.cacheHit ? "Already cached" : "Cached"}: RouterOS ${result.version} (${result.arch})`);
+				console.log(`Path: ${result.path}`);
+			}
+			break;
+		}
+		case "key": {
+			const { cacheKey } = await import("../lib/cache-api.ts");
+			const version = flag(flags, "version");
+			const explicitChannel = flag(flags, "channel") as Channel | undefined;
+			const { resolveSetting } = await import("../lib/settings.ts");
+			const channel = version || explicitChannel
+				? explicitChannel
+				: resolveSetting("default-channel").value as Channel;
+			const arch = (flag(flags, "arch") ?? resolveSetting("default-arch").value) as Arch | "auto";
+			const result = await cacheKey({ version, channel, arch });
+			if (flagBool(flags, "json")) {
+				console.log(JSON.stringify(result));
+			} else {
+				console.log(`dir=${result.dir}`);
+				console.log(`version=${result.version}`);
+				console.log(`arch=${result.arch}`);
+			}
+			break;
+		}
 		case "list":
 		case "ls": {
 			const entries = listCacheEntries();
@@ -2703,7 +2742,7 @@ Commands:
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
   networks                Network discovery & socket management
-  cache [list|prune|clear] Manage cached CHR images
+  cache [add|key|list|prune|clear] Manage cached CHR images
   settings [print|get|set|reset]  Manage quickchr's own global settings (quickchr.env)
   completions             Manage shell completions (Tab completion)
   logs <name>             Tail the QEMU log for an instance
@@ -3057,11 +3096,16 @@ Options:
 			showNetworksHelp();
 			break;
 		case "cache":
-			console.log(`quickchr cache <list|prune|clear> [options]
+			console.log(`quickchr cache <add|key|list|prune|clear> [options]
 
 Manage cached CHR images in the data dir cache directory.
 
 Subcommands:
+  add [--channel <ch> | --version <ver>] [--arch <arch>] [--json]
+                                      Resolve, download, and cache one CHR image without booting.
+  key [--channel <ch> | --version <ver>] [--arch <arch>] [--json]
+                                      Print cache directory, resolved version, and architecture for CI.
+                                      Without --json, output is GITHUB_OUTPUT-compatible key=value lines.
   list [--json]                       List cached images (basename, version, arch, size, age, in-use).
   prune [options]                     Evict cached images per policy. Never evicts in-use images.
     --older-than <ver>                Evict images with version < <ver>.
