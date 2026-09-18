@@ -162,7 +162,7 @@ describe("JSON REST methods", () => {
 
 		expect(put).toEqual({ status: 200, body: "ok" });
 		expect(del).toEqual({ status: 200, body: "ok" });
-		expect(seen).toEqual([
+		expect(seen).toMatchObject([
 			{
 				method: "PUT",
 				body: raw,
@@ -173,8 +173,10 @@ describe("JSON REST methods", () => {
 				method: "DELETE",
 				body: "",
 				contentType: undefined,
-				contentLength: "0",
 			},
 		]);
+		// Bun 1.4.2 omits Content-Length for a bodyless request. Older Bun
+		// versions and Node's HTTP shim expose the explicit zero.
+		expect([undefined, "0"]).toContain(seen[1]?.contentLength);
 	});
 });
