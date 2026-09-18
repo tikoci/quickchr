@@ -489,7 +489,12 @@ describe("review findings — #119", () => {
 			downloadToFile(url, dest, { logger: silentLogger, maxAttempts: 1 }),
 		);
 
-		expect(err.message).toContain("empty transfer");
+		// Bun 1.4.2 rejects the malformed response in fetch before the
+		// downloader can inspect the empty body. Both outcomes preserve the
+		// contract: the transfer is rejected and the malformed size is never
+		// reported as an expected byte count.
+		expect(err.code).toBe("DOWNLOAD_FAILED");
+		expect(err.message).toMatch(/empty transfer|fetch failed/i);
 		expect(err.message).not.toContain("4096.5");
 	}, 30_000);
 
