@@ -417,6 +417,18 @@ cache lookup cannot red the job; `cache add` fails because it cannot download an
 unknown image. Without `--json`, `cache key` emits `key=value` lines that can be
 appended directly to `$GITHUB_OUTPUT`.
 
+```yaml
+- id: chr-cache
+  run: quickchr cache key --channel stable --arch x86 >> "$GITHUB_OUTPUT"
+- uses: actions/cache/restore@v5
+  with:
+    path: ${{ steps.chr-cache.outputs.dir }}
+    key: chr-${{ runner.os }}-${{ steps.chr-cache.outputs.version }}
+```
+
+`--json` intentionally emits one JSON object for programmatic parsing; use the
+default output form when writing step outputs directly.
+
 #### `settings [print|get|set|reset] [key] [value] [--json]`
 
 Manage quickchr's own global preferences — repeated flags/defaults that

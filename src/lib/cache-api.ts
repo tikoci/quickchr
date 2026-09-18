@@ -1,8 +1,7 @@
 /** Public cache operations for CI consumers and the quickchr CLI. */
 
-import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { ensureCachedImage } from "./images.ts";
+import { ensureCachedImage, isUsableCachedImage } from "./images.ts";
 import type { ProgressLogger } from "./log.ts";
 import { getCacheDir } from "./state.ts";
 import { ARCHES, CHANNELS, QuickCHRError, type Arch, type Channel } from "./types.ts";
@@ -41,16 +40,16 @@ export interface CacheAddResult extends CacheKeyResult {
 export type CacheVersionResolver = (channel: Channel) => Promise<string>;
 
 function validateTarget(options: CacheTargetOptions): { channel?: Channel; version?: string } {
-	if (options.channel && options.version) {
+	if (options.channel !== undefined && options.version !== undefined) {
 		throw new QuickCHRError("INVALID_VERSION", "Choose either a RouterOS channel or a concrete version, not both");
 	}
-	if (options.channel && !(CHANNELS as readonly string[]).includes(options.channel)) {
+	if (options.channel !== undefined && !(CHANNELS as readonly string[]).includes(options.channel)) {
 		throw new QuickCHRError(
 			"INVALID_VERSION",
 			`Invalid RouterOS channel "${options.channel}" — expected one of ${CHANNELS.join(", ")}`,
 		);
 	}
-	if (options.version && !isValidVersion(options.version)) {
+	if (options.version !== undefined && !isValidVersion(options.version)) {
 		throw new QuickCHRError("INVALID_VERSION", `Invalid RouterOS version: ${options.version}`);
 	}
 	return { channel: options.channel, version: options.version };
@@ -61,7 +60,7 @@ async function concreteVersion(
 	resolver: CacheVersionResolver,
 ): Promise<{ channel?: Channel; version: string }> {
 	const target = validateTarget(options);
-	if (target.version) return { version: target.version };
+	if (target.version !== undefined) return { version: target.version };
 	const channel = target.channel ?? "stable";
 	const version = await resolver(channel);
 	if (!isValidVersion(version)) {
@@ -95,7 +94,7 @@ export async function cacheKey(
 	const target = validateTarget(options);
 	const dir = options.cacheDir ?? getCacheDir();
 	const arch = concreteArch(options.arch);
-	if (target.version) {
+	if (target.version !== undefined) {
 		return {
 			dir,
 			version: target.version.length <= CACHE_VERSION_MAX_LENGTH ? target.version : CACHE_VERSION_UNRESOLVED,
@@ -110,7 +109,7 @@ export async function cacheKey(
 			arch,
 		};
 	} catch (error) {
-		if (error instanceof QuickCHRError && (error.code === "DOWNLOAD_FAILED" || error.code === "INVALID_VERSION")) {
+		if (error instanceof QuickCHRError && error.code === "DOWNLOAD_FAILED") {
 			return { dir, version: CACHE_VERSION_UNRESOLVED, arch };
 		}
 		throw error;
@@ -123,10 +122,13 @@ export async function cacheAdd(
 	resolver: CacheVersionResolver = resolveVersion,
 ): Promise<CacheAddResult> {
 	const resolved = await concreteVersion(options, resolver);
+	if (resolved.version.length > CACHE_VERSION_MAX_LENGTH) {
+		throw new QuickCHRError("INVALID_VERSION", `RouterOS version is too long: ${resolved.version}`);
+	}
 	const arch = concreteArch(options.arch);
 	const dir = options.cacheDir ?? getCacheDir();
 	const expectedPath = join(dir, `${chrImageBasename(resolved.version, arch)}.img`);
-	const cacheHit = existsSync(expectedPath);
+	const cacheHit = await isUsableCachedImage(expectedPath);
 
 	try {
 		const path = await ensureCachedImage(resolved.version, arch, dir, options.logger);

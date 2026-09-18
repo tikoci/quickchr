@@ -2,7 +2,7 @@
  * Image download, ZIP extraction, and cache management.
  */
 
-import { existsSync, copyFileSync, readdirSync, renameSync, unlinkSync } from "node:fs";
+import { existsSync, copyFileSync, mkdtempSync, readdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -18,6 +18,37 @@ function finalizeExtractedImage(zipPath: string, imgPath: string): string {
 		unlinkSync(zipPath);
 	}
 	return imgPath;
+}
+
+/**
+ * Check that a cached raw image has a complete DOS partition table.
+ *
+ * RouterOS CHR images for both supported architectures use a DOS partition
+ * table. Checking its signature and partition extents catches empty and
+ * truncated files while avoiding a version-specific image-size assumption.
+ */
+export async function isUsableCachedImage(imgPath: string): Promise<boolean> {
+	const file = Bun.file(imgPath);
+	if (!(await file.exists()) || file.size < 512) return false;
+
+	try {
+		const sector = new Uint8Array(await file.slice(0, 512).arrayBuffer());
+		if (sector[510] !== 0x55 || sector[511] !== 0xaa) return false;
+
+		let hasPartition = false;
+		for (let offset = 446; offset < 510; offset += 16) {
+			const start = new DataView(sector.buffer, sector.byteOffset + offset + 8, 8);
+			const firstSector = start.getUint32(0, true);
+			const sectorCount = start.getUint32(4, true);
+			if (sectorCount === 0) continue;
+			hasPartition = true;
+			const end = (firstSector + sectorCount) * 512;
+			if (!Number.isSafeInteger(end) || end > file.size) return false;
+		}
+		return hasPartition;
+	} catch {
+		return false;
+	}
 }
 
 /** Download a CHR image ZIP if not already cached. Returns path to the ZIP. */
@@ -58,39 +89,38 @@ export async function extractImage(
 	const imgName = basename(zipPath, ".zip");
 	const imgPath = join(cache, imgName);
 
-	if (existsSync(imgPath)) {
+	if (await isUsableCachedImage(imgPath)) {
 		return finalizeExtractedImage(zipPath, imgPath);
 	}
+	if (existsSync(imgPath)) unlinkSync(imgPath);
 
 	const log = logger ?? createLogger();
 	log.status(`Extracting: ${basename(zipPath)}`);
 
-	extractZip(zipPath, cache);
+	const tempDir = mkdtempSync(join(cache, ".quickchr-image-"));
+	try {
+		extractZip(zipPath, tempDir);
 
-	// MikroTik x86 ZIPs contain chr-X.Y.Z.img (no arch suffix).
-	// Our ZIP is named chr-X.Y.Z.img.zip (without -x86 for x86). Check if we need to
-	// find the extracted file.
-	if (!existsSync(imgPath)) {
-		const files = readdirSync(cache).filter(
-			(f) => f.endsWith(".img") && f.startsWith("chr-"),
+		// MikroTik arm64 ZIPs may contain chr-X.Y.Z.img without the arch suffix.
+		const files = readdirSync(tempDir).filter((file) => file.endsWith(".img") && file.startsWith("chr-"));
+		const base = basename(zipPath, ".img.zip");
+		const expected = files.find(
+			(file) => file === `${base}.img` || file.replace("-arm64", "") === `${base.replace("-arm64", "")}.img`,
 		);
-		// Find the one that was just extracted (matching version)
-		const expected = files.find((f) => {
-			const base = basename(zipPath, ".img.zip");
-			// chr-7.22.1.img matches chr-7.22.1.img.zip
-			return f === base + ".img" || f.replace("-arm64", "") === base.replace("-arm64", "") + ".img";
-		});
-		if (expected) {
-			const extractedPath = join(cache, expected);
-			if (extractedPath !== imgPath) {
-				renameSync(extractedPath, imgPath);
-			}
-		} else {
+		if (!expected) {
 			throw new QuickCHRError(
 				"PROCESS_FAILED",
 				`Expected ${imgPath} after unzip, but not found. Files: ${files.join(", ")}`,
 			);
 		}
+
+		const extractedPath = join(tempDir, expected);
+		if (!(await isUsableCachedImage(extractedPath))) {
+			throw new QuickCHRError("PROCESS_FAILED", `Extracted CHR image is incomplete or invalid: ${expected}`);
+		}
+		renameSync(extractedPath, imgPath);
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
 	}
 
 	return finalizeExtractedImage(zipPath, imgPath);
@@ -105,11 +135,12 @@ export async function ensureCachedImage(
 ): Promise<string> {
 	const cache = cacheDir ?? getCacheDir();
 	const imgPath = join(cache, `${chrImageBasename(version, arch)}.img`);
-	if (existsSync(imgPath)) {
+	if (await isUsableCachedImage(imgPath)) {
 		const log = logger ?? createLogger();
 		log.status(`  Using cached image: ${chrImageBasename(version, arch)}`);
 		return imgPath;
 	}
+	if (existsSync(imgPath)) unlinkSync(imgPath);
 	assertSufficientQuickchrStorage(`cache CHR ${version} (${arch})`);
 	const zipPath = await downloadImage(version, arch, cacheDir, logger);
 	const extractedImgPath = await extractImage(zipPath, cacheDir, logger);

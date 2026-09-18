@@ -221,9 +221,8 @@ jobs:
       #
       # A resolution failure fails the plan, deliberately: it costs one 20 s job
       # instead of 15 legs that would each fail downloading from the same host.
-      # The leg still boots the TARGET (channel or pin) — QUICKCHR_TEST_TARGET is
-      # unchanged, so the channel-resolution path stays exercised in CI. The
-      # resolved value is used for the cache key and for reporting only.
+      # Every leg boots the RESOLVED pin. That keeps the tested image identical
+      # to the immutable cache key even if a channel release lands mid-run.
       - id: resolve
         env:
           TARGETS: ${{ inputs.routeros-targets }}
@@ -483,7 +482,7 @@ jobs:
       run:
         shell: bash
     env:
-      QUICKCHR_TEST_TARGET: ${{ matrix.target }}
+      QUICKCHR_TEST_TARGET: ${{ matrix.resolved }}
       # Tee the guest serial console to <machineDir>/serial.log. Safe here and
       # only here: provisioning types the generated password over serial in
       # cleartext, but CI passwords are per-run throwaways.
@@ -1403,7 +1402,7 @@ jobs:
       run:
         shell: bash
     env:
-      QUICKCHR_TEST_TARGET: ${{ matrix.target }}
+      QUICKCHR_TEST_TARGET: ${{ matrix.resolved }}
       EXAMPLE_FILTER: ${{ inputs.example-filter }}
       # See the integration job's env for why serial logging is on and
       # QUICKCHR_PRESERVE_ON_FAILURE is not.

@@ -19,10 +19,13 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 ### Changed
 
 - CI owners now prefetch and verify a declared image-and-package manifest in a
-  named, separately timed step, then save the immutable v4 cache before tests.
+  named, separately timed step, then save the immutable v5 cache before tests.
   Restore-key extras are reconciled away so old targets cannot accumulate until
   auto-prune evicts fixed fixtures. Product-test failures no longer leave a
-  platform cold, and declared external downloads no longer inflate per-file timing.
+  platform cold, and declared external downloads no longer inflate per-file
+  timing. Raw images are checked against their partition extents, package sets
+  carry an atomic extraction manifest, and each leg boots the exact version
+  named by its cache key.
 - **The tested Bun runtime is pinned.** `.bun-version` (currently `1.4.2`) is the single
   source of truth, and every workflow installs Bun through
   `setup-bun`'s `bun-version-file`. `bun run check` fails if a `setup-bun` step

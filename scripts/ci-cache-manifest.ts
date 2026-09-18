@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 /** Declarative cache content for a full quickchr integration leg (#144). */
 
-import { appendFileSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { cacheAdd } from "../src/lib/cache-api.ts";
-import { downloadPackages } from "../src/lib/packages.ts";
+import { isUsableCachedImage } from "../src/lib/images.ts";
+import { downloadPackages, isCompletePackageCache } from "../src/lib/packages.ts";
 import { getCacheDir } from "../src/lib/state.ts";
 import { ARCHES, type Arch } from "../src/lib/types.ts";
 import { chrImageBasename, isValidVersion } from "../src/lib/versions.ts";
@@ -44,38 +45,18 @@ export interface ManifestVerification {
 	present: string[];
 }
 
-function nonEmptyFile(path: string): boolean {
-	try {
-		const stat = statSync(path);
-		return stat.isFile() && stat.size > 0;
-	} catch {
-		return false;
-	}
-}
-
-function packagesComplete(cacheDir: string, artifact: CacheArtifact): boolean {
-	const zip = join(cacheDir, `all_packages-${artifact.arch}-${artifact.version}.zip`);
-	const dir = join(cacheDir, `packages-${artifact.arch}-${artifact.version}`);
-	if (!nonEmptyFile(zip) || !existsSync(dir)) return false;
-	try {
-		return readdirSync(dir).some((name) => name.endsWith(".npk") && nonEmptyFile(join(dir, name)));
-	} catch {
-		return false;
-	}
-}
-
 /** Verify every declared image, package archive, and extracted package set. */
-export function verifyIntegrationCacheManifest(
+export async function verifyIntegrationCacheManifest(
 	manifest: CacheArtifact[],
 	cacheDir: string = getCacheDir(),
-): ManifestVerification {
+): Promise<ManifestVerification> {
 	const missing: string[] = [];
 	const present: string[] = [];
 	for (const artifact of manifest) {
 		const label = `${artifact.kind}:${artifact.arch}:${artifact.version}`;
 		const ok = artifact.kind === "image"
-			? nonEmptyFile(join(cacheDir, `${chrImageBasename(artifact.version, artifact.arch)}.img`))
-			: packagesComplete(cacheDir, artifact);
+			? await isUsableCachedImage(join(cacheDir, `${chrImageBasename(artifact.version, artifact.arch)}.img`))
+			: await isCompletePackageCache(artifact.version, artifact.arch, cacheDir);
 		(ok ? present : missing).push(label);
 	}
 	return { matches: missing.length === 0, missing, present };
@@ -177,7 +158,7 @@ if (import.meta.main) {
 			throw new Error("usage: ci-cache-manifest.ts prefetch|verify --version <v> --arch <x86|arm64>");
 		}
 
-		const result = verifyIntegrationCacheManifest(manifest);
+		const result = await verifyIntegrationCacheManifest(manifest);
 		console.log(`cache manifest present: ${result.present.join(", ") || "(none)"}`);
 		if (result.missing.length > 0) console.error(`cache manifest missing: ${result.missing.join(", ")}`);
 		emit({ matches: String(result.matches) });

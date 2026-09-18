@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { zipSync } from "fflate";
 import {
 	integrationCacheManifest,
 	prefetchIntegrationCacheManifest,
@@ -8,8 +9,27 @@ import {
 	verifyIntegrationCacheManifest,
 } from "../../scripts/ci-cache-manifest.ts";
 import { chrImageBasename } from "../../src/lib/versions.ts";
+import { downloadPackages } from "../../src/lib/packages.ts";
 
 const TMP = join(import.meta.dir, ".tmp-ci-cache-manifest-test");
+
+function validRawImage(): Uint8Array {
+	const image = Buffer.alloc(1024);
+	image[510] = 0x55;
+	image[511] = 0xaa;
+	image.writeUInt32LE(1, 454);
+	image.writeUInt32LE(1, 458);
+	return image;
+}
+
+async function writeCompletePackageCache(version: string, arch: "x86" | "arm64"): Promise<void> {
+	const packages = {
+		[`container-${version}-${arch}.npk`]: new TextEncoder().encode("container package"),
+		[`dude-${version}-${arch}.npk`]: new TextEncoder().encode("dude package"),
+	};
+	await Bun.write(join(TMP, `all_packages-${arch}-${version}.zip`), zipSync(packages));
+	await downloadPackages(version, arch, TMP);
+}
 
 beforeEach(() => {
 	rmSync(TMP, { recursive: true, force: true });
@@ -60,46 +80,55 @@ describe("prefetchIntegrationCacheManifest", () => {
 });
 
 describe("verifyIntegrationCacheManifest", () => {
-	test("requires every non-empty image, package zip, and extracted package set", () => {
+	test("requires every structurally valid image and complete package extraction", async () => {
 		const manifest = integrationCacheManifest("7.24.4", "x86");
 		for (const artifact of manifest) {
 			if (artifact.kind === "image") {
-				writeFileSync(join(TMP, `${chrImageBasename(artifact.version, artifact.arch)}.img`), "image");
+				await Bun.write(join(TMP, `${chrImageBasename(artifact.version, artifact.arch)}.img`), validRawImage());
 				continue;
 			}
-			writeFileSync(join(TMP, `all_packages-${artifact.arch}-${artifact.version}.zip`), "zip");
-			const dir = join(TMP, `packages-${artifact.arch}-${artifact.version}`);
-			mkdirSync(dir, { recursive: true });
-			writeFileSync(join(dir, `container-${artifact.version}-${artifact.arch}.npk`), "package");
+			await writeCompletePackageCache(artifact.version, artifact.arch);
 		}
 
-		expect(verifyIntegrationCacheManifest(manifest, TMP)).toEqual({
+		expect(await verifyIntegrationCacheManifest(manifest, TMP)).toEqual({
 			matches: true,
 			missing: [],
 			present: manifest.map((artifact) => `${artifact.kind}:${artifact.arch}:${artifact.version}`),
 		});
 	});
 
-	test("reports an empty or incomplete artifact instead of blessing a partial cache", () => {
+	test("reports a truncated image instead of blessing a partial cache", async () => {
 		const manifest = [{ kind: "image" as const, version: "7.24.4", arch: "x86" as const }];
-		writeFileSync(join(TMP, "chr-7.24.4.img"), "");
-		expect(verifyIntegrationCacheManifest(manifest, TMP)).toEqual({
+		await Bun.write(join(TMP, "chr-7.24.4.img"), validRawImage().subarray(0, 700));
+		expect(await verifyIntegrationCacheManifest(manifest, TMP)).toEqual({
 			matches: false,
 			missing: ["image:x86:7.24.4"],
+			present: [],
+		});
+	});
+
+	test("reports a package extraction missing one recorded NPK", async () => {
+		const manifest = [{ kind: "packages" as const, version: "7.24.4", arch: "x86" as const }];
+		await writeCompletePackageCache("7.24.4", "x86");
+		unlinkSync(join(TMP, "packages-x86-7.24.4", "dude-7.24.4-x86.npk"));
+
+		expect(await verifyIntegrationCacheManifest(manifest, TMP)).toEqual({
+			matches: false,
+			missing: ["packages:x86:7.24.4"],
 			present: [],
 		});
 	});
 });
 
 describe("reconcileIntegrationCacheManifest", () => {
-	test("removes recognized prior-target artifacts but preserves unrelated files", () => {
+	test("removes recognized prior-target artifacts but preserves unrelated files", async () => {
 		const manifest = [{ kind: "image" as const, version: "7.24.4", arch: "x86" as const }];
-		writeFileSync(join(TMP, "chr-7.24.4.img"), "keep");
-		writeFileSync(join(TMP, "chr-7.23.1.img"), "old image");
-		writeFileSync(join(TMP, "all_packages-x86-7.23.1.zip"), "old zip");
+		await Bun.write(join(TMP, "chr-7.24.4.img"), validRawImage());
+		await Bun.write(join(TMP, "chr-7.23.1.img"), validRawImage());
+		await Bun.write(join(TMP, "all_packages-x86-7.23.1.zip"), "old zip");
 		mkdirSync(join(TMP, "packages-x86-7.23.1"), { recursive: true });
-		writeFileSync(join(TMP, "packages-x86-7.23.1", "container.npk"), "old package");
-		writeFileSync(join(TMP, "README.txt"), "unrelated");
+		await Bun.write(join(TMP, "packages-x86-7.23.1", "container.npk"), "old package");
+		await Bun.write(join(TMP, "README.txt"), "unrelated");
 
 		expect(reconcileIntegrationCacheManifest(manifest, TMP)).toEqual([
 			"all_packages-x86-7.23.1.zip",
@@ -108,6 +137,6 @@ describe("reconcileIntegrationCacheManifest", () => {
 		]);
 		expect(Bun.file(join(TMP, "chr-7.24.4.img")).size).toBeGreaterThan(0);
 		expect(Bun.file(join(TMP, "README.txt")).size).toBeGreaterThan(0);
-		expect(verifyIntegrationCacheManifest(manifest, TMP).matches).toBe(true);
+		expect((await verifyIntegrationCacheManifest(manifest, TMP)).matches).toBe(true);
 	});
 });

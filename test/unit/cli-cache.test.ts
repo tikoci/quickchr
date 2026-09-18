@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const TEST_DIR = join(import.meta.dir, ".tmp-cli-cache-test");
 const CLI = join(import.meta.dir, "../../src/cli/index.ts");
+
+function validRawImage(): Uint8Array {
+	const image = Buffer.alloc(1024);
+	image[510] = 0x55;
+	image[511] = 0xaa;
+	image.writeUInt32LE(1, 454);
+	image.writeUInt32LE(1, 458);
+	return image;
+}
 
 async function runQuickchr(args: string[]) {
 	const proc = Bun.spawn(["bun", CLI, ...args], {
@@ -54,12 +63,26 @@ describe("CLI cache key", () => {
 			"arch=x86",
 		]);
 	});
+
+	for (const option of ["version", "channel", "arch"]) {
+		test(`rejects a valueless --${option}`, async () => {
+			const result = await runQuickchr(["cache", "key", `--${option}`]);
+			expect(result.exitCode).not.toBe(0);
+			expect(result.stderr).toContain(`--${option} requires a value`);
+		});
+
+		test(`rejects an empty --${option}= value`, async () => {
+			const result = await runQuickchr(["cache", "key", `--${option}=`]);
+			expect(result.exitCode).not.toBe(0);
+			expect(result.stderr).toContain(`--${option} requires a value`);
+		});
+	}
 });
 
 describe("CLI cache add", () => {
 	test("an existing pinned image is an idempotent JSON cache hit", async () => {
 		const path = join(TEST_DIR, "cache", "chr-7.24.4.img");
-		writeFileSync(path, "cached image");
+		await Bun.write(path, validRawImage());
 		const result = await runQuickchr(["cache", "add", "--version", "7.24.4", "--arch", "x86", "--json"]);
 		expect(result.exitCode).toBe(0);
 		expect(result.stderr).toBe("");
@@ -71,4 +94,12 @@ describe("CLI cache add", () => {
 			cacheHit: true,
 		});
 	});
+
+	for (const option of ["version", "channel", "arch"]) {
+		test(`rejects a valueless --${option}`, async () => {
+			const result = await runQuickchr(["cache", "add", `--${option}`, "--json"]);
+			expect(result.exitCode).not.toBe(0);
+			expect(result.stderr).toContain(`--${option} requires a value`);
+		});
+	}
 });

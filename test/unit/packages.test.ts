@@ -217,9 +217,12 @@ describe("downloadPackages", () => {
 		globalThis.fetch = originalFetch;
 	});
 
-	test("returns cached extractDir immediately without fetching", async () => {
-		const extractDir = join(cacheDir, "packages-x86-7.22.1");
-		mkdirSync(extractDir, { recursive: true });
+	test("returns a verified cached extractDir without fetching", async () => {
+		const zipPath = join(cacheDir, "all_packages-x86-7.22.1.zip");
+		writeFileSync(zipPath, zipSync({
+			"container-7.22.1.npk": new TextEncoder().encode("container package"),
+		}));
+		const extractDir = await downloadPackages("7.22.1", "x86", cacheDir);
 
 		let fetchCalled = false;
 		globalThis.fetch = makeMockFetch(() => {
@@ -230,6 +233,24 @@ describe("downloadPackages", () => {
 		const result = await downloadPackages("7.22.1", "x86", cacheDir);
 		expect(result).toBe(extractDir);
 		expect(fetchCalled).toBe(false);
+	});
+
+	test("rebuilds a partial extraction from the cached ZIP", async () => {
+		const zipPath = join(cacheDir, "all_packages-x86-7.22.1.zip");
+		writeFileSync(zipPath, zipSync({
+			"container-7.22.1.npk": new TextEncoder().encode("container package"),
+			"dude-7.22.1.npk": new TextEncoder().encode("dude package"),
+		}));
+		const extractDir = join(cacheDir, "packages-x86-7.22.1");
+		mkdirSync(extractDir, { recursive: true });
+		writeFileSync(join(extractDir, "container-7.22.1.npk"), "partial package");
+		globalThis.fetch = makeMockFetch(() => {
+			throw new Error("fetch should not be called when the package ZIP is cached");
+		});
+
+		expect(await downloadPackages("7.22.1", "x86", cacheDir)).toBe(extractDir);
+		expect(readFileSync(join(extractDir, "container-7.22.1.npk"), "utf-8")).toBe("container package");
+		expect(readFileSync(join(extractDir, "dude-7.22.1.npk"), "utf-8")).toBe("dude package");
 	});
 
 	test("throws DOWNLOAD_FAILED when server returns non-ok status", async () => {

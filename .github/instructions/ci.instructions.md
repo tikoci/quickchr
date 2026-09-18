@@ -667,10 +667,11 @@ take hours. Red legs are the answer, not a problem with the run.
 
 **The examples smoke harness** (`test/integration/examples-smoke.test.ts`) runs a curated subset of runnable examples end-to-end — one representative per language *for the current OS* (`.ts` everywhere; `.sh`/`.py`-via-`uv` on POSIX; `.ps1` on Windows) — plus an intentional failure-path case that asserts teardown fires on error. `trial-license` is excluded (MikroTik rate-limits). Double-gated by `QUICKCHR_INTEGRATION` + `EXAMPLES_SMOKE` so the integration jobs don't pay for example boots; the `examples-smoke` job sets both via `bun run smoke:examples`.
 
-**Each matrix leg's target** is exported as `QUICKCHR_TEST_TARGET` and consumed by
-integration tests via `test/integration/image-target.ts`: a channel name resolves to
-`{ channel }`, anything else to `{ version }`, empty/unset → `stable` (so push CI, publish,
-and local runs are unchanged). Tests that deliberately pin a version (provisioning's
+**Each matrix leg's planned pin** (`matrix.resolved`) is exported as
+`QUICKCHR_TEST_TARGET` and consumed by integration tests via
+`test/integration/image-target.ts` as `{ version }`. `matrix.target` remains the
+dispatch label and reporting identity. Empty/unset still selects `stable`, so local
+runs are unchanged. Tests that deliberately pin a version (provisioning's
 `7.20.7`/`7.20.8`, library-api's `7.22.1`) ignore the override. Pinning an *old* target makes
 the version-gated provisioning/device-mode tests fail — expected, since channels all clear
 the 7.20.8 provisioning baseline.
@@ -934,17 +935,17 @@ The key is built by `scripts/ci-cache-key.ts`, not written inline in the
 workflow:
 
 ```text
-key           chr-images-v4-{platform-id}-{resolved-version}
-restore-keys  chr-images-v4-{platform-id}-
+key           chr-images-v5-{platform-id}-{resolved-version}
+restore-keys  chr-images-v5-{platform-id}-
 path          getCacheDir()          # not a literal — the workflow cannot drift
 ```
 
 `{resolved-version}` is a **concrete** RouterOS version. The `plan` job resolves
 every channel target once per dispatch (`ci-cache-key.ts resolve`) and carries
 the answer on each matrix entry as `matrix.resolved`, so the integration and
-examples legs derive the same key from the same resolution. The leg still boots
-`matrix.target` — `QUICKCHR_TEST_TARGET` is unchanged and the channel-resolution
-path stays exercised.
+examples legs derive the same key from the same resolution and boot that exact
+`matrix.resolved` pin. Channel resolution is exercised once in `plan`; it cannot
+drift between cache acquisition and the test boot.
 
 ### Key ownership (#104) — who may write
 
@@ -989,12 +990,11 @@ Two consequences worth knowing:
   strand `macos-x86` without an entry. Acquisition failure still reds the owner
   leg before any test runs; a failed manifest is never saved.
 - **A release published mid-dispatch cannot poison the planned key.** `plan`
-  fixes `matrix.resolved`; prefetch uses that concrete pin, while tests still
-  boot `matrix.target` and may independently see a newer channel release. The
+  fixes `matrix.resolved`; prefetch and tests both use that concrete pin. The
   immutable entry remains a complete cache for the version its key names, and
   the next dispatch resolves and populates the newer key.
 
-Bump `CACHE_KEY_GENERATION` in `scripts/ci-cache-key.ts` (currently `v4`) when
+Bump `CACHE_KEY_GENERATION` in `scripts/ci-cache-key.ts` (currently `v5`) when
 `integrationCacheManifest()` changes or an immutable generation must be
 invalidated. Old generations age out under the repo LRU cap.
 

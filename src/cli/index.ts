@@ -68,6 +68,15 @@ function flag(flags: Record<string, string | boolean | string[]>, key: string): 
 	return undefined;
 }
 
+function cacheTargetFlag(flags: Record<string, string | boolean | string[]>, key: string): string | undefined {
+	if (!(key in flags)) return undefined;
+	const value = flags[key];
+	if (typeof value !== "string" || value.length === 0) {
+		throw new Error(`--${key} requires a value`);
+	}
+	return value;
+}
+
 function flagBool(flags: Record<string, string | boolean | string[]>, key: string): boolean {
 	return flags[key] === true || flags[key] === "true";
 }
@@ -2421,12 +2430,12 @@ async function cmdCache(argv: string[]) {
 		case "add": {
 			const { cacheAdd } = await import("../lib/cache-api.ts");
 			const { resolveSetting } = await import("../lib/settings.ts");
-			const version = flag(flags, "version");
-			const explicitChannel = flag(flags, "channel") as Channel | undefined;
-			const channel = version || explicitChannel
+			const version = cacheTargetFlag(flags, "version");
+			const explicitChannel = cacheTargetFlag(flags, "channel") as Channel | undefined;
+			const channel = version !== undefined || explicitChannel !== undefined
 				? explicitChannel
 				: resolveSetting("default-channel").value as Channel;
-			const arch = (flag(flags, "arch") ?? resolveSetting("default-arch").value) as Arch | "auto";
+			const arch = (cacheTargetFlag(flags, "arch") ?? resolveSetting("default-arch").value) as Arch | "auto";
 			const asJson = flagBool(flags, "json");
 			const quiet = { status() {}, debug() {}, warn() {} };
 			const result = await cacheAdd({ version, channel, arch, logger: asJson ? quiet : undefined });
@@ -2440,13 +2449,13 @@ async function cmdCache(argv: string[]) {
 		}
 		case "key": {
 			const { cacheKey } = await import("../lib/cache-api.ts");
-			const version = flag(flags, "version");
-			const explicitChannel = flag(flags, "channel") as Channel | undefined;
+			const version = cacheTargetFlag(flags, "version");
+			const explicitChannel = cacheTargetFlag(flags, "channel") as Channel | undefined;
 			const { resolveSetting } = await import("../lib/settings.ts");
-			const channel = version || explicitChannel
+			const channel = version !== undefined || explicitChannel !== undefined
 				? explicitChannel
 				: resolveSetting("default-channel").value as Channel;
-			const arch = (flag(flags, "arch") ?? resolveSetting("default-arch").value) as Arch | "auto";
+			const arch = (cacheTargetFlag(flags, "arch") ?? resolveSetting("default-arch").value) as Arch | "auto";
 			const result = await cacheKey({ version, channel, arch });
 			if (flagBool(flags, "json")) {
 				console.log(JSON.stringify(result));

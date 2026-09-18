@@ -361,7 +361,10 @@ manifest before saving; saving opportunistic test byproducts makes a red or
 lost suite permanently cold, while saving only images makes immutable entries
 permanently package-incomplete. Acquisition is therefore a named pre-test step,
 restore-key extras are reconciled away before save so auto-prune cannot evict
-fixed fixtures later, and a manifest change bumps the cache-key generation
+fixed fixtures later, and a manifest change bumps the cache-key generation.
+Raw images must have in-bounds DOS partition extents; package directories are
+published atomically with an exact filename/size manifest. Tests boot the same
+concrete pin named by the immutable key rather than resolving the channel again
 (#144).
 
 7. **The boot probe can break the service it is waiting for.** `restGet()`

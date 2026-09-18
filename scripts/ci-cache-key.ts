@@ -46,9 +46,10 @@ import { CHANNELS, type Channel } from "../src/lib/types.ts";
 import { isValidVersion, resolveVersion } from "../src/lib/versions.ts";
 
 /** Bump when the CONTENT CONTRACT of an entry changes (not when a key input
- *  does — the inputs are in the key). `v4` = pre-test verified manifests;
- *  `v3` populated opportunistically after a full suite. */
-export const CACHE_KEY_GENERATION = "v4";
+ *  does — the inputs are in the key). `v5` = structurally verified images and
+ *  atomic package extraction manifests; `v4` = pre-test manifests; `v3`
+ *  populated opportunistically after a full suite. */
+export const CACHE_KEY_GENERATION = "v5";
 
 export interface CacheIdentity {
 	key: string;
