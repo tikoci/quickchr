@@ -18,9 +18,9 @@
  */
 
 import { describe, test, expect, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname, basename } from "node:path";
 import type { Socket } from "bun";
 import {
 	downloadToFile,
@@ -49,6 +49,22 @@ function tempDir(): string {
 	const d = mkdtempSync(join(tmpdir(), "quickchr-dl-"));
 	dirs.push(d);
 	return d;
+}
+
+/**
+ * Leftover partial files for `dest`.
+ *
+ * `downloadToFile` writes `<dest>.<pid>-<uuid8>.part`, never a fixed
+ * `<dest>.part` (see the unique-per-call note in download.ts). Asserting
+ * `existsSync(`${dest}.part`)` therefore checks a path that is never created:
+ * it cannot fail, and it passes happily while a real partial sits next to it.
+ * Every leftover assertion in this file goes through here instead.
+ */
+function leftoverParts(dest: string): string[] {
+	const dir = dirname(dest);
+	if (!existsSync(dir)) return [];
+	const prefix = `${basename(dest)}.`;
+	return readdirSync(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".part"));
 }
 
 interface StubOptions {
@@ -214,7 +230,7 @@ describe("downloadToFile — a moving transfer is never aborted for being slow",
 		await downloadToFile(url, dest, { logger: silentLogger });
 
 		expect(existsSync(dest)).toBe(true);
-		expect(existsSync(`${dest}.part`)).toBe(false);
+		expect(leftoverParts(dest)).toEqual([]);
 	});
 });
 
@@ -265,7 +281,7 @@ describe("downloadToFile — a wedged transfer fails fast and says so", () => {
 		// Both callers gate on existsSync(zipPath). A truncated file here would be
 		// served as a complete cached artifact forever.
 		expect(existsSync(dest)).toBe(false);
-		expect(existsSync(`${dest}.part`)).toBe(false);
+		expect(leftoverParts(dest)).toEqual([]);
 	}, 30_000);
 });
 
@@ -373,7 +389,7 @@ describe("downloadToFile — HTTP outcomes", () => {
 
 		expect(err.code).toBe("DOWNLOAD_FAILED");
 		expect(existsSync(dest)).toBe(false);
-		expect(existsSync(`${dest}.part`)).toBe(false);
+		expect(leftoverParts(dest)).toEqual([]);
 	}, 30_000);
 
 	test("a body with no content-length still downloads, under the stated fallback", async () => {
@@ -466,22 +482,23 @@ describe("review findings — #119", () => {
 		expect(published.every((b) => b === 65)).toBe(true);
 	}, 30_000);
 
-	// Bun's own handling of a malformed content-length, measured against the raw
-	// stub, is the context for these two:
+	// Bun's own handling of a malformed content-length, re-measured against the
+	// raw stub on Bun 1.4.2 (#148), is the context for these two:
 	//
-	//   "   "           -> header stripped to null,  body 0 bytes
-	//   "not-a-number"  -> header passed through,    body 0 bytes
-	//   "-5"            -> header passed through,    body 0 bytes
-	//   "4096.5"        -> header passed through,    body 0 bytes
-	//   "4096"          -> header passed through,    body 4096 bytes
+	//   "   "           -> fetch() rejects, InvalidContentLength
+	//   "not-a-number"  -> fetch() rejects, InvalidContentLength
+	//   "-5"            -> fetch() rejects, InvalidContentLength
+	//   "4096.5"        -> fetch() rejects, InvalidContentLength
+	//   "4096"          -> header passed through,   body 4096 bytes
 	//
-	// So `Number("")` is not reachable through this transport — Bun strips a blank
-	// header before we see it — and the parsing guard is defensive. What IS
-	// reachable is a passed-through malformed value with an empty body.
+	// On Bun 1.3.14 every malformed value was instead passed through to us with an
+	// empty body, so quickchr saw the header and reported "empty transfer". Bun 1.4
+	// rejects the response at the transport, which is why the old assertion on that
+	// phrase went red in #148 with no quickchr change. Either way NOTHING malformed
+	// reaches `Number()` through this transport, so the isInteger/>=0 guard in
+	// download.ts stays as defense in depth for a transport that is less strict --
+	// it is no longer drivable from here, and must not be deleted as "dead".
 	test("a malformed content-length does not become a bogus expected size", async () => {
-		// Without the isInteger/>=0 guard, "4096.5" parses finite and the
-		// truncation check then reports the (empty) transfer against a fractional
-		// expected size, which is a confusing way to describe a server fault.
 		const { url } = startStub({ size: 4_096, chunk: 1_024, declareLengthRaw: " 4096.5" });
 		const dest = join(tempDir(), "artifact.zip");
 
@@ -489,8 +506,14 @@ describe("review findings — #119", () => {
 			downloadToFile(url, dest, { logger: silentLogger, maxAttempts: 1 }),
 		);
 
-		expect(err.message).toContain("empty transfer");
+		// Assert only what quickchr owns, since which layer detects the bad framing
+		// is Bun's business and changed under us once already. What must hold on any
+		// runtime: the download is terminal and classified, nothing is published,
+		// and the diagnostic never dresses the malformed value up as a real size.
+		expect(err.code).toBe("DOWNLOAD_FAILED");
 		expect(err.message).not.toContain("4096.5");
+		expect(existsSync(dest)).toBe(false);
+		expect(leftoverParts(dest)).toEqual([]);
 	}, 30_000);
 
 	test("a zero-byte body is never published to the cache path", async () => {

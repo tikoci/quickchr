@@ -203,6 +203,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
 
       # Resolve every channel target to a CONCRETE version, ONCE per dispatch,
       # before any cache key is chosen (#104). Two reasons it happens here and
@@ -484,6 +486,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
 
       # ipxe-qemu provides efi-virtio.rom (needed by virtio-net-pci); harmless on
       # x86, mandatory on arm64. qemu-efi-aarch64 = UEFI firmware for virt machine.
@@ -1200,6 +1204,8 @@ jobs:
           ref: ci-data
           path: ci-data
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
 
       - name: Download metrics artifacts
@@ -1398,6 +1404,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
 
       - name: Install QEMU + tools (Linux x86)
         if: ${{ matrix.id == 'linux-x86' }}

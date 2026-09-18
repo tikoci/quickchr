@@ -187,6 +187,7 @@ insmod
 inttest
 ipc
 ipxe
+iqr
 irm
 kbd
 kexec

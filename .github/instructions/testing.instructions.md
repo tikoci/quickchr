@@ -318,6 +318,46 @@ nobody ran `curl` first to see what RouterOS actually returned.
 - **External URL code** (uses `fetch()` directly): Mock with `globalThis.fetch = ...`.
   Only valid for `versions.ts`, `images.ts`, `packages.ts`.
 
+### Assert what quickchr owns, not what the runtime synthesizes
+
+A unit test may only pin behavior quickchr actually decides. Two tests in #148 pinned
+behavior **Bun** decided, and both went red on a runtime bump with no quickchr change:
+
+- `rest.test.ts` asserted `Content-Length: 0` on a bodyless `DELETE`. quickchr sets that
+  header only when it has a body — the `0` came from Bun 1.3's `node:http`. Bun 1.4 and
+  Node 26 both omit it.
+- `download.test.ts` asserted the `empty transfer` message for a malformed
+  `content-length`. That phrasing depended on Bun 1.3 passing the bad header through with
+  an empty body; Bun 1.4 rejects the response at the transport, so quickchr never sees it.
+
+The failures were real gate signals, not noise — but they described a stale expectation
+rather than a regression. Before rewriting such a test:
+
+1. **Re-measure the runtime behavior** instead of reasoning from the old comment. The
+   measured matrix in `download.test.ts` was Bun 1.3 data presented as fact.
+2. **Ground the contract against a real device** when RouterOS is on the other end. The
+   bodyless-`DELETE` question was settled by deleting a real `/ip/firewall/filter` rule on
+   live CHR 7.24.2 over Bun 1.4.2 — wire bytes captured through a raw TCP proxy, no
+   `Content-Length`, `204` back and a `404` on the follow-up `GET`. Only then was the unit
+   contract changed to the absent header.
+3. **Narrow the assertion to the invariant, never to "it throws."** The malformed-length
+   test now asserts `DOWNLOAD_FAILED`, no published artifact, no leftover `.part`, and that
+   the diagnostic never repeats the bogus size — all true on any runtime. Replacing it with
+   a bare `toThrow()` would have deleted the finding that #119 bought.
+
+A guard that is no longer reachable through the current transport (the `isInteger/>=0`
+check in `download.ts`) stays as defense in depth and is commented as such — "no test can
+drive it" is not the same as dead code.
+
+**Then check the new assertion can fail.** Write the leftover/failure state the assertion
+is supposed to catch, and confirm the test goes red. Four assertions in `download.test.ts`
+read `existsSync(`${dest}.part`)` while `downloadToFile` actually writes
+`<dest>.<pid>-<uuid8>.part` — including one in a test named *"no .part file survives a
+successful download"*. They could never fail, so they had been reporting coverage of a
+leftover-artifact invariant that was never checked. They now go through `leftoverParts()`,
+verified by injecting a partial and watching all four go red. An assertion nobody has seen
+fail is a claim, not a test.
+
 ## Lab Tests (test/lab/)
 
 For longer single-test explorations that don't belong in CI:
