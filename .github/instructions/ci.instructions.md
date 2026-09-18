@@ -15,6 +15,25 @@ A red job tells you *something changed*, not *what is true*. Before acting on it
   example to green the pipeline before the behavior is reproduced and root-caused — that
   masks the bug (see `testing.instructions.md` and `examples.instructions.md`).
 
+## The Bun runtime is pinned (`.bun-version`)
+
+Every workflow installs Bun via `oven-sh/setup-bun` with **`bun-version-file: .bun-version`**.
+That file holds one exact `x.y.z` and is the single source of truth for the tested runtime.
+`bun run check` enforces both halves via `scripts/check-bun-pin.ts`: the pin must be exact
+(no `latest`/`canary`/ranges), and every `setup-bun` step must read it rather than inline a
+`bun-version:` that would drift.
+
+**Why (#148).** Previously no call site set a version, so each run silently installed
+whatever Bun was newest. Between 2026-08-05 and 2026-09-17 there were no `ci.yml` runs;
+Bun 1.4.0 shipped in that gap, and the next run moved 1.3.14 → 1.4.2 on its own. Two HTTP
+tests went red with **no repository change to point at** — the diff under review was
+innocent, which is the expensive part. A runtime upgrade is a toolchain change and must
+arrive as a reviewable diff whose compatibility results are visible in the same PR.
+
+**To upgrade Bun:** edit `.bun-version` in its own PR and let the full matrix run. If it
+goes red, that PR owns the incompatibility. Do not pin backwards to dodge a failure — an
+old runtime is a debt that compounds silently, which is how #148 happened.
+
 ## Workflow Overview
 
 The repo has several workflows, each with a distinct purpose:

@@ -173,7 +173,19 @@ describe("JSON REST methods", () => {
 				method: "DELETE",
 				body: "",
 				contentType: undefined,
-				contentLength: "0",
+				// Absent, not "0". quickchr sets Content-Length only when it has a
+				// body (src/lib/rest.ts), so any value here would be one the runtime
+				// synthesized. Bun 1.3's node:http did add `Content-Length: 0`; Bun
+				// 1.4 and Node 26 both omit it, which is why this assertion went red
+				// in #148 without any quickchr change.
+				//
+				// Grounded before changing the contract (#148): a bodyless DELETE of a
+				// real /ip/firewall/filter rule on live CHR 7.24.2 over Bun 1.4.2 --
+				// wire bytes captured through a raw TCP proxy, no Content-Length and
+				// no Transfer-Encoding -- returned 204 and the follow-up GET returned
+				// 404. RouterOS does not need the explicit zero, so quickchr does not
+				// send one.
+				contentLength: undefined,
 			},
 		]);
 	});

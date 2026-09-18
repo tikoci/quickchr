@@ -177,6 +177,14 @@ See MANUAL.md's CLI reference and environment-variables sections for the full su
 Full artifact map, dispatch recipes, and failure-diagnosis guide live in
 `.github/instructions/ci.instructions.md` — this section is the high-level rationale only.
 
+**The toolchain is part of the repository (#148).** `.bun-version` pins the exact Bun that
+CI, integration and release all install, enforced by `scripts/check-bun-pin.ts` in
+`bun run check`. Before this, `setup-bun` was called with no version anywhere, so the tested
+runtime could change between two identical commits — and did: a six-week gap with no `ci.yml`
+runs spanned the Bun 1.4.0 release, and the next PR inherited a 1.3.14 → 1.4.2 jump as if it
+were its own regression. Anything that can turn the build red is a dependency and belongs in
+a reviewable diff; "whatever is newest at run time" is not a version.
+
 **The 2026-07 refactor (#29)** replaced the organically-grown scheme (integration on every
 PR push, three parallel copies of the runner logic, `continue-on-error` green-washing)
 with a layered design:

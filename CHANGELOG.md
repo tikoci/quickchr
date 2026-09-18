@@ -8,6 +8,25 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Changed
+
+- **The tested Bun runtime is pinned.** `.bun-version` (currently `1.4.2`) is the single
+  source of truth, and every workflow installs Bun through
+  `setup-bun`'s `bun-version-file`. `bun run check` fails if a `setup-bun` step
+  omits it or if the pin is not an exact `x.y.z`. Previously each CI run installed
+  whatever Bun was newest, so a runtime upgrade could land — and break the build —
+  without any repository change to review (#148).
+
+### Fixed
+
+- **Green unit gates on Bun 1.4.** Two tests pinned runtime-synthesized HTTP behavior
+  rather than quickchr's own, and went red when CI moved from Bun 1.3.14 to 1.4.2:
+  a bodyless `DELETE` no longer asserts a `Content-Length: 0` that quickchr never set
+  (verified against live CHR 7.24.2: RouterOS accepts the absent header, returning `204`),
+  and the malformed-`content-length` test now asserts quickchr's invariants —
+  `DOWNLOAD_FAILED`, nothing published, no bogus size in the diagnostic — instead of a
+  message string Bun 1.4 produces at a different layer. No production behavior changed (#148).
+
 ## [0.4.7] — 2026-08-04
 
 ### Added
