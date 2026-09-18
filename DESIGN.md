@@ -355,9 +355,17 @@ boot went silent:
    paths (#106).
 
 Corollary for CI cache keys: `actions/cache` only saves when the primary key
-*missed*, so a static key means a newly-resolved RouterOS version re-downloads
-every run forever (#91). Primary keys must carry a rotating component, with
-`restore-keys` doing the prefix fallback.
+*missed*, so the concrete resolved RouterOS version belongs in the key (#91).
+The writable owner must prefetch and verify a declared image-and-package
+manifest before saving; saving opportunistic test byproducts makes a red or
+lost suite permanently cold, while saving only images makes immutable entries
+permanently package-incomplete. Acquisition is therefore a named pre-test step,
+restore-key extras are reconciled away before save so auto-prune cannot evict
+fixed fixtures later, and a manifest change bumps the cache-key generation.
+Raw images must have in-bounds DOS partition extents; package directories are
+published atomically with an exact filename/size manifest. Tests boot the same
+concrete pin named by the immutable key rather than resolving the channel again
+(#144).
 
 7. **The boot probe can break the service it is waiting for.** `restGet()`
    implements its deadline as `req.destroy()` — a mid-flight TCP teardown. On

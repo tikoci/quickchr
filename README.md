@@ -141,6 +141,10 @@ quickchr settings set default-channel long-term
 quickchr settings set secure-login true
 quickchr settings print
 
+# Resolve/cache an image without creating or booting a machine
+quickchr cache key --channel stable
+quickchr cache add --channel stable --arch x86
+
 # Reset disk to fresh image
 quickchr clean my-chr
 
@@ -377,6 +381,25 @@ await resolveActiveChannels();
 `7.24` < `7.24.1`). The same map is available from the CLI via
 `quickchr version --json`. See [MANUAL.md](./MANUAL.md) → *Version & channel helpers*.
 
+### Cache API
+
+CI can resolve cache identity and download an image without booting QEMU:
+
+```typescript
+import { CACHE_VERSION_UNRESOLVED, cacheAdd, cacheKey } from "@tikoci/quickchr";
+
+const identity = await cacheKey({ channel: "stable", arch: "x86" });
+// { dir: "/home/runner/.local/share/quickchr/cache", version: "7.24.4", arch: "x86" }
+
+if (identity.version !== CACHE_VERSION_UNRESOLVED) {
+  await cacheAdd({ version: identity.version, arch: "x86" });
+}
+```
+
+An explicit version never performs channel resolution. Offline channel lookup
+returns `version: "unresolved"` from `cacheKey`; `cacheAdd` remains strict and
+fails when it cannot resolve or download the requested image.
+
 ### Use in Tests
 
 ```typescript
@@ -405,7 +428,7 @@ afterAll(async () => {
 | `MIKROTIK_WEB_PASSWORD` | MikroTik.com password (for license renewal) |
 | `QUICKCHR_DEFAULT_CHANNEL`, `QUICKCHR_DEFAULT_ARCH`, `QUICKCHR_CACHE_MAX_SIZE`, `QUICKCHR_TIMEOUT_EXTRA`, `QUICKCHR_SECURE_LOGIN` | Env-tier overrides for the 5 `quickchr settings` keys — see [MANUAL.md §3 `settings`](./MANUAL.md#3-cli-command-reference) |
 | `QUICKCHR_INTEGRATION` | Set to `1` to run integration tests |
-| `QUICKCHR_TEST_TARGET` | Integration tests only: RouterOS channel (`stable`/`long-term`/`testing`/`development`) or pinned version (e.g. `7.22.1`) to boot. Empty = `stable`. The Integration workflow (`integration.yml`) sets this from its `routeros-target` dispatch input to test a release across platforms |
+| `QUICKCHR_TEST_TARGET` | Integration tests only: RouterOS channel (`stable`/`long-term`/`testing`/`development`) or pinned version (e.g. `7.22.1`) to boot. Empty = `stable`. The Integration workflow resolves each `routeros-target` once, then sets this to that exact pin across platforms |
 
 The full list (including `QUICKCHR_DATA_DIR`, `QUICKCHR_NO_PROMPT`, `QUICKCHR_DEBUG`,
 `NO_COLOR`) is in [MANUAL.md §11](./MANUAL.md#11-auth-secrets-environment-variables).

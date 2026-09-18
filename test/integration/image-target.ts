@@ -3,10 +3,10 @@ import { CHANNELS, type Channel } from "../../src/lib/types.ts";
 /**
  * RouterOS image selection for integration tests that just need "the default release".
  *
- * `QUICKCHR_TEST_TARGET` (set by integration.yml from the `routeros-target` dispatch
- * input) overrides the default so a single dispatch can point every platform's CHR boot
- * at one channel or a pinned version. Unset/empty → channel "stable" — preserves prior
- * behavior, so push CI, publish, and local `bun test` runs are unchanged.
+ * `QUICKCHR_TEST_TARGET` overrides the default so a single dispatch can point every
+ * platform's CHR boot at one channel or a pinned version. integration.yml resolves its
+ * dispatch target once and exports the exact pin; local callers may still pass a channel.
+ * Unset/empty → channel "stable", preserving local `bun test` behavior.
  *
  * A channel name resolves to `{ channel }` (avoids the lenient channel-as-version warning
  * on `StartOptions.version`); anything else is treated as an explicit `{ version }`.

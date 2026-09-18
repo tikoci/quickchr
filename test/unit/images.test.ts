@@ -3,9 +3,25 @@ import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node
 import { join } from "node:path";
 import { promises as dns } from "node:dns";
 import { zipSync } from "fflate";
-import { listCachedImages, downloadImage, extractImage, ensureCachedImage, copyImageToMachine } from "../../src/lib/images.ts";
+import {
+	listCachedImages,
+	downloadImage,
+	extractImage,
+	ensureCachedImage,
+	copyImageToMachine,
+	isUsableCachedImage,
+} from "../../src/lib/images.ts";
 
 const TMP = join(import.meta.dir, ".tmp-images-test");
+
+function validRawImage(): Buffer {
+	const image = Buffer.alloc(1024);
+	image[510] = 0x55;
+	image[511] = 0xaa;
+	image.writeUInt32LE(1, 454);
+	image.writeUInt32LE(1, 458);
+	return image;
+}
 
 beforeEach(() => {
 	mkdirSync(TMP, { recursive: true });
@@ -129,7 +145,7 @@ describe("extractImage", () => {
 		const zipPath = join(TMP, "chr-7.22.1.img.zip");
 		const imgPath = join(TMP, "chr-7.22.1.img");
 		writeFileSync(zipPath, "fake zip");
-		writeFileSync(imgPath, "already extracted");
+		writeFileSync(imgPath, validRawImage());
 
 		const result = await extractImage(zipPath, TMP);
 		expect(result).toBe(imgPath);
@@ -138,13 +154,14 @@ describe("extractImage", () => {
 	test("renames the extracted image when zip contains file without arm64 suffix", async () => {
 		const zipPath = join(TMP, "chr-7.22.1-arm64.img.zip");
 		// MikroTik sometimes ships arm64 ZIPs with chr-X.Y.Z.img (no -arm64 suffix) inside
-		const zipData = zipSync({ "chr-7.22.1.img": new TextEncoder().encode("arm64 image content") });
+		const image = validRawImage();
+		const zipData = zipSync({ "chr-7.22.1.img": image });
 		writeFileSync(zipPath, zipData);
 
 		const result = await extractImage(zipPath, TMP);
 		expect(result).toBe(join(TMP, "chr-7.22.1-arm64.img"));
 		expect(existsSync(result)).toBe(true);
-		expect(readFileSync(result, "utf-8")).toBe("arm64 image content");
+		expect(Array.from(readFileSync(result))).toEqual(Array.from(image));
 		expect(existsSync(join(TMP, "chr-7.22.1.img"))).toBe(false);
 		expect(existsSync(zipPath)).toBe(false);
 	});
@@ -170,6 +187,30 @@ describe("extractImage", () => {
 			message: expect.stringContaining("Expected"),
 		});
 	});
+
+	test("rejects an extracted image whose partition extends beyond the file", async () => {
+		const zipPath = join(TMP, "chr-7.22.1.img.zip");
+		const truncated = validRawImage().subarray(0, 700);
+		writeFileSync(zipPath, zipSync({ "chr-7.22.1.img": truncated }));
+
+		await expect(extractImage(zipPath, TMP)).rejects.toMatchObject({
+			code: "PROCESS_FAILED",
+			message: expect.stringContaining("incomplete or invalid"),
+		});
+		expect(existsSync(join(TMP, "chr-7.22.1.img"))).toBe(false);
+		expect(existsSync(zipPath)).toBe(true);
+	});
+});
+
+describe("isUsableCachedImage", () => {
+	test("requires a DOS signature and in-bounds partition", async () => {
+		const path = join(TMP, "chr-7.22.1.img");
+		writeFileSync(path, validRawImage());
+		expect(await isUsableCachedImage(path)).toBe(true);
+
+		writeFileSync(path, validRawImage().subarray(0, 700));
+		expect(await isUsableCachedImage(path)).toBe(false);
+	});
 });
 
 describe("ensureCachedImage", () => {
@@ -181,7 +222,7 @@ describe("ensureCachedImage", () => {
 
 	test("returns cached extracted image immediately when already present", async () => {
 		const imgPath = join(TMP, "chr-7.22.1.img");
-		writeFileSync(imgPath, "cached image");
+		writeFileSync(imgPath, validRawImage());
 
 		let fetchCalled = false;
 		globalThis.fetch = makeMockFetch(() => {
@@ -196,7 +237,7 @@ describe("ensureCachedImage", () => {
 
 	test("uses a cached zip and extracts it when the image is missing", async () => {
 		const zipPath = join(TMP, "chr-7.22.1.img.zip");
-		const zipData = zipSync({ "chr-7.22.1.img": new TextEncoder().encode("fresh image") });
+		const zipData = zipSync({ "chr-7.22.1.img": validRawImage() });
 		writeFileSync(zipPath, zipData);
 
 		let fetchCalled = false;
@@ -209,5 +250,18 @@ describe("ensureCachedImage", () => {
 		expect(result).toBe(join(TMP, "chr-7.22.1.img"));
 		expect(fetchCalled).toBe(false);
 		expect(existsSync(zipPath)).toBe(false);
+	});
+
+	test("replaces a truncated image from a cached zip", async () => {
+		const imgPath = join(TMP, "chr-7.22.1.img");
+		const zipPath = join(TMP, "chr-7.22.1.img.zip");
+		writeFileSync(imgPath, validRawImage().subarray(0, 700));
+		writeFileSync(zipPath, zipSync({ "chr-7.22.1.img": validRawImage() }));
+		globalThis.fetch = makeMockFetch(() => {
+			throw new Error("fetch should not be called when the image ZIP is cached");
+		});
+
+		expect(await ensureCachedImage("7.22.1", "x86", TMP)).toBe(imgPath);
+		expect(await isUsableCachedImage(imgPath)).toBe(true);
 	});
 });

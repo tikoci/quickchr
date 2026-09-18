@@ -2,9 +2,9 @@
  * Extra package download and installation for CHR instances.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
-import type { Arch } from "./types.ts";
+import { QuickCHRError, type Arch } from "./types.ts";
 import { packagesDownloadUrl } from "./versions.ts";
 import { downloadToFile } from "./download.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
@@ -12,6 +12,51 @@ import { createLogger, type ProgressLogger } from "./log.ts";
 import { restPost } from "./rest.ts";
 import { scpPush } from "./scp.ts";
 import { extractZip } from "./zip.ts";
+
+const PACKAGE_CACHE_MANIFEST = ".quickchr-complete.json";
+
+interface PackageCacheManifest {
+	version: string;
+	arch: Arch;
+	archiveSize: number;
+	packages: Array<{ name: string; size: number }>;
+}
+
+function packageFiles(extractDir: string): Array<{ name: string; size: number }> {
+	try {
+		return readdirSync(extractDir)
+			.filter((name) => name.endsWith(".npk"))
+			.map((name) => ({ name, size: statSync(join(extractDir, name)).size }))
+			.filter((entry) => entry.size > 0)
+			.sort((a, b) => a.name.localeCompare(b.name));
+	} catch {
+		return [];
+	}
+}
+
+/** Verify the archive and every package recorded after atomic extraction. */
+export async function isCompletePackageCache(
+	version: string,
+	arch: Arch,
+	cacheDir?: string,
+): Promise<boolean> {
+	const cache = cacheDir ?? getCacheDir();
+	const zipPath = join(cache, `all_packages-${arch}-${version}.zip`);
+	const extractDir = join(cache, `packages-${arch}-${version}`);
+	try {
+		const archiveSize = statSync(zipPath).size;
+		if (archiveSize <= 0) return false;
+		const manifest = await Bun.file(join(extractDir, PACKAGE_CACHE_MANIFEST)).json() as PackageCacheManifest;
+		const packages = packageFiles(extractDir);
+		return manifest.version === version &&
+			manifest.arch === arch &&
+			manifest.archiveSize === archiveSize &&
+			packages.length > 0 &&
+			JSON.stringify(manifest.packages) === JSON.stringify(packages);
+	} catch {
+		return false;
+	}
+}
 
 /** Download and extract the all-packages ZIP for a version/arch. Returns the extract dir. */
 export async function downloadPackages(
@@ -28,7 +73,7 @@ export async function downloadPackages(
 	const zipPath = join(cache, zipName);
 	const extractDir = join(cache, `packages-${arch}-${version}`);
 
-	if (existsSync(extractDir)) {
+	if (await isCompletePackageCache(version, arch, cache)) {
 		const log = logger ?? createLogger();
 		log.status(`  Using cached packages: ${version} (${arch})`);
 		return extractDir;
@@ -44,9 +89,38 @@ export async function downloadPackages(
 		await downloadToFile(url, zipPath, { logger: log });
 	}
 
-	// Extract
-	ensureDir(extractDir);
-	extractZip(zipPath, extractDir);
+	// Extract into a sibling directory, record the exact complete set, then
+	// rename it into place. A killed extraction can never look like a cache hit.
+	const tempDir = mkdtempSync(join(cache, ".quickchr-packages-"));
+	try {
+		extractZip(zipPath, tempDir);
+		const packages = packageFiles(tempDir);
+		if (packages.length === 0) {
+			throw new Error(`No non-empty .npk files found in ${zipName}`);
+		}
+		const manifest: PackageCacheManifest = {
+			version,
+			arch,
+			archiveSize: statSync(zipPath).size,
+			packages,
+		};
+		await Bun.write(join(tempDir, PACKAGE_CACHE_MANIFEST), `${JSON.stringify(manifest, null, "\t")}\n`);
+		if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true });
+		renameSync(tempDir, extractDir);
+	} catch (error) {
+		rmSync(tempDir, { recursive: true, force: true });
+		if (error instanceof Error && error.message.startsWith("No non-empty")) {
+			throw new QuickCHRError("PROCESS_FAILED", error.message);
+		}
+		throw error;
+	}
+
+	if (!(await isCompletePackageCache(version, arch, cache))) {
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`Package cache verification failed for ${version} (${arch})`,
+		);
+	}
 
 	return extractDir;
 }

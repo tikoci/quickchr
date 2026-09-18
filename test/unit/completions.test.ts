@@ -161,12 +161,19 @@ describe("generateCompletionScript", () => {
 	});
 
 	test("scripts include all main subcommands", () => {
-		const subcommands = ["start", "stop", "list", "remove", "console", "exec", "doctor", "completions"];
+		const subcommands = ["start", "stop", "list", "remove", "console", "exec", "cache", "doctor", "completions"];
 		for (const shell of SHELLS) {
 			const script = generateCompletionScript(shell);
 			for (const cmd of subcommands) {
 				expect(script).toContain(cmd);
 			}
+		}
+	});
+
+	test("scripts include cache add and key subcommands", () => {
+		for (const shell of SHELLS) {
+			const script = generateCompletionScript(shell);
+			expect(script).toContain("add key list prune clear");
 		}
 	});
 });

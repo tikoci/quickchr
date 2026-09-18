@@ -71,6 +71,16 @@ export type {
 export { QuickCHRError, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./lib/types.ts";
 export type { ErrorCode, HostInterface } from "./lib/types.ts";
 
+// Cache utilities
+export { cacheAdd, cacheKey, CACHE_VERSION_UNRESOLVED } from "./lib/cache-api.ts";
+export type {
+	CacheAddOptions,
+	CacheAddResult,
+	CacheKeyResult,
+	CacheTargetOptions,
+	CacheVersionResolver,
+} from "./lib/cache-api.ts";
+
 // Interface detection
 export { detectPhysicalInterfaces, resolveInterfaceAlias } from "./lib/platform.ts";
 
