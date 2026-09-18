@@ -349,6 +349,15 @@ A guard that is no longer reachable through the current transport (the `isIntege
 check in `download.ts`) stays as defense in depth and is commented as such — "no test can
 drive it" is not the same as dead code.
 
+**Then check the new assertion can fail.** Write the leftover/failure state the assertion
+is supposed to catch, and confirm the test goes red. Four assertions in `download.test.ts`
+read `existsSync(`${dest}.part`)` while `downloadToFile` actually writes
+`<dest>.<pid>-<uuid8>.part` — including one in a test named *"no .part file survives a
+successful download"*. They could never fail, so they had been reporting coverage of a
+leftover-artifact invariant that was never checked. They now go through `leftoverParts()`,
+verified by injecting a partial and watching all four go red. An assertion nobody has seen
+fail is a claim, not a test.
+
 ## Lab Tests (test/lab/)
 
 For longer single-test explorations that don't belong in CI:

@@ -11,25 +11,38 @@
  * Asserts:
  *   - `.bun-version` exists and holds one exact version (no ranges, no "latest")
  *   - every `oven-sh/setup-bun` step reads it via `bun-version-file: .bun-version`
- *     — never a literal `bun-version:`, which would drift from the pin
+ *     in that step's own `with:` mapping — never a literal `bun-version:`, which
+ *     would drift from the pin
+ *   - `actions/checkout` precedes `setup-bun` in the job, or the pin file is not
+ *     on disk yet when the action reads it
+ *
+ * The workflows are YAML-parsed rather than scanned line by line: an indentation
+ * scan accepts `bun-version-file` sitting under `env:` (where setup-bun never
+ * sees it) and is defeated by ordinary reformatting, such as a flow mapping.
  *
  * Wired into `bun run check`. Exits non-zero on any violation.
  */
-import { readFileSync, readdirSync } from "node:fs";
-import { existsSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
 const PIN_FILE = join(ROOT, ".bun-version");
 const WORKFLOWS = join(ROOT, ".github", "workflows");
+const SETUP_BUN = "oven-sh/setup-bun@";
+
+interface Step {
+	uses?: unknown;
+	with?: Record<string, unknown>;
+}
 
 const errors: string[] = [];
 
 // ── The pin itself ──────────────────────────────────────────────────────────
-if (!existsSync(PIN_FILE)) {
-	errors.push(`  .bun-version: missing — it is the single source of truth for the tested runtime`);
+const pinFile = Bun.file(PIN_FILE);
+if (!(await pinFile.exists())) {
+	errors.push("  .bun-version: missing — it is the single source of truth for the tested runtime");
 } else {
-	const pin = readFileSync(PIN_FILE, "utf-8").trim();
+	const pin = (await pinFile.text()).trim();
 	if (!/^\d+\.\d+\.\d+$/.test(pin)) {
 		errors.push(
 			`  .bun-version: ${JSON.stringify(pin)} is not an exact x.y.z version — ` +
@@ -38,37 +51,49 @@ if (!existsSync(PIN_FILE)) {
 	}
 }
 
-// ── Every consumer reads the pin ────────────────────────────────────────────
+// ── Every consumer reads the pin, from its own `with:` ──────────────────────
 for (const name of readdirSync(WORKFLOWS).sort()) {
 	if (!name.endsWith(".yml") && !name.endsWith(".yaml")) continue;
-	const lines = readFileSync(join(WORKFLOWS, name), "utf-8").split("\n");
 
-	for (const [i, line] of lines.entries()) {
-		if (!/uses:\s*oven-sh\/setup-bun@/.test(line)) continue;
-		const where = `  ${name}:${i + 1}`;
+	let workflow: { jobs?: Record<string, { steps?: Step[] }> };
+	try {
+		workflow = Bun.YAML.parse(await Bun.file(join(WORKFLOWS, name)).text()) as typeof workflow;
+	} catch (error) {
+		errors.push(`  ${name}: could not be parsed as YAML — ${error instanceof Error ? error.message : error}`);
+		continue;
+	}
 
-		// The step's own block: subsequent lines indented deeper than the `- uses:`.
-		const baseIndent = (line.match(/^\s*/)?.[0] ?? "").length;
-		const block: string[] = [];
-		for (let j = i + 1; j < lines.length; j++) {
-			const next = lines[j] ?? "";
-			if (next.trim() === "") continue;
-			const indent = (next.match(/^\s*/)?.[0] ?? "").length;
-			if (indent <= baseIndent) break;
-			block.push(next);
-		}
-		const body = block.join("\n");
+	for (const [jobName, job] of Object.entries(workflow?.jobs ?? {})) {
+		const where = `  ${name} / ${jobName}`;
+		let checkedOut = false;
 
-		if (/^\s*bun-version:/m.test(body)) {
-			errors.push(
-				`${where}: pins \`bun-version:\` inline — read \`.bun-version\` via ` +
-					`\`bun-version-file: .bun-version\` so one file governs every workflow`,
-			);
-		} else if (!/^\s*bun-version-file:\s*\.bun-version\s*$/m.test(body)) {
-			errors.push(
-				`${where}: no \`bun-version-file: .bun-version\` — this step would install ` +
-					`whatever Bun is latest at run time (#148)`,
-			);
+		for (const step of job?.steps ?? []) {
+			const uses = typeof step?.uses === "string" ? step.uses : "";
+			if (uses.includes("actions/checkout")) checkedOut = true;
+			if (!uses.includes(SETUP_BUN)) continue;
+
+			// `with` is the only mapping setup-bun receives. A key anywhere else in
+			// the step (notably `env:`) is invisible to the action.
+			const inputs = step.with ?? {};
+
+			if ("bun-version" in inputs) {
+				errors.push(
+					`${where}: pins \`bun-version:\` inline — read \`.bun-version\` via ` +
+						`\`bun-version-file: .bun-version\` so one file governs every workflow`,
+				);
+			} else if (inputs["bun-version-file"] !== ".bun-version") {
+				errors.push(
+					`${where}: \`with.bun-version-file\` is ${JSON.stringify(inputs["bun-version-file"] ?? null)}, ` +
+						`expected ".bun-version" — otherwise this step installs whatever Bun is latest at run time (#148)`,
+				);
+			}
+
+			if (!checkedOut) {
+				errors.push(
+					`${where}: \`setup-bun\` runs before \`actions/checkout\`, so \`.bun-version\` ` +
+						`is not on disk when the action reads it`,
+				);
+			}
 		}
 	}
 }

@@ -18,9 +18,9 @@
  */
 
 import { describe, test, expect, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname, basename } from "node:path";
 import type { Socket } from "bun";
 import {
 	downloadToFile,
@@ -49,6 +49,22 @@ function tempDir(): string {
 	const d = mkdtempSync(join(tmpdir(), "quickchr-dl-"));
 	dirs.push(d);
 	return d;
+}
+
+/**
+ * Leftover partial files for `dest`.
+ *
+ * `downloadToFile` writes `<dest>.<pid>-<uuid8>.part`, never a fixed
+ * `<dest>.part` (see the unique-per-call note in download.ts). Asserting
+ * `existsSync(`${dest}.part`)` therefore checks a path that is never created:
+ * it cannot fail, and it passes happily while a real partial sits next to it.
+ * Every leftover assertion in this file goes through here instead.
+ */
+function leftoverParts(dest: string): string[] {
+	const dir = dirname(dest);
+	if (!existsSync(dir)) return [];
+	const prefix = `${basename(dest)}.`;
+	return readdirSync(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".part"));
 }
 
 interface StubOptions {
@@ -214,7 +230,7 @@ describe("downloadToFile — a moving transfer is never aborted for being slow",
 		await downloadToFile(url, dest, { logger: silentLogger });
 
 		expect(existsSync(dest)).toBe(true);
-		expect(existsSync(`${dest}.part`)).toBe(false);
+		expect(leftoverParts(dest)).toEqual([]);
 	});
 });
 
@@ -265,7 +281,7 @@ describe("downloadToFile — a wedged transfer fails fast and says so", () => {
 		// Both callers gate on existsSync(zipPath). A truncated file here would be
 		// served as a complete cached artifact forever.
 		expect(existsSync(dest)).toBe(false);
-		expect(existsSync(`${dest}.part`)).toBe(false);
+		expect(leftoverParts(dest)).toEqual([]);
 	}, 30_000);
 });
 
@@ -373,7 +389,7 @@ describe("downloadToFile — HTTP outcomes", () => {
 
 		expect(err.code).toBe("DOWNLOAD_FAILED");
 		expect(existsSync(dest)).toBe(false);
-		expect(existsSync(`${dest}.part`)).toBe(false);
+		expect(leftoverParts(dest)).toEqual([]);
 	}, 30_000);
 
 	test("a body with no content-length still downloads, under the stated fallback", async () => {
@@ -497,7 +513,7 @@ describe("review findings — #119", () => {
 		expect(err.code).toBe("DOWNLOAD_FAILED");
 		expect(err.message).not.toContain("4096.5");
 		expect(existsSync(dest)).toBe(false);
-		expect(existsSync(`${dest}.part`)).toBe(false);
+		expect(leftoverParts(dest)).toEqual([]);
 	}, 30_000);
 
 	test("a zero-byte body is never published to the cache path", async () => {
