@@ -535,7 +535,7 @@
 		"ts": "2026-09-18T18:03:39.552Z"
 	},
 	"35386692051": {
-		"attempt": "2",
+		"attempt": "3",
 		"complete": 0,
 		"event": "workflow_dispatch",
 		"incomplete": {
@@ -620,14 +620,14 @@
 				"why": "job ended 'success' before the suite could instrument itself"
 			},
 			"macos-arm64|stable": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 1394,
+				"job_conclusion": "success",
+				"job_elapsed_s": 1411,
 				"job_matched": true,
 				"platform": "macos-arm64",
 				"resolved": "7.24.4",
 				"target": "stable",
 				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
+				"why": "job ended 'success' before the suite could instrument itself"
 			},
 			"windows-x86|development": {
 				"job_conclusion": "success",
@@ -641,7 +641,7 @@
 			},
 			"windows-x86|long-term": {
 				"job_conclusion": "failure",
-				"job_elapsed_s": 1689,
+				"job_elapsed_s": 1631,
 				"job_matched": true,
 				"platform": "windows-x86",
 				"resolved": "7.23.7",
@@ -651,7 +651,7 @@
 			},
 			"windows-x86|stable": {
 				"job_conclusion": "failure",
-				"job_elapsed_s": 1636,
+				"job_elapsed_s": 1487,
 				"job_matched": true,
 				"platform": "windows-x86",
 				"resolved": "7.24.4",
@@ -662,6 +662,6 @@
 		},
 		"planned": 12,
 		"sha": "fa6959ab95afaf617a949f8301d697ac316b964f",
-		"ts": "2026-09-19T00:52:48.070Z"
+		"ts": "2026-09-19T01:29:28.502Z"
 	}
 }
