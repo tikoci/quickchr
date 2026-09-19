@@ -535,7 +535,7 @@
 		"ts": "2026-09-18T18:03:39.552Z"
 	},
 	"35386692051": {
-		"attempt": "1",
+		"attempt": "2",
 		"complete": 0,
 		"event": "workflow_dispatch",
 		"incomplete": {
@@ -621,7 +621,7 @@
 			},
 			"macos-arm64|stable": {
 				"job_conclusion": "failure",
-				"job_elapsed_s": 1915,
+				"job_elapsed_s": 1394,
 				"job_matched": true,
 				"platform": "macos-arm64",
 				"resolved": "7.24.4",
@@ -641,7 +641,7 @@
 			},
 			"windows-x86|long-term": {
 				"job_conclusion": "failure",
-				"job_elapsed_s": 2925,
+				"job_elapsed_s": 1689,
 				"job_matched": true,
 				"platform": "windows-x86",
 				"resolved": "7.23.7",
@@ -651,7 +651,7 @@
 			},
 			"windows-x86|stable": {
 				"job_conclusion": "failure",
-				"job_elapsed_s": 2470,
+				"job_elapsed_s": 1636,
 				"job_matched": true,
 				"platform": "windows-x86",
 				"resolved": "7.24.4",
@@ -662,6 +662,6 @@
 		},
 		"planned": 12,
 		"sha": "fa6959ab95afaf617a949f8301d697ac316b964f",
-		"ts": "2026-09-18T20:23:41.847Z"
+		"ts": "2026-09-19T00:52:48.070Z"
 	}
 }
