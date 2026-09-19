@@ -161,9 +161,11 @@ describe("waitForAuth", () => {
 				res.end(JSON.stringify({ "board-name": "CHR" }));
 			},
 			async (port) => {
-				const { attempts, elapsedMs } = await waitForAuth(port, "Basic test", 5_000);
+				// Assert the attempt count only. A wall-clock upper bound here would
+				// be the very mistake this wait was built around — and under CI
+				// scheduler load it could fail without any retry having happened.
+				const { attempts } = await waitForAuth(port, "Basic test", 5_000);
 				expect(attempts).toBe(1);
-				expect(elapsedMs).toBeLessThan(250);
 			},
 		);
 	});
