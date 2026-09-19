@@ -535,7 +535,7 @@
 		"ts": "2026-09-18T18:03:39.552Z"
 	},
 	"35386692051": {
-		"attempt": "3",
+		"attempt": "4",
 		"complete": 0,
 		"event": "workflow_dispatch",
 		"incomplete": {
@@ -641,7 +641,7 @@
 			},
 			"windows-x86|long-term": {
 				"job_conclusion": "failure",
-				"job_elapsed_s": 1631,
+				"job_elapsed_s": 1716,
 				"job_matched": true,
 				"platform": "windows-x86",
 				"resolved": "7.23.7",
@@ -651,7 +651,7 @@
 			},
 			"windows-x86|stable": {
 				"job_conclusion": "failure",
-				"job_elapsed_s": 1487,
+				"job_elapsed_s": 1580,
 				"job_matched": true,
 				"platform": "windows-x86",
 				"resolved": "7.24.4",
@@ -662,6 +662,6 @@
 		},
 		"planned": 12,
 		"sha": "fa6959ab95afaf617a949f8301d697ac316b964f",
-		"ts": "2026-09-19T01:29:28.502Z"
+		"ts": "2026-09-19T03:37:47.446Z"
 	}
 }
