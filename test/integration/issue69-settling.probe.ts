@@ -18,6 +18,18 @@ import { imageTarget } from "./image-target.ts";
  *   gh workflow run integration.yml --ref <branch> \
  *     -f platforms=linux-arm64 -f test-filter=issue69-settling.probe.ts \
  *     -f run-examples=false
+ *
+ * **Reading its output after the credential-propagation fix.** `createUser()`
+ * now waits for its own credentials to authenticate before resolving, so the
+ * `new-user-resource` probes below run *after* that wait and no longer see the
+ * 401 window they were written to catch. A clean run here is therefore not
+ * evidence the window closed — only that `createUser()` absorbs it. The window
+ * itself is measured directly in `credential-propagation.test.ts`.
+ *
+ * This probe is still the instrument for the other half of #69: the
+ * `ECONNRESET` variant on linux-arm64, where the connection dies rather than
+ * the credentials being rejected. That is what its TCP loop, QEMU load
+ * sampling and console diagnostics are for, and none of it is affected.
  */
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;

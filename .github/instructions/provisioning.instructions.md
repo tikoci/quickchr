@@ -314,3 +314,67 @@ arm64/TCG reproduced a 5s timeout followed by a 200 response containing the exac
 `installSshKey` therefore gives the listing check one 30s convergence budget and lets
 each request use the full remaining budget. Do not restore a shorter per-request cap:
 repeatedly aborting the cold request recreates the false install failure.
+
+## `createUser()` resolves on authentication, not on visibility
+
+`createUser()` waits for two separate facts, in order:
+
+1. the record is visible in `/rest/user` (polled as `admin`, with the group checked);
+2. the new credentials are **accepted** — `waitForAuth()` polls `/rest/system/resource`
+   with that user's own basic auth until it returns 2xx, and reports
+   `{ attempts, elapsedMs }`.
+
+Only the second is what callers rely on, so it is the one the function promises.
+Do not "simplify" this back to the visibility check: the second wait is a no-op
+whenever the guest is healthy, and the whole point is the case where it is not.
+
+`waitForAuth()` is deliberately the inverse of `waitForBoot()`, which counts
+401/403 as **ready** — correct for a liveness probe, where an auth rejection
+still proves `www` is answering, and wrong here, where the 401 is the thing
+being waited out. Keep both; they answer different questions.
+
+### This is hardening and an instrument, not a proven fix for #69
+
+The symptom is a 401 on the first request made with freshly created credentials:
+four Windows legs across runs 35135008624 and 35386692051, always on the path
+that passes an explicit `user:` and therefore does nothing between
+`createUser()` returning and that request. The tests that happen to insert work
+in that position — `disableAdmin: true`, whose lookup loop retries for up to
+15 s, and the `secureLogin` path, with its `Bun.sleep(1000)` and SSH key
+install — stayed green on the same legs in the same runs.
+
+**That correlation is not evidence of a timing window, and a local attempt to
+find one failed.** On an Intel host against CHR 7.24.4 (x86 guest), a freshly
+added user was accepted on **attempt #1, 6/6**, under both TCG and HVF. There
+was no window to lose. Whatever produces the Windows 401 is still unidentified;
+`waitForAuth()` closes it if it is a timing window and produces a labelled
+failure if it is not, which is strictly better than the bare 401 either way.
+
+### Measuring this: count attempts, never elapsed time
+
+An earlier version of this investigation reported a "250–400 ms propagation
+window" on both accelerators, 8/8. It was an artifact of the measurement:
+
+- two pollers (record-visible as `admin`, auth-accepted as the new user) ran
+  **concurrently** against one emulated guest and slowed each other down;
+- each recorded `Date.now()` **after** its request returned, so a first request
+  that succeeded but took 350 ms was recorded as a 350 ms wait.
+
+Re-measured sequentially and by attempt count, the "window" disappeared: one
+attempt, always. The ~250 ms (HVF) / ~350 ms (TCG) figure is simply what a first
+authentication with a new password costs on an emulated guest — request latency,
+which scales with the accelerator exactly as observed, and which no amount of
+waiting reduces.
+
+**Rule: an attempt count cannot be inflated by request latency; an elapsed-time
+figure can.** On an emulated guest, where a single round-trip can cost hundreds
+of milliseconds, report attempts and treat any latency-derived "delay" as
+suspect until a sequential re-measurement confirms it.
+
+`waitForAuth()` returns `{ attempts, elapsedMs }` for exactly this reason, and
+`attempts` is the load-bearing half. Running the provisioning suite with
+`QUICKCHR_DEBUG=1` prints one line per created user; a full local pass recorded
+`1 attempt(s)` for all 7 with elapsed figures from 7 ms to 690 ms. Those
+hundreds of milliseconds are what a first authentication costs, not a wait —
+which is precisely why an elapsed-only reading of the same run looked like a
+600–900 ms propagation window and was not one. **Read the attempt count.**

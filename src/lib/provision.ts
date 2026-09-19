@@ -67,12 +67,74 @@ async function waitForRest(
 	}
 }
 
+/** Wait until RouterOS actually accepts `auth`, returning how long that took.
+ *
+ * Deliberately *not* `waitForBoot()`: that one counts 401/403 as ready, because
+ * for a liveness probe an auth rejection still proves `www` is answering. Here
+ * a 401 is the thing being waited out, so it needs the opposite predicate.
+ *
+ * **This is hardening and an instrument, not a proven fix for #69.** The known
+ * symptom is a 401 on the first request made with freshly created credentials —
+ * four Windows CI legs across runs 35135008624 and 35386692051, always on the
+ * path that does no work between `createUser()` and that request. A local
+ * attempt to reproduce it found no window to close: on an Intel host against
+ * CHR 7.24.4 (x86 guest), a new user authenticated on attempt #1, 6/6, under
+ * both TCG and HVF. So the cause of the CI 401 is still open, and this wait
+ * does not claim to explain it.
+ *
+ * What it does buy: `createUser()` can no longer resolve while its own
+ * credentials are rejected, and the outcome is measured either way. If the CI
+ * 401 is any kind of timing window, this closes it *and* the returned figure
+ * says how wide it was on that platform — which is the quantification #69 asks
+ * for. If it is not a timing window, the wait exhausts its budget and fails
+ * saying so, which is a far stronger signal than today's bare 401.
+ *
+ * Reports `attempts` alongside `elapsedMs`, and **`attempts` is the load-bearing
+ * number**. Elapsed time cannot tell a retry from a slow request: a first
+ * authentication with a new password costs a few hundred ms of ordinary request
+ * latency on an emulated guest, so an elapsed-only figure reads as a wait when
+ * nothing waited. `attempts === 1` means there was no window, whatever the
+ * clock says. (This is not hypothetical — it is the error the first pass at
+ * this investigation made; see `provisioning.instructions.md`.) */
+export async function waitForAuth(
+	httpPort: number,
+	auth: string,
+	timeoutMs: number = 30_000,
+): Promise<{ attempts: number; elapsedMs: number }> {
+	const url = `http://127.0.0.1:${httpPort}/rest/system/resource`;
+	const start = Date.now();
+	const deadline = start + timeoutMs;
+	let lastStatus: number | undefined;
+	let attempts = 0;
+
+	while (Date.now() < deadline) {
+		attempts++;
+		try {
+			const { status } = await restGet(url, auth, 5_000);
+			if (status >= 200 && status < 300) return { attempts, elapsedMs: Date.now() - start };
+			// 401/403 is the propagation window. 5xx also occurs briefly after a
+			// user-database change, and is equally transient, so both are polled
+			// out rather than one being singled out as "the" expected status.
+			lastStatus = status;
+		} catch { /* transport error mid-transition — keep polling */ }
+		await Bun.sleep(250);
+	}
+
+	throw new QuickCHRError(
+		"PROCESS_FAILED",
+		`Credentials were not accepted within ${timeoutMs}ms over ${attempts} attempt(s) ` +
+		`(last HTTP status: ${lastStatus ?? "no response"}) — ` +
+		"the user record exists but RouterOS is not authenticating it",
+	);
+}
+
 /** Create a user via the REST API. */
 export async function createUser(
 	httpPort: number,
 	name: string,
 	password: string,
 	group: string = "full",
+	logger?: ProgressLogger,
 ): Promise<void> {
 	await waitForRest(httpPort);
 
@@ -110,6 +172,21 @@ export async function createUser(
 						`User "${name}" created with unexpected group (expected=${expectedGroup}, actual=${actualGroup})`,
 					);
 				}
+				// "Visible in /rest/user" was the whole done-when here, which is a
+				// weaker promise than every caller actually relies on: they use the
+				// credentials next. Whether those two facts can diverge on the CI
+				// Windows legs is exactly #69's open question, so the stronger
+				// predicate is asserted rather than assumed.
+				const { attempts, elapsedMs } = await waitForAuth(
+					httpPort,
+					`Basic ${btoa(`${name}:${password}`)}`,
+				);
+				// attempts is the signal; elapsedMs alone cannot separate a retry
+				// from a slow first authentication on an emulated guest.
+				logger?.debug(
+					`user "${name}" accepted after ${attempts} attempt(s), ${elapsedMs}ms` +
+					(attempts > 1 ? " — credentials were REJECTED before being accepted (#69)" : ""),
+				);
 				return;
 			}
 		} catch (e) {
@@ -609,7 +686,7 @@ export async function provision(
 	// REST provisioning path. The console fallback above always returns early,
 	// so reaching here means REST came up and we provision over it.
 	if (effectiveUser) {
-		await createUser(httpPort, effectiveUser.name, effectiveUser.password);
+		await createUser(httpPort, effectiveUser.name, effectiveUser.password, "full", log);
 		// Persist to secret store so resolveAuth() picks it up
 		saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
 	}

@@ -21,6 +21,7 @@ addrs
 aehd
 ahostsv
 amm
+anchoruser
 apfs
 apk
 apkindex
@@ -473,6 +474,7 @@ whatwg
 whpx
 wifibridge
 winbox
+windowuser
 winget
 winsock
 wintun
