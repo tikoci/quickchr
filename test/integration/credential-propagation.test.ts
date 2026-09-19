@@ -28,7 +28,8 @@ import { restGet, restPost } from "../../src/lib/rest.ts";
  *    the number is evidence for #69/#110, and pinning a threshold would turn
  *    guest timing drift into an unrelated red test.
  *
- * Requires QEMU. Skipped unless QUICKCHR_INTEGRATION=1.
+ * Requires QEMU. Runs only when QUICKCHR_INTEGRATION is set (any value,
+ * including `0` — the gate tests presence, not truthiness).
  */
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
@@ -107,6 +108,9 @@ describe.skipIf(SKIP)("credential propagation", () => {
 				}
 				if (firstStatuses.length < 5) firstStatuses.push(status);
 				if (status === 200) { accepted = true; break; }
+				// Same 250 ms cadence as waitForAuth(). Back-to-back requests for
+				// 30 s would load the guest whose behaviour is being measured.
+				await Bun.sleep(250);
 			}
 
 			console.log(

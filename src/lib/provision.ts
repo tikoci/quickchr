@@ -109,8 +109,11 @@ export async function waitForAuth(
 
 	while (Date.now() < deadline) {
 		attempts++;
+		// Bound each request by what is left of the budget, so a stalled request
+		// cannot push the whole wait past the deadline it advertises.
+		const remaining = deadline - Date.now();
 		try {
-			const { status } = await restGet(url, auth, 5_000);
+			const { status } = await restGet(url, auth, Math.min(5_000, remaining));
 			if (status >= 200 && status < 300) return { attempts, elapsedMs: Date.now() - start };
 			// 401/403 is the propagation window. 5xx also occurs briefly after a
 			// user-database change, and is equally transient, so both are polled
@@ -135,6 +138,9 @@ export async function createUser(
 	password: string,
 	group: string = "full",
 	logger?: ProgressLogger,
+	/** Budget for the post-visibility authentication wait. Injectable so tests
+	 *  can exercise the failure path without burning the 30 s default. */
+	authTimeoutMs: number = 30_000,
 ): Promise<void> {
 	await waitForRest(httpPort);
 
@@ -157,6 +163,7 @@ export async function createUser(
 	// Verify visibility (and group) so callers get deterministic behavior.
 	const expectedGroup = group.trim().toLowerCase();
 	const deadline = Date.now() + 30_000;
+	let visible = false;
 	while (Date.now() < deadline) {
 		try {
 			const user = await readUser(httpPort, auth, name);
@@ -172,22 +179,8 @@ export async function createUser(
 						`User "${name}" created with unexpected group (expected=${expectedGroup}, actual=${actualGroup})`,
 					);
 				}
-				// "Visible in /rest/user" was the whole done-when here, which is a
-				// weaker promise than every caller actually relies on: they use the
-				// credentials next. Whether those two facts can diverge on the CI
-				// Windows legs is exactly #69's open question, so the stronger
-				// predicate is asserted rather than assumed.
-				const { attempts, elapsedMs } = await waitForAuth(
-					httpPort,
-					`Basic ${btoa(`${name}:${password}`)}`,
-				);
-				// attempts is the signal; elapsedMs alone cannot separate a retry
-				// from a slow first authentication on an emulated guest.
-				logger?.debug(
-					`user "${name}" accepted after ${attempts} attempt(s), ${elapsedMs}ms` +
-					(attempts > 1 ? " — credentials were REJECTED before being accepted (#69)" : ""),
-				);
-				return;
+				visible = true;
+				break;
 			}
 		} catch (e) {
 			// Rethrow deliberate group mismatch errors; retry transient HTTP failures
@@ -197,9 +190,32 @@ export async function createUser(
 		await Bun.sleep(500);
 	}
 
-	throw new QuickCHRError(
-		"PROCESS_FAILED",
-		`User "${name}" creation was acknowledged but did not become visible in RouterOS`,
+	if (!visible) {
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`User "${name}" creation was acknowledged but did not become visible in RouterOS`,
+		);
+	}
+
+	// Deliberately outside the loop above. waitForAuth() throws a QuickCHRError,
+	// and that catch swallows every QuickCHRError except the group mismatch — so
+	// running it inside would discard the one diagnostic this wait exists to
+	// produce and report "did not become visible" for a user that plainly is.
+	//
+	// "Visible in /rest/user" was the whole done-when here, which is a weaker
+	// promise than every caller relies on: they use the credentials next.
+	const { attempts, elapsedMs } = await waitForAuth(
+		httpPort,
+		`Basic ${btoa(`${name}:${password}`)}`,
+		authTimeoutMs,
+	);
+	// attempts is the signal; elapsedMs alone cannot separate a retry from a slow
+	// first authentication on an emulated guest. The earlier attempts are only
+	// known to have not-succeeded — waitForAuth also polls through 5xx and
+	// transport errors — so they are not reported as rejections.
+	logger?.debug(
+		`user "${name}" accepted after ${attempts} attempt(s), ${elapsedMs}ms` +
+		(attempts > 1 ? ` — ${attempts - 1} earlier probe(s) did not succeed (#69)` : ""),
 	);
 }
 

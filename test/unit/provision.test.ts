@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createServer } from "node:http";
-import { matchesManagedSshKey, opensshSha256Fingerprint, SSH_NULL_DEVICE, waitForAuth, waitForManagedSshKeyListing } from "../../src/lib/provision.ts";
+import { createUser, matchesManagedSshKey, opensshSha256Fingerprint, SSH_NULL_DEVICE, waitForAuth, waitForManagedSshKeyListing } from "../../src/lib/provision.ts";
 
 // cspell:ignore NUL
 const ED25519_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM7qj0C9zOslwAKpRuQxpmMlVSBKczuqv+T71uMhQ/w7 quickchr@test";
@@ -240,4 +240,83 @@ describe("waitForAuth", () => {
 			},
 		);
 	});
+});
+
+describe("createUser authentication gate", () => {
+	/** A CHR-shaped mock: /user/add succeeds, /rest/user lists the user, and
+	 *  /system/resource answers with `authStatus` for the new credentials. */
+	function chrMock(authStatus: number, opts: { acceptAfter?: number } = {}) {
+		let authCalls = 0;
+		const server = createServer((req, res) => {
+			const url = req.url ?? "";
+			if (url.includes("/user/add")) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end("{}");
+			} else if (url.includes("/rest/user")) {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify([{ name: "newbie", group: "full", ".id": "*9" }]));
+			} else {
+				// Count only probes carrying the NEW user's credentials. waitForRest()
+				// polls this same endpoint as admin first, and folding those in would
+				// make the assertion below measure boot probes as well as auth ones.
+				const isNewUser = (req.headers.authorization ?? "") === `Basic ${btoa("newbie:Pw1")}`;
+				if (!isNewUser) {
+					res.writeHead(200, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ "board-name": "CHR" }));
+					return;
+				}
+				authCalls++;
+				if (opts.acceptAfter !== undefined && authCalls > opts.acceptAfter) {
+					res.writeHead(200, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ "board-name": "CHR" }));
+					return;
+				}
+				res.writeHead(authStatus);
+				res.end("");
+			}
+		});
+		return { server, authCalls: () => authCalls };
+	}
+
+	async function withMock(
+		mock: ReturnType<typeof chrMock>,
+		fn: (port: number) => Promise<void>,
+	): Promise<void> {
+		await new Promise<void>((resolve) => mock.server.listen(0, "127.0.0.1", resolve));
+		try {
+			const address = mock.server.address();
+			if (!address || typeof address === "string") throw new Error("Expected TCP server address");
+			await fn(address.port);
+		} finally {
+			await new Promise<void>((resolve, reject) => mock.server.close((e) => e ? reject(e) : resolve()));
+		}
+	}
+
+	test("surfaces the authentication failure, not 'did not become visible'", async () => {
+		// Regression guard. waitForAuth() throws a QuickCHRError, and the
+		// visibility loop's catch swallows every QuickCHRError but the group
+		// mismatch — so running the wait inside that loop discarded the real
+		// diagnostic and blamed visibility for a user that was plainly visible.
+		const mock = chrMock(401);
+		await withMock(mock, async (port) => {
+			let message = "";
+			try {
+				await createUser(port, "newbie", "Pw1", "full", undefined, 600);
+				throw new Error("createUser should have rejected");
+			} catch (e) {
+				message = e instanceof Error ? e.message : String(e);
+			}
+			expect(message).toMatch(/not authenticating it/);
+			expect(message).not.toMatch(/did not become visible/);
+			expect(message).toMatch(/attempt\(s\)/);
+		});
+	}, 20_000);
+
+	test("returns once the credentials start working", async () => {
+		const mock = chrMock(401, { acceptAfter: 2 });
+		await withMock(mock, async (port) => {
+			await createUser(port, "newbie", "Pw1", "full", undefined, 5_000);
+			expect(mock.authCalls()).toBe(3);
+		});
+	}, 20_000);
 });
