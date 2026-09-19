@@ -333,6 +333,38 @@ whenever the guest is healthy, and the whole point is the case where it is not.
 still proves `www` is answering, and wrong here, where the 401 is the thing
 being waited out. Keep both; they answer different questions.
 
+### Only the `full` group is REST-verifiable — authentication vs authorization
+
+The gate runs for `full` and is skipped for every other group, because outside
+`full` a 2xx answer is not something a correctly created user can be expected to
+produce. RouterOS treats `rest-api`, `read` and `web` as independent policies,
+and a valid user in a limited group fails the probe permanently.
+
+Measured on CHR 7.24.4 — one user per group, `GET /rest/system/resource` as that
+user:
+
+| group policy | result |
+|---|---|
+| `local,ssh,winbox,read` (no `rest-api`) | **401 Unauthorized** |
+| `local,ssh,winbox,rest-api,write` (no `read`) | **500** `std failure: not allowed (9)` |
+| `local,winbox,rest-api,read` (no `web`) | **500** `std failure: not allowed (9)` |
+| default `read` / `write` / `full` | 200 |
+
+Two consequences, both load-bearing:
+
+- **The 401 is byte-identical to #69's symptom.** No amount of polling can
+  distinguish an unauthorized user from a credential that has not propagated, so the gate
+  cannot be made "smart" about it — it has to not run.
+- **The 500 is permanent, and `waitForAuth()` polls through 5xx** (correct for
+  the post-boot race documented above, wrong here). A gated limited user would
+  burn the full budget and then fail as "not authenticating" despite having been
+  created correctly.
+
+`provision()` only ever creates `full`, so this costs nothing on the shipped
+path. Note `rest-api` alone is not sufficient — the third row has both
+`rest-api` and `read` and still fails; `web` appears to be required as well,
+which is why the rule is "the `full` group" rather than a policy checklist.
+
 ### This is hardening and an instrument, not a proven fix for #69
 
 The symptom is a 401 on the first request made with freshly created credentials:

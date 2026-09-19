@@ -82,8 +82,10 @@ async function waitForRest(
  * both TCG and HVF. So the cause of the CI 401 is still open, and this wait
  * does not claim to explain it.
  *
- * What it does buy: `createUser()` can no longer resolve while its own
- * credentials are rejected, and the outcome is measured either way. If the CI
+ * What it does buy: `createUser()` can no longer resolve while a `full`-group
+ * user's own credentials are rejected, and the outcome is measured either way.
+ * (Limited groups are exempt — see the table at the call site: a valid user
+ * without `rest-api` answers 401, which is indistinguishable from the symptom.) If the CI
  * 401 is any kind of timing window, this closes it *and* the returned figure
  * says how wide it was on that platform — which is the quantification #69 asks
  * for. If it is not a timing window, the wait exhausts its budget and fails
@@ -195,6 +197,32 @@ export async function createUser(
 			"PROCESS_FAILED",
 			`User "${name}" creation was acknowledged but did not become visible in RouterOS`,
 		);
+	}
+
+	// Only the `full` group is gated, because only there does "the probe answers
+	// 2xx" mean "the credentials work". RouterOS separates authentication from
+	// authorization, and a correctly created user in a limited group cannot
+	// answer this probe at all. Measured on CHR 7.24.4 by creating one user per
+	// group and issuing GET /rest/system/resource as that user:
+	//
+	//   group policy                              | status
+	//   ------------------------------------------|---------------------------
+	//   local,ssh,winbox,read      (no rest-api)   | 401 Unauthorized
+	//   local,ssh,winbox,rest-api,write (no read)  | 500 std failure: not allowed (9)
+	//   local,winbox,rest-api,read (no web)        | 500 std failure: not allowed (9)
+	//   read / write / full (defaults)             | 200
+	//
+	// The 401 is byte-identical to #69's symptom, so no amount of polling can
+	// tell an unauthorized user from a credential that has not propagated, and the 500 is
+	// a permanent condition this wait would poll through to its deadline. Gating
+	// those would turn a correctly created user into a 30 s stall and a false
+	// "not authenticating" failure. `provision()` only ever creates `full`.
+	if (expectedGroup !== "full") {
+		logger?.debug(
+			`user "${name}" created in group "${group}" — authentication gate skipped: ` +
+			"only the full group is known to be REST-verifiable",
+		);
+		return;
 	}
 
 	// Deliberately outside the loop above. waitForAuth() throws a QuickCHRError,

@@ -247,8 +247,9 @@ describe("waitForAuth", () => {
 describe("createUser authentication gate", () => {
 	/** A CHR-shaped mock: /user/add succeeds, /rest/user lists the user, and
 	 *  /system/resource answers with `authStatus` for the new credentials. */
-	function chrMock(authStatus: number, opts: { acceptAfter?: number } = {}) {
+	function chrMock(authStatus: number, opts: { acceptAfter?: number; group?: string } = {}) {
 		let authCalls = 0;
+		const group = opts.group ?? "full";
 		const server = createServer((req, res) => {
 			const url = req.url ?? "";
 			if (url.includes("/user/add")) {
@@ -256,7 +257,7 @@ describe("createUser authentication gate", () => {
 				res.end("{}");
 			} else if (url.includes("/rest/user")) {
 				res.writeHead(200, { "Content-Type": "application/json" });
-				res.end(JSON.stringify([{ name: "newbie", group: "full", ".id": "*9" }]));
+				res.end(JSON.stringify([{ name: "newbie", group, ".id": "*9" }]));
 			} else {
 				// Count only probes carrying the NEW user's credentials. waitForRest()
 				// polls this same endpoint as admin first, and folding those in would
@@ -312,6 +313,23 @@ describe("createUser authentication gate", () => {
 			expect(message).not.toMatch(/did not become visible/);
 			expect(message).toMatch(/attempt\(s\)/);
 		});
+	}, 20_000);
+
+	test("does not gate a valid non-full group that cannot answer the probe", async () => {
+		// RouterOS separates authentication from authorization. Measured on CHR
+		// 7.24.4: a group without `rest-api` answers GET /rest/system/resource
+		// with 401 — byte-identical to #69's symptom — and one lacking `read`
+		// or `web` answers HTTP 500 "std failure: not allowed (9)". Both are
+		// permanent, so gating a limited group would stall for the whole budget
+		// and then fail a user that was created correctly.
+		for (const [group, status] of [["read", 401], ["readonly-custom", 500]] as const) {
+			const mock = chrMock(status, { group });
+			await withMock(mock, async (port) => {
+				await createUser(port, "newbie", "Pw1", group, undefined, 600);
+				// Not merely "did not throw": the gate must not have run at all.
+				expect(mock.authCalls()).toBe(0);
+			});
+		}
 	}, 20_000);
 
 	test("returns once the credentials start working", async () => {
