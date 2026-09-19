@@ -18,6 +18,21 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Changed
 
+- `createUser()` now resolves only once the credentials it created are actually
+  accepted, instead of once the user record is visible in `/rest/user`. Callers
+  that use a new user immediately — which is every caller — were relying on the
+  stronger fact while the function only promised the weaker one. A new
+  `waitForAuth()` in `src/lib/provision.ts` polls for the stronger one — a
+  module export alongside `createUser()`, not part of the `@tikoci/quickchr`
+  barrel — and reports
+  `{ attempts, elapsedMs }`; `QUICKCHR_DEBUG=1` logs one line per created user.
+  Hardening for #69, not a proven fix for it: the Windows 401 that prompted this
+  did not reproduce locally, where every fresh user was accepted on the first
+  attempt under both TCG and HVF. The wait applies to the `full` group only:
+  RouterOS separates authentication from authorization, and a valid user in a
+  limited group answers the probe with 401 (no `rest-api`) or HTTP 500 (no
+  `read`/`web`), so gating those would fail a correctly created user.
+
 - CI owners now prefetch and verify a declared image-and-package manifest in a
   named, separately timed step, then save the immutable v5 cache before tests.
   Restore-key extras are reconciled away so old targets cannot accumulate until

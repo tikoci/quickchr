@@ -67,12 +67,82 @@ async function waitForRest(
 	}
 }
 
+/** Wait until RouterOS actually accepts `auth`, returning how long that took.
+ *
+ * Deliberately *not* `waitForBoot()`: that one counts 401/403 as ready, because
+ * for a liveness probe an auth rejection still proves `www` is answering. Here
+ * a 401 is the thing being waited out, so it needs the opposite predicate.
+ *
+ * **This is hardening and an instrument, not a proven fix for #69.** The known
+ * symptom is a 401 on the first request made with freshly created credentials —
+ * four Windows CI legs across runs 35135008624 and 35386692051, always on the
+ * path that does no work between `createUser()` and that request. A local
+ * attempt to reproduce it found no window to close: on an Intel host against
+ * CHR 7.24.4 (x86 guest), a new user authenticated on attempt #1, 6/6, under
+ * both TCG and HVF. So the cause of the CI 401 is still open, and this wait
+ * does not claim to explain it.
+ *
+ * What it does buy: `createUser()` can no longer resolve while a `full`-group
+ * user's own credentials are rejected, and the outcome is measured either way.
+ * (Limited groups are exempt — see the table at the call site: a valid user
+ * without `rest-api` answers 401, which is indistinguishable from the symptom.) If the CI
+ * 401 is any kind of timing window, this closes it *and* the returned figure
+ * says how wide it was on that platform — which is the quantification #69 asks
+ * for. If it is not a timing window, the wait exhausts its budget and fails
+ * saying so, which is a far stronger signal than today's bare 401.
+ *
+ * Reports `attempts` alongside `elapsedMs`, and **`attempts` is the load-bearing
+ * number**. Elapsed time cannot tell a retry from a slow request: a first
+ * authentication with a new password costs a few hundred ms of ordinary request
+ * latency on an emulated guest, so an elapsed-only figure reads as a wait when
+ * nothing waited. `attempts === 1` means there was no window, whatever the
+ * clock says. (This is not hypothetical — it is the error the first pass at
+ * this investigation made; see `provisioning.instructions.md`.) */
+export async function waitForAuth(
+	httpPort: number,
+	auth: string,
+	timeoutMs: number = 30_000,
+): Promise<{ attempts: number; elapsedMs: number }> {
+	const url = `http://127.0.0.1:${httpPort}/rest/system/resource`;
+	const start = Date.now();
+	const deadline = start + timeoutMs;
+	let lastStatus: number | undefined;
+	let attempts = 0;
+
+	while (Date.now() < deadline) {
+		attempts++;
+		// Bound each request by what is left of the budget, so a stalled request
+		// cannot push the whole wait past the deadline it advertises.
+		const remaining = deadline - Date.now();
+		try {
+			const { status } = await restGet(url, auth, Math.min(5_000, remaining));
+			if (status >= 200 && status < 300) return { attempts, elapsedMs: Date.now() - start };
+			// 401/403 is the propagation window. 5xx also occurs briefly after a
+			// user-database change, and is equally transient, so both are polled
+			// out rather than one being singled out as "the" expected status.
+			lastStatus = status;
+		} catch { /* transport error mid-transition — keep polling */ }
+		await Bun.sleep(250);
+	}
+
+	throw new QuickCHRError(
+		"PROCESS_FAILED",
+		`Credentials were not accepted within ${timeoutMs}ms over ${attempts} attempt(s) ` +
+		`(last HTTP status: ${lastStatus ?? "no response"}) — ` +
+		"the user record exists but RouterOS is not authenticating it",
+	);
+}
+
 /** Create a user via the REST API. */
 export async function createUser(
 	httpPort: number,
 	name: string,
 	password: string,
 	group: string = "full",
+	logger?: ProgressLogger,
+	/** Budget for the post-visibility authentication wait. Injectable so tests
+	 *  can exercise the failure path without burning the 30 s default. */
+	authTimeoutMs: number = 30_000,
 ): Promise<void> {
 	await waitForRest(httpPort);
 
@@ -95,6 +165,7 @@ export async function createUser(
 	// Verify visibility (and group) so callers get deterministic behavior.
 	const expectedGroup = group.trim().toLowerCase();
 	const deadline = Date.now() + 30_000;
+	let visible = false;
 	while (Date.now() < deadline) {
 		try {
 			const user = await readUser(httpPort, auth, name);
@@ -110,7 +181,8 @@ export async function createUser(
 						`User "${name}" created with unexpected group (expected=${expectedGroup}, actual=${actualGroup})`,
 					);
 				}
-				return;
+				visible = true;
+				break;
 			}
 		} catch (e) {
 			// Rethrow deliberate group mismatch errors; retry transient HTTP failures
@@ -120,9 +192,58 @@ export async function createUser(
 		await Bun.sleep(500);
 	}
 
-	throw new QuickCHRError(
-		"PROCESS_FAILED",
-		`User "${name}" creation was acknowledged but did not become visible in RouterOS`,
+	if (!visible) {
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`User "${name}" creation was acknowledged but did not become visible in RouterOS`,
+		);
+	}
+
+	// Only the `full` group is gated, because only there does "the probe answers
+	// 2xx" mean "the credentials work". RouterOS separates authentication from
+	// authorization, and a correctly created user in a limited group cannot
+	// answer this probe at all. Measured on CHR 7.24.4 by creating one user per
+	// group and issuing GET /rest/system/resource as that user:
+	//
+	//   group policy                              | status
+	//   ------------------------------------------|---------------------------
+	//   local,ssh,winbox,read      (no rest-api)   | 401 Unauthorized
+	//   local,ssh,winbox,rest-api,write (no read)  | 500 std failure: not allowed (9)
+	//   local,winbox,rest-api,read (no web)        | 500 std failure: not allowed (9)
+	//   read / write / full (defaults)             | 200
+	//
+	// The 401 is byte-identical to #69's symptom, so no amount of polling can
+	// tell an unauthorized user from a credential that has not propagated, and the 500 is
+	// a permanent condition this wait would poll through to its deadline. Gating
+	// those would turn a correctly created user into a 30 s stall and a false
+	// "not authenticating" failure. `provision()` only ever creates `full`.
+	if (expectedGroup !== "full") {
+		logger?.debug(
+			`user "${name}" created in group "${group}" — authentication gate skipped: ` +
+			"only the full group is known to be REST-verifiable",
+		);
+		return;
+	}
+
+	// Deliberately outside the loop above. waitForAuth() throws a QuickCHRError,
+	// and that catch swallows every QuickCHRError except the group mismatch — so
+	// running it inside would discard the one diagnostic this wait exists to
+	// produce and report "did not become visible" for a user that plainly is.
+	//
+	// "Visible in /rest/user" was the whole done-when here, which is a weaker
+	// promise than every caller relies on: they use the credentials next.
+	const { attempts, elapsedMs } = await waitForAuth(
+		httpPort,
+		`Basic ${btoa(`${name}:${password}`)}`,
+		authTimeoutMs,
+	);
+	// attempts is the signal; elapsedMs alone cannot separate a retry from a slow
+	// first authentication on an emulated guest. The earlier attempts are only
+	// known to have not-succeeded — waitForAuth also polls through 5xx and
+	// transport errors — so they are not reported as rejections.
+	logger?.debug(
+		`user "${name}" accepted after ${attempts} attempt(s), ${elapsedMs}ms` +
+		(attempts > 1 ? ` — ${attempts - 1} earlier probe(s) did not succeed (#69)` : ""),
 	);
 }
 
@@ -609,7 +730,7 @@ export async function provision(
 	// REST provisioning path. The console fallback above always returns early,
 	// so reaching here means REST came up and we provision over it.
 	if (effectiveUser) {
-		await createUser(httpPort, effectiveUser.name, effectiveUser.password);
+		await createUser(httpPort, effectiveUser.name, effectiveUser.password, "full", log);
 		// Persist to secret store so resolveAuth() picks it up
 		saveInstanceCredentials(machineName, effectiveUser.name, effectiveUser.password);
 	}
