@@ -6,7 +6,7 @@
 import type { StartOptions, Arch, Channel, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
-import { ADD_FLAGS, START_FLAGS, unknownFlags, unknownFlagMessage } from "./flags.ts";
+import { ADD_FLAGS, START_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
 import { CENTRS_EXEC_TIP, CENTRS_SEE_ALSO, tip, tipsForError } from "./tips.ts";
 import {
 	MIN_PROVISION_VERSION,
@@ -131,9 +131,17 @@ function rejectUnknownFlags(
 	command: string,
 ): void {
 	const unknown = unknownFlags(flags, known);
-	if (unknown.length === 0) return;
-	console.error(unknownFlagMessage(unknown, command));
-	process.exit(1);
+	if (unknown.length > 0) {
+		console.error(unknownFlagMessage(unknown, command));
+		process.exit(1);
+	}
+	// A known flag given without its value is the same hazard wearing a valid name:
+	// `add --name --version 7.24.3` would otherwise create an auto-named machine.
+	const valueless = valuelessFlags(flags, known);
+	if (valueless.length > 0) {
+		console.error(valuelessFlagMessage(valueless, command));
+		process.exit(1);
+	}
 }
 
 /** True when interactive prompts must be suppressed (e.g. LLM / CI / pipe). */

@@ -40,6 +40,18 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   ignoring it, with a "did you mean" suggestion for a near miss. A typo that
   downloads 43 MB and creates a machine is not a good default. (#156)
 
+- `quickchr remove ..` deleted the entire data directory — every machine, the image
+  cache and the socket registry — and reported success. `join(machinesDir, "..")`
+  normalizes to the data dir, which exists and holds no `machine.json`, so the orphan
+  check took it for a half-created machine. Names that are not usable path segments
+  (empty, `.`, `..`, or containing a separator) are now rejected before any path is
+  derived from them, at every site that deletes. Introduced with the orphan recovery
+  below and caught in review before release.
+
+- A known flag given without its value is an error rather than a silent default.
+  `quickchr add --name --version 7.24.3` parsed `--name` as a boolean, dropped it,
+  and created an auto-named machine. (#156)
+
 - Machine and named-socket names are validated before anything is written: no
   leading `-`, and letters, digits, dot, underscore and hyphen only. Both become a
   path segment under the data dir, so this also closes a path-traversal hole in

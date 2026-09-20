@@ -186,6 +186,26 @@ describe("an orphan directory is recoverable (#155)", () => {
 		expect(result.stderr).toContain("Leftover directories");
 	});
 
+	test("a traversal name never deletes outside machines/<name>/", async () => {
+		// `remove ..` used to resolve to the data directory itself and delete every
+		// machine, the image cache and the socket registry — reporting success. The
+		// orphan predicate made it reachable: the data dir exists and holds no
+		// machine.json, so it looked exactly like a half-created machine.
+		mkdirSync(join(TEST_DIR, "machines", "keep-me"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "machines", "keep-me", "machine.json"), '{"name":"keep-me"}');
+		mkdirSync(join(TEST_DIR, "cache"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "cache", "keep.img"), "seed");
+
+		for (const name of ["..", ".", "../..", "a/b"]) {
+			const result = await runQuickchr(["remove", name]);
+			expect({ name, exitCode: result.exitCode }).toEqual({ name, exitCode: 1 });
+			expect(result.stderr).toContain("INVALID_NAME");
+		}
+
+		expect(existsSync(join(TEST_DIR, "machines", "keep-me", "machine.json"))).toBe(true);
+		expect(existsSync(join(TEST_DIR, "cache", "keep.img"))).toBe(true);
+	});
+
 	test("doctor names the orphan and a command that clears it", async () => {
 		strandDirectory("half-made");
 		const result = await runQuickchr(["doctor"]);

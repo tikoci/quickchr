@@ -134,6 +134,23 @@ describe("unknown flags on machine-creating commands (#156)", () => {
 		expect(dataDirContents()).toEqual([]);
 	});
 
+	test("a known flag given without its value is an error, not an auto-named machine", async () => {
+		// parseFlags stores `true` when a flag is followed by another flag, and flag()
+		// turns that back into undefined — so this used to reach add() with no name and
+		// create an auto-named machine, which is the exact hazard this command guards.
+		const result = await runQuickchr(["add", "--name", "--version", "7.24.3"]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("missing a value");
+		expect(result.stderr).toContain("--name <value>");
+		expect(dataDirContents()).toEqual([]);
+	});
+
+	test("--no-x negation is not mistaken for a missing value", async () => {
+		const result = await runQuickchr(["start", "--dry-run", "--version", "7.24.3", "--no-device-mode", "--no-winbox"]);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("Dry run");
+	});
+
 	test("every flag in the command's own help is accepted", async () => {
 		// The registry and the help text are two hand-maintained lists of the same
 		// thing; this is the check that keeps them from drifting apart.

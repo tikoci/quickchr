@@ -551,9 +551,21 @@ handle. `list()` is `get()` for everything in `machines/`.
 
 `listOrphans()` / `removeOrphan()` cover the gap between the two: a directory under
 `machines/` with no readable `machine.json`, left by a create that a crash or a
-SIGKILL interrupted. `list()` cannot show it and `get()` returns `null` for it, but
-it still occupies the name. `removeOrphan()` returns `false` for a real machine —
-use `get(name)?.remove()` for those — and for a name that does not exist at all.
+SIGKILL interrupted. It still occupies the name, so `add()` refuses it, but no
+machine answers to it.
+
+How `get()` and `list()` behave depends on *why* the state is unreadable, and the
+two differ:
+
+| State | `get(name)` | `list()` |
+|---|---|---|
+| `machine.json` missing | `null` | omits it |
+| `machine.json` present but not valid JSON | **throws** (`loadMachine()` propagates the parse error) | **throws** — one corrupt file fails the whole listing |
+
+`listOrphans()` and `removeOrphan()` treat both the same — unreadable is unreadable —
+so `quickchr remove <name>` clears either. `removeOrphan()` returns `false` for a real
+machine (use `get(name)?.remove()` for those) and for a name that does not exist, and
+throws `INVALID_NAME` for a name that is not a usable path segment.
 
 ### `ChrInstance`
 

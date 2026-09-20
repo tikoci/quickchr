@@ -32,6 +32,31 @@ export function assertValidResourceName(name: string, kind: string): void {
 	}
 }
 
+/** The weaker rule that applies to a name being *used*, not created.
+ *
+ *  `assertValidResourceName()` cannot guard a lookup or a delete: machines created
+ *  under the older, looser rules have to stay addressable. But a name still becomes a
+ *  path segment, and `join(machinesDir, name)` happily normalizes `..` into the data
+ *  directory itself — so `removeOrphan("..")` would `rmSync` every machine, the cache
+ *  and the socket registry. This is the minimum that stops that while passing every
+ *  name a real machine can have. */
+export function isPathSafeName(name: string): boolean {
+	if (name.length === 0) return false;
+	if (name === "." || name === "..") return false;
+	if (name.includes("/") || name.includes("\\") || name.includes("\0")) return false;
+	return true;
+}
+
+/** Throwing form of {@link isPathSafeName}, for the paths that delete. */
+export function assertPathSafeName(name: string, kind: string): void {
+	if (!isPathSafeName(name)) {
+		throw new QuickCHRError(
+			"INVALID_NAME",
+			`Invalid ${kind} name ${JSON.stringify(name)} — a name cannot be empty, "." or "..", or contain a path separator`,
+		);
+	}
+}
+
 /** Non-throwing form, for callers that want to branch rather than fail. */
 export function isValidResourceName(name: string): boolean {
 	try {

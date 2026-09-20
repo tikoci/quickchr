@@ -32,6 +32,46 @@ const START_ONLY_FLAGS = [
 export const ADD_FLAGS: readonly string[] = CREATE_FLAGS;
 export const START_FLAGS: readonly string[] = [...CREATE_FLAGS, ...START_ONLY_FLAGS];
 
+/** Flags that are meaningless without a value.
+ *
+ *  `parseFlags` stores `true` when a flag is followed by another flag or by nothing,
+ *  and `flag()` turns a boolean back into `undefined` — so `quickchr add --name
+ *  --version 7.24.3` used to reach `add()` with no name at all and quietly create an
+ *  auto-named machine. Checking names alone does not catch that; the value has to be
+ *  checked too.
+ *
+ *  `--no-x` (which parses as `false`) is a deliberate negation, not a missing value,
+ *  so only an explicit `true` is rejected. */
+const VALUE_FLAGS = new Set([
+	"version", "channel", "arch", "name", "cpu", "mem", "accel",
+	"add-package", "port-base", "forward",
+	"add-network", "vmnet-bridge",
+	"boot-disk-format", "boot-size", "add-disk",
+	"device-mode", "device-mode-enable", "device-mode-disable",
+	"add-user", "timeout-extra",
+	"license-level", "license-account", "license-password",
+]);
+
+/** Flags given without the value they require. */
+export function valuelessFlags(
+	flags: Record<string, string | boolean | string[]>,
+	known: readonly string[],
+): string[] {
+	return Object.keys(flags).filter(
+		(name) => known.includes(name) && VALUE_FLAGS.has(name) && flags[name] === true,
+	);
+}
+
+/** Human-readable complaint for `valuelessFlags()` output. Empty when nothing is missing. */
+export function valuelessFlagMessage(valueless: readonly string[], command: string): string {
+	if (valueless.length === 0) return "";
+	return [
+		`Error: flag${valueless.length > 1 ? "s" : ""} for 'quickchr ${command}' missing a value:`,
+		...valueless.map((name) => `  --${name} <value>`),
+		`Run 'quickchr ${command} --help' for the full list.`,
+	].join("\n");
+}
+
 function editDistance(a: string, b: string): number {
 	// One rolling row — the suggestion only needs the distance, never the edit script.
 	let previous = Array.from({ length: b.length + 1 }, (_, j) => j);

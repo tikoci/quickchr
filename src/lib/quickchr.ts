@@ -25,7 +25,7 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./types.ts";
-import { assertValidResourceName } from "./names.ts";
+import { assertValidResourceName, assertPathSafeName } from "./names.ts";
 import packageJson from "../../package.json";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
@@ -2233,6 +2233,9 @@ export class QuickCHR {
 	 *  a stranded directory blocks re-add while being invisible to `list` — so clearing
 	 *  one must not require knowing that the data dir exists. */
 	static removeOrphan(name: string): boolean {
+		// Explicit, before the predicate: this deletes a directory tree, and `join()`
+		// turns ".." into the data dir itself. Say why rather than answering `false`.
+		assertPathSafeName(name, "machine");
 		if (!isOrphanMachineDir(name)) return false;
 		removeState(name);
 		return true;
