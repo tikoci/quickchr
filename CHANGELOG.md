@@ -117,10 +117,16 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   has no AF_UNIX datagram socket. The previous default, UDP multicast, is the only
   N-way transport but fails *silently* on macOS and wherever UDP is blocked —
   interfaces up, addresses assigned, 100% packet loss, nothing logged. `dgram` needs
-  no host port and no UDP syscall, and either machine may start first. Existing
-  `networks/<name>.json` entries carry an explicit mode and are unaffected; use
+  no host port and no UDP syscall, and either machine may start first. Use
   `--mode mcast` for more than two machines on one segment. Requires QEMU 7.2+, which
-  is checked before spawn. (#158)
+  is checked before spawn, and Windows is checked too — a `dgram` entry carried over
+  from a POSIX host is refused there with the command to recreate it.
+
+  A named socket you created yourself keeps the mode recorded in its
+  `networks/<name>.json` and is unaffected. One that `start` auto-created for you is
+  removed when its last member stops, as it always has been, so it comes back with
+  the new default the next time — and `start` now names the transport, so the change
+  is visible rather than silent. (#158)
 
 - A third machine joining a two-machine named socket is refused, naming the machines
   that hold the ends and pointing at `--mode mcast`. It is checked before any image
