@@ -62,6 +62,56 @@ Each lab follows the same protocol:
 4. **Cross-check** — compare findings against existing SKILL/instruction files
 5. **Correction** — update skills and instructions where lab data contradicts prior claims
 
+## Grounding a Field Report
+
+The labs above are ones we chose to run. A **field report** is the other kind: a bug
+report or an external agent's lab arrives with a conclusion already in it, and that
+conclusion has to be grounded before anything is written down. The methodology above
+assumes you picked the question; this one assumes someone else did, possibly wrongly.
+
+The rule from `~/CLAUDE.md` applies with full force here — *one failure in one place is a
+signal, not a fact* — and the specific trap is that a field report's **conclusion** and its
+**observation** arrive welded together. The observation is usually sound. The conclusion is
+a guess made under time pressure by someone debugging something else.
+
+**Ask for one repro per candidate cause, not for a verdict.** A question like "was UDP
+blocked?" invites the reporter to restate their conclusion. Splitting it forces
+measurement:
+
+1. **Name the environment** — `uname -a`, OS release, sandbox/seccomp/proxy/firewall state,
+   and the exact command line of the process that failed. Half of field reports are
+   resolved here, because the environment is not the one everyone assumed.
+2. **Separate observed from inferred.** "What exact command failed, with what exact
+   errno/output? Was that seen at the syscall (strace/audit/`EPERM`), or inferred from a
+   silent symptom?" A report that says "blocked at the syscall level" may mean either.
+3. **Enumerate the candidate causes and demand a minimal repro for each, separately.**
+   This is the step that does the work. For a suspected network block, the split was
+   internet / loopback-multicast / unix-datagram — three commands, and the second one
+   killed the egress theory outright.
+4. **Ask for the diagnostics that would refute it** — `netstat -gn`, `iptables -L -n`,
+   `nft list ruleset`, the persisted config — including the ones expected to come back
+   empty. An empty firewall ruleset is what makes "it is a kernel filter" a finding rather
+   than a guess.
+5. **Ask directly whether the recollection matches the logs**, and say whose recollection
+   it is. Memory of a debugging session is reconstructed, and the reporter is the only one
+   who can check it against what was actually logged.
+6. **Ask what should be withdrawn.** Field reports bundle unrelated failures. Naming the
+   ones that are *not* evidence for this question prevents them being cited later.
+
+Then map the grounded observation onto a mechanism in source before writing it down. An
+observation without a mechanism is still a correlation.
+
+**Worked example (2026-09-20, `mcast`).** The report said "the sandbox blocked outbound UDP
+at the syscall level". Steps 1–3 turned that into: Linux host (not macOS, which the issue
+had assumed), seccomp-bpf active with an empty firewall, and `EPERM` on *unconnected*
+`sendto()`/`sendmsg()` for `AF_INET` `SOCK_DGRAM` only — `connect()`+`send()`, TCP and
+`AF_UNIX` datagrams all pass. Step 3's loopback case disproved the egress theory two
+people had independently assumed. That maps onto the `sendto()`/`send()` branch in QEMU's
+`net_socket_receive_dgram()`, which is why `mcast` died there and `dgram` did not. Step 6
+withdrew the same session's image-download failures, which were TCP proxy stalls. Written
+up in DESIGN.md, "A named socket says what it is"; the split it produced is #167
+(delivery) vs #169 (permission).
+
 ## Environment
 
 All labs were conducted on:

@@ -675,7 +675,40 @@ The rule the three share: **clearing quickchr's own mess must never require know
 An external agent's 3-CHR lab brought up two CHRs on `--add-network socket::skylab-mir`,
 got interfaces up, addresses assigned, and 100% packet loss with no error anywhere. It
 found the cause by opening `machine.json`: the link was UDP multicast, and the sandbox
-blocked outbound UDP at the syscall level.
+denied the send.
+
+The lab re-ran the question against its own VM on 2026-09-20, which turned the original
+hand-wave ("the sandbox blocks UDP") into something exact — and narrower:
+
+- The host is **Linux** (Ubuntu 24.04, seccomp-bpf active, `NoNewPrivs=1`, four filters).
+  `iptables` and `nft` are empty, so no firewall is involved. **This lab was never on
+  macOS**, which is why its finding is independent of the macOS defect below.
+- The denied call is **an unconnected `sendto()`/`sendmsg()` on an `AF_INET` `SOCK_DGRAM`
+  socket**, returning `EPERM` — strace-confirmed. Not "UDP". A `connect()`-ed UDP socket's
+  `send()` passes the filter, as does TCP, as does `AF_UNIX` `SOCK_DGRAM`.
+- `socket()`, `bind()` and `IP_ADD_MEMBERSHIP` all succeed; only the send is refused. So
+  the group joins cleanly and then silently carries nothing.
+- Loopback multicast fails **independently** of internet egress: `sendto()` to
+  `230.0.0.1:4000` gets the same `EPERM` as `sendto()` to `8.8.8.8:53`. It is not an
+  egress-only policy, which was the intuition that had to be tested rather than assumed.
+
+That maps onto one line of QEMU, which is why `mcast` died there and `dgram` did not
+(`net/socket.c`, `net_socket_receive_dgram()`):
+
+```c
+ret = RETRY_ON_EINTR(
+    s->dgram_dst.sin_family != AF_UNIX ?
+        sendto(s->fd, buf, size, 0, (struct sockaddr *)&s->dgram_dst, sizeof(s->dgram_dst)) :
+        send(s->fd, buf, size, 0)
+);
+```
+
+`mcast` takes the `AF_INET` branch — the exact call the filter denies. `dgram` over unix
+takes `send()`. `EPERM` is neither `EINTR` nor `EAGAIN`, so the frame is dropped and
+nothing is logged: the 100% loss, mechanically.
+
+One thing the lab explicitly withdrew: the failed 7.24.4 image downloads in the same
+session were **TCP egress-proxy stalls**, not UDP. Do not cite them as evidence here.
 
 Three separate defects converged on that one silence.
 
@@ -700,7 +733,7 @@ Measured on QEMU 11.1.1, macOS Intel, CHR 7.24.4, rather than reasoned about:
 | start order | any | listener first | **either end first** |
 | frames verified | broken on macOS | (was unreachable) | ICMP both ways, plus MNDP and IPv6 ND |
 | host ports | a multicast group | a TCP port | none |
-| UDP syscalls | required | none | none |
+| send call | unconnected `sendto()`, `AF_INET` | TCP `send()` | `send()`, `AF_UNIX` |
 | machines | any number | 2 | 2 |
 | where a failure lives | host kernel / sandbox policy | quickchr's own registry | quickchr's own registry |
 
@@ -793,8 +826,60 @@ apply is an error rather than a silently dropped argument.
 `dgram` and `listen-connect` both cap at two machines, and `mcast` — the N-way answer —
 is broken on macOS. **quickchr still has no 3-node rootless L2 segment on macOS.** That
 was true before this change; it is now explicit rather than presenting as a RouterOS
-fault. The fix is a frame-repeating hub, and "no daemon" is a standing design decision,
-so it is tracked separately rather than smuggled in here.
+fault. Tracked in #167.
+
+The in-repo alternative is a frame-repeating hub, and since `start` returns and `--bg` is
+not a detach (#159), there is no process to host one — a hub is a daemon, and "no daemon"
+is a standing design decision. So the work goes into making `mcast` usable instead, via
+two independent defects.
+
+**Ours:** quickchr never passes `localaddr=`, so `net_socket_mcast_create()` falls back to
+`imr_interface = INADDR_ANY` and sets no `IP_MULTICAST_IF`. The group therefore rides the
+host's default multicast interface rather than loopback. `IP_MULTICAST_LOOP` governs local
+delivery, not scoping. A `dgram` link cannot leave the filesystem; an `mcast` one does.
+The consequence — two people on one LAN using the default group joining each other's
+segments — is **a reading of the code plus the lab's `netstat -gn`, not a demonstrated
+two-host repro**; #167 step 1 is the probe that settles it.
+
+**Upstream:** `net_socket_mcast_create()` sets only `SO_REUSEADDR`, on a stated assumption
+that this suffices to share a multicast port — true on Linux, false on BSD/macOS, which
+require `SO_REUSEPORT` on every such socket. Still that way on QEMU master
+`c1c18d1e640b64292859ce9f30f3c344edfb0294` (2026-09-19). `test/lab/mndp/REPORT.md`
+isolates it to QEMU's side: the host joined on every interface *with* `SO_REUSEPORT` and
+still received nothing, and two CHRs on one group never discovered each other.
+
+**The two are independent, and it matters.** The macOS defect is a *delivery* failure —
+the send succeeds, only one socket receives. The Linux sandbox defect is a *permission*
+failure — the send never happens. They were found in different environments by different
+labs, neither reproduces the other, and fixing either leaves the other intact. Reading
+"mcast is broken" as one story is how the sandbox finding ended up attached to a macOS
+issue in the first place.
+
+**`mcast` stays opt-in either way.** Fixing both removes specific causes of silent failure,
+but neither overturns the asymmetry that chose the `dgram` default — and the sandbox lab is
+itself the cleanest evidence for that default, since `dgram` carried frames in the exact
+environment where `mcast` could not send at all.
+
+The precise form of the asymmetry, corrected: it is **not** that mcast failures are
+undetectable. An active probe at create or start time — one unconnected `sendto()` to a
+loopback group — catches the whole permission class cheaply, including the one that
+actually bit (#169). What a probe cannot catch is the *delivery* class: `SO_REUSEPORT`,
+a downstream firewall, a VPN capturing the group, or another host already on it. The
+durable difference is that a pair transport's misconfiguration is endpoint occupancy —
+persisted, visible, and refused before spawn — whereas every mcast failure mode needs
+an active measurement, and some are not reachable by one at all.
+
+Nor is `mcast` the simpler mechanism it first appears: it removes slots, roles and start
+order, but trades them for group and port allocation, which is where the
+three-links-one-port collapse above came from — and a group collision merges segments
+silently where a slot collision refuses.
+
+One correction on the record, since the earlier draft of this section got it backwards.
+The external lab's sandbox report was marked *unverified*, with the guess that it probably
+only restricted internet-bound UDP. Both halves were wrong: the block is real, it is at the
+syscall, and loopback multicast fails independently of egress. The lesson is the one this
+section already argues elsewhere — the answer came from running the commands on the actual
+host, not from reasoning about what a sandbox is likely to permit.
 
 ### Out of Scope (decided)
 
