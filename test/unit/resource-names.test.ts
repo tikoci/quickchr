@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { assertValidResourceName, isValidResourceName } from "../../src/lib/names.ts";
@@ -80,7 +80,10 @@ describe("named sockets validate their name (#156)", () => {
 		const created = await runQuickchr(["networks", "sockets", "create", "lab"]);
 		expect(created.exitCode).toBe(0);
 		// 4000 is DEFAULT_START_PORT — a socket named "--help" used to take it first.
-		expect(created.stdout).toContain("port:4000");
+		// Read the port back from the registry rather than the output: since #158 the
+		// default transport is `dgram`, which has no port to print.
+		const entry = JSON.parse(readFileSync(join(TEST_DIR, "networks", "lab.json"), "utf-8"));
+		expect(entry.port).toBe(4000);
 		expect(readdirSync(join(TEST_DIR, "networks")).sort()).toEqual(["lab.json"]);
 	});
 

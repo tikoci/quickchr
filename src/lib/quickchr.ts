@@ -17,6 +17,7 @@ import type {
 	LicenseLevel,
 	MachineState,
 	NetworkTopologyEntry,
+	PlatformInfo,
 	PortMapping,
 	QgaCommand,
 	ServiceEndpoint,
@@ -35,7 +36,7 @@ import {
 	assertProvisioningSupportedVersion,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport } from "./network.ts";
 import {
 	getUsedPortBases,
 	getUsedMacs,
@@ -72,7 +73,7 @@ import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec, CONSOLE_LOGIN_COST_MS } from "./console.ts";
 import { restRequest, restGet, restPost } from "./rest.ts";
-import { createNamedSocket, getNamedSocket, addSocketMember, removeSocketMember } from "./socket-registry.ts";
+import { createNamedSocket, getNamedSocket, addSocketMember, removeSocketMember, getSocketSlot } from "./socket-registry.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import {
 	formatDeviceModeSelection,
@@ -190,6 +191,40 @@ function getSocketNamedNetworks(state: MachineState): string[] {
 		.map((n) => (n.specifier as { type: "socket"; name: string }).name);
 }
 
+/** Refuse a start that a named socket has no room for, before any I/O.
+ *
+ *  Only a *new* member is refused: a machine already holding an endpoint is simply
+ *  restarting into its own slot. An unknown socket is left alone — `start()`
+ *  auto-creates it further down. */
+function assertNamedSocketsHaveRoom(opts: StartOptions, logger: ProgressLogger): void {
+	const named = resolveStartNetworks(opts.networks, opts.network)
+		.map((n) => n.specifier)
+		.filter((spec): spec is { type: "socket"; name: string } =>
+			typeof spec === "object" && spec !== null && spec.type === "socket");
+	for (const { name } of named) {
+		const entry = getNamedSocket(name);
+		if (!entry?.endpoints) continue;
+		if (opts.name && entry.endpoints.includes(opts.name)) continue;
+		if (entry.endpoints.includes(null)) continue;
+		const held = entry.endpoints.filter((m): m is string => m !== null);
+		logger.debug(`socket::${name} endpoints held by ${held.join(", ")}`);
+		throw new QuickCHRError(
+			"NETWORK_UNAVAILABLE",
+			`Named socket "${name}" is a ${entry.mode} link and carries 2 machines; ` +
+			`${held.join(" and ")} already hold both ends. ` +
+			`Stop one of them, or create an N-way segment with 'quickchr networks sockets create <name> --mode mcast'.`,
+		);
+	}
+}
+
+/** QEMU version for the binary this machine's arch will run on, when it can be read.
+ *  `-netdev dgram` needs 7.2, and a named socket should say so rather than failing at
+ *  spawn with a netdev QEMU does not recognize. */
+function qemuVersionForArch(platform: PlatformInfo, arch: Arch): string | undefined {
+	const bin = arch === "arm64" ? platform.qemuBinArm64 : platform.qemuBinX86;
+	return bin ? getQemuVersion(bin) : undefined;
+}
+
 function registerSocketMembers(state: MachineState): void {
 	for (const name of getSocketNamedNetworks(state)) {
 		try {
@@ -198,8 +233,27 @@ function registerSocketMembers(state: MachineState): void {
 			}
 			addSocketMember(name, state.name);
 		} catch (e) {
+			// A full two-member link is a refusal, not a warning: carrying on would spawn
+			// QEMU with no endpoint to bind, and on a `dgram` link a second machine
+			// binding the same path unlinks the first one's socket and steals the link
+			// with nothing logged on either side.
+			if (e instanceof QuickCHRError && e.code === "NETWORK_UNAVAILABLE") throw e;
 			console.warn(`Warning: failed to register socket member "${state.name}" on "${name}": ${e instanceof Error ? e.message : String(e)}`);
 		}
+	}
+}
+
+/** Report the transport each named socket resolved to.
+ *
+ *  #158's acceptance bar: nothing about a named socket should require opening a file
+ *  under the data dir. The field report that produced these issues had to read
+ *  `machine.json` to discover its link was UDP multicast, after ping had already
+ *  failed silently. */
+function reportSocketTransports(state: MachineState, logger: ProgressLogger): void {
+	for (const name of getSocketNamedNetworks(state)) {
+		const entry = getNamedSocket(name);
+		if (!entry) continue;
+		logger.status(`  Network socket::${name}: ${describeSocketTransport(entry, getSocketSlot(entry, state.name))}`);
 	}
 }
 
@@ -1230,7 +1284,11 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 	);
 	const platform = await detectPlatform();
 	const hostfwd = buildHostfwdString(state.ports);
-	const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+	const resolvedNetworks = resolveAllNetworks(
+		state.networks,
+		{ platform, machine: state.name, qemuVersion: qemuVersionForArch(platform, state.arch) },
+		hostfwd,
+	);
 	return {
 		arch: state.arch,
 		machineDir: state.machineDir,
@@ -1533,6 +1591,11 @@ export class QuickCHR {
 
 		const logger = createLogger(opts.onProgress);
 
+		// Before any download or disk work: a named socket whose two ends are already
+		// taken cannot carry this machine, and #156's rule is that a start that cannot
+		// succeed should not first fetch 43 MB.
+		assertNamedSocketsHaveRoom(opts, logger);
+
 		const requestedDeviceMode = opts.deviceMode;
 		const resolvedDeviceMode = resolveDeviceModeOptions(requestedDeviceMode);
 		for (const warning of resolvedDeviceMode.warnings) {
@@ -1762,9 +1825,14 @@ export class QuickCHR {
 		const accel = await detectAccel(arch);
 		const note = accelNote(arch, accel);
 		if (note) logger.warn(note);
-			registerSocketMembers(state);
+		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
-		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+		const resolvedNetworks = resolveAllNetworks(
+			state.networks,
+			{ platform, machine: state.name, qemuVersion: qemuVersionForArch(platform, state.arch) },
+			hostfwd,
+		);
+		reportSocketTransports(state, logger);
 
 		const launchConfig: QemuLaunchConfig = {
 			arch,
@@ -2095,9 +2163,14 @@ export class QuickCHR {
 		const accel = await detectAccel(state.arch);
 		const note = accelNote(state.arch, accel);
 		if (note) (logger ?? createLogger()).warn(note);
-			registerSocketMembers(state);
+		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
-		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+		const resolvedNetworks = resolveAllNetworks(
+			state.networks,
+			{ platform, machine: state.name, qemuVersion: qemuVersionForArch(platform, state.arch) },
+			hostfwd,
+		);
+		reportSocketTransports(state, logger ?? createLogger());
 
 		const launchConfig: QemuLaunchConfig = {
 			arch: state.arch,

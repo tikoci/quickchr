@@ -2225,8 +2225,11 @@ async function showInterfaces() {
 	console.log(table(["Device", "Name", "Alias", "MAC"], rows));
 }
 
+const SOCKET_MODES = ["dgram", "listen-connect", "mcast"] as const;
+
 async function handleSockets(argv: string[]) {
-	const { listNamedSockets, createNamedSocket, removeNamedSocket } = await import("../lib/socket-registry.ts");
+	const { listNamedSockets, createNamedSocket, removeNamedSocket, defaultSocketMode } = await import("../lib/socket-registry.ts");
+	const { describeSocketTransport } = await import("../lib/network.ts");
 	const { bold, dim, table: fmtTable } = await import("./format.ts");
 
 	const action = argv[0];
@@ -2240,22 +2243,54 @@ async function handleSockets(argv: string[]) {
 		const rows = sockets.map((s) => [
 			s.name,
 			s.mode,
-			String(s.port),
-			s.mcastGroup ?? "",
+			describeSocketTransport(s),
 			s.members.join(", ") || dim("none"),
 		]);
-		console.log(fmtTable(["Name", "Mode", "Port", "Group", "Members"], rows));
+		console.log(fmtTable(["Name", "Mode", "Transport", "Members"], rows));
 		return;
 	}
 
 	if (action === "create") {
-		const name = argv[1];
+		const { flags, positional } = parseFlags(argv.slice(1));
+		const name = positional[0];
 		if (!name) {
-			console.error("Usage: quickchr networks sockets create <name>");
+			console.error("Usage: quickchr networks sockets create <name> [--mode dgram|listen-connect|mcast] [--port <n>] [--group <addr>]");
 			process.exit(1);
 		}
-		const entry = createNamedSocket(name);
-		console.log(`Created named socket: ${bold(entry.name)} (${entry.mode} port:${entry.port})`);
+		const mode = flag(flags, "mode");
+		if (mode !== undefined && !(SOCKET_MODES as readonly string[]).includes(mode)) {
+			console.error(`Error: unknown --mode "${mode}" — expected one of ${SOCKET_MODES.join(", ")}.`);
+			process.exit(1);
+		}
+		const portRaw = flag(flags, "port");
+		const port = portRaw === undefined ? undefined : Number.parseInt(portRaw, 10);
+		if (portRaw !== undefined && (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535)) {
+			console.error(`Error: --port must be a number between 1 and 65535, got "${portRaw}".`);
+			process.exit(1);
+		}
+		const group = flag(flags, "group");
+		const effectiveMode = mode ?? defaultSocketMode();
+		if (group !== undefined && effectiveMode !== "mcast") {
+			console.error(`Error: --group only applies to --mode mcast (this socket is ${effectiveMode}).`);
+			process.exit(1);
+		}
+		if (portRaw !== undefined && effectiveMode === "dgram") {
+			console.error("Error: --port does not apply to --mode dgram — a unix datagram pair uses no port.");
+			process.exit(1);
+		}
+		const entry = createNamedSocket(name, {
+			mode: mode as (typeof SOCKET_MODES)[number] | undefined,
+			port,
+			mcastGroup: group,
+		});
+		console.log(`Created named socket: ${bold(entry.name)} (${entry.mode})`);
+		console.log(`  Transport: ${describeSocketTransport(entry)}`);
+		if (entry.mode === "mcast") {
+			// The caveat belongs at create time, not in a doc: mcast fails with no error
+			// anywhere — interfaces up, addresses assigned, 100% loss.
+			console.log(dim("  Note: UDP multicast is the only N-way segment, but it is broken on macOS"));
+			console.log(dim("        and in sandboxes that block UDP — and it fails silently in both."));
+		}
 		return;
 	}
 
@@ -2288,6 +2323,20 @@ Usage:
   quickchr networks sockets             List named sockets
   quickchr networks sockets create <n>  Create a named socket
   quickchr networks sockets remove <n>  Remove a named socket
+
+Socket create options:
+  --mode <mode>    dgram | listen-connect | mcast
+                   Default: dgram (POSIX), listen-connect (Windows)
+  --port <n>       TCP/UDP port for listen-connect and mcast
+  --group <addr>   Multicast group for --mode mcast (default 230.0.0.1)
+
+Transports:
+  dgram            A pair of unix datagram sockets. No ports, no UDP syscalls,
+                   and either machine may start first. Two machines. POSIX only.
+  listen-connect   A TCP pair on loopback. Two machines; whichever starts first
+                   listens. The Windows default.
+  mcast            UDP multicast — the only N-way segment, but broken on macOS
+                   and in UDP-blocked sandboxes, and silent when it fails.
 
 Aliases: quickchr net`);
 }
