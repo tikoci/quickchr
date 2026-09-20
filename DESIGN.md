@@ -793,8 +793,28 @@ apply is an error rather than a silently dropped argument.
 `dgram` and `listen-connect` both cap at two machines, and `mcast` — the N-way answer —
 is broken on macOS. **quickchr still has no 3-node rootless L2 segment on macOS.** That
 was true before this change; it is now explicit rather than presenting as a RouterOS
-fault. The fix is a frame-repeating hub, and "no daemon" is a standing design decision,
-so it is tracked separately rather than smuggled in here.
+fault. Tracked in #167.
+
+The direction there is to **fix `mcast` rather than engineer around it**. `mcast` is the
+design we want — N-way, no start order, no endpoint bookkeeping — and the entire two-slot
+apparatus above exists because we do not have it. The cause is one missing socket option,
+still present on QEMU master as of 2026-09-20: `net_socket_mcast_create()` in
+`net/socket.c` sets only `SO_REUSEADDR`, on the stated assumption that this is enough to
+share a multicast port. That holds on Linux and not on BSD/macOS, which require
+`SO_REUSEPORT` on every socket sharing the port. `test/lab/mndp/REPORT.md` isolates it to
+QEMU's side: the host joined the group on every interface *with* `SO_REUSEPORT` and still
+received nothing, and two CHRs on one group never discovered each other.
+
+The in-process alternative is a frame-repeating hub, and since `start` returns and `--bg`
+is not a detach (#159), there is no process to host one — a hub is a daemon, and "no
+daemon" is a standing design decision. That is why an upstream fix is preferred over a
+local workaround, not merely cheaper.
+
+One caveat on the record, because it is currently cited as fact and is not: the external
+lab's report of UDP blocked at the syscall level inside its sandbox is **unverified**, and
+that lab hit several unrelated problems, so it may conflate causes. The `dgram` default
+does not depend on it — the `SO_REUSEPORT` bug is reason enough — but the sandbox strand
+needs its own local reproduction before it is repeated.
 
 ### Out of Scope (decided)
 
