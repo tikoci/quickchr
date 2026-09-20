@@ -44,6 +44,7 @@ import {
 	saveMachine,
 	loadMachine,
 	loadAllMachines,
+	listUnreadableMachines,
 	removeMachine as removeState,
 	getMachineDir,
 	getMachinesDir,
@@ -2348,6 +2349,17 @@ export class QuickCHR {
 		}
 
 		return createInstance(state);
+	}
+
+	/** Machines whose `machine.json` is present but cannot be turned into state, each
+	 *  with the reason: the file would not read, the JSON is invalid, or it parsed into
+	 *  something that is not a machine.
+	 *
+	 *  `list()` skips these so one corrupt file cannot abort the enumeration; this is
+	 *  where they stay visible. `get(name)` still throws for such a machine — a lookup
+	 *  by name is not an enumeration (#165). */
+	static listUnreadable(): Array<{ name: string; error: string }> {
+		return listUnreadableMachines();
 	}
 
 	/** Names of machine directories with no readable `machine.json` — half-created

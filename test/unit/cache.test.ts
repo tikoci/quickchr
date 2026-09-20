@@ -40,6 +40,7 @@ function writeFakeMachine(name: string, version: string, arch: "x86" | "arm64"):
 		excludePorts: [],
 		extraPorts: [],
 		createdAt: new Date().toISOString(),
+		status: "stopped",
 		machineDir: dir,
 	};
 	writeFileSync(join(dir, "machine.json"), JSON.stringify(state, null, "\t"));

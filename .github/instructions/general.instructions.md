@@ -31,8 +31,8 @@ applyTo: "src/**"
 
 ## CLI Conventions
 
-Three rules the CLI layer enforces centrally. A new subcommand inherits the first
-and has to opt into the others.
+Four rules the CLI layer enforces centrally. A new subcommand gets `--help` handling
+and flag arity for free; it has to opt into the other two.
 
 - **`--help` is answered before dispatch.** The guard is in `main()`
   (`wantsCommandHelp`), not per-command, so a new subcommand cannot forget it.
@@ -44,6 +44,17 @@ and has to opt into the others.
   means adding it to that registry** — a test cross-checks the registry against each
   command's own help text, so the two cannot drift. Read-only commands stay tolerant
   of stray arguments on purpose.
+- **A flag's arity is declared, never guessed.** `VALUE_FLAGS` in `src/cli/flags.ts`
+  is `parseFlags`'s arity table, not just a validation list: a flag in it consumes the
+  next argument, and a flag absent from it is boolean and leaves the next argument
+  alone. **A new value-taking flag goes in that set** — `test/unit/cli-flag-arity.test.ts`
+  scans the CLI source for every flag read, both the helpers (`flag()`, `flagList()`,
+  `flagBool()`) and direct access (`flags["older-than"]`, `flags.accel`), and fails if a
+  name is read as a value without being declared, or read as a boolean while declared.
+  The direct-access half is not decoration: three `cache prune` flags are read that way,
+  and a helpers-only audit called the registry complete while `--older-than` had already
+  stopped taking its value. A removed flag name goes in `REMOVED_FLAGS` and errors with its
+  replacement, so it cannot come back as a silently ignored argument.
 - **Tips go to stderr.** `src/cli/tips.ts`. stdout is the command's result and has to
   stay usable in a pipe; a tip names a next command or a better-suited tool, never restates
   what just happened, and is suppressible with `QUICKCHR_NO_TIPS=1`. `exec` points at
