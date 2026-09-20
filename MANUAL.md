@@ -597,7 +597,7 @@ throws `INVALID_NAME` for a name that is not a usable path segment.
 | Group | Member | Purpose |
 |---|---|---|
 | Identity | `name`, `state`, `ports`, `restUrl`, `sshPort`, `portBase` | Static metadata persisted in `machine.json` |
-| Capture | `captureInterface`, `tzspGatewayIp` | Platform-correct values for TZSP capture (`tshark -i …`) and RouterOS streaming target |
+| Capture | `captureInterface`, `hostGatewayIp` | Platform-correct values for TZSP capture (`tshark -i …`) and the guest→host address any UDP emitter targets |
 | Lifecycle | `waitForBoot()`, `waitFor(fn, ms?)`, `stop()`, `remove()`, `clean()`, `destroy()` | Boot readiness, custom polling, teardown |
 | Comms | `rest()`, `exec()`, `monitor()`, `serial()`, `qga()` | REST, RouterOS CLI, QEMU monitor, serial console, QGA (x86 only) |
 | Provisioning | `license()`, `setDeviceMode()`, `availablePackages()`, `installPackage()` | Post-boot configuration |
@@ -614,7 +614,8 @@ interface ChrInstance {
   sshPort: number;
   portBase: number;           // start of this instance's reserved port block
   captureInterface: string;   // "lo0" on macOS, "any" on Linux — for TZSP capture
-  tzspGatewayIp: string;      // "10.0.2.2" — QEMU slirp host gateway
+  hostGatewayIp: string;      // "10.0.2.2" — the host, as seen from inside the guest
+  tzspGatewayIp: string;      // deprecated alias for hostGatewayIp (#26)
 
   waitForBoot(timeoutMs?: number): Promise<boolean>;
   waitFor(condition: () => Promise<boolean>, timeoutMs?: number): Promise<boolean>;
@@ -744,7 +745,7 @@ const chr = await QuickCHR.start({
 ```
 
 To **receive** UDP a guest sends, no forward is needed — bind an *unconnected*
-host socket and have the guest send to `chr.tzspGatewayIp` (`10.0.2.2`); see
+host socket and have the guest send to `chr.hostGatewayIp` (`10.0.2.2`); see
 [`docs/networking-recipes.md`](docs/networking-recipes.md) §2 and
 [`examples/udp-gateway/`](examples/udp-gateway/).
 

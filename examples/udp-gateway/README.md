@@ -7,7 +7,7 @@
 Receive UDP that a CHR *sends* on the host, with no `hostfwd` and no extra NIC.
 Any datagram the guest sends to the SLIRP gateway `10.0.2.2:<port>` is relayed to
 a host process bound on loopback `<port>` — the general form of the TZSP path
-`ChrInstance.tzspGatewayIp` exposes. Emitter here: RouterOS remote syslog.
+`ChrInstance.hostGatewayIp` exposes. Emitter here: RouterOS remote syslog.
 
 The catch: relayed datagrams arrive from a SLIRP-rewritten loopback source, so the
 host socket must be left **unconnected** (recvfrom) — a connected socket filters
@@ -37,7 +37,7 @@ runnable `.ts` is the cross-platform path. Expected time: ~30–50 s.
 ## Friction found
 
 None — the unconnected-socket requirement is inherent to SLIRP, documented in the
-`tzspGatewayIp` JSDoc and `docs/networking-recipes.md`.
+`hostGatewayIp` JSDoc and `docs/networking-recipes.md`.
 
 ## See also
 

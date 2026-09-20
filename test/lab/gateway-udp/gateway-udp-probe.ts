@@ -48,12 +48,12 @@ async function main() {
 			mem: 256,
 		});
 		const booted = await instance.waitForBoot(180_000);
-		console.log(`[chr] booted=${booted} gateway=${instance.tzspGatewayIp} capture=${instance.captureInterface}`);
+		console.log(`[chr] booted=${booted} gateway=${instance.hostGatewayIp} capture=${instance.captureInterface}`);
 
 		// 3. RouterOS: remote syslog action → gateway:port, rule on the `info` topic.
 		//    NOTE: RouterOS logging-action names must be alphanumeric (no hyphens).
 		await instance.exec(
-			`/system/logging/action/add name=qchrgw target=remote remote=${instance.tzspGatewayIp} remote-port=${port}`,
+			`/system/logging/action/add name=qchrgw target=remote remote=${instance.hostGatewayIp} remote-port=${port}`,
 		);
 		await instance.exec("/system/logging/add action=qchrgw topics=info");
 

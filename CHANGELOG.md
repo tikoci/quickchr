@@ -10,6 +10,10 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Added
 
+- `ChrInstance.hostGatewayIp` — the QEMU user-mode (SLIRP) gateway `10.0.2.2`, the
+  host's address as seen from inside the guest. Same value the instance has always
+  carried; the point is the name. (#26)
+
 - Tips: a one-line pointer on stderr at the moment a better-suited tool applies,
   suppressible with `QUICKCHR_NO_TIPS=1`. `exec --help` and a bare `quickchr exec`
   now name `centrs retrieve|execute --quickchr <name>`, which validates a
@@ -48,6 +52,22 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   `<!-- specifier-lint: skip — reason -->`, and the reason is required. (#157)
 
 ### Fixed
+
+- **A backgrounded QEMU now leaves the caller's process group on macOS and Linux**, so
+  it survives a signal aimed at the CLI rather than the VM. `spawnQemu()` called
+  `unref()` on the POSIX path, which lets the parent exit *voluntarily* — QEMU is
+  adopted by init/launchd — but left QEMU in the caller's process group, where a group
+  signal reaches it: Ctrl-C in the terminal, a shell `timeout`, a CI step teardown, an
+  agent harness killing a stuck command. A multi-CHR lab hit exactly this and worked
+  around it by wrapping every start in `nohup`. Windows already spawned with
+  `detached: true` for its own reason (escaping the Job Object), with a comment
+  describing this hazard; both platforms now take that one path. Killing a run's VMs
+  deliberately is by QEMU process name, not by group, so nothing that intends to sweep
+  QEMU loses its reach. (#159)
+
+  `start` still waits for REST readiness before it returns — `--bg` has always been the
+  default and only controls where the serial console goes, never whether the CLI blocks.
+  An opt-out (`--no-wait`) is the other half of #159 and is not in this release.
 
 - `quickchr list` survives one corrupt `machine.json`. `loadMachine()` parsed with no
   guard, so a single truncated file — the realistic outcome of a disk-full or power
@@ -136,6 +156,16 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   Those are the internal `NetworkSpecifier` type names; the CLI takes
   `socket:listen:<port>`. Both now show the CLI spelling, with the TypeScript form
   noted beside it. (#157)
+
+### Deprecated
+
+- `ChrInstance.tzspGatewayIp` — renamed to `hostGatewayIp`. The value was never
+  TZSP-specific: it is the host as seen from the guest, and it carries any guest→host
+  UDP (remote syslog, NetFlow, a plain socket) with no forward and no extra NIC. The old
+  name invited readers to assume a sniffer-only primitive and skip the recipe that
+  covers their case. The alias is still populated with the identical value — a unit test
+  asserts the two cannot drift — and will be removed no earlier than the next minor.
+  Migration is a rename at the call site. (#26)
 
 ### Removed
 

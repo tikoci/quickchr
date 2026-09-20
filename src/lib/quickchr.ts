@@ -26,7 +26,7 @@ import type {
 	SshServiceEndpoint,
 	StartOptions,
 } from "./types.ts";
-import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./types.ts";
+import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION, HOST_GATEWAY_IP } from "./types.ts";
 import { assertValidResourceName, assertPathSafeName } from "./names.ts";
 import packageJson from "../../package.json";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
@@ -497,7 +497,10 @@ function createInstance(state: MachineState): ChrInstance {
 		sshPort: ports.ssh,
 		portBase: state.portBase,
 		captureInterface: process.platform === "darwin" ? "lo0" : "any",
-		tzspGatewayIp: "10.0.2.2",
+		hostGatewayIp: HOST_GATEWAY_IP,
+		// Deprecated alias for hostGatewayIp (#26) — same value, removed no earlier
+		// than the next minor.
+		tzspGatewayIp: HOST_GATEWAY_IP,
 
 		async waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean> {
 			// Use resolved credentials so waitForBoot can validate the response body

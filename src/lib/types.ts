@@ -62,7 +62,7 @@ export type NetworkMode =
  *   (rootless via socket_vmnet on macOS / pre-created TAP on Linux).
  *
  * Note: receiving guest-*originated* UDP (e.g. a guest replying to `10.0.2.2`)
- * needs no extra NIC and no forward — see {@link ChrInstance.tzspGatewayIp}.
+ * needs no extra NIC and no forward — see {@link ChrInstance.hostGatewayIp}.
  */
 export type NetworkSpecifier =
 	/** SLIRP user-mode NAT + `hostfwd` port mapping. Management default; the only
@@ -176,6 +176,11 @@ export const SERVICE_NAMES = Object.keys(SERVICE_PORTS) as ServiceName[];
 /** Ports per instance block for allocation. */
 export const PORTS_PER_BLOCK = 10;
 export const DEFAULT_PORT_BASE = 9100;
+
+/** QEMU user-mode (SLIRP) gateway — the host's address as seen from inside a guest.
+ *  Fixed by QEMU's built-in 10.0.2.0/24 user network; surfaced on a running instance
+ *  as {@link ChrInstance.hostGatewayIp}. */
+export const HOST_GATEWAY_IP = "10.0.2.2";
 
 /**
  * TCP endpoint for QEMU IPC channels on Windows.
@@ -348,7 +353,7 @@ export interface StartOptions {
 	 *  {@link lookupGuestPort} resolve guest port + proto for common service names.
 	 *
 	 *  For *receiving* guest-originated UDP (no forward needed), see
-	 *  {@link ChrInstance.tzspGatewayIp} and `docs/networking-recipes.md`.
+	 *  {@link ChrInstance.hostGatewayIp} and `docs/networking-recipes.md`.
 	 *  @example
 	 *  extraPorts: [{ name: "snmp", host: 9161, guest: 161, proto: "udp" }]
 	 *  @example
@@ -598,8 +603,16 @@ export interface ChrInstance {
 	 *  `docs/networking-recipes.md`, `examples/udp-gateway/`.
 	 *  @example
 	 *  // RouterOS TZSP sniffer streaming to the host:
-	 *  await instance.exec(`/tool/sniffer/set streaming-server=${instance.tzspGatewayIp}:37008`);
+	 *  await instance.exec(`/tool/sniffer/set streaming-server=${instance.hostGatewayIp}:37008`);
 	 */
+	hostGatewayIp: string;
+	/** @deprecated Renamed to {@link ChrInstance.hostGatewayIp} — the value was never
+	 *  TZSP-specific, it is the host as seen from inside the guest and carries any
+	 *  guest→host UDP (remote syslog, NetFlow, a plain socket). The old name led
+	 *  readers to assume a sniffer-only primitive.
+	 *
+	 *  Still populated with the identical value, and will be removed no earlier than
+	 *  the next minor. Migration is a rename at the call site — nothing else changes. */
 	tzspGatewayIp: string;
 
 	/** Check or wait for REST API readiness.

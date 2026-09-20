@@ -89,7 +89,7 @@ socket bound on loopback `<port>` — **no forward, no extra NIC**. `ChrInstance
 exposes the constants:
 
 ```ts
-instance.tzspGatewayIp;    // "10.0.2.2" — host address from inside the guest
+instance.hostGatewayIp;    // "10.0.2.2" — host address from inside the guest
 instance.captureInterface; // "lo0" on macOS, "any" on Linux
 ```
 
@@ -102,7 +102,7 @@ replies must keep its socket unconnected.
 ```ts
 const sock = dgram.createSocket("udp4");
 sock.bind(0, "0.0.0.0");   // unconnected
-// guest: send UDP to instance.tzspGatewayIp:<sock port> (syslog, NetFlow, TZSP, …)
+// guest: send UDP to instance.hostGatewayIp:<sock port> (syslog, NetFlow, TZSP, …)
 ```
 
 Covers: guest-originated UDP (remote syslog, NetFlow/`traffic-flow`, TZSP sniffer

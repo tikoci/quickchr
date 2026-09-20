@@ -46,7 +46,7 @@ machine down on success *or* failure via `runExample()`.
 | [`file-transfer/`](./file-transfer/) | `upload()` / `download()` round-trip |
 | [`device-mode/`](./device-mode/) | provision `/system/device-mode` (enable container) |
 | [`trial-license/`](./trial-license/) | apply a CHR trial license — **manual-only** (rate limits) |
-| [`udp-gateway/`](./udp-gateway/) | receive guest-originated UDP with no forward (`tzspGatewayIp`) |
+| [`udp-gateway/`](./udp-gateway/) | receive guest-originated UDP with no forward (`hostGatewayIp`) |
 | [`mndp/`](./mndp/) | receive MNDP L2 broadcasts via a `socket-connect` NIC |
 | [`version-matrix/`](./version-matrix/) | boot every RouterOS channel in parallel and compare *(was `matrica`)* |
 
