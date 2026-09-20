@@ -137,8 +137,15 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 	return args;
 }
 
-/** Build networking arguments from NetworkConfig array. */
-function buildNetworkArgs(
+/** Build networking arguments from a `NetworkConfig` array.
+ *
+ *  Exported because it is one of the two places a NIC reaches QEMU (the other is
+ *  `resolveAllNetworks()` in `network.ts`, whose output the `net.resolved` branch
+ *  below passes straight through). Testing it through {@link buildQemuArgs} would
+ *  require a QEMU binary on the host, which the unit tier does not have — and a
+ *  test that skips itself when QEMU is missing would assert nothing on CI, which
+ *  is how a MAC-less NIC got shipped in the first place (#154). */
+export function buildNetworkArgs(
 	args: string[],
 	ports: Record<string, PortMapping>,
 	networks: NetworkConfig[],

@@ -4,7 +4,6 @@
  */
 
 import { createConnection } from "node:net";
-import { createHash } from "node:crypto";
 import {
 	DEFAULT_PORT_BASE,
 	PORTS_PER_BLOCK,
@@ -405,7 +404,7 @@ export function resolveStartNetworks(
  * lab rebuilt under the same names presents the same addresses.
  */
 export function deriveMac(name: string, index: number, salt = 0): string {
-	const digest = createHash("sha256")
+	const digest = new Bun.CryptoHasher("sha256")
 		.update(`${name}\u0000${index}\u0000${salt}`)
 		.digest();
 	// Five octets after the fixed `02`, so a NIC's address is 48 bits total.
@@ -430,6 +429,15 @@ export function deriveMac(name: string, index: number, salt = 0): string {
  * A SHA-256 collision across five octets is vanishingly unlikely, but `taken` makes
  * the guarantee structural rather than probabilistic — a duplicate here is the exact
  * silent-L2 failure this exists to prevent, so it is worth not leaving to odds.
+ *
+ * `taken` is a snapshot, so two concurrent creations can each miss the other. That
+ * only changes an outcome when the two would otherwise have collided — i.e. on top
+ * of that 2^-40 event — but the window is real. It is the same read-then-write
+ * window the port allocator has on the adjacent line (`getUsedPortBases()` →
+ * `findAvailablePortBlock()` → `saveMachine()`), where it fires routinely and
+ * breaks starts outright: #140. Both allocators want one lock around
+ * read-allocate-persist; adding a second, MAC-only lock here would leave the
+ * frequent half of the race unfixed while implying it was handled.
  */
 export function assignMacs(
 	name: string,
