@@ -181,6 +181,8 @@ ifup
 ihl
 imagekey
 img
+imr
+inaddr
 initcall
 initialise
 insmod

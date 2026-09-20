@@ -795,20 +795,34 @@ is broken on macOS. **quickchr still has no 3-node rootless L2 segment on macOS.
 was true before this change; it is now explicit rather than presenting as a RouterOS
 fault. Tracked in #167.
 
-The direction there is to **fix `mcast` rather than engineer around it**. `mcast` is the
-design we want — N-way, no start order, no endpoint bookkeeping — and the entire two-slot
-apparatus above exists because we do not have it. The cause is one missing socket option,
-still present on QEMU master as of 2026-09-20: `net_socket_mcast_create()` in
-`net/socket.c` sets only `SO_REUSEADDR`, on the stated assumption that this is enough to
-share a multicast port. That holds on Linux and not on BSD/macOS, which require
-`SO_REUSEPORT` on every socket sharing the port. `test/lab/mndp/REPORT.md` isolates it to
-QEMU's side: the host joined the group on every interface *with* `SO_REUSEPORT` and still
-received nothing, and two CHRs on one group never discovered each other.
+The in-repo alternative is a frame-repeating hub, and since `start` returns and `--bg` is
+not a detach (#159), there is no process to host one — a hub is a daemon, and "no daemon"
+is a standing design decision. So the work goes into making `mcast` usable instead, via
+two independent defects.
 
-The in-process alternative is a frame-repeating hub, and since `start` returns and `--bg`
-is not a detach (#159), there is no process to host one — a hub is a daemon, and "no
-daemon" is a standing design decision. That is why an upstream fix is preferred over a
-local workaround, not merely cheaper.
+**Ours:** quickchr never passes `localaddr=`, so `net_socket_mcast_create()` falls back to
+`imr_interface = INADDR_ANY` and sets no `IP_MULTICAST_IF`. The group therefore rides the
+host's default multicast interface — the physical LAN — and two people on one network
+using the default group join each other's segments. `IP_MULTICAST_LOOP` governs local
+delivery, not scoping. A `dgram` link cannot leave the filesystem; an `mcast` one does
+today.
+
+**Upstream:** `net_socket_mcast_create()` sets only `SO_REUSEADDR`, on a stated assumption
+that this suffices to share a multicast port — true on Linux, false on BSD/macOS, which
+require `SO_REUSEPORT` on every such socket. Still that way on QEMU master as of
+2026-09-20. `test/lab/mndp/REPORT.md` isolates it to QEMU's side: the host joined on every
+interface *with* `SO_REUSEPORT` and still received nothing, and two CHRs on one group
+never discovered each other.
+
+**`mcast` stays opt-in either way.** Fixing both removes specific causes of silent failure;
+neither changes the asymmetry that chose the `dgram` default, because that asymmetry is not
+about macOS. `mcast` state lives in the host kernel rather than in quickchr's registry, so a
+firewall, a VPN capturing multicast, or another host on the group produces the same
+invisible 100% loss. Pair-transport misconfiguration is endpoint occupancy — persisted,
+and refused before spawn. Nor is `mcast` the simpler mechanism it first appears: it removes
+slots, roles and start order, but trades them for group and port allocation, which is where
+the three-links-one-port collapse above came from — and a group collision merges segments
+silently where a slot collision refuses.
 
 One caveat on the record, because it is currently cited as fact and is not: the external
 lab's report of UDP blocked at the syscall level inside its sandbox is **unverified**, and
