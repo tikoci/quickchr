@@ -92,6 +92,45 @@ export function saveMachine(state: MachineState): void {
 	writeFileSync(machineJsonPath(state.name), JSON.stringify(state, null, "\t") + "\n");
 }
 
+/** The fields every caller dereferences without guarding, with the `typeof` each must
+ *  answer. Deliberately not a schema: it is the set that turns a bad file into a crash
+ *  somewhere else, which is the thing being prevented. `cpu`/`mem` are absent because a
+ *  missing one prints oddly rather than throwing, and a narrow check cannot wrongly
+ *  condemn a machine that works today. `networks` is absent because `loadMachine()`
+ *  migrates it just below.
+ *
+ *  Every field listed here has been required on `MachineState` since the commit that
+ *  introduced it (5cfe052), so no `machine.json` any version of quickchr wrote can be
+ *  condemned by this check — which is the thing that would make it worse than the bug
+ *  it fixes. */
+const REQUIRED_STATE_FIELDS: ReadonlyArray<[keyof MachineState, "string" | "number" | "object"]> = [
+	["name", "string"],
+	["version", "string"],
+	["arch", "string"],
+	["status", "string"],
+	["machineDir", "string"],
+	["portBase", "number"],
+	["ports", "object"],
+	["packages", "object"],
+];
+
+/** Why `parsed` is not usable as a `MachineState`, or `undefined` when it is.
+ *
+ *  Parsing successfully is not the same as being state. `{"name":"lab"}` parses, and
+ *  `JSON.parse` is happy with `null` and `[]` too; casting any of them to `MachineState`
+ *  only moves the failure — `{"name":"lab"}` reached `formatPorts(m.ports)` and aborted
+ *  `quickchr list` exactly as an unparseable file used to (#165). */
+function stateShapeProblem(parsed: unknown): string | undefined {
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		return "not a JSON object";
+	}
+	const record = parsed as Record<string, unknown>;
+	const bad = REQUIRED_STATE_FIELDS
+		.filter(([key, kind]) => typeof record[key] !== kind || record[key] === null)
+		.map(([key]) => key);
+	return bad.length > 0 ? `missing or invalid: ${bad.join(", ")}` : undefined;
+}
+
 /** Load machine state from disk. Returns undefined if not found.
  *
  *  Throws `STATE_ERROR` when the file is there but unusable. A targeted lookup by name
@@ -111,10 +150,11 @@ export function loadMachine(name: string): MachineState | undefined {
 			`Inspect ${path}, or clear the machine with 'quickchr remove ${name}'`,
 		);
 	}
-	if (state === null || typeof state !== "object" || Array.isArray(state)) {
+	const shapeProblem = stateShapeProblem(state);
+	if (shapeProblem) {
 		throw new QuickCHRError(
 			"STATE_ERROR",
-			`Machine "${name}" has an unreadable machine.json (not a JSON object)`,
+			`Machine "${name}" has an unreadable machine.json (${shapeProblem})`,
 			`Inspect ${path}, or clear the machine with 'quickchr remove ${name}'`,
 		);
 	}

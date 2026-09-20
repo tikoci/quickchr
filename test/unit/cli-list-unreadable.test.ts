@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import type { MachineState } from "../../src/lib/types.ts";
@@ -27,7 +27,7 @@ async function runQuickchr(args: string[]) {
 	return { stdout, stderr, exitCode };
 }
 
-function healthyMachine(name: string, portBase: number): void {
+async function healthyMachine(name: string, portBase: number): Promise<void> {
 	const state: MachineState = {
 		name,
 		version: "7.24.4",
@@ -44,16 +44,14 @@ function healthyMachine(name: string, portBase: number): void {
 		status: "stopped",
 		machineDir: join(TEST_DIR, "machines", name),
 	};
-	mkdirSync(state.machineDir, { recursive: true });
-	writeFileSync(join(state.machineDir, "machine.json"), JSON.stringify(state, null, "\t"));
+	await Bun.write(join(state.machineDir, "machine.json"), JSON.stringify(state, null, "\t"));
 }
 
 /** A `saveMachine()` that died mid-write — disk full, power loss — is the realistic way
  *  to get here, and a truncated object is what it leaves behind. */
-function truncatedMachine(name: string): void {
-	const dir = join(TEST_DIR, "machines", name);
-	mkdirSync(dir, { recursive: true });
-	writeFileSync(join(dir, "machine.json"), '{"name":"' + name + '","version":"7.24.4","po');
+async function truncatedMachine(name: string): Promise<void> {
+	// Bun.write creates the machine directory on the way.
+	await Bun.write(join(TEST_DIR, "machines", name, "machine.json"), `{"name":"${name}","version":"7.24.4","po`);
 }
 
 beforeEach(() => {
@@ -67,9 +65,9 @@ afterEach(() => {
 
 describe("one corrupt machine.json does not cost the whole listing (#165)", () => {
 	test("list completes, exit 0, with the healthy machines intact", async () => {
-		healthyMachine("lab1", 9100);
-		healthyMachine("lab2", 9110);
-		truncatedMachine("lab3");
+		await healthyMachine("lab1", 9100);
+		await healthyMachine("lab2", 9110);
+		await truncatedMachine("lab3");
 
 		const result = await runQuickchr(["list"]);
 		// Exit 0 on purpose: the listing succeeded. A non-zero exit would punish the
@@ -82,8 +80,8 @@ describe("one corrupt machine.json does not cost the whole listing (#165)", () =
 	});
 
 	test("the unreadable machine is a row, named, with the remedy attached", async () => {
-		healthyMachine("lab1", 9100);
-		truncatedMachine("lab3");
+		await healthyMachine("lab1", 9100);
+		await truncatedMachine("lab3");
 
 		const result = await runQuickchr(["list"]);
 		expect(result.stdout).toContain("lab3");
@@ -94,7 +92,7 @@ describe("one corrupt machine.json does not cost the whole listing (#165)", () =
 	});
 
 	test("a machine that is only unreadable is still not 'no instances'", async () => {
-		truncatedMachine("lab3");
+		await truncatedMachine("lab3");
 
 		const result = await runQuickchr(["list"]);
 		expect(result.exitCode).toBe(0);
@@ -103,8 +101,8 @@ describe("one corrupt machine.json does not cost the whole listing (#165)", () =
 	});
 
 	test("--json carries it as its own shape, not a half-filled machine", async () => {
-		healthyMachine("lab1", 9100);
-		truncatedMachine("lab3");
+		await healthyMachine("lab1", 9100);
+		await truncatedMachine("lab3");
 
 		const result = await runQuickchr(["list", "--json"]);
 		expect(result.exitCode).toBe(0);
@@ -117,10 +115,26 @@ describe("one corrupt machine.json does not cost the whole listing (#165)", () =
 		expect(broken?.version).toBeUndefined();
 	});
 
+	test("a machine.json that parses but is not state cannot abort the listing either", async () => {
+		// Found in review: the first fix guarded `JSON.parse` and rejected primitives and
+		// arrays, so `{"name":"lab3"}` was still cast to MachineState, still enumerated,
+		// and still reached `formatPorts(m.ports)` — `Object.entries(undefined)`, the same
+		// wholesale abort with a different stack. Parsing is not the bar; being usable is.
+		await healthyMachine("lab1", 9100);
+		await Bun.write(join(TEST_DIR, "machines", "shaped", "machine.json"), '{"name":"shaped"}');
+
+		const result = await runQuickchr(["list"]);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("lab1");
+		expect(result.stdout).toContain("shaped");
+		expect(result.stdout).toContain("unreadable");
+		expect(result.stderr).not.toContain("Object.entries");
+	});
+
 	test("a targeted lookup still fails — and says which file and what to run", async () => {
 		// `get(name)` is not an enumeration: you named *this* machine, it is corrupt, and
 		// answering "no such machine" about a directory that exists would be a lie.
-		truncatedMachine("lab3");
+		await truncatedMachine("lab3");
 
 		const result = await runQuickchr(["list", "lab3"]);
 		expect(result.exitCode).toBe(1);
@@ -130,8 +144,8 @@ describe("one corrupt machine.json does not cost the whole listing (#165)", () =
 	});
 
 	test("remove clears it, and the listing goes back to clean", async () => {
-		healthyMachine("lab1", 9100);
-		truncatedMachine("lab3");
+		await healthyMachine("lab1", 9100);
+		await truncatedMachine("lab3");
 
 		const removed = await runQuickchr(["remove", "lab3"]);
 		expect(removed.exitCode).toBe(0);
@@ -156,8 +170,8 @@ describe("state.ts: enumeration and lookup take different policies (#165)", () =
 
 	test("loadAllMachines skips the unreadable entry; listUnreadableMachines names it", async () => {
 		const { loadAllMachines, listUnreadableMachines, loadMachine } = await import("../../src/lib/state.ts");
-		healthyMachine("lab1", 9100);
-		truncatedMachine("lab3");
+		await healthyMachine("lab1", 9100);
+		await truncatedMachine("lab3");
 
 		expect(loadAllMachines().map((m) => m.name)).toEqual(["lab1"]);
 		expect(listUnreadableMachines().map((u) => u.name)).toEqual(["lab3"]);
@@ -169,9 +183,7 @@ describe("state.ts: enumeration and lookup take different policies (#165)", () =
 		// `JSON.parse("null")` succeeds, so a parse guard alone would hand every caller a
 		// MachineState-typed null and move the crash somewhere less informative.
 		const { listUnreadableMachines } = await import("../../src/lib/state.ts");
-		const dir = join(TEST_DIR, "machines", "nulled");
-		mkdirSync(dir, { recursive: true });
-		writeFileSync(join(dir, "machine.json"), "null");
+		await Bun.write(join(TEST_DIR, "machines", "nulled", "machine.json"), "null");
 
 		expect(listUnreadableMachines().map((u) => u.name)).toEqual(["nulled"]);
 	});
@@ -182,7 +194,7 @@ describe("state.ts: enumeration and lookup take different policies (#165)", () =
 		// second because it still holds a disk image under a name someone chose.
 		const { listUnreadableMachines, listOrphanMachineDirs } = await import("../../src/lib/state.ts");
 		mkdirSync(join(TEST_DIR, "machines", "half-made"), { recursive: true });
-		truncatedMachine("lab3");
+		await truncatedMachine("lab3");
 
 		expect(listUnreadableMachines().map((u) => u.name)).toEqual(["lab3"]);
 		expect(listOrphanMachineDirs().sort()).toEqual(["half-made", "lab3"]);

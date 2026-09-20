@@ -1,7 +1,5 @@
 // cspell:ignore netdev verison
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import {
 	ADD_FLAGS,
@@ -12,7 +10,7 @@ import {
 } from "../../src/cli/flags.ts";
 import { parseFlags } from "../../src/cli/index.ts";
 
-const CLI_SOURCE = readFileSync(join(import.meta.dir, "../../src/cli/index.ts"), "utf-8");
+const CLI_SOURCE = await Bun.file(new URL("../../src/cli/index.ts", import.meta.url)).text();
 
 /** Every flag name passed to one of the CLI's flag readers. The audit that found
  *  `--vmnet-shared` was someone re-reading every call site by eye; this is that audit as

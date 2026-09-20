@@ -21,9 +21,10 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   directories are now addressable from the public API, not just by `rm -rf` on the
   data dir.
 
-- `QuickCHR.listUnreadable()` — the machines `list()` skipped, with the parse error
-  for each. `list()` no longer aborts on a corrupt `machine.json`, so this is where
-  what it skipped stays visible. (#165)
+- `QuickCHR.listUnreadable()` — the machines `list()` skipped, each with the reason it
+  could not be loaded: the file would not read, the JSON is invalid, or it parsed into
+  something that is not machine state. `list()` no longer aborts on a corrupt
+  `machine.json`, so this is where what it skipped stays visible. (#165)
 
 - `quickchr cache add` and the public `cacheAdd()` API resolve and prefetch one
   CHR image without requiring QEMU or creating a machine. `quickchr cache key`
@@ -52,7 +53,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   guard, so a single truncated file — the realistic outcome of a disk-full or power
   loss during `saveMachine()` — aborted the whole listing with a raw parse trace and
   took every healthy machine's state with it. The enumeration now skips what it cannot
-  read and shows it as a row instead: named, marked `unreadable`, with
+  read — a failed read, invalid JSON, or valid JSON that is not machine state — and
+  shows it as a row instead: named, marked `unreadable`, with
   `quickchr remove <name>` attached, and exit 0 because the listing succeeded. Nothing
   is hidden — a machine that vanished from `list` is exactly the failure that does not
   look like one. `QuickCHR.get(name)` still throws for that machine, because a lookup

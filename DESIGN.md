@@ -687,6 +687,8 @@ The audit matters as much as the table. `--vmnet-shared` was found by accident w
 
 Skipping alone would have traded a loud failure for a quiet one: a machine that was there yesterday just disappears, which is the shape of trouble that does *not* look like trouble. So the unreadable entry keeps its place in `list` as a row — marked, named, with the remedy attached — because it still holds a disk image and `list` is where anyone looks first. Deferring it to `doctor` assumes you already suspect something. Exit stays 0: the listing succeeded, and a non-zero exit would punish the working machines and break every script piping `list`.
 
+"Unreadable" is not the same as "unparseable", and review caught the first version confusing them: it guarded `JSON.parse` and rejected primitives and arrays, so `{"name":"lab3"}` was still cast to `MachineState`, still enumerated, and still reached `formatPorts(m.ports)` — `Object.entries(undefined)`, the same wholesale abort with a different stack. `loadMachine()` now checks the fields callers dereference unguarded (`REQUIRED_STATE_FIELDS`). That list is deliberately not a schema: it is the set that turns a bad file into a crash somewhere else, and every field in it has been required on `MachineState` since the commit that introduced the type, so it cannot condemn state any version of quickchr wrote. `cpu`/`mem` are left out precisely because a missing one prints oddly rather than throwing.
+
 Internally this is a three-way `tryLoadMachine()` (`ok` / `missing` / `unreadable`) that `loadMachine()` still collapses into "undefined or throw". Keeping the discriminated result unexported is the small diff; promoting it to public API is a rename if #58 lands.
 
 ### A named socket says what it is
