@@ -184,9 +184,17 @@ describe("networks sockets create", () => {
 
 	test("the network overview names the transport instead of a port that may not exist", async () => {
 		// It interpolated `port:${s.port}` and printed `port:undefined` for a dgram link.
+		//
+		// Compared against `describeSocketTransport()` rather than a literal: the default
+		// transport is platform-dependent, so asserting "unix datagram" here passes on
+		// POSIX and can never pass on Windows, where the default is `listen-connect`.
 		await runQuickchr(["networks", "sockets", "create", "lab"]);
 		const overview = await runQuickchr(["networks"]);
-		expect(overview.stdout).toContain("unix datagram");
+
+		_resetSocketCache();
+		const entry = getNamedSocket("lab");
+		if (!entry) throw new Error("entry missing");
+		expect(overview.stdout).toContain(describeSocketTransport(entry));
 		expect(overview.stdout).not.toContain("port:undefined");
 	});
 
