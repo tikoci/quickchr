@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync
 import { join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { getDataDir } from "./state.ts";
-import { assertValidResourceName } from "./names.ts";
+import { assertValidResourceName, assertPathSafeName } from "./names.ts";
 
 export interface SocketEntry {
 	name: string;
@@ -42,6 +42,11 @@ export function getSocketRegistryDir(): string {
 }
 
 function socketPath(name: string): string {
+	// The single place a name becomes a path, so the traversal guard lives here
+	// rather than at each caller: `networks sockets remove ../victim` used to delete
+	// <dataDir>/victim.json, and a longer prefix reached outside the data dir entirely.
+	// createNamedSocket() applies the stricter creation rules on top of this.
+	assertPathSafeName(name, "named socket");
 	return join(getSocketRegistryDir(), `${name}.json`);
 }
 

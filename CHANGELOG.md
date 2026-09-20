@@ -48,6 +48,12 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   derived from them, at every site that deletes. Introduced with the orphan recovery
   below and caught in review before release.
 
+- `quickchr networks sockets remove ../<name>` deleted a `.json` file outside the
+  socket registry, and a longer prefix reached outside the data dir entirely. The
+  traversal guard now sits in `socketPath()`, the one place a named socket becomes a
+  path. Pre-existing; found while auditing the deletion paths after the `remove ..`
+  fix above.
+
 - A known flag given without its value is an error rather than a silent default.
   `quickchr add --name --version 7.24.3` parsed `--name` as a boolean, dropped it,
   and created an auto-named machine. (#156)
