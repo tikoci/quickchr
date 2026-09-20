@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -118,6 +118,35 @@ describe("port auto-allocation", () => {
 		createNamedSocket("b", { mode: "listen-connect", port: 4005 });
 		const c = createNamedSocket("c", { mode: "mcast" });
 		expect(c.port).toBe(4006);
+	});
+
+	test("allocation sees another process's change to a link this one has cached", () => {
+		// listNamedSockets() seeds from the in-memory cache and only reads disk for names
+		// it does not already hold, so a cached entry whose on-disk port has since changed
+		// was never re-read — and the next allocation could hand out a port that is taken.
+		const x = createNamedSocket("x", { mode: "mcast" });
+		expect(x.port).toBe(4000);
+
+		// Another quickchr process moves x to a different port. Written directly: the
+		// point is that this process's cache never learns about it.
+		const path = join(getSocketRegistryDir(), "x.json");
+		const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+		onDisk.port = 4001;
+		writeFileSync(path, JSON.stringify(onDisk, null, "\t") + "\n");
+
+		expect(createNamedSocket("y", { mode: "mcast" }).port).toBe(4002);
+	});
+
+	test("a link this process just wrote still counts, even if a disk read misses it", () => {
+		// The mirror case, and why the fix unions disk with the cache rather than
+		// replacing it: the cache exists because Bun on Windows can return stale data
+		// from a read that follows a write, so a fresh scan can miss this process's own
+		// entries. Simulated by removing the file while the cache still holds it.
+		const a = createNamedSocket("a", { mode: "mcast" });
+		expect(a.port).toBe(4000);
+		rmSync(join(getSocketRegistryDir(), "a.json"));
+
+		expect(createNamedSocket("b", { mode: "mcast" }).port).toBe(4001);
 	});
 
 	test("a dgram link carries no port, and portless entries do not disturb allocation", () => {

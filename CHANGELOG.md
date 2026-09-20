@@ -152,7 +152,9 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 - Automatic socket port allocation is serialized registry-wide. It reads every entry to
   pick `max + 1`, so a per-entry lock did not help when the contenders were different
   names: three `mcast` links created at once all took port 4000, silently collapsing
-  three segments into one shared group. (#158)
+  three segments into one shared group. Allocation also reads the registry from disk
+  and unions it with the in-memory cache, so a link another process has changed since
+  this one cached it cannot be handed out twice. (#158)
 
 - `quickchr networks sockets remove` refuses a link its machines are still using.
   Removing the entry also unlinks the endpoint sockets, so the peer's `remote.path`

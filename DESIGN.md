@@ -772,6 +772,16 @@ took port 4000 (15 of 15 rounds), silently collapsing three segments into one gr
 The registry-wide lock is always taken *inside* the per-entry one, so the order is
 fixed and two holders cannot deadlock.
 
+The lock alone is not enough, though: allocation also has to *see* the current
+registry. `listNamedSockets()` seeds itself from the in-memory cache and only reads
+disk for names it does not already hold, so a cached entry whose on-disk port has
+changed is never re-read — and the next allocation hands out a port that is taken.
+Reading only from disk is not the fix either, because that cache exists to work around
+Bun returning stale data from a read that follows a write on Windows. The two sources
+go stale in opposite directions, so allocation takes the **union** of both: it can only
+over-estimate the maximum, which wastes a port number, where trusting either one alone
+under-estimates it and collides.
+
 The acceptance bar, and the reason the visibility work is not cosmetic: **nothing about
 a named socket should require opening a file under the data dir.** Every place the
 field report had to read `machine.json` is a place quickchr knew the answer and did not

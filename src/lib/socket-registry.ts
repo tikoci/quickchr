@@ -256,8 +256,43 @@ function reloadEntry(name: string): SocketEntry | undefined {
 	}
 }
 
-function allocatePort(existing: SocketEntry[]): number {
-	const used = existing.map((e) => e.port).filter((p): p is number => typeof p === "number");
+/** Every port the registry has handed out — read from disk *and* from this process's
+ *  cache.
+ *
+ *  `listNamedSockets()` seeds itself from `_cache` and only reads disk for names it does
+ *  not already hold, so a cached entry whose on-disk port has since changed is never
+ *  re-read. Allocating from it can then hand out a port another process is already
+ *  using: cache `x` at 4000, let another process move `x` to 4001, and the next
+ *  allocation here picks 4001.
+ *
+ *  Reading only from disk is not the fix either — the cache exists because Bun on
+ *  Windows can return stale data from a read that immediately follows a write, so a
+ *  fresh scan can miss entries *this* process just wrote. The two sources go stale in
+ *  opposite directions, so allocation unions them. That can only over-estimate the
+ *  maximum, which wastes a port number; trusting either one alone under-estimates it
+ *  and collides. */
+function portsInUse(): number[] {
+	const ports: number[] = [];
+	for (const entry of _cache.values()) {
+		if (typeof entry.port === "number") ports.push(entry.port);
+	}
+	const dir = getSocketRegistryDir();
+	try {
+		for (const file of readdirSync(dir)) {
+			if (!file.endsWith(".json")) continue;
+			try {
+				const raw = JSON.parse(readFileSync(join(dir, file), "utf-8")) as Partial<SocketEntry>;
+				if (typeof raw.port === "number") ports.push(raw.port);
+			} catch { /* unreadable: it holds no usable link, so it claims no port */ }
+		}
+	} catch { /* no registry directory yet */ }
+	return ports;
+}
+
+/** Next free port. Callers hold the registry-wide lock, so the scan above and the write
+ *  that follows it are one critical section against every other name. */
+function allocatePort(): number {
+	const used = portsInUse();
 	if (used.length === 0) return DEFAULT_START_PORT;
 	return Math.max(...used) + 1;
 }
@@ -331,7 +366,7 @@ function createEntry(
 
 	// Allocating reads every entry, so the read and the write that follows it have to be
 	// one critical section against every other name.
-	return withRegistryLock(() => build(allocatePort(listNamedSockets())));
+	return withRegistryLock(() => build(allocatePort()));
 }
 
 export function getNamedSocket(name: string): SocketEntry | undefined {
