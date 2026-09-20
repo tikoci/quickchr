@@ -5,6 +5,12 @@
  * Verifies that on Windows, spawnQemu uses node:child_process.spawn with
  * detached: true + windowsHide: true so QEMU survives the parent process exit.
  *
+ * `spawnQemu` now takes this path on every platform (#159) — POSIX needs the same
+ * `detached: true` for a different reason, and proves it behaviorally with a real
+ * group signal in `posix-detach.test.ts`. What stays Windows-specific here is
+ * `windowsHide` and the Job Object motivation, so these assertions stay skipped
+ * elsewhere rather than being generalized into a second mock-level copy.
+ *
  * Implementation note: spawnQemu does `await import("node:child_process")` lazily
  * inside the function body. We intercept this with `mock.module()` from bun:test,
  * which patches the module registry before the dynamic import runs.

@@ -30,6 +30,7 @@ armvirt
 askpass
 authless
 awk
+backgrounded
 backoff
 bak
 basicauth
@@ -271,6 +272,7 @@ nlevel
 noauth
 nodefaults
 nographic
+nohup
 nolocaladdr
 noninteractive
 nopasswd
@@ -378,6 +380,7 @@ sendmsg
 sendto
 setcap
 setmode
+setsid
 settimeout
 setuid
 sfc

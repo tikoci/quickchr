@@ -535,7 +535,7 @@ capture on any platform. Evidence: `test/lab/mndp/REPORT.md`.
 The dual of `hostfwd`: SLIRP's gateway `10.0.2.2` *is* the host from inside the
 guest, so guest-originated UDP to `10.0.2.2:<port>` reaches a host socket bound on
 loopback `<port>` with **no forward and no extra NIC**. This generalizes the TZSP
-path (`tzspGatewayIp`/`captureInterface`) — it is not TZSP-specific and reaches an
+path (`hostGatewayIp`/`captureInterface`) — it is not TZSP-specific and reaches an
 ordinary bound socket, not just a `tshark`/pcap capture. The host socket **must be
 unconnected**: SLIRP re-emits from a rewritten loopback source
 (`127.0.0.1:<ephemeral>`), which a `connect()`-ed socket would filter. This closed
@@ -901,6 +901,35 @@ only restricted internet-bound UDP. Both halves were wrong: the block is real, i
 syscall, and loopback multicast fails independently of egress. The lesson is the one this
 section already argues elsewhere — the answer came from running the commands on the actual
 host, not from reasoning about what a sandbox is likely to permit.
+
+### Background is not detachment, and `--bg` never claimed to be
+
+`spawnQemu()` backgrounds QEMU and calls `unref()`. That is enough for the parent to
+*exit* — QEMU is adopted by init/launchd and runs on — and it was read as detachment for
+as long as nobody sent a signal. It leaves QEMU in the caller's process group, so anything
+addressed to the group takes the VM with it: Ctrl-C in the terminal, a shell `timeout`, a
+CI step teardown, an agent harness killing a command it thinks is stuck. The external lab
+that hit this worked around it by wrapping every start in `nohup` (#159).
+
+Windows had the right spawn for the wrong-looking reason. A Job Object terminates
+everything inside it when the parent goes, and `Bun.spawn().unref()` does not escape one,
+so that branch already used `node:child_process` with `detached: true` — and carried a
+comment describing precisely the hazard the POSIX branch was exposed to. The two platforms
+fail differently (a Job Object on parent *exit*; a process group on a *signal*), which is
+why the asymmetry survived review: the Windows comment reads as Windows trivia rather than
+as the general rule. It is the general rule. Both platforms now take one path.
+
+Detaching does not weaken cleanup, because nothing that sweeps QEMU sweeps by group —
+`scripts/ci-file-watchdog.ts` and the integration workflow both kill by process name. That
+is worth stating rather than assuming: "the child outlives its parent's signal" and "a
+wedged run leaks VMs" would otherwise look like the same change.
+
+The naming half is not fixed and should not be fixed quietly. `--bg` is already the
+default and only ever meant "serial console goes to a log file instead of stdio" — it does
+not make `start` return early, because `start` waits for REST readiness by contract. Both
+an external agent and the maintainer believed it bought them something. The honest repair
+is a separate `--no-wait` that opts out of the wait, not a redefinition of `--bg` that
+would change what existing scripts get; #159 holds that half.
 
 ### Out of Scope (decided)
 

@@ -566,7 +566,7 @@ The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Win
 
 - `test/unit/windows-paths.test.ts` — `getDataDir()` (`LOCALAPPDATA`/`USERPROFILE`), `getMachinesDir()`, `getCacheDir()`, `findCommandOnPath()` uses `where.exe`, `detectPackageManager()` returns `"winget"`
 - `test/unit/windows-channels.test.ts` — on Windows, `buildQemuArgs` produces TCP-localhost chardev paths (`host=127.0.0.1,port=portBase+N`: monitor +6, serial +7, qga +8), because QEMU's Winsock `bind()` cannot handle `\\.\pipe\` paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` when the TCP port is not listening; `stopMachineByName` handles no `.sock` files
-- `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`
+- `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`. The spawn path is shared with POSIX since #159; the non-Windows half is `test/unit/posix-detach.test.ts`, which signals a real process group and is skipped on Windows (no process groups to signal)
 
 **Windows integration tests** run via `platforms=windows-x86` on `integration.yml` —
 TCG-only, full suite by default (300-min timeout); a red job is a real failure
