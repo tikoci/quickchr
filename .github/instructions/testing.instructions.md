@@ -203,6 +203,31 @@ New library functionality must include an integration test that:
 Example: `packages` option → verify via `/rest/system/package` that the package appears
 as active after `QuickCHR.start` returns.
 
+## A stub stops modelling the object the moment the source grows a method
+
+`mock.module("node:child_process", ...)` in `windows-spawn.test.ts` returned `{ pid, unref }`.
+Adding one `child.on("error", ...)` line to `spawnQemu()` made that stub throw a `TypeError` —
+which landed in the test's own `try { ... } catch { /* may throw after spawn */ }`, so `unref()`
+was never reached and the assertion failed with `Expected: true, Received: false`, naming nothing
+about `on`. The call under test had become a no-op that the assertions could not see.
+
+Two rules fall out, both cheap:
+
+- **A catch-all around the call under test hides the call disappearing.** If a test swallows
+  exceptions for a legitimate reason (here: `spawnQemu` may throw `SPAWN_FAILED` after the part
+  being asserted), the assertions have to prove the code *got that far* — assert on something the
+  stub records, not merely on an absence of failure.
+- **Grow the stub with the source.** When production code starts calling a new method on a
+  mocked object, every stub of that object needs it, and the new call deserves its own assertion
+  (`expect(events).toContain("error")`) so the next person changing it gets a message about the
+  right thing.
+
+Windows-only tests are `describe.skipIf(process.platform !== "win32")`, so this class of break is
+invisible locally and surfaces only on the `windows-unit-tests` leg. To check one without a round
+trip through CI, force the branch in a scratch file — `Object.defineProperty(process, "platform",
+{ value: "win32", configurable: true })` before the call, restored in `afterEach` — which
+reproduces both the failure and the fix on a POSIX host in about two seconds.
+
 ## CHR-Interacting Features Must Be Integration-Tested Before "Done"
 
 **A feature is NOT done until its integration test passes against a real running CHR.**

@@ -39,7 +39,7 @@ describe.skipIf(!isWindows)("Windows spawnQemu — node:child_process with detac
 		mock.module("node:child_process", () => ({
 			spawn: (_bin: string, _args: string[], options: Record<string, unknown>) => {
 				capturedOptions = options;
-				return { pid: process.pid, unref: () => {} };
+				return { pid: process.pid, unref: () => {}, on: () => {} };
 			},
 		}));
 
@@ -62,6 +62,7 @@ describe.skipIf(!isWindows)("Windows spawnQemu — node:child_process with detac
 			spawn: (_bin: string, _args: string[], _options: unknown) => ({
 				pid: process.pid,
 				unref: () => { unrefCalled = true; },
+				on: () => {},
 			}),
 		}));
 
@@ -72,5 +73,33 @@ describe.skipIf(!isWindows)("Windows spawnQemu — node:child_process with detac
 		}
 
 		expect(unrefCalled).toBe(true);
+	});
+
+	// A failed exec arrives as an `error` event with no pid, and an unhandled `error`
+	// event is a crash rather than a thrown QuickCHRError — nothing awaits this child.
+	// Asserting the registration rather than the effect, because the mock cannot emit.
+	//
+	// This test exists because its absence bit: adding the listener to the source broke
+	// the unref test above, whose stub had no `on`, and the whole `spawnQemu` call
+	// disappeared into that test's catch. A stub that silently stops modelling the
+	// object under test turns a real call into a no-op the assertions cannot see.
+	test("spawnQemu registers an error listener so a failed exec is reportable", async () => {
+		const events: string[] = [];
+
+		mock.module("node:child_process", () => ({
+			spawn: (_bin: string, _args: string[], _options: unknown) => ({
+				pid: process.pid,
+				unref: () => {},
+				on: (event: string) => { events.push(event); },
+			}),
+		}));
+
+		try {
+			await spawnQemu(["qemu-system-x86_64", "-version"], TMP, true);
+		} catch {
+			// May throw after spawn — that's fine
+		}
+
+		expect(events).toContain("error");
 	});
 });
