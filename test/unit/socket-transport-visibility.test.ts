@@ -175,6 +175,21 @@ describe("networks sockets create", () => {
 		expect(bad.stderr).toContain("--port");
 	});
 
+	test("a port with trailing characters is refused", async () => {
+		// Number.parseInt("4000abc") is 4000, so the old check accepted it.
+		const bad = await runQuickchr(["networks", "sockets", "create", "lab", "--mode", "mcast", "--port", "4000abc"]);
+		expect(bad.exitCode).toBe(1);
+		expect(bad.stderr).toContain("4000abc");
+	});
+
+	test("the network overview names the transport instead of a port that may not exist", async () => {
+		// It interpolated `port:${s.port}` and printed `port:undefined` for a dgram link.
+		await runQuickchr(["networks", "sockets", "create", "lab"]);
+		const overview = await runQuickchr(["networks"]);
+		expect(overview.stdout).toContain("unix datagram");
+		expect(overview.stdout).not.toContain("port:undefined");
+	});
+
 	test("the listing names each socket's transport", async () => {
 		await runQuickchr(["networks", "sockets", "create", "lab"]);
 		const list = await runQuickchr(["networks", "sockets"]);
@@ -225,5 +240,38 @@ describe("a start that cannot resolve does not keep the endpoint it claimed", ()
 
 		_resetSocketCache();
 		expect(getNamedSocket("ok-link")?.endpoints).toEqual(["chr1", null]);
+	});
+});
+
+
+describe("a machine that is not running holds no endpoint", () => {
+	test("a claim on an earlier socket is released when a later one is full", async () => {
+		// registerSocketMembers() claims one endpoint per named socket. With the claim
+		// outside the cleanup scope, a machine on two links whose second link was full
+		// kept the first claim, and the caller could not clean it either — it only learns
+		// about the claim once the call returns.
+		const { registerAndResolveNetworks } = await import("../../src/lib/quickchr.ts");
+		createNamedSocket("link-a", { mode: "dgram" });
+		createNamedSocket("link-b", { mode: "dgram" });
+		addSocketMember("link-b", "other1");
+		addSocketMember("link-b", "other2");
+
+		const state = {
+			name: "chr1",
+			networks: [
+				{ specifier: { type: "socket" as const, name: "link-a" }, id: "net0" },
+				{ specifier: { type: "socket" as const, name: "link-b" }, id: "net1" },
+			],
+		} as unknown as Parameters<typeof registerAndResolveNetworks>[0];
+
+		expect(() =>
+			registerAndResolveNetworks(state, {
+				platform: { os: "linux", hostArch: "x64", packageManager: "apt", accelAvailable: [] },
+			}, ""),
+		).toThrow(/carries 2 machines/);
+
+		_resetSocketCache();
+		expect(getNamedSocket("link-a")?.endpoints).toEqual([null, null]);
+		expect(getNamedSocket("link-a")?.members).toEqual([]);
 	});
 });

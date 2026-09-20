@@ -760,7 +760,17 @@ afterwards — the listening machine must be up before the connecting one, since
 `connect=` fails silently and never retries. `dgram` has no ordering constraint at any
 point. A claim is also released if the launch that made it never reaches persisted
 state, so a start that fails after claiming an endpoint does not leave a link occupied
-by a machine that is not running.
+by a machine that is not running. The invariant is the plain one — **a machine that is
+not running holds no endpoint** — and every path that reaches "stopped" has to honour
+it, including the two that do not go through `stop()`: a foreground run whose QEMU has
+exited, and `clean()`.
+
+The registry needs a second, wider lock as well. Automatic port allocation is
+`max(existing ports) + 1`, which reads *every* entry, so the per-entry lock does not
+help when the contenders are different names — three `mcast` links created at once all
+took port 4000 (15 of 15 rounds), silently collapsing three segments into one group.
+The registry-wide lock is always taken *inside* the per-entry one, so the order is
+fixed and two holders cannot deadlock.
 
 The acceptance bar, and the reason the visibility work is not cosmetic: **nothing about
 a named socket should require opening a file under the data dir.** Every place the

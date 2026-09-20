@@ -219,6 +219,26 @@ function withEntryLock<T>(name: string, fn: () => T): T {
 	}
 }
 
+/** Lock name for the registry-wide lock. Deliberately not a legal socket name:
+ *  `assertPathSafeName` accepts it as a path segment, while `assertValidResourceName`
+ *  rejects a leading dot for a real socket, so it can never collide with one. Its lock
+ *  file does not end in `.json`, so `listNamedSockets()` never sees it either. */
+const REGISTRY_LOCK_NAME = ".registry";
+
+/** Serialize work that reads or writes the registry as a whole, rather than one entry.
+ *
+ *  Automatic port allocation is `max(existing ports) + 1`, which reads every entry —
+ *  so the per-entry lock does not help when the contenders are *different* names. Three
+ *  processes creating three `mcast` links at once all read an empty registry and all
+ *  take 4000, silently collapsing three segments into one shared group. A repro hit
+ *  that on 15 of 15 rounds.
+ *
+ *  Always taken *inside* `withEntryLock()`, never the other way round, so the lock
+ *  order is fixed and two holders cannot deadlock. */
+function withRegistryLock<T>(fn: () => T): T {
+	return withEntryLock(REGISTRY_LOCK_NAME, fn);
+}
+
 /** Read an entry straight from disk, bypassing the in-memory cache.
  *
  *  The cache is a write-through workaround for Bun's Windows FS caching, and it is
@@ -283,26 +303,35 @@ function createEntry(
 		);
 	}
 
-	const port = mode === "dgram" ? undefined : (opts?.port ?? allocatePort(listNamedSockets()));
 	const mcastGroup = mode === "mcast" ? (opts?.mcastGroup ?? DEFAULT_MCAST_GROUP) : undefined;
 
 	// Fail at create, not at spawn: a path over sun_path only surfaces as a QEMU
 	// startup error that names a path the caller never chose.
 	if (mode === "dgram") assertEndpointPathsFit(name);
 
-	const entry: SocketEntry = {
-		name,
-		mode,
-		port,
-		mcastGroup,
-		createdAt: new Date().toISOString(),
-		members: [],
-		endpoints: mode === "mcast" ? undefined : [null, null],
-		autoCreated: opts?.autoCreated ?? false,
+	const build = (port: number | undefined): SocketEntry => {
+		const entry: SocketEntry = {
+			name,
+			mode,
+			port,
+			mcastGroup,
+			createdAt: new Date().toISOString(),
+			members: [],
+			endpoints: mode === "mcast" ? undefined : [null, null],
+			autoCreated: opts?.autoCreated ?? false,
+		};
+		saveEntry(entry);
+		return entry;
 	};
 
-	saveEntry(entry);
-	return entry;
+	// A dgram link needs no port, and an explicit one is the caller's to pick — neither
+	// reads the rest of the registry, so neither needs the registry-wide lock.
+	if (mode === "dgram") return build(undefined);
+	if (opts?.port !== undefined) return build(opts.port);
+
+	// Allocating reads every entry, so the read and the write that follows it have to be
+	// one critical section against every other name.
+	return withRegistryLock(() => build(allocatePort(listNamedSockets())));
 }
 
 export function getNamedSocket(name: string): SocketEntry | undefined {

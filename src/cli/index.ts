@@ -2125,6 +2125,7 @@ async function cmdNetworks(argv: string[]) {
 async function showNetworkOverview() {
 	const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
 	const { listNamedSockets } = await import("../lib/socket-registry.ts");
+	const { describeSocketTransport } = await import("../lib/network.ts");
 	const { statusIcon, bold, dim } = await import("./format.ts");
 
 	const platform = await detectPlatform();
@@ -2198,7 +2199,8 @@ async function showNetworkOverview() {
 		console.log("  Named Sockets:");
 		for (const s of sockets) {
 			const members = s.members.length > 0 ? dim(`  members: ${s.members.join(", ")}`) : "";
-			console.log(`    ${s.name.padEnd(16)}${s.mode} port:${s.port}${members}`);
+			// Not `port:${s.port}` — a dgram link has no port and printed `port:undefined`.
+			console.log(`    ${s.name.padEnd(16)}${s.mode}  ${describeSocketTransport(s)}${members}`);
 		}
 	} else {
 		console.log("  Named Sockets:");
@@ -2272,8 +2274,10 @@ async function handleSockets(argv: string[]) {
 			process.exit(1);
 		}
 		const portRaw = flag(flags, "port");
-		const port = portRaw === undefined ? undefined : Number.parseInt(portRaw, 10);
-		if (portRaw !== undefined && (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535)) {
+		// Number(), not parseInt(): parseInt stops at the first non-digit, so "4000abc"
+		// came through as 4000.
+		const port = portRaw === undefined ? undefined : Number(portRaw);
+		if (portRaw !== undefined && (!/^\d+$/.test(portRaw) || !Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535)) {
 			console.error(`Error: --port must be a number between 1 and 65535, got "${portRaw}".`);
 			process.exit(1);
 		}

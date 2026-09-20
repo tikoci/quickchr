@@ -270,8 +270,12 @@ export function registerAndResolveNetworks(
 	ctx: { platform: PlatformInfo; qemuVersion?: string },
 	hostfwd: string,
 ): NetworkConfig[] {
-	registerSocketMembers(state);
 	try {
+		// Inside the try, not before it: this claims one endpoint per named socket, so a
+		// machine on two links whose second link is full would otherwise keep the first
+		// claim — and the caller cannot clean it either, since it only learns about the
+		// claim once this returns.
+		registerSocketMembers(state);
 		return resolveAllNetworks(state.networks, { ...ctx, machine: state.name }, hostfwd);
 	} catch (e) {
 		unregisterSocketMembers(state);
@@ -544,6 +548,10 @@ function createInstance(state: MachineState): ChrInstance {
 			if (state.pid && isMachineRunning(state)) {
 				await stopQemu(state.pid);
 			}
+			// Same invariant as stop()/remove(): a machine that is not running holds no
+			// endpoint. clean() stops QEMU directly rather than through stop(), so without
+			// this a cleaned machine keeps a pair link occupied and blocks its removal.
+			unregisterSocketMembers(state);
 			// NOTE: clean() deliberately does NOT delete efi-vars.fd. On the arm64 `virt`
 			// machine that file stores UEFI boot order (Boot0000 -> first virtio-blk-pci
 			// disk), not OS state; wiping it forces a full device scan (~480s) on the next
@@ -1883,6 +1891,11 @@ export class QuickCHR {
 
 		// Foreground (no provisioning): spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
+			// QEMU has already exited here — spawnQemu() blocks in foreground. A machine
+			// that is not running must not keep holding an end of a link: stop() and
+			// remove() unregister, and this path reaches "stopped" without going through
+			// either of them.
+			unregisterSocketMembers(state);
 			state.status = "stopped";
 			state.lastStartedAt = new Date().toISOString();
 			saveMachine(state);
@@ -2230,6 +2243,8 @@ export class QuickCHR {
 
 		// Foreground without provisioning: spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
+			// See the same branch in start(): QEMU has exited, so the endpoint goes back.
+			unregisterSocketMembers(state);
 			state.status = "stopped";
 			state.lastStartedAt = new Date().toISOString();
 			saveMachine(state);

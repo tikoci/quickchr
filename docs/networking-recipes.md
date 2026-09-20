@@ -135,8 +135,9 @@ framing, and verified findings: [`mndp.md`](./mndp.md); example:
 
 ## 4. L2 link between two VMs (`socket::<name>`)
 
-Two CHRs sharing a name form an L2 tunnel (first to start listens, second
-connects):
+Two CHRs sharing a name form an L2 tunnel. How the two ends meet depends on the
+link's transport, which is fixed when the name is created: the default pair of unix
+datagram sockets lets either machine start first, every time.
 
 ```sh
 quickchr networks sockets create lab-switch

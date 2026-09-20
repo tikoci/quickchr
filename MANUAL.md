@@ -265,8 +265,9 @@ Tail the per-machine `qemu.log`. `--follow` streams new output;
 
 `networks` enumerates host interfaces and their alias resolution
 (`wifi`, `ethernet`, `auto`). `networks sockets` lists registered
-named L2 sockets; `networks sockets create <name>` reserves a port for a
-new tunnel.
+named L2 sockets and the transport each one uses; `networks sockets create <name>`
+registers a new link, taking `--mode` to pick that transport (the default needs no
+port at all).
 
 #### `version [--json]`
 

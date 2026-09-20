@@ -24,6 +24,7 @@ import {
 	_resetSocketCache,
 	createNamedSocket,
 	getNamedSocket,
+	listNamedSockets,
 } from "../../src/lib/socket-registry.ts";
 
 /** A short base, not `import.meta.dir`: a `dgram` endpoint path is
@@ -33,6 +34,7 @@ import {
  *  found in the first place. */
 const TEST_DIR = mkdtempSync(join(tmpdir(), "qchr-test-"));
 const WORKER = join(import.meta.dir, "helpers/join-socket-worker.ts");
+const CREATE_WORKER = join(import.meta.dir, "helpers/create-socket-worker.ts");
 const origDataDir = process.env.QUICKCHR_DATA_DIR;
 
 /** Run N joiners that all start work at the same instant. */
@@ -106,5 +108,31 @@ describe("concurrent joins on one named socket", () => {
 		expect(held).toHaveLength(2);
 		// The winners are the ones the registry says hold the ends — no silent drop.
 		expect(ok.map((r) => r.replace("OK ", "")).sort()).toEqual([...held].sort());
+	}, 30_000);
+});
+
+describe("concurrent creation of different links", () => {
+	test("three links created at once get three distinct ports", async () => {
+		// Automatic allocation is max(existing ports) + 1, which reads *every* entry — so
+		// a per-entry lock does not help when the contenders are different names. Three
+		// processes creating three mcast links all read an empty registry and all took
+		// 4000, silently collapsing three segments into one shared group. 15/15 rounds
+		// before the registry-wide lock.
+		const startAt = Date.now() + 300;
+		await Promise.all(
+			["segment-a", "segment-b", "segment-c"].map(async (name) => {
+				const proc = Bun.spawn(["bun", CREATE_WORKER, name, String(startAt)], {
+					env: { ...process.env, QUICKCHR_DATA_DIR: TEST_DIR },
+					stdout: "pipe",
+					stderr: "pipe",
+				});
+				await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+			}),
+		);
+
+		_resetSocketCache();
+		const ports = listNamedSockets().map((e) => e.port);
+		expect(ports).toHaveLength(3);
+		expect(new Set(ports).size).toBe(3);
 	}, 30_000);
 });
