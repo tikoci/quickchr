@@ -21,6 +21,7 @@ import {
 	QuickCHRError,
 } from "./types.ts";
 import { getNamedSocket } from "./socket-registry.ts";
+import { assertValidResourceName } from "./names.ts";
 import { resolveInterfaceAlias, isSocketVmnetDaemonRunning } from "./platform.ts";
 
 /** Allocate a port block for a new instance, avoiding conflicts with existing machines. */
@@ -329,6 +330,9 @@ function parseSocketSpecifier(input: string): NetworkSpecifier {
 				"socket:: requires a link name (e.g. socket::mylink)",
 			);
 		}
+		// start() auto-creates a registry entry (and a networks/<name>.json file) for an
+		// unknown name, so the specifier is the other door into createNamedSocket().
+		assertValidResourceName(name, "named socket");
 		return { type: "socket", name };
 	}
 

@@ -10,11 +10,48 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Added
 
+- Tips: a one-line pointer on stderr at the moment a better-suited tool applies,
+  suppressible with `QUICKCHR_NO_TIPS=1`. `exec --help` and a bare `quickchr exec`
+  now name `centrs retrieve|execute --quickchr <name>`, which validates a
+  RouterOS-shaped command before running it and has per-verb help — `quickchr exec`
+  is a raw `/rest/execute` pipe and always was. Tips go to stderr, never stdout,
+  so `--json` output stays parseable.
+
+- `QuickCHR.listOrphans()` and `QuickCHR.removeOrphan(name)` — half-created machine
+  directories are now addressable from the public API, not just by `rm -rf` on the
+  data dir.
+
 - `quickchr cache add` and the public `cacheAdd()` API resolve and prefetch one
   CHR image without requiring QEMU or creating a machine. `quickchr cache key`
   and `cacheKey()` expose the actual cache directory, concrete architecture,
   and resolved version; pinned versions skip the network and offline channel
   resolution degrades to the documented `unresolved` sentinel.
+
+### Fixed
+
+- `--help` is handled before any side effect, for every subcommand. `quickchr add --help`
+  used to generate a machine name and download 43 MB while printing nothing, and
+  `quickchr networks sockets create --help` used to persist a named socket called
+  `--help` on the default start port. The guard lives in the dispatcher, so a new
+  subcommand cannot miss it; everything after a bare `--` is left alone as the
+  caller's payload. (#156)
+
+- `quickchr add` and `quickchr start` reject an unrecognised flag instead of
+  ignoring it, with a "did you mean" suggestion for a near miss. A typo that
+  downloads 43 MB and creates a machine is not a good default. (#156)
+
+- Machine and named-socket names are validated before anything is written: no
+  leading `-`, and letters, digits, dot, underscore and hyphen only. Both become a
+  path segment under the data dir, so this also closes a path-traversal hole in
+  `socket::<name>`. Existing machines created under the older, looser rules stay
+  startable. (#156)
+
+- A failed `quickchr add` no longer leaves a machine directory behind. One with no
+  readable `machine.json` was invisible to `list`, unremovable by `remove`, and
+  still blocked re-add with `MACHINE_EXISTS` — recoverable only by knowing the data
+  dir exists. `add` now removes the directory it created when it fails, `remove`
+  clears a stranded one, `MACHINE_EXISTS` says which case it is, and `doctor` points
+  at `quickchr remove <name>` rather than `rm -rf`. (#155)
 
 ### Changed
 

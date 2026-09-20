@@ -29,6 +29,32 @@ applyTo: "src/**"
 - `ChrInstance` has: `.stop()`, `.remove()`, `.rest()`, `.monitor()`, `.serial()`, `.qga()`, `.ports`, `.state`.
 - Port blocks: 10 ports per instance, base 9100. Offsets: +0=HTTP, +1=HTTPS, +2=SSH, +3=API, +4=API-SSL, +5=WinBox.
 
+## CLI Conventions
+
+Three rules the CLI layer enforces centrally. A new subcommand inherits the first
+and has to opt into the others.
+
+- **`--help` is answered before dispatch.** The guard is in `main()`
+  (`wantsCommandHelp`), not per-command, so a new subcommand cannot forget it.
+  Give every command a `printCommandHelp()` case — `test/unit/cli-help-guard.test.ts`
+  fails a command that falls through to "No detailed help". The scan stops at a bare
+  `--`: everything after it is the caller's payload.
+- **A machine-creating command validates its flags.** `add` and `start` check against
+  `ADD_FLAGS` / `START_FLAGS` in `src/cli/flags.ts`. **Adding a flag to either command
+  means adding it to that registry** — a test cross-checks the registry against each
+  command's own help text, so the two cannot drift. Read-only commands stay tolerant
+  of stray arguments on purpose.
+- **Tips go to stderr.** `src/cli/tips.ts`. stdout is the command's result and has to
+  stay usable in a pipe; a tip names a next command or a better-suited tool, never restates
+  what just happened, and is suppressible with `QUICKCHR_NO_TIPS=1`. `exec` points at
+  `centrs --quickchr` because quickchr's `exec` is a raw `/rest/execute` pipe with no
+  command validation.
+
+**Nothing quickchr creates may require `rm -rf` on the data dir to clear.** A failed
+`add` removes the directory it made; `remove` clears a directory with no readable
+`machine.json`; `doctor` names `quickchr remove <name>`. Resource names
+(`src/lib/names.ts`) are validated before any write, since they become path segments.
+
 ## RouterOS "expired admin" Caveat
 
 The `expired: true` flag on the default admin account does NOT block REST API access.

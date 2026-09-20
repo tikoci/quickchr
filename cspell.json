@@ -14,7 +14,10 @@
 	],
 	"useGitignore": true,
 	"minWordLength": 3,
-	"flagWords": ["hte", "teh"],
+	"flagWords": [
+		"hte",
+		"teh"
+	],
 	"ignoreWords": [
 		"anchoruser",
 		"behaviour",
@@ -27,6 +30,7 @@
 		"kvmkvmkvm",
 		"licences",
 		"lukqg",
+		"MBR",
 		"mhello",
 		"mmm",
 		"mult",
@@ -45,6 +49,7 @@
 		"pdl",
 		"retu",
 		"stabilises",
+		"startable",
 		"tcgtcgtcgtcg",
 		"testuser",
 		"trauks",
@@ -62,6 +67,8 @@
 			"addWords": true
 		}
 	],
-	"dictionaries": ["project-words"],
+	"dictionaries": [
+		"project-words"
+	],
 	"words": []
 }

@@ -133,6 +133,30 @@ export function listMachineNames(): string[] {
 		.map((e) => e.name);
 }
 
+/** True when `name` has a machine directory but no readable `machine.json` — a create
+ *  that did not finish. `list` cannot show it and `start` cannot boot it, but
+ *  `listMachineNames()` (directory-based) still counts it, so it blocks re-add (#155). */
+export function isOrphanMachineDir(name: string): boolean {
+	const dir = getMachineDir(name);
+	if (!existsSync(dir)) return false;
+	return !isReadableMachine(name);
+}
+
+/** Every machine directory with no readable `machine.json`. */
+export function listOrphanMachineDirs(): string[] {
+	return listMachineNames().filter((name) => !isReadableMachine(name));
+}
+
+/** `loadMachine()` without the throw — a truncated or corrupt `machine.json` is as
+ *  unusable as a missing one, and both make the directory an orphan. */
+function isReadableMachine(name: string): boolean {
+	try {
+		return loadMachine(name) !== undefined;
+	} catch {
+		return false;
+	}
+}
+
 /** Get all port bases currently in use by existing machines. */
 export function getUsedPortBases(): number[] {
 	return loadAllMachines().map((m) => m.portBase);

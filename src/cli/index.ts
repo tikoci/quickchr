@@ -6,6 +6,8 @@
 import type { StartOptions, Arch, Channel, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
+import { ADD_FLAGS, START_FLAGS, unknownFlags, unknownFlagMessage } from "./flags.ts";
+import { CENTRS_EXEC_TIP, CENTRS_SEE_ALSO, tip, tipsForError } from "./tips.ts";
 import {
 	MIN_PROVISION_VERSION,
 	PROVISIONING_BOOT_ONLY_SUMMARY,
@@ -120,6 +122,20 @@ function buildNetworks(flags: Record<string, string | boolean | string[]>): Netw
 	return specs;
 }
 
+/** Exit with a flag-list error when a machine-creating command is given a flag it does
+ *  not know. An unrecognised flag is a typo, and a typo that downloads 43 MB and creates
+ *  a machine is not a good default (#156). */
+function rejectUnknownFlags(
+	flags: Record<string, string | boolean | string[]>,
+	known: readonly string[],
+	command: string,
+): void {
+	const unknown = unknownFlags(flags, known);
+	if (unknown.length === 0) return;
+	console.error(unknownFlagMessage(unknown, command));
+	process.exit(1);
+}
+
 /** True when interactive prompts must be suppressed (e.g. LLM / CI / pipe). */
 function isNoPrompt(): boolean {
 	return !!process.env.QUICKCHR_NO_PROMPT || !process.stdout.isTTY || !process.stdin.isTTY;
@@ -196,8 +212,30 @@ export async function resolveSecureLoginFlag(flags: Record<string, string | bool
 	return resolveSetting("secure-login").value === true ? true : undefined;
 }
 
+/** True when the user asked for help on this subcommand.
+ *
+ *  `--help` used to reach subcommands as an ordinary argument: `add --help` generated a
+ *  name and downloaded 43 MB, and `networks sockets create --help` persisted a socket
+ *  called `--help` (#156). Handling it here — before the dispatch — means a new
+ *  subcommand cannot miss the guard.
+ *
+ *  Everything after a bare `--` is the user's payload (a RouterOS command for `exec`),
+ *  so the scan stops there. */
+function wantsCommandHelp(argv: string[]): boolean {
+	for (const arg of argv) {
+		if (arg === "--") return false;
+		if (arg === "--help" || arg === "-h") return true;
+	}
+	return false;
+}
+
 async function main() {
 	try {
+		// Help before side effects — for every subcommand, present and future (#156).
+		if (command !== undefined && !command.startsWith("-") && wantsCommandHelp(args.slice(1))) {
+			printHelp(command);
+			return;
+		}
 		switch (command) {
 			case "add":
 				await cmdAdd(args.slice(1));
@@ -303,6 +341,7 @@ async function main() {
 			if (err.installHint) {
 				console.error(`  Hint: ${err.installHint}`);
 			}
+			for (const line of tipsForError(err.code, command)) tip(line);
 			if (err.code === "PROVISIONING_VERSION_UNSUPPORTED") {
 				console.error(`  Why this happened: ${provisioningSupportSummary(MIN_PROVISION_VERSION)}`);
 				console.error(`  ${PROVISIONING_BOOT_ONLY_SUMMARY}`);
@@ -561,6 +600,7 @@ function printMachineListWithTip(
 
 async function cmdAdd(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
+	rejectUnknownFlags(flags, ADD_FLAGS, "add");
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold, formatPorts, formatNetworks, dim } = await import("./format.ts");
 	const { resolveSetting } = await import("../lib/settings.ts");
@@ -665,6 +705,7 @@ async function cmdExec(argv: string[]) {
 		} else {
 			console.error("Usage: quickchr exec <name> <command...>\n  Run a RouterOS CLI command on a running instance.");
 		}
+		tip(CENTRS_EXEC_TIP);
 		process.exit(1);
 	}
 
@@ -1205,6 +1246,7 @@ async function cmdSetup() {
 async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	applyTimeoutExtraShortFlag(argv, flags, positional);
+	rejectUnknownFlags(flags, START_FLAGS, "start");
 	// Before the --all branch: both start paths must see the same override.
 	await applyAccelFlag(flags);
 
@@ -1722,8 +1764,21 @@ async function cmdRemove(argv: string[]) {
 		return;
 	}
 
-	const instance = QuickCHR.get(name);
+	// A machine.json that does not parse throws out of get(). Everywhere else that is
+	// the right behaviour — silently dropping a machine from `list` would hide state
+	// loss — but `remove` is the command whose job is to clear it, so here it routes
+	// into the orphan path below instead of a stack trace (#155).
+	let instance: ReturnType<typeof QuickCHR.get> = null;
+	try {
+		instance = QuickCHR.get(name);
+	} catch { /* unreadable state → orphan */ }
 	if (!instance) {
+		// A half-created directory is unremovable any other way, and `remove` naming it
+		// in the "not found" list while refusing to delete it was the worst of both (#155).
+		if (QuickCHR.removeOrphan(name)) {
+			console.log(`${bold(name)} removed (leftover directory — no readable machine.json).`);
+			return;
+		}
 		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
@@ -2743,6 +2798,7 @@ Commands:
   env <name> [--json]     Print subprocess environment for a running machine
   console <name>          Attach to serial console of a running instance
   exec <name> <command>   Run a RouterOS CLI command on a running instance
+                          (raw /rest/execute — see 'quickchr exec --help' for centrs)
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
   get <name> [group]          Show machine config (license, device-mode, admin)
@@ -2850,7 +2906,9 @@ Options:
 Examples:
   quickchr exec my-chr /system/resource/print
   quickchr exec my-chr ":put [:serialize to=json [/ip/address/print]]"
-  quickchr exec my-chr "/log/info message=hello"`);
+  quickchr exec my-chr "/log/info message=hello"
+
+${CENTRS_SEE_ALSO}`);
 			break;
 		case "start":
 			console.log(`quickchr start [<name>] [options]
@@ -2923,6 +2981,7 @@ Options:
 Alias for 'quickchr list'. See 'quickchr help list'.`);
 			break;
 		case "list":
+		case "ls":
 			console.log(`quickchr list [<name>] [--json]
 
 List all CHR instances or show detailed info for one.
@@ -3076,6 +3135,14 @@ Credential resolution order (highest priority first):
   3. OS native secret store (macOS Keychain, Linux GNOME Keyring, Windows Credential Manager)
   4. ~/.config/quickchr/credentials.json (fallback)`);
 			break;
+		case "qga":
+			console.log(`quickchr qga <name> <operation> [options]
+
+Query the QEMU Guest Agent on a running CHR instance.
+QGA is x86-only — the arm64 CHR image does not start the guest agent.
+
+Run 'quickchr qga <name>' with no operation to list every operation.`);
+			break;
 		case "clean":
 			console.log(`quickchr clean [<name>] [--all]
 
@@ -3084,6 +3151,7 @@ Credential resolution order (highest priority first):
   --all       Clean all instances.`);
 			break;
 		case "remove":
+		case "rm":
 			console.log(`quickchr remove [<name>] [--all]
 
   <name>      Remove an instance (stops if running, deletes disk and state).
@@ -3163,6 +3231,7 @@ Credentials (--add-user, MIKROTIK_WEB_ACCOUNT/PASSWORD) are never stored here.`)
 			break;
 		default:
 			console.log(`No detailed help for '${command}'.`);
+			console.log("Run 'quickchr help' for the command list.");
 	}
 }
 
