@@ -954,7 +954,13 @@ segment with 'quickchr networks sockets create <name> --mode mcast'.
 ```
 
 quickchr unregisters socket members on `stop`/`remove`/`clean`, which frees the end
-for another machine.
+for another machine. `networks sockets remove` refuses a link that still has members —
+removing it unlinks the endpoint sockets, which would kill a running link without
+saying so.
+
+Joining a link takes a registry lock, so `quickchr start a & quickchr start b &` is
+safe: without it both machines claim the same endpoint and are handed the same socket
+path.
 
 For platform internals (vmnet quirks, TAP creation, bridged-mode
 restrictions, half-open SLiRP under TCG), see `docs/networking.md`.

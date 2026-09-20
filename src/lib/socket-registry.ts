@@ -25,7 +25,10 @@ export interface SocketEntry {
 	name: string;
 	mode: SocketMode;
 	mcastGroup?: string;
-	port: number;
+	/** Host port for `listen-connect` and `mcast`. Absent on a `dgram` link, which
+	 *  addresses its ends by filesystem path and uses no port at all — carrying a
+	 *  number there would be a field that looks meaningful and is not. */
+	port?: number;
 	createdAt: string;
 	/** Machines that currently reference this socket. */
 	members: string[];
@@ -89,7 +92,7 @@ function socketPath(name: string): string {
 }
 
 /** Normalize an entry loaded from disk: defaults missing fields for backward compat. */
-function normalizeEntry(raw: Partial<SocketEntry> & { name: string; mode: SocketEntry["mode"]; port: number; createdAt: string }): SocketEntry {
+function normalizeEntry(raw: Partial<SocketEntry> & { name: string; mode: SocketEntry["mode"]; createdAt: string }): SocketEntry {
 	return {
 		name: raw.name,
 		mode: raw.mode,
@@ -97,8 +100,15 @@ function normalizeEntry(raw: Partial<SocketEntry> & { name: string; mode: Socket
 		port: raw.port,
 		createdAt: raw.createdAt,
 		members: Array.isArray(raw.members) ? [...raw.members] : [],
-		// Entries written before slots existed were all `mcast`, which has no slots.
-		endpoints: Array.isArray(raw.endpoints) ? [...raw.endpoints] : undefined,
+		// Entries written before slots existed have no `endpoints`. `mcast` never has
+		// them; a pair link needs them, or every member resolves to "holds no endpoint"
+		// and the link cannot start at all. `listen-connect` was reachable from the
+		// library API before the CLI could spell it, so such entries can exist. Seeded
+		// empty rather than from `members`, which is live membership and can be stale
+		// after a crash — the machines reclaim their ends on the next start.
+		endpoints: Array.isArray(raw.endpoints)
+			? [...raw.endpoints]
+			: raw.mode === "mcast" ? undefined : [null, null],
 		autoCreated: typeof raw.autoCreated === "boolean" ? raw.autoCreated : false,
 	};
 }
@@ -224,9 +234,9 @@ function reloadEntry(name: string): SocketEntry | undefined {
 }
 
 function allocatePort(existing: SocketEntry[]): number {
-	if (existing.length === 0) return DEFAULT_START_PORT;
-	const maxPort = Math.max(...existing.map((e) => e.port));
-	return maxPort + 1;
+	const used = existing.map((e) => e.port).filter((p): p is number => typeof p === "number");
+	if (used.length === 0) return DEFAULT_START_PORT;
+	return Math.max(...used) + 1;
 }
 
 export function createNamedSocket(
@@ -261,7 +271,16 @@ function createEntry(
 			`mcastGroup only applies to mode "mcast" — named socket "${name}" is ${mode}.`,
 		);
 	}
-	const port = opts?.port ?? allocatePort(listNamedSockets());
+	// The CLI rejects this; the library has to as well, or it can persist an entry whose
+	// port is meaningless and which nothing ever reports.
+	if (opts?.port !== undefined && mode === "dgram") {
+		throw new QuickCHRError(
+			"INVALID_NETWORK",
+			`port does not apply to mode "dgram" — named socket "${name}" is a unix datagram pair and uses no port.`,
+		);
+	}
+
+	const port = mode === "dgram" ? undefined : (opts?.port ?? allocatePort(listNamedSockets()));
 	const mcastGroup = mode === "mcast" ? (opts?.mcastGroup ?? DEFAULT_MCAST_GROUP) : undefined;
 
 	// Fail at create, not at spawn: a path over sun_path only surfaces as a QEMU
@@ -317,7 +336,21 @@ export function listNamedSockets(): SocketEntry[] {
 }
 
 export function removeNamedSocket(name: string): boolean {
-	return withEntryLock(name, () => removeEntry(name));
+	return withEntryLock(name, () => {
+		// Removing the entry also unlinks the endpoint sockets, and a peer's
+		// `remote.path` then names nothing — so removing a link out from under running
+		// machines breaks it immediately and silently. Members are dropped on
+		// stop/remove/clean, so this only refuses a link that is genuinely in use.
+		const entry = reloadEntry(name);
+		if (entry && entry.members.length > 0) {
+			throw new QuickCHRError(
+				"STATE_ERROR",
+				`Named socket "${name}" is in use by ${entry.members.join(" and ")} — ` +
+				`stop ${entry.members.length > 1 ? "those machines" : "that machine"} first.`,
+			);
+		}
+		return removeEntry(name);
+	});
 }
 
 function removeEntry(name: string): boolean {
@@ -422,7 +455,9 @@ export function removeSocketMember(name: string, machineName: string): void {
 			entry.endpoints = entry.endpoints.map((m) => (m === machineName ? null : m));
 		}
 		if (entry.members.length === 0 && entry.autoCreated) {
-			removeNamedSocket(name);
+			// removeEntry, not removeNamedSocket: the in-use guard there re-reads from
+			// disk, which still shows the member we just dropped in memory.
+			removeEntry(name);
 		} else {
 			saveEntry(entry);
 		}

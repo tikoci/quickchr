@@ -135,8 +135,14 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   side, and a third peer on a TCP pair connects successfully and then receives
   nothing. (#158)
 
-- `createNamedSocket()` rejects an `mcastGroup` on a non-`mcast` link rather than
-  dropping it silently. (#158)
+- `createNamedSocket()` rejects an `mcastGroup` on a non-`mcast` link, and a `port` on
+  a `dgram` link, rather than dropping either silently. A `dgram` entry now carries no
+  `port` at all — it addresses its ends by filesystem path, so a number there was a
+  field that looked meaningful and was not. (#158)
+
+- `quickchr networks sockets remove` refuses a link its machines are still using.
+  Removing the entry also unlinks the endpoint sockets, so the peer's `remote.path`
+  stops naming anything and a running link dies silently. (#158)
 
 - Joining a named socket is serialized with a registry lock and written atomically.
   Two machines started concurrently (`quickchr start a & quickchr start b &`) both read

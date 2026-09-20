@@ -166,3 +166,47 @@ describe("networks sockets create", () => {
 		expect(list.stdout).toContain("lab");
 	});
 });
+
+describe("a start that cannot resolve does not keep the endpoint it claimed", () => {
+	test("a dgram link on Windows releases the slot it took", async () => {
+		// Membership is persisted *before* networks resolve, because the resolver needs
+		// to know which end this machine holds. So a resolution that throws — a dgram
+		// link on Windows, or on QEMU older than 7.2 — would otherwise leave a machine
+		// holding an endpoint it never used, and two failed starts would fill the link
+		// with machines that are not running.
+		const { registerAndResolveNetworks } = await import("../../src/lib/quickchr.ts");
+		createNamedSocket("win-link", { mode: "dgram" });
+
+		const state = {
+			name: "chr1",
+			networks: [{ specifier: { type: "socket" as const, name: "win-link" }, id: "net0" }],
+		} as unknown as Parameters<typeof registerAndResolveNetworks>[0];
+
+		expect(() =>
+			registerAndResolveNetworks(state, {
+				platform: { os: "win32", hostArch: "x64", packageManager: "winget", accelAvailable: [] },
+			}, ""),
+		).toThrow(/Windows cannot provide/);
+
+		_resetSocketCache();
+		expect(getNamedSocket("win-link")?.endpoints).toEqual([null, null]);
+		expect(getNamedSocket("win-link")?.members).toEqual([]);
+	});
+
+	test("a successful resolution keeps the claim", async () => {
+		const { registerAndResolveNetworks } = await import("../../src/lib/quickchr.ts");
+		createNamedSocket("ok-link", { mode: "dgram" });
+
+		const state = {
+			name: "chr1",
+			networks: [{ specifier: { type: "socket" as const, name: "ok-link" }, id: "net0" }],
+		} as unknown as Parameters<typeof registerAndResolveNetworks>[0];
+
+		registerAndResolveNetworks(state, {
+			platform: { os: "linux", hostArch: "x64", packageManager: "apt", accelAvailable: [] },
+		}, "");
+
+		_resetSocketCache();
+		expect(getNamedSocket("ok-link")?.endpoints).toEqual(["chr1", null]);
+	});
+});

@@ -16,6 +16,7 @@ import type {
 	LicenseInput,
 	LicenseLevel,
 	MachineState,
+	NetworkConfig,
 	NetworkTopologyEntry,
 	PlatformInfo,
 	PortMapping,
@@ -253,6 +254,28 @@ function reportSocketTransports(state: MachineState, logger: ProgressLogger): vo
 		const entry = getNamedSocket(name);
 		if (!entry) continue;
 		logger.status(`  Network socket::${name}: ${describeSocketTransport(entry, getSocketSlot(entry, state.name))}`);
+	}
+}
+
+/** Claim each named socket's endpoint, then resolve — releasing the claims if
+ *  resolution fails.
+ *
+ *  Membership is persisted *before* networks resolve, because the resolver needs to
+ *  know which end this machine holds. So a resolution that throws — a `dgram` link on
+ *  Windows, or on a QEMU older than 7.2 — would otherwise leave the machine holding an
+ *  endpoint it never used, and two failed starts would fill a link with machines that
+ *  are not running. */
+export function registerAndResolveNetworks(
+	state: MachineState,
+	ctx: { platform: PlatformInfo; qemuVersion?: string },
+	hostfwd: string,
+): NetworkConfig[] {
+	registerSocketMembers(state);
+	try {
+		return resolveAllNetworks(state.networks, { ...ctx, machine: state.name }, hostfwd);
+	} catch (e) {
+		unregisterSocketMembers(state);
+		throw e;
 	}
 }
 
@@ -1824,11 +1847,10 @@ export class QuickCHR {
 		const accel = await detectAccel(arch);
 		const note = accelNote(arch, accel);
 		if (note) logger.warn(note);
-		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
-		const resolvedNetworks = resolveAllNetworks(
-			state.networks,
-			{ platform, machine: state.name, qemuVersion: qemuVersionForArch(platform, state.arch) },
+		const resolvedNetworks = registerAndResolveNetworks(
+			state,
+			{ platform, qemuVersion: qemuVersionForArch(platform, state.arch) },
 			hostfwd,
 		);
 		reportSocketTransports(state, logger);
@@ -2162,11 +2184,10 @@ export class QuickCHR {
 		const accel = await detectAccel(state.arch);
 		const note = accelNote(state.arch, accel);
 		if (note) (logger ?? createLogger()).warn(note);
-		registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
-		const resolvedNetworks = resolveAllNetworks(
-			state.networks,
-			{ platform, machine: state.name, qemuVersion: qemuVersionForArch(platform, state.arch) },
+		const resolvedNetworks = registerAndResolveNetworks(
+			state,
+			{ platform, qemuVersion: qemuVersionForArch(platform, state.arch) },
 			hostfwd,
 		);
 		reportSocketTransports(state, logger ?? createLogger());

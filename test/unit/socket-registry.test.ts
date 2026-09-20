@@ -100,16 +100,24 @@ describe("createNamedSocket", () => {
 });
 
 describe("port auto-allocation", () => {
+	// Only the port-using transports allocate one; a `dgram` link addresses its ends by
+	// path and carries no port at all.
 	test("starts at 4000 when no sockets exist", () => {
-		const entry = createNamedSocket("first");
+		const entry = createNamedSocket("first", { mode: "mcast" });
 		expect(entry.port).toBe(4000);
 	});
 
 	test("increments from highest used port", () => {
-		createNamedSocket("a", { port: 4000 });
-		createNamedSocket("b", { port: 4005 });
-		const c = createNamedSocket("c");
+		createNamedSocket("a", { mode: "mcast", port: 4000 });
+		createNamedSocket("b", { mode: "listen-connect", port: 4005 });
+		const c = createNamedSocket("c", { mode: "mcast" });
 		expect(c.port).toBe(4006);
+	});
+
+	test("a dgram link carries no port, and portless entries do not disturb allocation", () => {
+		createNamedSocket("path-only", { mode: "dgram" });
+		expect(getNamedSocket("path-only")?.port).toBeUndefined();
+		expect(createNamedSocket("ported", { mode: "mcast" }).port).toBe(4000);
 	});
 });
 
@@ -317,5 +325,70 @@ describe("endpoint slots (#158)", () => {
 		} finally {
 			process.env.QUICKCHR_DATA_DIR = TEST_DIR;
 		}
+	});
+});
+
+describe("review findings — legacy entries, in-use links, inapplicable options", () => {
+	test("a pair entry written before slots existed still starts", () => {
+		// `listen-connect` was reachable from the library API before the CLI could spell
+		// it, so entries with `mode` and `members` but no `endpoints` exist in the wild.
+		// Without a migration every member resolves to "holds no endpoint" and the link
+		// cannot start at all.
+		writeFileSync(
+			join(getSocketRegistryDir(), "legacy.json"),
+			JSON.stringify({
+				name: "legacy",
+				mode: "listen-connect",
+				port: 4000,
+				createdAt: new Date().toISOString(),
+				members: [],
+				autoCreated: false,
+			}),
+		);
+		_resetSocketCache();
+
+		expect(getNamedSocket("legacy")?.endpoints).toEqual([null, null]);
+		addSocketMember("legacy", "chr1");
+		const entry = getNamedSocket("legacy");
+		if (!entry) throw new Error("entry missing");
+		expect(getSocketSlot(entry, "chr1")).toBe(0);
+	});
+
+	test("a legacy mcast entry keeps no slots", () => {
+		writeFileSync(
+			join(getSocketRegistryDir(), "old-segment.json"),
+			JSON.stringify({
+				name: "old-segment",
+				mode: "mcast",
+				mcastGroup: "230.0.0.1",
+				port: 4000,
+				createdAt: new Date().toISOString(),
+				members: [],
+				autoCreated: false,
+			}),
+		);
+		_resetSocketCache();
+		expect(getNamedSocket("old-segment")?.endpoints).toBeUndefined();
+	});
+
+	test("a link its machines are still using cannot be removed", () => {
+		// Removing the entry unlinks the endpoint sockets, and the peer's `remote.path`
+		// then names nothing — so this would break a running link silently.
+		createNamedSocket("live", { mode: "dgram" });
+		addSocketMember("live", "chr-a");
+		addSocketMember("live", "chr-b");
+
+		expect(() => removeNamedSocket("live")).toThrow(/in use by chr-a and chr-b/);
+		expect(getNamedSocket("live")).toBeDefined();
+
+		removeSocketMember("live", "chr-a");
+		removeSocketMember("live", "chr-b");
+		expect(removeNamedSocket("live")).toBe(true);
+	});
+
+	test("a port on a dgram link is an error in the library, not only in the CLI", () => {
+		expect(() => createNamedSocket("ported", { mode: "dgram", port: 4321 }))
+			.toThrow(/uses no port/);
+		expect(getNamedSocket("ported")).toBeUndefined();
 	});
 });

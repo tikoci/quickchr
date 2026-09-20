@@ -119,7 +119,9 @@ describe.skipIf(SKIP)("named socket default transport", () => {
 			//    count instead would hand the restarting machine the other end.
 			await first.stop();
 			expect(getNamedSocket(LINK)?.endpoints).toEqual([SECOND, null]);
-			first = await QuickCHR.start({ background: true, name: FIRST });
+			// Not reassigned to `first`: the cleanup below goes by name, and the
+			// assertions that follow read the registry and ping from `second`.
+			await QuickCHR.start({ background: true, name: FIRST });
 
 			const restarted = getNamedSocket(LINK);
 			if (!restarted) throw new Error("named socket vanished");

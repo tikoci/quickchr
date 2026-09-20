@@ -77,11 +77,12 @@ describe("named sockets validate their name (#156)", () => {
 		const help = await runQuickchr(["networks", "sockets", "create", "--help"]);
 		expect(help.exitCode).toBe(0);
 
-		const created = await runQuickchr(["networks", "sockets", "create", "lab"]);
+		// Created with an explicit port-using transport, because since #158 the default
+		// is `dgram`, which carries no port at all — the symptom this test was written
+		// against only exists where a port is allocated.
+		const created = await runQuickchr(["networks", "sockets", "create", "lab", "--mode", "mcast"]);
 		expect(created.exitCode).toBe(0);
 		// 4000 is DEFAULT_START_PORT — a socket named "--help" used to take it first.
-		// Read the port back from the registry rather than the output: since #158 the
-		// default transport is `dgram`, which has no port to print.
 		const entry = JSON.parse(readFileSync(join(TEST_DIR, "networks", "lab.json"), "utf-8"));
 		expect(entry.port).toBe(4000);
 		expect(readdirSync(join(TEST_DIR, "networks")).sort()).toEqual(["lab.json"]);
