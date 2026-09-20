@@ -9,6 +9,9 @@ import {
 	addSocketMember,
 	removeSocketMember,
 	getSocketRegistryDir,
+	getSocketSlot,
+	socketEndpointPath,
+	defaultSocketMode,
 	_resetSocketCache,
 } from "../../src/lib/socket-registry.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
@@ -41,14 +44,31 @@ describe("getSocketRegistryDir", () => {
 });
 
 describe("createNamedSocket", () => {
-	test("creates a socket with default mcast settings", () => {
+	// The default changed from `mcast` to `dgram` in #158. mcast was the only
+	// transport reachable from the CLI, and it fails *silently* on macOS and in
+	// UDP-blocked sandboxes — interfaces up, addresses assigned, 100% loss, nothing
+	// logged. See DESIGN.md for the evidence behind the flip.
+	test("creates a socket with the platform default transport", () => {
 		const entry = createNamedSocket("link1");
 		expect(entry.name).toBe("link1");
-		expect(entry.mode).toBe("mcast");
+		expect(entry.mode).toBe(defaultSocketMode());
+		expect(entry.members).toEqual([]);
+		expect(entry.endpoints).toEqual([null, null]);
+		expect(entry.createdAt).toBeTruthy();
+	});
+
+	test("the default transport is dgram on POSIX and listen-connect on Windows", () => {
+		// Windows' AF_UNIX has no SOCK_DGRAM, so it cannot have the unix-datagram pair.
+		expect(defaultSocketMode("darwin")).toBe("dgram");
+		expect(defaultSocketMode("linux")).toBe("dgram");
+		expect(defaultSocketMode("win32")).toBe("listen-connect");
+	});
+
+	test("an explicit mcast socket still gets the documented group and port", () => {
+		const entry = createNamedSocket("link1", { mode: "mcast" });
 		expect(entry.mcastGroup).toBe("230.0.0.1");
 		expect(entry.port).toBe(4000);
-		expect(entry.members).toEqual([]);
-		expect(entry.createdAt).toBeTruthy();
+		expect(entry.endpoints).toBeUndefined();
 	});
 
 	test("creates a listen-connect socket without mcastGroup", () => {
@@ -69,8 +89,13 @@ describe("createNamedSocket", () => {
 	});
 
 	test("uses custom mcast group", () => {
-		const entry = createNamedSocket("custom", { mcastGroup: "230.1.2.3" });
+		const entry = createNamedSocket("custom", { mode: "mcast", mcastGroup: "230.1.2.3" });
 		expect(entry.mcastGroup).toBe("230.1.2.3");
+	});
+
+	test("a group on a non-mcast socket is an error, not a silently dropped option", () => {
+		expect(() => createNamedSocket("x", { mode: "dgram", mcastGroup: "230.1.2.3" }))
+			.toThrow(/only applies to mode "mcast"/);
 	});
 });
 
@@ -202,5 +227,95 @@ describe("backward compatibility", () => {
 		expect(entry).toBeDefined();
 		expect(entry?.autoCreated).toBe(false);
 		expect(entry?.members).toEqual(["chr-old"]);
+	});
+});
+
+
+describe("endpoint slots (#158)", () => {
+	test("the two ends of a pair link are handed out in join order", () => {
+		createNamedSocket("pair", { mode: "dgram" });
+		addSocketMember("pair", "alpha");
+		addSocketMember("pair", "beta");
+
+		const entry = getNamedSocket("pair");
+		if (!entry) throw new Error("entry missing");
+		expect(entry.endpoints).toEqual(["alpha", "beta"]);
+		expect(getSocketSlot(entry, "alpha")).toBe(0);
+		expect(getSocketSlot(entry, "beta")).toBe(1);
+	});
+
+	test("a machine keeps its slot across a stop and start", () => {
+		// The bug this replaces: the role was derived from `members.length` at resolve
+		// time, so a listener that stopped and restarted came back as a *second*
+		// connector and the link silently went dead.
+		createNamedSocket("pair", { mode: "listen-connect" });
+		addSocketMember("pair", "listener");
+		addSocketMember("pair", "connector");
+
+		removeSocketMember("pair", "listener");
+		expect(getNamedSocket("pair")?.endpoints).toEqual([null, "connector"]);
+
+		addSocketMember("pair", "listener");
+		const entry = getNamedSocket("pair");
+		if (!entry) throw new Error("entry missing");
+		expect(getSocketSlot(entry, "listener")).toBe(0);
+		expect(getSocketSlot(entry, "connector")).toBe(1);
+	});
+
+	test("a third machine on a pair link is refused, and names the N-way alternative", () => {
+		// Not a cosmetic cap: on a dgram link a second machine binding the same path
+		// unlinks the first one's socket and steals the link with nothing logged, and on
+		// listen-connect QEMU stops accepting after one peer while the port stays open.
+		createNamedSocket("pair", { mode: "dgram" });
+		addSocketMember("pair", "alpha");
+		addSocketMember("pair", "beta");
+
+		expect(() => addSocketMember("pair", "gamma")).toThrow(QuickCHRError);
+		try {
+			addSocketMember("pair", "gamma");
+		} catch (e) {
+			expect((e as QuickCHRError).code).toBe("NETWORK_UNAVAILABLE");
+			expect((e as Error).message).toContain("alpha and beta");
+			expect((e as Error).message).toContain("--mode mcast");
+		}
+		expect(getNamedSocket("pair")?.members).toEqual(["alpha", "beta"]);
+	});
+
+	test("re-adding a machine already holding an end is a no-op", () => {
+		createNamedSocket("pair", { mode: "dgram" });
+		addSocketMember("pair", "alpha");
+		addSocketMember("pair", "alpha");
+		expect(getNamedSocket("pair")?.endpoints).toEqual(["alpha", null]);
+		expect(getNamedSocket("pair")?.members).toEqual(["alpha"]);
+	});
+
+	test("mcast has no slots and no member cap", () => {
+		createNamedSocket("segment", { mode: "mcast" });
+		for (const m of ["a", "b", "c", "d"]) addSocketMember("segment", m);
+		const entry = getNamedSocket("segment");
+		if (!entry) throw new Error("entry missing");
+		expect(entry.endpoints).toBeUndefined();
+		expect(entry.members).toEqual(["a", "b", "c", "d"]);
+		expect(getSocketSlot(entry, "a")).toBeUndefined();
+	});
+
+	test("endpoint paths are keyed by slot, not by machine name", () => {
+		// The first machine to start has to name its peer's path before that peer
+		// exists, so a slot is the only thing both ends can agree on in advance.
+		expect(socketEndpointPath("lab", 0)).toEndWith("lab.0.sock");
+		expect(socketEndpointPath("lab", 1)).toEndWith("lab.1.sock");
+	});
+
+	test("a dgram path over the sun_path limit fails at create, naming the limit", () => {
+		// QEMU otherwise reports `UNIX socket path '...' is too long` at spawn, against
+		// a path the caller never chose.
+		const deep = join(TEST_DIR, "d".repeat(60), "e".repeat(60));
+		mkdirSync(deep, { recursive: true });
+		process.env.QUICKCHR_DATA_DIR = deep;
+		try {
+			expect(() => createNamedSocket("lab", { mode: "dgram" })).toThrow(/104-byte limit/);
+		} finally {
+			process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		}
 	});
 });
