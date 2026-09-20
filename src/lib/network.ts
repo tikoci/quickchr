@@ -4,6 +4,7 @@
  */
 
 import { createConnection } from "node:net";
+import { createHash } from "node:crypto";
 import {
 	DEFAULT_PORT_BASE,
 	PORTS_PER_BLOCK,
@@ -388,6 +389,71 @@ export function resolveStartNetworks(
 	return [{ specifier: "user", id: "net0" }];
 }
 
+/** Derive a stable MAC for one NIC of one machine.
+ *
+ * QEMU's default is `52:54:00:12:34:56` incremented per NIC **within** a guest, so
+ * NIC index *N* holds the same address in *every* guest. Harmless while machines
+ * only have `user` NICs (separate SLIRP namespaces), fatal the moment two share an
+ * L2 segment — a named socket, a listen/connect pair, a TAP, or a RouterOS bridge
+ * on a hub VM. Forwarding then breaks in ways that look like a RouterOS or overlay
+ * defect rather than a launcher one (#154).
+ *
+ * The first octet is `0x02`: locally administered (bit 1 set) and unicast (bit 0
+ * clear), so these never collide with a vendor-assigned address. The remaining five
+ * octets come from a SHA-256 of the machine name, NIC index and `salt`, which makes
+ * the address reproducible for a given name instead of random per boot — the same
+ * lab rebuilt under the same names presents the same addresses.
+ */
+export function deriveMac(name: string, index: number, salt = 0): string {
+	const digest = createHash("sha256")
+		.update(`${name}\u0000${index}\u0000${salt}`)
+		.digest();
+	// Five octets after the fixed `02`, so a NIC's address is 48 bits total.
+	const octets = Array.from(digest.subarray(0, 5), (o) =>
+		o.toString(16).padStart(2, "0"),
+	);
+	return ["02", ...octets].join(":");
+}
+
+/** Assign a MAC to every NIC that lacks one, avoiding `taken`.
+ *
+ * Mutates and returns `networks`. Idempotent: a NIC that already has a MAC keeps it,
+ * so a machine's addresses are fixed at creation and survive restart, a re-resolve on
+ * a different platform, and any later change to {@link deriveMac} itself.
+ *
+ * **Call this only where a machine is created.** Changing a MAC on a machine that has
+ * already booted breaks it: RouterOS ties its persisted interface identity to the
+ * address, so a new one orphans the `ether1` holding the DHCP client and the guest
+ * comes up with no IP. Verified by A/B on a live CHR — see DESIGN.md, "NIC MAC
+ * Addresses". Machines created before #154 keep QEMU's defaults and must be recreated.
+ *
+ * A SHA-256 collision across five octets is vanishingly unlikely, but `taken` makes
+ * the guarantee structural rather than probabilistic — a duplicate here is the exact
+ * silent-L2 failure this exists to prevent, so it is worth not leaving to odds.
+ */
+export function assignMacs(
+	name: string,
+	networks: NetworkConfig[],
+	taken: ReadonlySet<string> = new Set(),
+): NetworkConfig[] {
+	const used = new Set(taken);
+	for (const n of networks) {
+		if (n.mac) used.add(n.mac);
+	}
+	networks.forEach((n, i) => {
+		if (n.mac) return;
+		let salt = 0;
+		let mac = deriveMac(name, i, salt);
+		while (used.has(mac)) {
+			salt++;
+			mac = deriveMac(name, i, salt);
+		}
+		used.add(mac);
+		n.mac = mac;
+	});
+	return networks;
+}
+
 /** Returns true when at least one network uses QEMU user-mode (hostfwd) networking.
  *  Only user-mode networks forward localhost ports — shared/bridged/tap/socket networks
  *  assign a DHCP address that is not reachable from host localhost. */
@@ -402,8 +468,16 @@ export interface ResolutionContext {
 	socketVmnet?: SocketVmnetInfo;
 }
 
-function deviceArgs(id: string): string[] {
-	return ["-device", `virtio-net-pci,netdev=${id}`];
+/** `-device` for one NIC — the **only** place a NIC device is emitted.
+ *
+ *  Takes the whole {@link NetworkConfig} rather than an id so a caller physically
+ *  cannot emit a NIC without its MAC. `qemu.ts`'s fallback path builds its own
+ *  `-netdev` strings but shares this, so both paths carry the address; every guest
+ *  would otherwise get QEMU's default `52:54:00:12:34:56` sequence and two machines
+ *  bridged onto one L2 segment would collide (#154). */
+export function deviceArgs(config: NetworkConfig): string[] {
+	const mac = config.mac ? `,mac=${config.mac}` : "";
+	return ["-device", `virtio-net-pci,netdev=${config.id}${mac}`];
 }
 
 function resolveUser(
@@ -416,7 +490,7 @@ function resolveUser(
 	return {
 		qemuNetdevArgs: [
 			"-netdev", netdevValue,
-			...deviceArgs(config.id),
+			...deviceArgs(config),
 		],
 	};
 }
@@ -438,7 +512,7 @@ function resolveShared(
 			return {
 				qemuNetdevArgs: [
 					"-netdev", `socket,id=${config.id},fd=3`,
-					...deviceArgs(config.id),
+					...deviceArgs(config),
 				],
 				wrapper: [svn.client, svn.sharedSocket],
 			};
@@ -446,7 +520,7 @@ function resolveShared(
 		return {
 			qemuNetdevArgs: [
 				"-netdev", `vmnet-shared,id=${config.id}`,
-				...deviceArgs(config.id),
+				...deviceArgs(config),
 			],
 			downgraded: {
 				from: "shared (socket_vmnet)",
@@ -473,7 +547,7 @@ function resolveVmnetShared(
 	return {
 		qemuNetdevArgs: [
 			"-netdev", `vmnet-shared,id=${config.id}`,
-			...deviceArgs(config.id),
+			...deviceArgs(config),
 		],
 	};
 }
@@ -498,7 +572,7 @@ function resolveBridged(
 			return {
 				qemuNetdevArgs: [
 					"-netdev", `socket,id=${config.id},fd=3`,
-					...deviceArgs(config.id),
+					...deviceArgs(config),
 				],
 				wrapper: [svn.client, bridgeSocket],
 			};
@@ -506,7 +580,7 @@ function resolveBridged(
 		return {
 			qemuNetdevArgs: [
 				"-netdev", `vmnet-bridged,id=${config.id},ifname=${resolved}`,
-				...deviceArgs(config.id),
+				...deviceArgs(config),
 			],
 			downgraded: {
 				from: `bridged:${iface} (socket_vmnet)`,
@@ -534,7 +608,7 @@ function resolveVmnetBridged(
 	return {
 		qemuNetdevArgs: [
 			"-netdev", `vmnet-bridged,id=${config.id},ifname=${iface}`,
-			...deviceArgs(config.id),
+			...deviceArgs(config),
 		],
 	};
 }
@@ -554,7 +628,7 @@ function resolveSocketNamed(
 		return {
 			qemuNetdevArgs: [
 				"-netdev", `socket,id=${config.id},mcast=${entry.mcastGroup}:${entry.port}`,
-				...deviceArgs(config.id),
+				...deviceArgs(config),
 			],
 		};
 	}
@@ -565,7 +639,7 @@ function resolveSocketNamed(
 	return {
 		qemuNetdevArgs: [
 			"-netdev", netdevArg,
-			...deviceArgs(config.id),
+			...deviceArgs(config),
 		],
 	};
 }
@@ -577,7 +651,7 @@ function resolveSocketListen(
 	return {
 		qemuNetdevArgs: [
 			"-netdev", `socket,id=${config.id},listen=:${port}`,
-			...deviceArgs(config.id),
+			...deviceArgs(config),
 		],
 	};
 }
@@ -589,7 +663,7 @@ function resolveSocketConnect(
 	return {
 		qemuNetdevArgs: [
 			"-netdev", `socket,id=${config.id},connect=127.0.0.1:${port}`,
-			...deviceArgs(config.id),
+			...deviceArgs(config),
 		],
 	};
 }
@@ -602,7 +676,7 @@ function resolveSocketMcast(
 	return {
 		qemuNetdevArgs: [
 			"-netdev", `socket,id=${config.id},mcast=${group}:${port}`,
-			...deviceArgs(config.id),
+			...deviceArgs(config),
 		],
 	};
 }
@@ -621,7 +695,7 @@ function resolveTap(
 	return {
 		qemuNetdevArgs: [
 			"-netdev", `tap,id=${config.id},ifname=${ifname},script=no,downscript=no`,
-			...deviceArgs(config.id),
+			...deviceArgs(config),
 		],
 	};
 }

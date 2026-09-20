@@ -52,6 +52,25 @@ macOS **arm64 guests never auto-select HVF** — see the Apple Silicon note belo
 **Resolution order for `--add-network shared`:** socket_vmnet daemon → vmnet-shared (root) → error
 **Resolution order for `--add-network bridged:<iface>`:** socket_vmnet bridged → vmnet-bridged (root) → error
 
+### NIC MACs Are Assigned at Creation and Never Changed
+
+Every NIC gets a locally-administered MAC (`02:` + five octets of SHA-256 over
+machine name + NIC index), persisted in `machine.json`. Without it QEMU hands every
+guest the same `52:54:00:12:34:56` sequence and two machines on one L2 segment
+collide — see DESIGN.md "NIC MAC Addresses" for why that reads as a RouterOS bug.
+
+**Never change a MAC on a machine that has already booted.** RouterOS ties its
+persisted interface identity to the address; a new MAC orphans the `ether1` holding
+the DHCP client, the guest gets no IP, and you land in the half-open hostfwd state
+below from a different cause. Verified by A/B on a live CHR (7.24.2 x86, HVF): same
+disk boots with its original MAC, fails with a changed one (36 probe-timeouts over
+178 s, all forwarded ports `dropped`), boots again once restored.
+
+So `assignMacs()` is called only where a machine is created, and skips any NIC that
+already has an address. Machines created before MACs existed keep QEMU's defaults
+and must be recreated. `deviceArgs()` in `network.ts` is the only place a NIC
+`-device` is emitted, including from `qemu.ts`'s fallback path — keep it that way.
+
 ### SLiRP hostfwd Requires a Guest IP
 
 SLiRP `hostfwd` forwards connections to a specific guest IP (default `10.0.2.15`).

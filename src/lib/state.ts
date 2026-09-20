@@ -138,6 +138,19 @@ export function getUsedPortBases(): number[] {
 	return loadAllMachines().map((m) => m.portBase);
 }
 
+/** Every NIC MAC currently assigned across all machines.
+ *  Passed to `assignMacs()` so a new machine cannot be handed an address another
+ *  machine already presents on a shared L2 segment (#154). */
+export function getUsedMacs(): Set<string> {
+	const macs = new Set<string>();
+	for (const m of loadAllMachines()) {
+		for (const n of m.networks ?? []) {
+			if (n.mac) macs.add(n.mac);
+		}
+	}
+	return macs;
+}
+
 /** Delete a machine and all its files. */
 export function removeMachine(name: string): void {
 	const dir = getMachineDir(name);

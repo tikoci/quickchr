@@ -34,9 +34,10 @@ import {
 	assertProvisioningSupportedVersion,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts } from "./network.ts";
 import {
 	getUsedPortBases,
+	getUsedMacs,
 	saveMachine,
 	loadMachine,
 	loadAllMachines,
@@ -1463,7 +1464,7 @@ export class QuickCHR {
 				arch,
 				cpu: opts.cpu ?? 1,
 				mem: defaultMem(arch, opts.mem),
-				networks: resolveStartNetworks(opts.networks, opts.network),
+				networks: assignMacs(name, resolveStartNetworks(opts.networks, opts.network), getUsedMacs()),
 				ports,
 				packages: opts.packages ?? [],
 				installAllPackages: opts.installAllPackages,
@@ -1634,7 +1635,7 @@ export class QuickCHR {
 				arch,
 				cpu: opts.cpu ?? 1,
 				mem: defaultMem(arch, opts.mem),
-				networks: resolveStartNetworks(opts.networks, opts.network),
+				networks: assignMacs(name, resolveStartNetworks(opts.networks, opts.network), getUsedMacs()),
 				ports,
 				packages: opts.packages ?? [],
 				deviceMode: requestedDeviceMode,
@@ -1693,7 +1694,7 @@ export class QuickCHR {
 			opts.secureLogin === true
 		);
 
-		const networkConfigs = resolveStartNetworks(opts.networks, opts.network);
+		const networkConfigs = assignMacs(name, resolveStartNetworks(opts.networks, opts.network), getUsedMacs());
 		if (hasProvisioning && !hasUserModeNetwork(networkConfigs)) {
 			throw new QuickCHRError(
 				"NETWORK_UNAVAILABLE",
@@ -1732,7 +1733,7 @@ export class QuickCHR {
 		const accel = await detectAccel(arch);
 		const note = accelNote(arch, accel);
 		if (note) logger.warn(note);
-		registerSocketMembers(state);
+			registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
 
@@ -2060,7 +2061,7 @@ export class QuickCHR {
 		const accel = await detectAccel(state.arch);
 		const note = accelNote(state.arch, accel);
 		if (note) (logger ?? createLogger()).warn(note);
-		registerSocketMembers(state);
+			registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
 		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
 

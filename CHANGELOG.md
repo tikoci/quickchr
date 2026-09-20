@@ -50,6 +50,21 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- Every NIC now carries a stable, locally-administered MAC (`02:` plus five
+  octets derived from the machine name and NIC index) instead of QEMU's default
+  `52:54:00:12:34:56` sequence. That default is per-NIC-index within a guest, so
+  NIC *N* held the same address in every machine — invisible with `user`-only
+  NICs, but two machines sharing an L2 segment (named socket, listen/connect
+  pair, TAP, or a RouterOS bridge on a hub VM) collided, and the resulting
+  half-broken forwarding read as a RouterOS or overlay fault rather than a
+  launcher one. Addresses are persisted in `machine.json` and derived rather than
+  randomized, so a lab rebuilt under the same names presents the same addresses.
+  **Machines created before this release keep QEMU's defaults and must be
+  recreated to get a stable address** — a MAC is assigned at creation only and is
+  never changed on an existing machine, because RouterOS ties its persisted
+  interface identity to it and a changed address leaves the guest with no IP.
+  (#154)
+
 - **Green unit gates on Bun 1.4.** Two tests pinned runtime-synthesized HTTP behavior
   rather than quickchr's own, and went red when CI moved from Bun 1.3.14 to 1.4.2:
   a bodyless `DELETE` no longer asserts a `Content-Length: 0` that quickchr never set

@@ -471,6 +471,48 @@ The `default-route-distance=2` ensures the shared route is backup — SLiRP ethe
 
 **TCG hazard:** SLiRP half-open connections (TCP connect succeeds, data never flows) burn the full per-probe HTTP timeout in `waitForBoot`. Under cross-arch TCG where TCP round-trips are slow, this compounds badly. Lab: `test/lab/slirp-hostfwd/`.
 
+#### NIC MAC Addresses — Stable Per Machine, Assigned Once
+
+QEMU's default NIC address is `52:54:00:12:34:56`, incremented per NIC **within** a
+guest. NIC index *N* therefore holds the same address in *every* guest. That is
+harmless while machines only have `user` NICs (each SLiRP netdev is its own
+namespace and nothing is shared), and fatal the moment two machines share an L2
+segment — a named socket, a `socket:listen`/`socket:connect` pair, a TAP, or a
+RouterOS bridge on a hub VM. Forwarding then half-works, and every instinct points
+at RouterOS or the overlay rather than at the launcher (#154).
+
+quickchr assigns each NIC a locally-administered address: `02:` (bit 1 set =
+locally administered, bit 0 clear = unicast, so it can never collide with a
+vendor-assigned address) followed by five octets of a SHA-256 over the machine
+name, NIC index and a collision salt. Deriving rather than randomizing means a lab
+rebuilt under the same machine names presents the same addresses. The address is
+persisted in `machine.json` and `deriveMac()` is consulted only when a NIC has
+none, so a later change to the derivation cannot move an existing machine's
+addresses.
+
+**Assigned at creation only — never backfilled onto an existing machine.**
+RouterOS ties its persisted interface identity to the MAC. Change it and the guest
+treats the NIC as new: the `ether1` holding the DHCP client is orphaned, no address
+is obtained, and hostfwd accepts on the host side while every guest SYN is dropped
+— the same half-open signature as the SLiRP/ether1 hazard above, from a different
+cause.
+
+Grounded by A/B against a live CHR (7.24.2 x86, HVF), same machine and same disk:
+
+| MAC | Result |
+|---|---|
+| original | boots, REST ready |
+| changed | boot fails — 36 probe-timeouts over 178 s, all forwarded ports `dropped` |
+| restored | boots, REST ready |
+
+So a machine created before MACs existed keeps QEMU's defaults for its lifetime and
+must be recreated to get a stable address. Silently rewriting a working lab's L2
+identity on upgrade would be the worse trade.
+
+`deviceArgs()` in `network.ts` is the single place a `-device virtio-net-pci` is
+emitted; `qemu.ts`'s fallback path builds its own `-netdev` strings but calls into
+it, so a NIC cannot reach QEMU without its address.
+
 #### Host-Side L2 Capture (MNDP, MAC-Telnet)
 
 A caller can receive the guest's raw Layer-2 frames — RouterOS MNDP (UDP/5678
