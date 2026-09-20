@@ -1496,10 +1496,15 @@ export class QuickCHR {
 			return state;
 		} catch (err) {
 			// A failed create must leave nothing behind: the directory exists from this
-			// call's ensureDir(), and without machine.json it is invisible to `list` and
-			// unremovable by `remove` while still blocking re-add (#155). Same guard as
-			// start()'s spawn-failure path.
-			if (!existsSync(join(machineDir, "machine.json"))) {
+			// call's ensureDir(), and without readable state it is invisible to `list`
+			// and unremovable by `remove` while still blocking re-add (#155).
+			//
+			// The test is "no *readable* machine.json", not "no machine.json" — a
+			// saveMachine() that died mid-write (disk full) leaves a truncated file, and
+			// a file-exists check would take that for a finished machine and strand the
+			// directory it was supposed to clean up. Nothing runs after saveMachine()
+			// but `return state`, so a readable file here means the create succeeded.
+			if (isOrphanMachineDir(name)) {
 				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
 			}
 			throw err;
@@ -1681,6 +1686,7 @@ export class QuickCHR {
 		// Acquire a lock to prevent concurrent starts of the same machine
 		const machineDir = getMachineDir(name);
 		assertSufficientQuickchrStorage(`start CHR ${name}`);
+		const dirCreatedHere = !existsSync(machineDir);
 		ensureDir(machineDir);
 		const lockPath = join(machineDir, ".start-lock");
 		acquireLock(lockPath);
@@ -1893,9 +1899,14 @@ export class QuickCHR {
 
 			return instance;
 		} catch (err) {
-			// Clean up orphaned machine directory if spawn failed before machine.json was saved
-			const machineJsonPath = join(machineDir, "machine.json");
-			if (!existsSync(machineJsonPath)) {
+			// Clean up an orphaned machine directory if the spawn failed before readable
+			// state was saved — same predicate as add()'s cleanup, so a truncated
+			// machine.json is not mistaken for a finished machine.
+			//
+			// `dirCreatedHere` is the difference from add(): start() also starts machines
+			// that already exist, and a directory this call did not create is never ours
+			// to delete, whatever state it is in.
+			if (dirCreatedHere && isOrphanMachineDir(name)) {
 				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
 			}
 			throw err;

@@ -92,6 +92,28 @@ describe("a failed add leaves nothing behind (#155)", () => {
 		expect(machinesDirContents()).toEqual([]);
 	});
 
+	test("a truncated machine.json is cleaned up, not mistaken for a finished machine", async () => {
+		// The predicate has to be "no *readable* state", not "no machine.json": a
+		// saveMachine() that dies mid-write (disk full) leaves a partial file, and a
+		// file-exists check would read that as a finished machine and strand the
+		// directory. Driving a real partial write from the CLI is not practical, so this
+		// pins the predicate itself — the same one add()'s catch and remove() use.
+		const { isOrphanMachineDir } = await import("../../src/lib/state.ts");
+		const machineDir = join(TEST_DIR, "machines", "half-written");
+		mkdirSync(machineDir, { recursive: true });
+		writeFileSync(join(machineDir, "machine.json"), '{"name":"half-written","ver');
+
+		const prev = process.env.QUICKCHR_DATA_DIR;
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		try {
+			expect(isOrphanMachineDir("half-written")).toBe(true);
+			expect(existsSync(join(machineDir, "machine.json"))).toBe(true);
+		} finally {
+			if (prev === undefined) delete process.env.QUICKCHR_DATA_DIR;
+			else process.env.QUICKCHR_DATA_DIR = prev;
+		}
+	});
+
 	test("an existing machine's directory survives a failed second add", async () => {
 		seedCachedImage("7.24.4", "x86");
 		// `--boot-disk-format raw` keeps the whole path clear of qemu-img.
