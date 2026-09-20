@@ -44,6 +44,7 @@ bootaa
 bootptab
 borderless
 bpath
+bpf
 brname
 btest
 bubbletea
@@ -106,6 +107,7 @@ dsls
 dsv
 dtb
 eabi
+eagain
 eai
 earlycon
 eax
@@ -117,6 +119,7 @@ edk
 efault
 efi
 efibootmgr
+eintr
 eio
 elif
 emerg
@@ -124,6 +127,7 @@ endgroup
 enoent
 enoexec
 env
+eperm
 errno
 esac
 eservfail
@@ -267,6 +271,7 @@ nlevel
 noauth
 nodefaults
 nographic
+nolocaladdr
 noninteractive
 nopasswd
 notrunc
@@ -312,6 +317,7 @@ pptp
 prereq
 prerouting
 printk
+privs
 procs
 proplist
 provpass
@@ -365,8 +371,11 @@ scp
 scriptable
 sdl
 seabios
+seccomp
 sed
 sendall
+sendmsg
+sendto
 setcap
 setmode
 settimeout
@@ -388,6 +397,7 @@ snapname
 sni
 snmp
 socat
+sockaddr
 softmmu
 srand
 ssbd

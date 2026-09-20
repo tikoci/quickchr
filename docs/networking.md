@@ -60,8 +60,20 @@ Multicast variant (any number of VMs, no listen/connect asymmetry):
 > macOS/BSD require `SO_REUSEPORT` on every socket sharing a multicast port. So
 > `socket,mcast=` delivers nothing between local sockets on macOS — two CHRs on the
 > same group don't even discover each other, and a host listener gets no frames.
-> It works on **Linux** (and CI). Verified in [`../test/lab/mndp/REPORT.md`](../test/lab/mndp/REPORT.md).
-> The TCP `listen`/`connect` variant has no such limitation — prefer it on macOS.
+> It works on **Linux** (and CI) — *unless* the host blocks unconnected UDP sends. A
+> seccomp-filtered sandbox that returns `EPERM` for `sendto()` on an `AF_INET` datagram
+> socket refuses the frames while the group still joins cleanly, producing the identical
+> silent 100% loss on Linux. Verified in
+> [`../test/lab/mndp/REPORT.md`](../test/lab/mndp/REPORT.md) (macOS half) and DESIGN.md
+> "A named socket says what it is" (sandbox half).
+>
+> **⚠ mcast is also not confined to your host.** quickchr emits `mcast=<group>:<port>`
+> with no `localaddr=`, so the group uses the host's default multicast interface, not
+> loopback — another machine on the same LAN using the same group joins the segment.
+> Tracked in [#167](https://github.com/tikoci/quickchr/issues/167).
+>
+> The TCP `listen`/`connect` and unix `dgram` variants have none of these limitations —
+> prefer them for two machines on any platform.
 
 **quickchr today:** `socket::<name>` specifier uses a port registry in `~/.local/share/quickchr/networks/<name>.json` to auto-assign and track ports. Named sockets avoid the listen/connect ordering problem.
 

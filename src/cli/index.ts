@@ -2300,9 +2300,17 @@ async function handleSockets(argv: string[]) {
 		console.log(`  Transport: ${describeSocketTransport(entry)}`);
 		if (entry.mode === "mcast") {
 			// The caveat belongs at create time, not in a doc: mcast fails with no error
-			// anywhere — interfaces up, addresses assigned, 100% loss.
-			console.log(dim("  Note: UDP multicast is the only N-way segment, but it is broken on macOS"));
-			console.log(dim("        and in sandboxes that block UDP — and it fails silently in both."));
+			// anywhere — interfaces up, addresses assigned, 100% loss. Three distinct
+			// hazards, not one (#167): a macOS delivery bug, a sandbox permission block,
+			// and — because quickchr passes no localaddr= — a group that rides the host's
+			// default interface rather than loopback.
+			console.log(dim("  Note: UDP multicast is the only N-way segment, and the only one that"));
+			console.log(dim("        fails silently. It does not deliver on macOS, and it is refused"));
+			console.log(dim("        in sandboxes that block unconnected UDP sends (some Linux CI)."));
+			console.log(dim(`        This group is not confined to loopback: ${entry.mcastGroup} rides the host's`));
+			console.log(dim("        default multicast interface, so another machine on your LAN using"));
+			console.log(dim("        the same group joins this segment. Use a unique group, or prefer"));
+			console.log(dim("        'dgram' for two machines."));
 		}
 		return;
 	}

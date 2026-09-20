@@ -937,11 +937,21 @@ you never have to open a file under the data dir to find out what your link is.
 | `listen-connect` (default on Windows) | TCP pair on loopback | 2 | the listening end first | the first machine to *join* takes the listening end and keeps it; a connector never retries, so start that machine first |
 | `mcast` | UDP multicast on `230.0.0.1` | any number | any | the only N-way segment — **and the only one that fails silently** |
 
-`mcast` is worth the warning it prints at create time: it does not work on macOS, and
-it does not work where UDP is blocked (many sandboxes and CI containers). It fails
-with interfaces up, addresses assigned, 100% packet loss and nothing logged anywhere.
-Use it when you genuinely need more than two machines on one segment, and check the
-link before you trust it.
+`mcast` is worth the warning it prints at create time. Three separate hazards, all with
+the same signature — interfaces up, addresses assigned, 100% packet loss, nothing logged:
+
+- **It does not deliver on macOS.** QEMU's multicast socket omits `SO_REUSEPORT`, which
+  macOS/BSD require before two sockets on one group both receive.
+- **It is refused where unconnected UDP sends are blocked** — seccomp-filtered sandboxes
+  and some CI containers, including on Linux. The group still joins cleanly; only the
+  send is denied.
+- **It is not confined to your machine.** quickchr does not pass `localaddr=`, so the
+  group rides the host's default multicast interface rather than loopback. Another
+  machine on your LAN using the same group joins your segment.
+
+Use it when you genuinely need more than two machines on one segment, give it a group of
+its own, and check the link before you trust it. For two machines, `dgram` is both
+confined to the filesystem and able to refuse a bad configuration up front.
 
 The two-machine modes hold their ends in named slots, so a machine that stops and
 starts again comes back on the same end. That is what makes a restart safe, and it is
