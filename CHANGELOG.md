@@ -27,6 +27,21 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   and resolved version; pinned versions skip the network and offline channel
   resolution degrades to the documented `unresolved` sentinel.
 
+- `quickchr networks sockets create` takes `--mode dgram|listen-connect|mcast`,
+  `--port` and `--group`. The registry has always modelled more than one transport;
+  until now the CLI could only reach UDP multicast. Creating an `mcast` link prints
+  the caveat that it is broken on macOS and in UDP-blocked sandboxes, and that it
+  fails silently in both. (#158)
+
+- `quickchr start` names the transport each named socket resolved to, and
+  `quickchr networks sockets` lists it. Nothing about a named socket now requires
+  opening a file under the data dir. (#158)
+
+- `bun run check` parses every `--add-network` specifier printed in the docs through
+  `parseNetworkSpecifier`, so a spelling the CLI does not accept fails lint. A block
+  documenting syntax that does not exist yet opts out with
+  `<!-- specifier-lint: skip — reason -->`, and the reason is required. (#157)
+
 ### Fixed
 
 - `--help` is handled before any side effect, for every subcommand. `quickchr add --help`
@@ -78,7 +93,80 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   clears a stranded one, `MACHINE_EXISTS` says which case it is, and `doctor` points
   at `quickchr remove <name>` rather than `rm -rf`. (#155)
 
+- A named socket in `listen-connect` mode is no longer a guaranteed dead link. The
+  listener role came from `members.length === 0` at resolve time, but members are
+  registered *before* networks are resolved, so the starting machine had always added
+  itself and `isFirst` was never true — every member resolved to `connect=` and nobody
+  listened. The two ends are now held in persisted slots, so the role survives a stop
+  and start instead of silently demoting the listener to a second connector. (#158)
+
+- `quickchr list` and `quickchr info` print `socket::<name>` for a named socket
+  instead of the raw specifier object. `format.ts` tested for a `socket-named` type
+  the parser never emits, so the branch could not match. (#158)
+
+- The `MANUAL.md` and `docs/networking-recipes.md` specifier tables listed
+  `socket-listen:<port>` / `socket-connect:<port>` / `socket-mcast:<group>:<port>`.
+  Those are the internal `NetworkSpecifier` type names; the CLI takes
+  `socket:listen:<port>`. Both now show the CLI spelling, with the TypeScript form
+  noted beside it. (#157)
+
 ### Changed
+
+- **A named socket now defaults to a pair of unix datagram sockets** (`--mode dgram`)
+  on macOS and Linux, and to a TCP pair (`--mode listen-connect`) on Windows, which
+  has no AF_UNIX datagram socket. The previous default, UDP multicast, is the only
+  N-way transport but fails *silently* on macOS and wherever UDP is blocked —
+  interfaces up, addresses assigned, 100% packet loss, nothing logged. `dgram` needs
+  no host port and no UDP syscall, and either machine may start first. Use
+  `--mode mcast` for more than two machines on one segment. Requires QEMU 7.2+, which
+  is checked before spawn, and Windows is checked too — a `dgram` entry carried over
+  from a POSIX host is refused there with the command to recreate it.
+
+  A named socket you created yourself keeps the mode recorded in its
+  `networks/<name>.json` and is unaffected. One that `start` auto-created for you is
+  removed when its last member stops, as it always has been, so it comes back with
+  the new default the next time — and `start` now names the transport, so the change
+  is visible rather than silent. (#158)
+
+- A third machine joining a two-machine named socket is refused, naming the machines
+  that hold the ends and pointing at `--mode mcast`. It is checked before any image
+  download. This is not a cosmetic cap: a second QEMU binding the same unix path
+  unlinks the first's socket and takes the link over with nothing logged on either
+  side, and a third peer on a TCP pair connects successfully and then receives
+  nothing. (#158)
+
+- `createNamedSocket()` rejects an `mcastGroup` on a non-`mcast` link, and a `port` on
+  a `dgram` link, rather than dropping either silently. A `dgram` entry now carries no
+  `port` at all — it addresses its ends by filesystem path, so a number there was a
+  field that looked meaningful and was not. (#158)
+
+- A named-socket option given without its value (`--mode`, `--port`, `--group` with
+  nothing after it) is rejected instead of silently taking the default, and a `--port`
+  with trailing characters (`4000abc`) is rejected instead of parsing as `4000`. (#158)
+
+- A machine that is not running no longer holds an end of a named link. A foreground
+  run that has exited, and `clean()`, both reached "stopped" without going through
+  `stop()`, so they kept their endpoint and could block a third machine or the link's
+  removal. (#158)
+
+- Automatic socket port allocation is serialized registry-wide. It reads every entry to
+  pick `max + 1`, so a per-entry lock did not help when the contenders were different
+  names: three `mcast` links created at once all took port 4000, silently collapsing
+  three segments into one shared group. Allocation also reads the registry from disk
+  and unions it with the in-memory cache, so a link another process has changed since
+  this one cached it cannot be handed out twice. (#158)
+
+- `quickchr networks sockets remove` refuses a link its machines are still using.
+  Removing the entry also unlinks the endpoint sockets, so the peer's `remote.path`
+  stops naming anything and a running link dies silently. (#158)
+
+- Joining a named socket is serialized with a registry lock and written atomically.
+  Two machines started concurrently (`quickchr start a & quickchr start b &`) both read
+  the same free endpoint and one overwrote the other, handing both QEMUs the same
+  socket path — which on a `dgram` link means the second silently takes the link over.
+  A truncating write could also leave a concurrent reader seeing invalid JSON and
+  reporting the socket as missing. A start that claims one link and then fails on a
+  second, full one releases the first claim too. (#158)
 
 - `createUser()` now resolves only once the credentials it created are actually
   accepted, instead of once the user record is visible in `/rest/user`. Callers

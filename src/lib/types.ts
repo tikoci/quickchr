@@ -55,8 +55,9 @@ export type NetworkMode =
  * - **Host needs to see guest L2 frames** (MNDP, MAC-Telnet, raw Ethernet,
  *   broadcasts) → `{type:"socket-connect", port}` against a host TCP server
  *   (rootless, cross-platform; recipe in `docs/mndp.md`).
- * - **L2 link between two VMs** → `{type:"socket", name}` (named pair) or
- *   `socket-listen`/`socket-connect`/`socket-mcast` (low-level).
+ * - **L2 link between two VMs** → `{type:"socket", name}`, a named link whose
+ *   transport (`dgram`, `listen-connect`, `mcast`) is fixed when the name is created;
+ *   or `socket-listen`/`socket-connect`/`socket-mcast` for a raw netdev.
  * - **Real LAN / DHCP-from-host presence** → `"shared"` or `{type:"bridged", iface}`
  *   (rootless via socket_vmnet on macOS / pre-created TAP on Linux).
  *

@@ -16,7 +16,9 @@ import type {
 	LicenseInput,
 	LicenseLevel,
 	MachineState,
+	NetworkConfig,
 	NetworkTopologyEntry,
+	PlatformInfo,
 	PortMapping,
 	QgaCommand,
 	ServiceEndpoint,
@@ -35,7 +37,7 @@ import {
 	assertProvisioningSupportedVersion,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport } from "./network.ts";
 import {
 	getUsedPortBases,
 	getUsedMacs,
@@ -72,7 +74,7 @@ import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec, CONSOLE_LOGIN_COST_MS } from "./console.ts";
 import { restRequest, restGet, restPost } from "./rest.ts";
-import { createNamedSocket, getNamedSocket, addSocketMember, removeSocketMember } from "./socket-registry.ts";
+import { getNamedSocket, joinNamedSocket, removeSocketMember, getSocketSlot } from "./socket-registry.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import {
 	formatDeviceModeSelection,
@@ -190,16 +192,94 @@ function getSocketNamedNetworks(state: MachineState): string[] {
 		.map((n) => (n.specifier as { type: "socket"; name: string }).name);
 }
 
+/** Refuse a start that a named socket has no room for, before any I/O.
+ *
+ *  Only a *new* member is refused: a machine already holding an endpoint is simply
+ *  restarting into its own slot. An unknown socket is left alone — `start()`
+ *  auto-creates it further down. */
+function assertNamedSocketsHaveRoom(opts: StartOptions, logger: ProgressLogger): void {
+	const named = resolveStartNetworks(opts.networks, opts.network)
+		.map((n) => n.specifier)
+		.filter((spec): spec is { type: "socket"; name: string } =>
+			typeof spec === "object" && spec !== null && spec.type === "socket");
+	for (const { name } of named) {
+		const entry = getNamedSocket(name);
+		if (!entry?.endpoints) continue;
+		if (opts.name && entry.endpoints.includes(opts.name)) continue;
+		if (entry.endpoints.includes(null)) continue;
+		const held = entry.endpoints.filter((m): m is string => m !== null);
+		logger.debug(`socket::${name} endpoints held by ${held.join(", ")}`);
+		throw new QuickCHRError(
+			"NETWORK_UNAVAILABLE",
+			`Named socket "${name}" is a ${entry.mode} link and carries 2 machines; ` +
+			`${held.join(" and ")} already hold both ends. ` +
+			`Stop one of them, or create an N-way segment with 'quickchr networks sockets create <name> --mode mcast'.`,
+		);
+	}
+}
+
+/** QEMU version for the binary this machine's arch will run on, when it can be read.
+ *  `-netdev dgram` needs 7.2, and a named socket should say so rather than failing at
+ *  spawn with a netdev QEMU does not recognize. */
+function qemuVersionForArch(platform: PlatformInfo, arch: Arch): string | undefined {
+	const bin = arch === "arm64" ? platform.qemuBinArm64 : platform.qemuBinX86;
+	return bin ? getQemuVersion(bin) : undefined;
+}
+
 function registerSocketMembers(state: MachineState): void {
 	for (const name of getSocketNamedNetworks(state)) {
 		try {
-			if (!getNamedSocket(name)) {
-				createNamedSocket(name, { autoCreated: true });
-			}
-			addSocketMember(name, state.name);
+			// Create-if-missing and join under one registry lock: two concurrent starts
+			// both pass a test-then-create, and both then claim the same endpoint slot.
+			joinNamedSocket(name, state.name, { autoCreated: true });
 		} catch (e) {
+			// A full two-member link is a refusal, not a warning: carrying on would spawn
+			// QEMU with no endpoint to bind, and on a `dgram` link a second machine
+			// binding the same path unlinks the first one's socket and steals the link
+			// with nothing logged on either side.
+			if (e instanceof QuickCHRError && e.code === "NETWORK_UNAVAILABLE") throw e;
 			console.warn(`Warning: failed to register socket member "${state.name}" on "${name}": ${e instanceof Error ? e.message : String(e)}`);
 		}
+	}
+}
+
+/** Report the transport each named socket resolved to.
+ *
+ *  #158's acceptance bar: nothing about a named socket should require opening a file
+ *  under the data dir. The field report that produced these issues had to read
+ *  `machine.json` to discover its link was UDP multicast, after ping had already
+ *  failed silently. */
+function reportSocketTransports(state: MachineState, logger: ProgressLogger): void {
+	for (const name of getSocketNamedNetworks(state)) {
+		const entry = getNamedSocket(name);
+		if (!entry) continue;
+		logger.status(`  Network socket::${name}: ${describeSocketTransport(entry, getSocketSlot(entry, state.name))}`);
+	}
+}
+
+/** Claim each named socket's endpoint, then resolve — releasing the claims if
+ *  resolution fails.
+ *
+ *  Membership is persisted *before* networks resolve, because the resolver needs to
+ *  know which end this machine holds. So a resolution that throws — a `dgram` link on
+ *  Windows, or on a QEMU older than 7.2 — would otherwise leave the machine holding an
+ *  endpoint it never used, and two failed starts would fill a link with machines that
+ *  are not running. */
+export function registerAndResolveNetworks(
+	state: MachineState,
+	ctx: { platform: PlatformInfo; qemuVersion?: string },
+	hostfwd: string,
+): NetworkConfig[] {
+	try {
+		// Inside the try, not before it: this claims one endpoint per named socket, so a
+		// machine on two links whose second link is full would otherwise keep the first
+		// claim — and the caller cannot clean it either, since it only learns about the
+		// claim once this returns.
+		registerSocketMembers(state);
+		return resolveAllNetworks(state.networks, { ...ctx, machine: state.name }, hostfwd);
+	} catch (e) {
+		unregisterSocketMembers(state);
+		throw e;
 	}
 }
 
@@ -468,6 +548,10 @@ function createInstance(state: MachineState): ChrInstance {
 			if (state.pid && isMachineRunning(state)) {
 				await stopQemu(state.pid);
 			}
+			// Same invariant as stop()/remove(): a machine that is not running holds no
+			// endpoint. clean() stops QEMU directly rather than through stop(), so without
+			// this a cleaned machine keeps a pair link occupied and blocks its removal.
+			unregisterSocketMembers(state);
 			// NOTE: clean() deliberately does NOT delete efi-vars.fd. On the arm64 `virt`
 			// machine that file stores UEFI boot order (Boot0000 -> first virtio-blk-pci
 			// disk), not OS state; wiping it forces a full device scan (~480s) on the next
@@ -1230,7 +1314,11 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 	);
 	const platform = await detectPlatform();
 	const hostfwd = buildHostfwdString(state.ports);
-	const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+	const resolvedNetworks = resolveAllNetworks(
+		state.networks,
+		{ platform, machine: state.name, qemuVersion: qemuVersionForArch(platform, state.arch) },
+		hostfwd,
+	);
 	return {
 		arch: state.arch,
 		machineDir: state.machineDir,
@@ -1533,6 +1621,11 @@ export class QuickCHR {
 
 		const logger = createLogger(opts.onProgress);
 
+		// Before any download or disk work: a named socket whose two ends are already
+		// taken cannot carry this machine, and #156's rule is that a start that cannot
+		// succeed should not first fetch 43 MB.
+		assertNamedSocketsHaveRoom(opts, logger);
+
 		const requestedDeviceMode = opts.deviceMode;
 		const resolvedDeviceMode = resolveDeviceModeOptions(requestedDeviceMode);
 		for (const warning of resolvedDeviceMode.warnings) {
@@ -1690,6 +1783,12 @@ export class QuickCHR {
 		ensureDir(machineDir);
 		const lockPath = join(machineDir, ".start-lock");
 		acquireLock(lockPath);
+		// Endpoints are claimed before QEMU is spawned, because resolution needs to know
+		// which end this machine holds. A launch that fails before its state is persisted
+		// has no instance lifecycle to release them later, so a failed start would leave a
+		// machine holding an end of a link it never used — and two of those fill the link.
+		// Cleared once saveMachine() has committed the claim.
+		let unpersistedSocketClaim: MachineState | undefined;
 		try {
 
 		// Download and prepare image
@@ -1762,9 +1861,14 @@ export class QuickCHR {
 		const accel = await detectAccel(arch);
 		const note = accelNote(arch, accel);
 		if (note) logger.warn(note);
-			registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
-		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+		const resolvedNetworks = registerAndResolveNetworks(
+			state,
+			{ platform, qemuVersion: qemuVersionForArch(platform, state.arch) },
+			hostfwd,
+		);
+		unpersistedSocketClaim = state;
+		reportSocketTransports(state, logger);
 
 		const launchConfig: QemuLaunchConfig = {
 			arch,
@@ -1787,9 +1891,15 @@ export class QuickCHR {
 
 		// Foreground (no provisioning): spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
+			// QEMU has already exited here — spawnQemu() blocks in foreground. A machine
+			// that is not running must not keep holding an end of a link: stop() and
+			// remove() unregister, and this path reaches "stopped" without going through
+			// either of them.
+			unregisterSocketMembers(state);
 			state.status = "stopped";
 			state.lastStartedAt = new Date().toISOString();
 			saveMachine(state);
+			unpersistedSocketClaim = undefined;
 			return createInstance(state);
 		}
 
@@ -1797,6 +1907,7 @@ export class QuickCHR {
 		state.lastStartedAt = new Date().toISOString();
 
 		saveMachine(state);
+		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);
 
@@ -1899,6 +2010,10 @@ export class QuickCHR {
 
 			return instance;
 		} catch (err) {
+			// Release an endpoint this launch claimed but never committed. stop()/remove()
+			// would do it for a machine that reached persisted state; one that did not has
+			// no instance to do it.
+			if (unpersistedSocketClaim) unregisterSocketMembers(unpersistedSocketClaim);
 			// Clean up an orphaned machine directory if the spawn failed before readable
 			// state was saved — same predicate as add()'s cleanup, so a truncated
 			// machine.json is not mistaken for a finished machine.
@@ -2061,6 +2176,9 @@ export class QuickCHR {
 	): Promise<ChrInstance> {
 		const lockPath = join(state.machineDir, ".start-lock");
 		acquireLock(lockPath);
+		// Same pre-persistence window as start(): a relaunch that claims an endpoint and
+		// then fails to spawn would keep it, with no instance to release it.
+		let unpersistedSocketClaim: MachineState | undefined;
 		try {
 
 		const diskPath = join(state.machineDir, "disk.img");
@@ -2095,9 +2213,14 @@ export class QuickCHR {
 		const accel = await detectAccel(state.arch);
 		const note = accelNote(state.arch, accel);
 		if (note) (logger ?? createLogger()).warn(note);
-			registerSocketMembers(state);
 		const hostfwd = buildHostfwdString(state.ports);
-		const resolvedNetworks = resolveAllNetworks(state.networks, { platform }, hostfwd);
+		const resolvedNetworks = registerAndResolveNetworks(
+			state,
+			{ platform, qemuVersion: qemuVersionForArch(platform, state.arch) },
+			hostfwd,
+		);
+		unpersistedSocketClaim = state;
+		reportSocketTransports(state, logger ?? createLogger());
 
 		const launchConfig: QemuLaunchConfig = {
 			arch: state.arch,
@@ -2120,9 +2243,12 @@ export class QuickCHR {
 
 		// Foreground without provisioning: spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
+			// See the same branch in start(): QEMU has exited, so the endpoint goes back.
+			unregisterSocketMembers(state);
 			state.status = "stopped";
 			state.lastStartedAt = new Date().toISOString();
 			saveMachine(state);
+			unpersistedSocketClaim = undefined;
 			return createInstance(state);
 		}
 
@@ -2130,6 +2256,7 @@ export class QuickCHR {
 		state.status = "running";
 		state.lastStartedAt = new Date().toISOString();
 		saveMachine(state);
+		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);
 
@@ -2195,6 +2322,9 @@ export class QuickCHR {
 		} catch { /* never propagate */ }
 
 		return instance;
+		} catch (err) {
+			if (unpersistedSocketClaim) unregisterSocketMembers(unpersistedSocketClaim);
+			throw err;
 		} finally {
 			try { unlinkSync(lockPath); } catch { /* ignore */ }
 		}

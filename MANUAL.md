@@ -265,8 +265,9 @@ Tail the per-machine `qemu.log`. `--follow` streams new output;
 
 `networks` enumerates host interfaces and their alias resolution
 (`wifi`, `ethernet`, `auto`). `networks sockets` lists registered
-named L2 sockets; `networks sockets create <name>` reserves a port for a
-new tunnel.
+named L2 sockets and the transport each one uses; `networks sockets create <name>`
+registers a new link, taking `--mode` to pick that transport (the default needs no
+port at all).
 
 #### `version [--json]`
 
@@ -906,7 +907,7 @@ Picking among the specifiers/forwards by *goal* — full guide with recipes in
 |---|---|---|---|---|
 | `user` | SLiRP user-mode NAT, hostfwd port mapping | no | no | via hostfwd ports only |
 | `socket::<name>` | L2 socket pair between two VMs sharing the name | no | yes | no |
-| `socket-listen:<port>` / `socket-connect:<port>` / `socket-mcast:<group>:<port>` | low-level QEMU socket netdevs | no | yes | no |
+| `socket:listen:<port>` / `socket:connect:<port>` / `socket:mcast:<group>:<port>` | low-level QEMU socket netdevs | no | yes | no |
 | `shared` | NAT'd L3 with DHCP from the host | yes (or `socket_vmnet` rootless) | yes | yes |
 | `bridged:<iface>` | L2 bridged onto host iface | yes (or `socket_vmnet` rootless) | yes | yes |
 | `tap:<iface>` | pre-created TAP, no quickchr setup | depends | yes | yes |
@@ -917,15 +918,54 @@ Resolution chains:
 - **`shared`** on macOS: socket_vmnet daemon → vmnet-shared (root-only QEMU). On Linux: pre-created TAP owned by the user, else root-created TAP+bridge.
 - **`bridged:<iface>`** on macOS: socket_vmnet bridged → vmnet-bridged (root). On Linux: TAP attached to a bridge containing the named iface.
 
+> The table lists the strings the **CLI** takes. The library's equivalents are the
+> `NetworkSpecifier` type names, which are spelled with a dash rather than a colon:
+> `socket:listen:5000` on the command line is `{ type: "socket-listen", port: 5000 }`
+> in TypeScript.
+
 ### Named L2 sockets
 
-`quickchr networks sockets create lab-sw1` reserves a port and stores
-metadata in `<dataDir>/networks/lab-sw1.json`. Two machines using
-`--add-network socket::lab-sw1` form an L2 tunnel: the first to start
-listens on the port; the second connects.
+`quickchr networks sockets create lab-sw1` registers a link in
+`<dataDir>/networks/lab-sw1.json`, and two machines using
+`--add-network socket::lab-sw1` join it. A link carries a **transport**, fixed when
+the name is created and printed by `start`, `networks sockets` and `create` itself —
+you never have to open a file under the data dir to find out what your link is.
 
-quickchr unregisters socket members on `stop`/`remove`/`clean` so port
-allocation can recycle.
+| `--mode` | Transport | Machines | Start order | Notes |
+|---|---|---|---|---|
+| `dgram` (default on macOS/Linux) | a pair of unix datagram sockets | 2 | either first | no host port, no UDP syscalls; needs QEMU 7.2+ |
+| `listen-connect` (default on Windows) | TCP pair on loopback | 2 | the listening end first | the first machine to *join* takes the listening end and keeps it; a connector never retries, so start that machine first |
+| `mcast` | UDP multicast on `230.0.0.1` | any number | any | the only N-way segment — **and the only one that fails silently** |
+
+`mcast` is worth the warning it prints at create time: it does not work on macOS, and
+it does not work where UDP is blocked (many sandboxes and CI containers). It fails
+with interfaces up, addresses assigned, 100% packet loss and nothing logged anywhere.
+Use it when you genuinely need more than two machines on one segment, and check the
+link before you trust it.
+
+The two-machine modes hold their ends in named slots, so a machine that stops and
+starts again comes back on the same end. That is what makes a restart safe, and it is
+also why `listen-connect` has a start order at all: the roles are fixed when the two
+machines first join, and from then on the listening end has to be running before the
+connecting one starts, because QEMU's `connect=` fails silently and never retries.
+`dgram` has no such constraint — either end may start first, every time. A third machine is refused, with a pointer
+to `--mode mcast`:
+
+```console
+$ quickchr start --name chr3 --add-network socket::lab-sw1
+Error [NETWORK_UNAVAILABLE]: Named socket "lab-sw1" is a dgram link and carries 2
+machines; chr1 and chr2 already hold both ends. Stop one of them, or create an N-way
+segment with 'quickchr networks sockets create <name> --mode mcast'.
+```
+
+quickchr unregisters socket members on `stop`/`remove`/`clean`, which frees the end
+for another machine. `networks sockets remove` refuses a link that still has members —
+removing it unlinks the endpoint sockets, which would kill a running link without
+saying so.
+
+Joining a link takes a registry lock, so `quickchr start a & quickchr start b &` is
+safe: without it both machines claim the same endpoint and are handed the same socket
+path.
 
 For platform internals (vmnet quirks, TAP creation, bridged-mode
 restrictions, half-open SLiRP under TCG), see `docs/networking.md`.

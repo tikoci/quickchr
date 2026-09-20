@@ -20,7 +20,12 @@ import {
 	SERVICE_PORTS,
 	QuickCHRError,
 } from "./types.ts";
-import { getNamedSocket } from "./socket-registry.ts";
+import {
+	getNamedSocket,
+	getSocketSlot,
+	socketEndpointPath,
+	type SocketEntry,
+} from "./socket-registry.ts";
 import { assertValidResourceName } from "./names.ts";
 import { resolveInterfaceAlias, isSocketVmnetDaemonRunning } from "./platform.ts";
 
@@ -478,6 +483,14 @@ export function hasUserModeNetwork(networks: NetworkConfig[]): boolean {
 export interface ResolutionContext {
 	platform: PlatformInfo;
 	socketVmnet?: SocketVmnetInfo;
+	/** Machine being resolved. A named socket's endpoint role is per-machine, so the
+	 *  resolver needs to know who is asking; absent for callers that only want the
+	 *  shape of a specifier (dry runs, unit tests over the non-socket modes). */
+	machine?: string;
+	/** QEMU version string, when the caller knows it. `-netdev dgram` landed in 7.2;
+	 *  an unknown version does not block, because refusing to run on a QEMU we merely
+	 *  failed to parse is worse than the error the spawn would give. */
+	qemuVersion?: string;
 }
 
 /** `-device` for one NIC — the **only** place a NIC device is emitted.
@@ -625,9 +638,40 @@ function resolveVmnetBridged(
 	};
 }
 
+/** One-line description of the transport a named socket resolved to, for the line
+ *  `start` prints and for `list`/`info`. The acceptance bar for #158's visibility
+ *  work is that nothing about a named socket requires opening a file under the data
+ *  dir, and this is what makes that true. */
+export function describeSocketTransport(entry: SocketEntry, slot?: number): string {
+	switch (entry.mode) {
+		case "mcast":
+			return `UDP multicast ${entry.mcastGroup}:${entry.port} (N-way)`;
+		case "listen-connect":
+			if (slot === undefined) return `TCP pair on 127.0.0.1:${entry.port}`;
+			return slot === 0
+				? `TCP 127.0.0.1:${entry.port} (listening)`
+				: `TCP 127.0.0.1:${entry.port} (connecting)`;
+		case "dgram": {
+			// Unoccupied: name the pair once rather than printing the directory twice.
+			if (slot === undefined) {
+				return `unix datagram ${socketEndpointPath(entry.name, 0).replace(/\.0\.sock$/, ".{0,1}.sock")}`;
+			}
+			const peer = slot === 0 ? 1 : 0;
+			return `unix datagram ${socketEndpointPath(entry.name, slot)} -> ${socketEndpointPath(entry.name, peer)}`;
+		}
+	}
+}
+
+/** `-netdev dgram` was added in QEMU 7.2. */
+export function qemuSupportsDgram(version: string): boolean {
+	const [major = 0, minor = 0] = version.split(".").map((p) => Number.parseInt(p, 10) || 0);
+	return major > 7 || (major === 7 && minor >= 2);
+}
+
 function resolveSocketNamed(
 	config: NetworkConfig,
 	name: string,
+	ctx: ResolutionContext,
 ): ResolvedNetwork {
 	const entry = getNamedSocket(name);
 	if (!entry) {
@@ -644,8 +688,50 @@ function resolveSocketNamed(
 			],
 		};
 	}
-	const isFirst = entry.members.length === 0;
-	const netdevArg = isFirst
+
+	// Two-member modes carry a role. It comes from the persisted slot, claimed when the
+	// machine joined, so a listener that stops and restarts comes back as the listener
+	// instead of silently demoting itself to a second connector.
+	const slot = ctx.machine ? getSocketSlot(entry, ctx.machine) : undefined;
+	if (slot === undefined) {
+		const held = entry.endpoints?.filter((m): m is string => m !== null) ?? [];
+		const who = held.length > 0 ? held.join(" and ") : "no machine";
+		throw new QuickCHRError(
+			"NETWORK_UNAVAILABLE",
+			ctx.machine
+				? `Machine "${ctx.machine}" holds no endpoint on named socket "${name}" — it is a ${entry.mode} link, and its two ends are held by ${who}.`
+				: `Named socket "${name}" is a ${entry.mode} link, so resolving it needs the machine's name (its endpoint role is per-machine). Pass 'machine' in the resolution context.`,
+		);
+	}
+
+	if (entry.mode === "dgram") {
+		// Windows first: it cannot have this transport at any QEMU version.
+		if (ctx.platform.os === "win32") {
+			throw new QuickCHRError(
+				"NETWORK_UNAVAILABLE",
+				`Named socket "${name}" is a unix-datagram link, which Windows cannot provide (AF_UNIX has no SOCK_DGRAM). ` +
+				`Recreate it with 'quickchr networks sockets create ${name} --mode listen-connect'.`,
+			);
+		}
+		if (ctx.qemuVersion && !qemuSupportsDgram(ctx.qemuVersion)) {
+			throw new QuickCHRError(
+				"NETWORK_UNAVAILABLE",
+				`Named socket "${name}" is a unix-datagram link, which needs QEMU 7.2 or newer (found ${ctx.qemuVersion}). ` +
+				`Upgrade QEMU, or recreate the socket with 'quickchr networks sockets create ${name} --mode listen-connect'.`,
+			);
+		}
+		const local = socketEndpointPath(name, slot);
+		const remote = socketEndpointPath(name, slot === 0 ? 1 : 0);
+		return {
+			qemuNetdevArgs: [
+				"-netdev",
+				`dgram,id=${config.id},local.type=unix,local.path=${local},remote.type=unix,remote.path=${remote}`,
+				...deviceArgs(config),
+			],
+		};
+	}
+
+	const netdevArg = slot === 0
 		? `socket,id=${config.id},listen=:${entry.port}`
 		: `socket,id=${config.id},connect=127.0.0.1:${entry.port}`;
 	return {
@@ -736,7 +822,7 @@ export function resolveNetworkConfig(
 				resolved = resolveVmnetBridged(config, spec.iface, ctx);
 				break;
 			case "socket":
-				resolved = resolveSocketNamed(config, spec.name);
+				resolved = resolveSocketNamed(config, spec.name, ctx);
 				break;
 			case "socket-listen":
 				resolved = resolveSocketListen(config, spec.port);

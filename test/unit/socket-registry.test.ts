@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, readFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	createNamedSocket,
@@ -9,11 +10,19 @@ import {
 	addSocketMember,
 	removeSocketMember,
 	getSocketRegistryDir,
+	getSocketSlot,
+	socketEndpointPath,
+	defaultSocketMode,
 	_resetSocketCache,
 } from "../../src/lib/socket-registry.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
-const TEST_DIR = join(import.meta.dir, ".tmp-socket-registry-test");
+/** A short base, not `import.meta.dir`: a `dgram` endpoint path is
+ *  `<dir>/networks/<name>.<slot>.sock`, and the whole thing has to fit `sun_path`'s
+ *  104 bytes. Under the repo it depends on how deep the checkout is, so these tests
+ *  would pass here and fail on a longer path — which is exactly how the limit was
+ *  found in the first place. */
+const TEST_DIR = mkdtempSync(join(tmpdir(), "qchr-test-"));
 const origDataDir = process.env.QUICKCHR_DATA_DIR;
 
 beforeEach(() => {
@@ -41,14 +50,31 @@ describe("getSocketRegistryDir", () => {
 });
 
 describe("createNamedSocket", () => {
-	test("creates a socket with default mcast settings", () => {
+	// The default changed from `mcast` to `dgram` in #158. mcast was the only
+	// transport reachable from the CLI, and it fails *silently* on macOS and in
+	// UDP-blocked sandboxes — interfaces up, addresses assigned, 100% loss, nothing
+	// logged. See DESIGN.md for the evidence behind the flip.
+	test("creates a socket with the platform default transport", () => {
 		const entry = createNamedSocket("link1");
 		expect(entry.name).toBe("link1");
-		expect(entry.mode).toBe("mcast");
+		expect(entry.mode).toBe(defaultSocketMode());
+		expect(entry.members).toEqual([]);
+		expect(entry.endpoints).toEqual([null, null]);
+		expect(entry.createdAt).toBeTruthy();
+	});
+
+	test("the default transport is dgram on POSIX and listen-connect on Windows", () => {
+		// Windows' AF_UNIX has no SOCK_DGRAM, so it cannot have the unix-datagram pair.
+		expect(defaultSocketMode("darwin")).toBe("dgram");
+		expect(defaultSocketMode("linux")).toBe("dgram");
+		expect(defaultSocketMode("win32")).toBe("listen-connect");
+	});
+
+	test("an explicit mcast socket still gets the documented group and port", () => {
+		const entry = createNamedSocket("link1", { mode: "mcast" });
 		expect(entry.mcastGroup).toBe("230.0.0.1");
 		expect(entry.port).toBe(4000);
-		expect(entry.members).toEqual([]);
-		expect(entry.createdAt).toBeTruthy();
+		expect(entry.endpoints).toBeUndefined();
 	});
 
 	test("creates a listen-connect socket without mcastGroup", () => {
@@ -69,22 +95,64 @@ describe("createNamedSocket", () => {
 	});
 
 	test("uses custom mcast group", () => {
-		const entry = createNamedSocket("custom", { mcastGroup: "230.1.2.3" });
+		const entry = createNamedSocket("custom", { mode: "mcast", mcastGroup: "230.1.2.3" });
 		expect(entry.mcastGroup).toBe("230.1.2.3");
+	});
+
+	test("a group on a non-mcast socket is an error, not a silently dropped option", () => {
+		expect(() => createNamedSocket("x", { mode: "dgram", mcastGroup: "230.1.2.3" }))
+			.toThrow(/only applies to mode "mcast"/);
 	});
 });
 
 describe("port auto-allocation", () => {
+	// Only the port-using transports allocate one; a `dgram` link addresses its ends by
+	// path and carries no port at all.
 	test("starts at 4000 when no sockets exist", () => {
-		const entry = createNamedSocket("first");
+		const entry = createNamedSocket("first", { mode: "mcast" });
 		expect(entry.port).toBe(4000);
 	});
 
 	test("increments from highest used port", () => {
-		createNamedSocket("a", { port: 4000 });
-		createNamedSocket("b", { port: 4005 });
-		const c = createNamedSocket("c");
+		createNamedSocket("a", { mode: "mcast", port: 4000 });
+		createNamedSocket("b", { mode: "listen-connect", port: 4005 });
+		const c = createNamedSocket("c", { mode: "mcast" });
 		expect(c.port).toBe(4006);
+	});
+
+	test("allocation sees another process's change to a link this one has cached", () => {
+		// listNamedSockets() seeds from the in-memory cache and only reads disk for names
+		// it does not already hold, so a cached entry whose on-disk port has since changed
+		// was never re-read — and the next allocation could hand out a port that is taken.
+		const x = createNamedSocket("x", { mode: "mcast" });
+		expect(x.port).toBe(4000);
+
+		// Another quickchr process moves x to a different port. Written directly: the
+		// point is that this process's cache never learns about it.
+		const path = join(getSocketRegistryDir(), "x.json");
+		const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+		onDisk.port = 4001;
+		writeFileSync(path, JSON.stringify(onDisk, null, "\t") + "\n");
+
+		expect(createNamedSocket("y", { mode: "mcast" }).port).toBe(4002);
+	});
+
+	test("a link this process just wrote still counts, even if a disk read misses it", () => {
+		// The mirror case, and why the fix unions disk with the cache rather than
+		// replacing it: the cache exists because Bun on Windows can return stale data
+		// from a read that follows a write, so a fresh scan can miss this process's own
+		// entries. Simulated by removing the file while the cache still holds it.
+		const a = createNamedSocket("a", { mode: "mcast" });
+		expect(a.port).toBe(4000);
+		rmSync(join(getSocketRegistryDir(), "a.json"));
+
+		expect(createNamedSocket("b", { mode: "mcast" }).port).toBe(4001);
+	});
+
+	test("a dgram link carries no port, and portless entries do not disturb allocation", () => {
+		createNamedSocket("path-only", { mode: "dgram" });
+		expect(getNamedSocket("path-only")?.port).toBeUndefined();
+		expect(createNamedSocket("ported", { mode: "mcast" }).port).toBe(4000);
 	});
 });
 
@@ -202,5 +270,160 @@ describe("backward compatibility", () => {
 		expect(entry).toBeDefined();
 		expect(entry?.autoCreated).toBe(false);
 		expect(entry?.members).toEqual(["chr-old"]);
+	});
+});
+
+
+describe("endpoint slots (#158)", () => {
+	test("the two ends of a pair link are handed out in join order", () => {
+		createNamedSocket("pair", { mode: "dgram" });
+		addSocketMember("pair", "alpha");
+		addSocketMember("pair", "beta");
+
+		const entry = getNamedSocket("pair");
+		if (!entry) throw new Error("entry missing");
+		expect(entry.endpoints).toEqual(["alpha", "beta"]);
+		expect(getSocketSlot(entry, "alpha")).toBe(0);
+		expect(getSocketSlot(entry, "beta")).toBe(1);
+	});
+
+	test("a machine keeps its slot across a stop and start", () => {
+		// The bug this replaces: the role was derived from `members.length` at resolve
+		// time, so a listener that stopped and restarted came back as a *second*
+		// connector and the link silently went dead.
+		createNamedSocket("pair", { mode: "listen-connect" });
+		addSocketMember("pair", "listener");
+		addSocketMember("pair", "connector");
+
+		removeSocketMember("pair", "listener");
+		expect(getNamedSocket("pair")?.endpoints).toEqual([null, "connector"]);
+
+		addSocketMember("pair", "listener");
+		const entry = getNamedSocket("pair");
+		if (!entry) throw new Error("entry missing");
+		expect(getSocketSlot(entry, "listener")).toBe(0);
+		expect(getSocketSlot(entry, "connector")).toBe(1);
+	});
+
+	test("a third machine on a pair link is refused, and names the N-way alternative", () => {
+		// Not a cosmetic cap: on a dgram link a second machine binding the same path
+		// unlinks the first one's socket and steals the link with nothing logged, and on
+		// listen-connect QEMU stops accepting after one peer while the port stays open.
+		createNamedSocket("pair", { mode: "dgram" });
+		addSocketMember("pair", "alpha");
+		addSocketMember("pair", "beta");
+
+		expect(() => addSocketMember("pair", "gamma")).toThrow(QuickCHRError);
+		try {
+			addSocketMember("pair", "gamma");
+		} catch (e) {
+			expect((e as QuickCHRError).code).toBe("NETWORK_UNAVAILABLE");
+			expect((e as Error).message).toContain("alpha and beta");
+			expect((e as Error).message).toContain("--mode mcast");
+		}
+		expect(getNamedSocket("pair")?.members).toEqual(["alpha", "beta"]);
+	});
+
+	test("re-adding a machine already holding an end is a no-op", () => {
+		createNamedSocket("pair", { mode: "dgram" });
+		addSocketMember("pair", "alpha");
+		addSocketMember("pair", "alpha");
+		expect(getNamedSocket("pair")?.endpoints).toEqual(["alpha", null]);
+		expect(getNamedSocket("pair")?.members).toEqual(["alpha"]);
+	});
+
+	test("mcast has no slots and no member cap", () => {
+		createNamedSocket("segment", { mode: "mcast" });
+		for (const m of ["a", "b", "c", "d"]) addSocketMember("segment", m);
+		const entry = getNamedSocket("segment");
+		if (!entry) throw new Error("entry missing");
+		expect(entry.endpoints).toBeUndefined();
+		expect(entry.members).toEqual(["a", "b", "c", "d"]);
+		expect(getSocketSlot(entry, "a")).toBeUndefined();
+	});
+
+	test("endpoint paths are keyed by slot, not by machine name", () => {
+		// The first machine to start has to name its peer's path before that peer
+		// exists, so a slot is the only thing both ends can agree on in advance.
+		expect(socketEndpointPath("lab", 0)).toEndWith("lab.0.sock");
+		expect(socketEndpointPath("lab", 1)).toEndWith("lab.1.sock");
+	});
+
+	test("a dgram path over the sun_path limit fails at create, naming the limit", () => {
+		// QEMU otherwise reports `UNIX socket path '...' is too long` at spawn, against
+		// a path the caller never chose.
+		const deep = join(TEST_DIR, "d".repeat(60), "e".repeat(60));
+		mkdirSync(deep, { recursive: true });
+		process.env.QUICKCHR_DATA_DIR = deep;
+		try {
+			expect(() => createNamedSocket("lab", { mode: "dgram" })).toThrow(/104-byte limit/);
+		} finally {
+			process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		}
+	});
+});
+
+describe("review findings — legacy entries, in-use links, inapplicable options", () => {
+	test("a pair entry written before slots existed still starts", () => {
+		// `listen-connect` was reachable from the library API before the CLI could spell
+		// it, so entries with `mode` and `members` but no `endpoints` exist in the wild.
+		// Without a migration every member resolves to "holds no endpoint" and the link
+		// cannot start at all.
+		writeFileSync(
+			join(getSocketRegistryDir(), "legacy.json"),
+			JSON.stringify({
+				name: "legacy",
+				mode: "listen-connect",
+				port: 4000,
+				createdAt: new Date().toISOString(),
+				members: [],
+				autoCreated: false,
+			}),
+		);
+		_resetSocketCache();
+
+		expect(getNamedSocket("legacy")?.endpoints).toEqual([null, null]);
+		addSocketMember("legacy", "chr1");
+		const entry = getNamedSocket("legacy");
+		if (!entry) throw new Error("entry missing");
+		expect(getSocketSlot(entry, "chr1")).toBe(0);
+	});
+
+	test("a legacy mcast entry keeps no slots", () => {
+		writeFileSync(
+			join(getSocketRegistryDir(), "old-segment.json"),
+			JSON.stringify({
+				name: "old-segment",
+				mode: "mcast",
+				mcastGroup: "230.0.0.1",
+				port: 4000,
+				createdAt: new Date().toISOString(),
+				members: [],
+				autoCreated: false,
+			}),
+		);
+		_resetSocketCache();
+		expect(getNamedSocket("old-segment")?.endpoints).toBeUndefined();
+	});
+
+	test("a link its machines are still using cannot be removed", () => {
+		// Removing the entry unlinks the endpoint sockets, and the peer's `remote.path`
+		// then names nothing — so this would break a running link silently.
+		createNamedSocket("live", { mode: "dgram" });
+		addSocketMember("live", "chr-a");
+		addSocketMember("live", "chr-b");
+
+		expect(() => removeNamedSocket("live")).toThrow(/in use by chr-a and chr-b/);
+		expect(getNamedSocket("live")).toBeDefined();
+
+		removeSocketMember("live", "chr-a");
+		removeSocketMember("live", "chr-b");
+		expect(removeNamedSocket("live")).toBe(true);
+	});
+
+	test("a port on a dgram link is an error in the library, not only in the CLI", () => {
+		expect(() => createNamedSocket("ported", { mode: "dgram", port: 4321 }))
+			.toThrow(/uses no port/);
+		expect(getNamedSocket("ported")).toBeUndefined();
 	});
 });

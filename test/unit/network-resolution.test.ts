@@ -1,11 +1,13 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import * as platformMod from "../../src/lib/platform.ts";
 import {
 	createNamedSocket,
 	addSocketMember,
+	socketEndpointPath,
 	_resetSocketCache,
 } from "../../src/lib/socket-registry.ts";
 
@@ -231,7 +233,12 @@ describe("resolveNetworkConfig", () => {
 	// ── Socket: named ─────────────────────────────────────────────────
 
 	describe("socket-named", () => {
-		const TEST_DIR = join(import.meta.dir, ".tmp-network-resolution-sockets");
+		/** A short base, not `import.meta.dir`: a `dgram` endpoint path is
+ *  `<dir>/networks/<name>.<slot>.sock`, and the whole thing has to fit `sun_path`'s
+ *  104 bytes. Under the repo it depends on how deep the checkout is, so these tests
+ *  would pass here and fail on a longer path — which is exactly how the limit was
+ *  found in the first place. */
+const TEST_DIR = mkdtempSync(join(tmpdir(), "qchr-test-"));
 		const origDataDir = process.env.QUICKCHR_DATA_DIR;
 
 		beforeEach(() => {
@@ -261,25 +268,96 @@ describe("resolveNetworkConfig", () => {
 			expect(netdev).toBe("socket,id=net0,mcast=230.0.0.1:4000");
 		});
 
-		test("resolves listen-connect: first member listens", () => {
-			createNamedSocket("mylink", { mode: "listen-connect", port: 4000 });
-			const result = resolveNetworkConfig(
-				cfg({ type: "socket", name: "mylink" }),
-				linuxCtx(),
-			);
-			const netdev = resolved(result).qemuNetdevArgs[1];
-			expect(netdev).toBe("socket,id=net0,listen=:4000");
-		});
-
-		test("resolves listen-connect: subsequent members connect", () => {
+		// Before #158 the role came from `entry.members.length === 0` at resolve time.
+		// `registerSocketMembers()` runs *before* `resolveAllNetworks()`, so the starting
+		// machine had always added itself by then and `isFirst` was never true: every
+		// member resolved to `connect=`, nobody listened, and listen-connect was a dead
+		// link for its whole life. The role now comes from the persisted slot.
+		test("resolves listen-connect: the machine holding slot 0 listens", () => {
 			createNamedSocket("mylink", { mode: "listen-connect", port: 4000 });
 			addSocketMember("mylink", "chr1");
 			const result = resolveNetworkConfig(
 				cfg({ type: "socket", name: "mylink" }),
-				linuxCtx(),
+				{ ...linuxCtx(), machine: "chr1" },
 			);
-			const netdev = resolved(result).qemuNetdevArgs[1];
-			expect(netdev).toBe("socket,id=net0,connect=127.0.0.1:4000");
+			expect(resolved(result).qemuNetdevArgs[1]).toBe("socket,id=net0,listen=:4000");
+		});
+
+		test("resolves listen-connect: the machine holding slot 1 connects", () => {
+			createNamedSocket("mylink", { mode: "listen-connect", port: 4000 });
+			addSocketMember("mylink", "chr1");
+			addSocketMember("mylink", "chr2");
+			const result = resolveNetworkConfig(
+				cfg({ type: "socket", name: "mylink" }),
+				{ ...linuxCtx(), machine: "chr2" },
+			);
+			expect(resolved(result).qemuNetdevArgs[1]).toBe("socket,id=net0,connect=127.0.0.1:4000");
+		});
+
+		test("resolves dgram to a unix pair, each end pointing at the other's slot", () => {
+			createNamedSocket("mylink", { mode: "dgram" });
+			addSocketMember("mylink", "chr1");
+			addSocketMember("mylink", "chr2");
+
+			const first = resolveNetworkConfig(
+				cfg({ type: "socket", name: "mylink" }),
+				{ ...linuxCtx(), machine: "chr1" },
+			);
+			const second = resolveNetworkConfig(
+				cfg({ type: "socket", name: "mylink" }),
+				{ ...linuxCtx(), machine: "chr2" },
+			);
+			const a = socketEndpointPath("mylink", 0);
+			const b = socketEndpointPath("mylink", 1);
+			expect(resolved(first).qemuNetdevArgs[1]).toBe(
+				`dgram,id=net0,local.type=unix,local.path=${a},remote.type=unix,remote.path=${b}`,
+			);
+			expect(resolved(second).qemuNetdevArgs[1]).toBe(
+				`dgram,id=net0,local.type=unix,local.path=${b},remote.type=unix,remote.path=${a}`,
+			);
+		});
+
+		test("dgram on Windows is refused, and names the transport to use instead", () => {
+			createNamedSocket("mylink", { mode: "dgram" });
+			addSocketMember("mylink", "chr1");
+			expect(() =>
+				resolveNetworkConfig(cfg({ type: "socket", name: "mylink" }), {
+					platform: { os: "win32", hostArch: "x64", packageManager: "winget", accelAvailable: [] },
+					machine: "chr1",
+				}),
+			).toThrow(/--mode listen-connect/);
+		});
+
+		test("dgram on QEMU older than 7.2 is refused before spawn", () => {
+			createNamedSocket("mylink", { mode: "dgram" });
+			addSocketMember("mylink", "chr1");
+			expect(() =>
+				resolveNetworkConfig(cfg({ type: "socket", name: "mylink" }), {
+					...linuxCtx(), machine: "chr1", qemuVersion: "7.1.0",
+				}),
+			).toThrow(/QEMU 7.2 or newer \(found 7.1.0\)/);
+		});
+
+		test("an unknown QEMU version does not block dgram", () => {
+			// Refusing to run on a QEMU we merely failed to parse is worse than the error
+			// the spawn itself would give.
+			createNamedSocket("mylink", { mode: "dgram" });
+			addSocketMember("mylink", "chr1");
+			const result = resolveNetworkConfig(
+				cfg({ type: "socket", name: "mylink" }),
+				{ ...linuxCtx(), machine: "chr1" },
+			);
+			expect(resolved(result).qemuNetdevArgs[1]).toContain("dgram,id=net0");
+		});
+
+		test("a machine holding no endpoint on a pair link is refused", () => {
+			createNamedSocket("mylink", { mode: "dgram" });
+			addSocketMember("mylink", "chr1");
+			expect(() =>
+				resolveNetworkConfig(cfg({ type: "socket", name: "mylink" }), {
+					...linuxCtx(), machine: "stranger",
+				}),
+			).toThrow(QuickCHRError);
 		});
 
 		test("throws when socket not found", () => {

@@ -21,13 +21,14 @@
     "MANUAL.md"
   ],
   "scripts": {
-    "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown && bun run lint:cspell && bun run lint:examples && bun run lint:shell && bun run lint:bun-pin",
+    "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown && bun run lint:cspell && bun run lint:examples && bun run lint:specifiers && bun run lint:shell && bun run lint:bun-pin",
     "lint": "biome check . && tsc --noEmit",
     "lint:biome": "biome check .",
     "lint:typecheck": "tsc --noEmit",
     "lint:markdown": "bunx markdownlint-cli2 '**/*.md'",
     "lint:cspell": "cspell lint . --no-progress",
     "lint:examples": "bun run scripts/validate-examples.ts",
+    "lint:specifiers": "bun run scripts/validate-network-specifiers.ts",
     "lint:shell": "sh scripts/lint-shell.sh",
     "lint:bun-pin": "bun run scripts/check-bun-pin.ts",
     "test": "bun test test/unit/",

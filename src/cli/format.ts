@@ -125,7 +125,12 @@ export function formatNetworks(networks: { specifier: unknown; id: string }[]): 
 			if (s.type === "socket-listen") return `socket:listen:${s.port}`;
 			if (s.type === "socket-connect") return `socket:connect:${s.port}`;
 			if (s.type === "socket-mcast") return `socket:mcast:${s.group}:${s.port}`;
-			if (s.type === "socket-named") return `socket::${s.name}`;
+			// `{type:"socket"}` is what `parseNetworkSpecifier` emits. This tested for
+			// "socket-named", a type name nothing ever produced, so the branch could not
+			// match and every named socket fell through to JSON.stringify — part of why
+			// the field report had to open machine.json to find out what its link was
+			// (#158).
+			if (s.type === "socket") return `socket::${s.name}`;
 			if (s.type === "tap") return `tap:${s.ifname}`;
 			return JSON.stringify(spec);
 		}

@@ -251,10 +251,14 @@ By default each CHR gets a single user-mode NIC (SLIRP). Use `--add-network` to 
 quickchr start --name router1 --add-network user --add-network shared
 quickchr start --name router2 --add-network user --add-network shared
 
-# Named virtual socket (L2 tunnel between CHRs)
+# Named virtual socket (L2 link between two CHRs; either may start first)
 quickchr networks sockets create lab-switch
 quickchr start --name r1 --add-network socket::lab-switch
 quickchr start --name r2 --add-network socket::lab-switch
+
+# More than two machines on one segment needs UDP multicast, which does not work
+# on macOS or where UDP is blocked — and fails silently when it does not
+quickchr networks sockets create lab-segment --mode mcast
 
 # Bridge to a physical interface
 quickchr start --name gw --add-network user --add-network bridged:en0

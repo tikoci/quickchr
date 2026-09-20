@@ -43,7 +43,7 @@ macOS **arm64 guests never auto-select HVF** — see the Apple Silicon note belo
 ## Networking
 
 - User mode: `-netdev user,id=net0,hostfwd=...`
-- Socket (inter-VM L2): `-netdev socket,id=net1,listen=:4001` / `connect=127.0.0.1:4001`
+- Socket (inter-VM L2): `-netdev dgram,id=net1,local.type=unix,local.path=...,remote.type=unix,remote.path=...` (default), or `-netdev socket,id=net1,listen=:4001` / `connect=127.0.0.1:4001`, or `-netdev socket,id=net1,mcast=230.0.0.1:4001`
 - socket_vmnet (macOS, preferred): `-netdev socket,id=net0,fd=3` — QEMU launched via `socket_vmnet_client <socket_path> qemu-system-*`. Daemon runs as root, QEMU runs unprivileged
 - vmnet-shared (macOS, fallback): `-netdev vmnet-shared,id=net0` — requires entire QEMU as root
 - vmnet-bridged (macOS, fallback): `-netdev vmnet-bridged,id=net0,ifname=en0` — requires root
@@ -51,6 +51,55 @@ macOS **arm64 guests never auto-select HVF** — see the Apple Silicon note belo
 
 **Resolution order for `--add-network shared`:** socket_vmnet daemon → vmnet-shared (root) → error
 **Resolution order for `--add-network bridged:<iface>`:** socket_vmnet bridged → vmnet-bridged (root) → error
+
+### Every inter-VM L2 transport fails silently — pick by which silence we can see
+
+Measured on QEMU 11.1.1 (macOS Intel). Do not re-derive these from the QEMU docs; the
+docs do not say any of it.
+
+| | `mcast` | `listen-connect` | `dgram` over unix |
+|---|---|---|---|
+| start order | any | listener first | either end first |
+| host port | multicast group | TCP port | none |
+| UDP syscalls | yes | no | no |
+| machines | any | 2 | 2 |
+| failure is visible to quickchr | **no** | yes | yes |
+
+- **`connect=` to a dead port is not an error.** QEMU runs on, logs nothing, exits
+  non-zero never, and does not retry when the listener appears later. Starting the
+  connector first means the link never forms, in silence.
+- **`listen=` accepts exactly one peer** and keeps the listening socket open, so a
+  third member's TCP connect succeeds at the kernel level and then receives nothing.
+- **A duplicate `dgram` `local.path` silently steals the link.** The second QEMU
+  unlinks the first's socket and binds its own — the inode changes, both processes
+  stay alive, neither logs anything.
+- **`sun_path` is 104 bytes** (macOS; 108 on Linux). Over it, QEMU fails at spawn with
+  `UNIX socket path '...' is too long`. quickchr checks at create time instead, so the
+  error names the data dir.
+- **`mcast` is broken on macOS** (QEMU sets only `SO_REUSEADDR`) and wherever UDP is
+  blocked. Interfaces up, addresses assigned, 100% loss, nothing logged anywhere — and
+  quickchr cannot detect it, because the failure lives in the host kernel and, for a
+  sandboxed guest, is per-process.
+
+That asymmetry is the whole basis of the default: `dgram`/`listen-connect` failures are
+member count and endpoint occupancy, both already in the registry, so they can be
+refused before spawn. See DESIGN.md "A named socket says what it is".
+
+### Named socket endpoints are slots, never derived from live membership
+
+`registerSocketMembers()` runs *before* `resolveAllNetworks()`, so a resolver asking
+"am I the first member?" always gets no. That is exactly how `listen-connect` shipped
+as a guaranteed dead link: `entry.members.length === 0` was never true, every member
+resolved to `connect=`, and nobody listened.
+
+The role lives in `SocketEntry.endpoints` — index is the endpoint, value is the machine
+holding it. Slot 0 listens (`listen-connect`) or is endpoint A (`dgram`). Two
+consequences worth keeping:
+
+- The first machine to start must name its peer's socket path before that peer exists,
+  and a slot number is the only thing both ends can agree on in advance.
+- A machine that stops and starts keeps its slot, instead of coming back as a second
+  connector and killing the link.
 
 ### NIC MACs Are Assigned at Creation and Never Changed
 
