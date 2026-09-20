@@ -670,6 +670,25 @@ Three CLI defects reported from one external agent's 3-CHR lab were the same def
 
 The rule the three share: **clearing quickchr's own mess must never require knowing that the data dir exists.** A recovery step whose only form is `rm -rf ~/.local/share/quickchr/machines/<name>` is not a recovery step; it is a leak of an internal layout into the user's hands. The same rule is why machine and socket names are validated before anything is written — both become a path segment, so "what names are legal" is a storage-layout question the user should never have to answer.
 
+### A flag's arity is declared, not guessed
+
+`parseFlags` had one rule for two jobs: *if the next argument does not start with `--`, consume it as this flag's value.* That is right for `--version 7.24.3` and wrong for every boolean flag, which then eats the following positional — `quickchr start --vmnet-shared lab` set `vmnet-shared="lab"` and lost the machine name (#164). Arity now comes from `VALUE_FLAGS` in `src/cli/flags.ts`; a flag absent from that table is boolean and leaves the next argument alone. A typo is boolean too, which is why a misspelled `--version` followed by `lab` can now be reported as an unknown flag *with* the machine name intact, instead of silently consuming it.
+
+The audit matters as much as the table. `--vmnet-shared` was found by accident while fixing something else, and the only way to find its siblings was to re-read every `flag()` call site by eye. `test/unit/cli-flag-arity.test.ts` scans the CLI source for every flag read and cross-checks each name against the registry in both directions — so the next flag cannot skip the table by being forgotten, and nobody has to do that reading again. Writing it paid for itself immediately: the first version scanned only the `flag()`/`flagBool()` helpers, pronounced the registry complete, and missed three `cache prune` flags read straight off the object (`flags["older-than"]`), which the arity change had already broken. An audit is only as wide as the ways the code actually reads a flag.
+
+`--vmnet-shared` / `--vmnet-bridge <iface>` were removed rather than repaired: they were special cases for one network type that `--add-network` already expresses in general, both were already documented as deprecated aliases, and nothing generated them. A removed name is still recognized and errors with its replacement — deleting it outright would leave the flag "unknown", and for the tolerant read-only commands, ignored again. `vmnet-shared` is simultaneously the removed flag, QEMU's own netdev name, and a legacy `machine.json` value; only the first went, and a test pins the other two because the collision makes over-deletion easy.
+
+### An enumeration and a lookup fail differently
+
+`loadMachine()` parsed `machine.json` with no guard, so one corrupt file — a `saveMachine()` that died mid-write — threw a raw `SyntaxError` out of `quickchr list` and destroyed the state of every healthy machine alongside it (#165). One policy was being applied to two contracts:
+
+- **`get(name)` is a targeted lookup.** You named *that* machine, it is corrupt, and answering `null` would report a directory that exists as one that never did. It still throws — now `STATE_ERROR` naming the file and `quickchr remove <name>`, rather than a parse trace.
+- **`list()` is an enumeration** — best-effort across many. One bad entry aborting it is the enumeration failing at its own job, and it costs more signal than it keeps.
+
+Skipping alone would have traded a loud failure for a quiet one: a machine that was there yesterday just disappears, which is the shape of trouble that does *not* look like trouble. So the unreadable entry keeps its place in `list` as a row — marked, named, with the remedy attached — because it still holds a disk image and `list` is where anyone looks first. Deferring it to `doctor` assumes you already suspect something. Exit stays 0: the listing succeeded, and a non-zero exit would punish the working machines and break every script piping `list`.
+
+Internally this is a three-way `tryLoadMachine()` (`ok` / `missing` / `unreadable`) that `loadMachine()` still collapses into "undefined or throw". Keeping the discriminated result unexported is the small diff; promoting it to public API is a rename if #58 lands.
+
 ### A named socket says what it is
 
 An external agent's 3-CHR lab brought up two CHRs on `--add-network socket::skylab-mir`,

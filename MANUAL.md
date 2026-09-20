@@ -152,8 +152,9 @@ directory, downloads the RouterOS image (cached), and writes
 | `--no-api-ssl` | false | Exclude API-SSL port |
 | `--port-base <n>` | auto from 9100 | First port of the 10-port block |
 
-`--vmnet-shared` and `--vmnet-bridge <iface>` are deprecated aliases for
-`--add-network shared` / `--add-network bridged:<iface>`.
+`--vmnet-shared` and `--vmnet-bridge <iface>` have been removed. Use
+`--add-network shared` and `--add-network bridged:<iface>`; either old spelling is
+an error naming its replacement, not a silently ignored flag.
 
 #### `start [name]`
 
@@ -218,6 +219,14 @@ the provisioning flags again, or `remove` and re-create, to get them back.
 Without a name: tabular summary of every machine. With a name: detailed
 view including credentials and connection tips. `--json` for
 machine-readable output.
+
+A machine whose `machine.json` cannot be parsed — a `saveMachine()` interrupted by a
+disk-full or a power loss — still appears, as a row marked `unreadable` followed by
+`quickchr remove <name>`. The listing exits 0: it succeeded, and the broken entry is
+named rather than silently dropped. In `--json` that entry is
+`{"name": …, "status": "unreadable", "error": …}` with no machine fields. Naming that
+machine directly (`list <name>`, and every other command that takes a name) fails with
+`STATE_ERROR` instead — a lookup you asked for by name is not an enumeration.
 
 #### `get <name> [license | device-mode | admin] [--json]`
 
@@ -530,6 +539,7 @@ QuickCHR.start(opts?: StartOptions): Promise<ChrInstance>
 QuickCHR.add(opts?: StartOptions): Promise<MachineState>
 QuickCHR.list(): MachineState[]
 QuickCHR.get(name: string): ChrInstance | null
+QuickCHR.listUnreadable(): Array<{ name: string; error: string }>
 QuickCHR.listOrphans(): string[]
 QuickCHR.removeOrphan(name: string): boolean
 QuickCHR.doctor(): Promise<DoctorResult>
@@ -556,12 +566,17 @@ SIGKILL interrupted. It still occupies the name, so `add()` refuses it, but no
 machine answers to it.
 
 How `get()` and `list()` behave depends on *why* the state is unreadable, and the
-two differ:
+two differ — a targeted lookup fails, an enumeration does not:
 
 | State | `get(name)` | `list()` |
 |---|---|---|
 | `machine.json` missing | `null` | omits it |
-| `machine.json` present but not valid JSON | **throws** (`loadMachine()` propagates the parse error) | **throws** — one corrupt file fails the whole listing |
+| `machine.json` present but not valid JSON | **throws** `STATE_ERROR`, naming the file and `quickchr remove <name>` | skips it; `listUnreadable()` names it, and `quickchr list` shows it as a row |
+
+`listUnreadable()` returns `{ name, error }` for every machine in the second row —
+present but unparseable — so nothing is dropped without being reported somewhere. A
+directory with *no* `machine.json` is not in it; that is a create that never finished,
+and `listOrphans()` covers it.
 
 `listOrphans()` and `removeOrphan()` treat both the same — unreadable is unreadable —
 so `quickchr remove <name>` clears either. `removeOrphan()` returns `false` for a real

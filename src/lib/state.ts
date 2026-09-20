@@ -92,12 +92,32 @@ export function saveMachine(state: MachineState): void {
 	writeFileSync(machineJsonPath(state.name), JSON.stringify(state, null, "\t") + "\n");
 }
 
-/** Load machine state from disk. Returns undefined if not found. */
+/** Load machine state from disk. Returns undefined if not found.
+ *
+ *  Throws `STATE_ERROR` when the file is there but unusable. A targeted lookup by name
+ *  has to fail: the caller named *this* machine, and answering `undefined` would report
+ *  a machine that exists on disk as one that never did. `loadAllMachines()` is the
+ *  enumeration and takes the other policy — see `tryLoadMachine()` (#165). */
 export function loadMachine(name: string): MachineState | undefined {
 	const path = machineJsonPath(name);
 	if (!existsSync(path)) return undefined;
-	const data = readFileSync(path, "utf-8");
-	const state = JSON.parse(data) as MachineState;
+	let state: MachineState;
+	try {
+		state = JSON.parse(readFileSync(path, "utf-8")) as MachineState;
+	} catch (e) {
+		throw new QuickCHRError(
+			"STATE_ERROR",
+			`Machine "${name}" has an unreadable machine.json (${e instanceof Error ? e.message : String(e)})`,
+			`Inspect ${path}, or clear the machine with 'quickchr remove ${name}'`,
+		);
+	}
+	if (state === null || typeof state !== "object" || Array.isArray(state)) {
+		throw new QuickCHRError(
+			"STATE_ERROR",
+			`Machine "${name}" has an unreadable machine.json (not a JSON object)`,
+			`Inspect ${path}, or clear the machine with 'quickchr remove ${name}'`,
+		);
+	}
 	// Migrate legacy `network` field → `networks` array
 	if (!state.networks && (state as unknown as Record<string, unknown>).network) {
 		const legacy = (state as unknown as Record<string, unknown>).network as MachineState["networks"][0]["specifier"] | "user" | "vmnet-shared" | { type: "vmnet-bridge"; iface: string };
@@ -108,7 +128,33 @@ export function loadMachine(name: string): MachineState | undefined {
 	return state;
 }
 
-/** Load all machine states. */
+/** The three things a machine directory can turn out to be.
+ *
+ *  `loadMachine()` collapses `missing` and `unreadable` into "undefined or throw", which
+ *  is the right contract for a lookup and the wrong one for an enumeration. This keeps
+ *  them apart so each caller can pick (#165). Internal for now: promoting it to public
+ *  API is a rename if #58 lands. */
+type MachineLoad =
+	| { status: "ok"; state: MachineState }
+	| { status: "missing" }
+	| { status: "unreadable"; error: string };
+
+/** `loadMachine()` without the throw. */
+function tryLoadMachine(name: string): MachineLoad {
+	try {
+		const state = loadMachine(name);
+		return state ? { status: "ok", state } : { status: "missing" };
+	} catch (e) {
+		return { status: "unreadable", error: e instanceof Error ? e.message : String(e) };
+	}
+}
+
+/** Load all machine states, skipping directories with no usable `machine.json`.
+ *
+ *  An enumeration is best-effort across many: one corrupt file used to abort the whole
+ *  listing, which loses the state of every healthy machine as well. Nothing is hidden by
+ *  the skip — `listUnreadableMachines()` names what was left out, and `quickchr list`
+ *  shows it as a row (#165). */
 export function loadAllMachines(): MachineState[] {
 	const dir = getMachinesDir();
 	if (!existsSync(dir)) return [];
@@ -118,11 +164,25 @@ export function loadAllMachines(): MachineState[] {
 
 	for (const entry of entries) {
 		if (!entry.isDirectory()) continue;
-		const state = loadMachine(entry.name);
-		if (state) machines.push(state);
+		const loaded = tryLoadMachine(entry.name);
+		if (loaded.status === "ok") machines.push(loaded.state);
 	}
 
 	return machines;
+}
+
+/** Every machine directory whose `machine.json` exists but cannot be read.
+ *
+ *  Distinct from `listOrphanMachineDirs()`, which also counts a directory with no
+ *  `machine.json` at all — a create that never finished. This one is a machine that did
+ *  exist and whose state went bad, so it still holds a disk image worth naming. */
+export function listUnreadableMachines(): Array<{ name: string; error: string }> {
+	const out: Array<{ name: string; error: string }> = [];
+	for (const name of listMachineNames()) {
+		const loaded = tryLoadMachine(name);
+		if (loaded.status === "unreadable") out.push({ name, error: loaded.error });
+	}
+	return out;
 }
 
 /** Get all existing machine names. */
@@ -152,14 +212,10 @@ export function listOrphanMachineDirs(): string[] {
 	return listMachineNames().filter((name) => !isReadableMachine(name));
 }
 
-/** `loadMachine()` without the throw — a truncated or corrupt `machine.json` is as
- *  unusable as a missing one, and both make the directory an orphan. */
+/** A truncated or corrupt `machine.json` is as unusable as a missing one, and both make
+ *  the directory an orphan. */
 function isReadableMachine(name: string): boolean {
-	try {
-		return loadMachine(name) !== undefined;
-	} catch {
-		return false;
-	}
+	return tryLoadMachine(name).status === "ok";
 }
 
 /** Get all port bases currently in use by existing machines. */

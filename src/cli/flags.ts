@@ -16,7 +16,7 @@ const CREATE_FLAGS = [
 	"version", "channel", "arch", "name", "cpu", "mem", "accel",
 	"add-package", "install-all-packages",
 	"port-base", "forward", "winbox", "api-ssl",
-	"add-network", "network", "vmnet-shared", "vmnet-bridge",
+	"add-network", "network",
 	"boot-disk-format", "boot-size", "add-disk",
 	"device-mode", "device-mode-enable", "device-mode-disable",
 	"add-user", "disable-admin", "secure-login",
@@ -32,30 +32,67 @@ const START_ONLY_FLAGS = [
 export const ADD_FLAGS: readonly string[] = CREATE_FLAGS;
 export const START_FLAGS: readonly string[] = [...CREATE_FLAGS, ...START_ONLY_FLAGS];
 
-/** Flags that are meaningless without a value.
+/** Every flag that takes a value, across every command — `parseFlags`'s arity table.
  *
- *  `parseFlags` stores `true` when a flag is followed by another flag or by nothing,
- *  and `flag()` turns a boolean back into `undefined` — so `quickchr add --name
- *  --version 7.24.3` used to reach `add()` with no name at all and quietly create an
- *  auto-named machine. Checking names alone does not catch that; the value has to be
- *  checked too.
+ *  This is the parser's input, not only a validation list. Without it `parseFlags`
+ *  guessed each flag's arity from the shape of the next argument — *if it does not start
+ *  with `--`, consume it as the value* — which is one rule doing two jobs and getting one
+ *  of them wrong: a boolean flag swallowed the following positional, so
+ *  `quickchr start --vmnet-shared lab` set `vmnet-shared="lab"` and lost the machine name
+ *  (#164). A flag absent from this set is boolean and never consumes an argument.
+ *
+ *  It is also what makes a missing value visible. `parseFlags` stores `true` when a
+ *  value-taking flag is followed by another flag or by nothing, and `flag()` turns a
+ *  boolean back into `undefined` — so `quickchr add --name --version 7.24.3` used to
+ *  reach `add()` with no name at all and quietly create an auto-named machine. Checking
+ *  names alone does not catch that; the value has to be checked too.
  *
  *  `--no-x` (which parses as `false`) is a deliberate negation, not a missing value,
- *  so only an explicit `true` is rejected. */
-const VALUE_FLAGS = new Set([
+ *  so only an explicit `true` is rejected.
+ *
+ *  Both directions are asserted mechanically against the CLI source in
+ *  `test/unit/cli-flag-arity.test.ts` — every name read as a value is here, and no name
+ *  read as a boolean is — and the scan covers direct access (`flags["older-than"]`) as
+ *  well as the helpers, because that is where the first gap was. A new flag cannot skip
+ *  this table by being forgotten; the audit is the test's job, not a reviewer's. */
+export const VALUE_FLAGS: ReadonlySet<string> = new Set([
+	// add / start
 	"version", "channel", "arch", "name", "cpu", "mem", "accel",
 	"add-package", "port-base", "forward",
-	"add-network", "vmnet-bridge",
+	"add-network",
 	"boot-disk-format", "boot-size", "add-disk",
 	"device-mode", "device-mode-enable", "device-mode-disable",
 	"add-user", "timeout-extra",
 	"license-level", "license-account", "license-password",
+	// exec / qga / console
+	"via", "user", "password", "timeout", "path", "data", "script",
+	// set --license
+	"account", "level",
+	// networks sockets create
+	"mode", "port", "group",
+	// completions / logs
+	"shell", "lines",
+	// cache prune
+	"older-than", "max-age", "max-size",
+]);
+
+/** Flags that quickchr used to accept, and what to write instead.
+ *
+ *  `--vmnet-shared` / `--vmnet-bridge <iface>` were special cases for one network type
+ *  that `--add-network` already expresses in general (#164). Removing them silently would
+ *  repeat the defect they were removed for: a flag that is accepted and does nothing. A
+ *  removed name stays known for as long as anyone might still type it, and says what
+ *  replaced it. */
+export const REMOVED_FLAGS: ReadonlyMap<string, string> = new Map([
+	["vmnet-shared", "--add-network shared"],
+	["vmnet-bridge", "--add-network bridged:<iface>"],
 ]);
 
 /** Value-taking flags with a documented `--no-` spelling, where `false` is a real
  *  instruction rather than a value that went missing. `--no-device-mode` is the only
- *  one today; it is listed in `start --help`. */
-const NEGATABLE_VALUE_FLAGS = new Set(["device-mode"]);
+ *  one today; it is listed in `start --help`. Exported for the arity audit, which would
+ *  otherwise read `flags["device-mode"] === false` as proof that it is a boolean. */
+export const NEGATABLE_VALUE_FLAGS: ReadonlySet<string> = new Set(["device-mode"]);
 
 /** Flags given without the value they require.
  *

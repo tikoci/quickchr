@@ -812,6 +812,10 @@ export type ErrorCode =
 	| "INVALID_VERSION"
 	| "INVALID_ARCH"
 	| "INVALID_NAME"
+	// A flag or argument the CLI cannot honour as written — a removed flag name, or a
+	// value it will not accept. Distinct from INVALID_SETTING_VALUE, which is about a
+	// stored setting rather than what was typed.
+	| "INVALID_ARGUMENT"
 	| "INVALID_DISK_SIZE"
 	| "MACHINE_LOCKED"
 	| "EXEC_FAILED"

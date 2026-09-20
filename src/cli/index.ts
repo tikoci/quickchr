@@ -6,7 +6,8 @@
 import type { StartOptions, Arch, Channel, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
-import { ADD_FLAGS, START_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
+import { ADD_FLAGS, REMOVED_FLAGS, START_FLAGS, VALUE_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
+import { QuickCHRError } from "../lib/types.ts";
 import { CENTRS_EXEC_TIP, CENTRS_SEE_ALSO, tip, tipsForError } from "./tips.ts";
 import {
 	MIN_PROVISION_VERSION,
@@ -19,8 +20,24 @@ import {
 const args = process.argv.slice(2);
 const command = args[0];
 
-/** Parse --flag=value and --flag value pairs from args. */
-export function parseFlags(argv: string[]): { flags: Record<string, string | boolean | string[]>; positional: string[] } {
+/** Stop a removed flag at the parser, naming what replaced it. Thrown rather than
+ *  printed so it reaches `main()`'s handler like any other error, and so no command can
+ *  reach a state where the flag was accepted and ignored (#164). */
+function rejectRemovedFlag(key: string): void {
+	const replacement = REMOVED_FLAGS.get(key);
+	if (replacement === undefined) return;
+	throw new QuickCHRError("INVALID_ARGUMENT", `--${key} was removed. Use: ${replacement}`);
+}
+
+/** Parse --flag=value and --flag value pairs from args.
+ *
+ *  Arity comes from `VALUE_FLAGS`, never from the shape of the next argument: a flag
+ *  that is not in that table is boolean and leaves the following argument alone, so a
+ *  positional cannot be eaten by a flag that has no use for it (#164). */
+export function parseFlags(
+	argv: string[],
+	valueFlags: ReadonlySet<string> = VALUE_FLAGS,
+): { flags: Record<string, string | boolean | string[]>; positional: string[] } {
 	const flags: Record<string, string | boolean | string[]> = {};
 	const positional: string[] = [];
 
@@ -35,13 +52,16 @@ export function parseFlags(argv: string[]): { flags: Record<string, string | boo
 			const eqIdx = arg.indexOf("=");
 			if (eqIdx !== -1) {
 				const key = arg.slice(2, eqIdx);
+				rejectRemovedFlag(key);
 				flags[key] = arg.slice(eqIdx + 1);
 			} else if (arg.startsWith("--no-")) {
+				rejectRemovedFlag(arg.slice(5));
 				flags[arg.slice(5)] = false;
 			} else {
 				const key = arg.slice(2);
+				rejectRemovedFlag(key);
 				const next = argv[i + 1];
-				if (next && !next.startsWith("--")) {
+				if (valueFlags.has(key) && next !== undefined && !next.startsWith("--")) {
 					// Check if this is a repeatable flag
 					const existing = flags[key];
 					if (Array.isArray(existing)) {
@@ -94,20 +114,10 @@ function csvList(values: string[]): string[] {
 	return [...new Set(values.flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean))];
 }
 
-/** Build networks array from --add-network, --no-network, and legacy vmnet flags. */
+/** Build networks array from --add-network and --no-network. */
 function buildNetworks(flags: Record<string, string | boolean | string[]>): NetworkSpecifier[] | undefined {
 	const specs: NetworkSpecifier[] = [];
 
-	// Legacy flags first
-	if (flag(flags, "vmnet-shared") !== undefined) {
-		specs.push(parseNetworkSpecifier("shared"));
-	}
-	const bridgeIface = flag(flags, "vmnet-bridge");
-	if (bridgeIface) {
-		specs.push(parseNetworkSpecifier(`bridged:${bridgeIface}`));
-	}
-
-	// New --add-network flags
 	for (const raw of flagList(flags, "add-network")) {
 		specs.push(parseNetworkSpecifier(raw));
 	}
@@ -1538,8 +1548,13 @@ async function cmdList(argv: string[] = []) {
 
 	const { table, statusIcon, formatPorts, formatNetworks, dim } = await import("./format.ts");
 	const machines = QuickCHR.list();
+	// A machine whose state went bad keeps its place in the listing. It still holds a
+	// disk image, and `list` is where anyone looks first — deferring it to `doctor`
+	// assumes you already suspect trouble, which a quietly absent machine does not
+	// suggest. The listing itself succeeded, so the exit code stays 0 (#165).
+	const unreadable = QuickCHR.listUnreadable();
 
-	if (machines.length === 0) {
+	if (machines.length === 0 && unreadable.length === 0) {
 		if (asJson) {
 			console.log("[]");
 		} else {
@@ -1549,7 +1564,10 @@ async function cmdList(argv: string[] = []) {
 	}
 
 	if (asJson) {
-		console.log(JSON.stringify(machines, null, 2));
+		console.log(JSON.stringify([
+			...machines,
+			...unreadable.map((u) => ({ name: u.name, status: "unreadable", error: u.error })),
+		], null, 2));
 		return;
 	}
 
@@ -1563,8 +1581,17 @@ async function cmdList(argv: string[] = []) {
 		formatPorts(m.ports),
 		m.pid ? String(m.pid) : dim("—"),
 	]);
+	for (const u of unreadable) {
+		rows.push([statusIcon("error"), u.name, dim("unreadable"), dim("—"), dim("—"), dim("—"), dim("—")]);
+	}
 
 	console.log(table(headers, rows));
+
+	// The row says which machine; this says what to do about it, so neither takes a
+	// second command to learn.
+	for (const u of unreadable) {
+		console.log(`\n${statusIcon("error")} ${u.name}: machine.json unreadable — 'quickchr remove ${u.name}' to clear it`);
+	}
 }
 
 function shellQuoteEnv(value: string): string {
@@ -1772,10 +1799,10 @@ async function cmdRemove(argv: string[]) {
 		return;
 	}
 
-	// A machine.json that does not parse throws out of get(). Everywhere else that is
-	// the right behaviour — silently dropping a machine from `list` would hide state
-	// loss — but `remove` is the command whose job is to clear it, so here it routes
-	// into the orphan path below instead of a stack trace (#155).
+	// A machine.json that does not parse throws out of get(), because a lookup by name
+	// must not answer "no such machine" about a directory that exists (#165). `remove`
+	// is the command whose job is to clear that state, so here it routes into the
+	// orphan path below instead of surfacing the error (#155).
 	let instance: ReturnType<typeof QuickCHR.get> = null;
 	try {
 		instance = QuickCHR.get(name);
@@ -2951,9 +2978,7 @@ Options:
   --device-mode <m>     Set device-mode on first boot: rose|advanced|basic|home|auto|skip
   --add-network <spec>  Add a network NIC (repeatable). Specs: user, shared, bridged:<if>,
                         socket::<name>, tap:<if>. Default: single user NIC.
-  --no-network          Start with no NICs (headless)
-  --vmnet-shared        [deprecated] Use --add-network shared
-  --vmnet-bridge <if>   [deprecated] Use --add-network bridged:<if>`);
+  --no-network          Start with no NICs (headless)`);
 			break;
 		case "setup":
 			console.log(`quickchr setup
@@ -3034,8 +3059,6 @@ Options:
   --add-network <spec>  Add a network NIC (repeatable). Specs: user, shared, bridged:<if>,
                         socket::<name>, tap:<if>. Default: single user NIC.
   --no-network          Start with no NICs (headless)
-  --vmnet-shared        [deprecated] Use --add-network shared
-  --vmnet-bridge <if>   [deprecated] Use --add-network bridged:<if>
   --install-all-packages  Install all packages from all_packages.zip
   --license-level <l>   Apply trial license: p1 (1 Gbps), p10 (10 Gbps), unlimited
   --license-account <a> MikroTik account email (or use MIKROTIK_WEB_ACCOUNT env var)

@@ -21,6 +21,10 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   directories are now addressable from the public API, not just by `rm -rf` on the
   data dir.
 
+- `QuickCHR.listUnreadable()` — the machines `list()` skipped, with the parse error
+  for each. `list()` no longer aborts on a corrupt `machine.json`, so this is where
+  what it skipped stays visible. (#165)
+
 - `quickchr cache add` and the public `cacheAdd()` API resolve and prefetch one
   CHR image without requiring QEMU or creating a machine. `quickchr cache key`
   and `cacheKey()` expose the actual cache directory, concrete architecture,
@@ -43,6 +47,27 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   `<!-- specifier-lint: skip — reason -->`, and the reason is required. (#157)
 
 ### Fixed
+
+- `quickchr list` survives one corrupt `machine.json`. `loadMachine()` parsed with no
+  guard, so a single truncated file — the realistic outcome of a disk-full or power
+  loss during `saveMachine()` — aborted the whole listing with a raw parse trace and
+  took every healthy machine's state with it. The enumeration now skips what it cannot
+  read and shows it as a row instead: named, marked `unreadable`, with
+  `quickchr remove <name>` attached, and exit 0 because the listing succeeded. Nothing
+  is hidden — a machine that vanished from `list` is exactly the failure that does not
+  look like one. `QuickCHR.get(name)` still throws for that machine, because a lookup
+  by name is not an enumeration, and it now throws `STATE_ERROR` naming the file and
+  the remedy rather than a `SyntaxError`. (#165)
+
+- A boolean flag no longer swallows the argument after it. `parseFlags` had no notion
+  of arity and guessed from the shape of the next argument — *if it does not start with
+  `--`, consume it* — so `quickchr start --vmnet-shared lab` set `vmnet-shared="lab"`
+  and lost the machine name. Arity now comes from the flag registry
+  (`src/cli/flags.ts`), and a test checks every flag read in the CLI against it — the
+  helpers and direct `flags[...]` access both — so the audit that found this one is no
+  longer someone's eyesight. That test immediately caught `quickchr cache prune
+  --older-than` / `--max-age` / `--max-size`, whose values the arity change would
+  otherwise have started dropping. (#164)
 
 - `--help` is handled before any side effect, for every subcommand. `quickchr add --help`
   used to generate a machine name and download 43 MB while printing nothing, and
@@ -109,6 +134,17 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   Those are the internal `NetworkSpecifier` type names; the CLI takes
   `socket:listen:<port>`. Both now show the CLI spelling, with the TypeScript form
   noted beside it. (#157)
+
+### Removed
+
+- `--vmnet-shared` and `--vmnet-bridge <iface>` are gone from `add` and `start`. Both
+  were exactly expressible as `--add-network shared` / `--add-network bridged:<iface>`,
+  and both were broken: `--vmnet-shared` alone applied no network at all (it was read
+  with `flag()`, which returns `undefined` for a boolean), and `--vmnet-shared lab`
+  "worked" only by eating the machine name. Typing either now fails with
+  `INVALID_ARGUMENT` naming the replacement, rather than being silently ignored. The
+  `vmnet-shared` *netdev* and the legacy `machine.json` migration keep the name and are
+  untouched — only the CLI flag was removed. (#164)
 
 ### Changed
 
