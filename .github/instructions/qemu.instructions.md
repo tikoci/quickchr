@@ -172,7 +172,8 @@ and `.github/instructions/provisioning.instructions.md`. Implementation:
 SLIRP's gateway `10.0.2.2` **is the host** from inside the guest. A datagram the
 guest sends to `10.0.2.2:<port>` is relayed to a host process bound on loopback
 `<port>` — **no `hostfwd`, no extra NIC**. This is the general form of the TZSP path
-(`ChrInstance.tzspGatewayIp` / `captureInterface`); it also covers remote syslog,
+(`ChrInstance.hostGatewayIp` / `captureInterface` — `tzspGatewayIp` is the
+deprecated alias, #26); it also covers remote syslog,
 NetFlow, and a guest server replying to the gateway.
 
 **The host socket must be left unconnected** (`recvfrom`, not `connect`): SLIRP
@@ -184,10 +185,23 @@ range form `name:hostStart-hostEnd[:guestStart-guestEnd][/proto]`).
 
 ## Process model — QEMU outlives its parent by design
 
-`spawnQemu()` detaches QEMU deliberately when `background: true` (`src/lib/qemu.ts`): `proc.unref()` on POSIX, so it
-is orphaned and adopted by init/launchd; `node:child_process` with `detached: true` on Windows,
-because `Bun.spawn().unref()` does **not** escape the Windows Job Object and the VM would die
-with the CLI. That is the point — `quickchr start` must return while the VM keeps running.
+`spawnQemu()` detaches QEMU deliberately when `background: true` (`src/lib/qemu.ts`), with
+`detached: true` on both platforms — `Bun.spawn` on POSIX, `node:child_process` on Windows.
+That is the point: `quickchr start` must return while the VM keeps running.
+
+**`unref()` is not detachment** (#159). It covers only a *voluntary* parent exit — QEMU is
+orphaned and adopted by init/launchd — and leaves QEMU in the caller's **process group**, where
+a group signal reaches it: Ctrl-C, a shell `timeout`, a CI step teardown, an agent harness
+killing a stuck command. `detached: true` is `setsid()` on POSIX, which is what actually puts
+QEMU out of that group; `test/unit/posix-detach.test.ts` proves it by signalling a real group.
+POSIX uses `Bun.spawn` per the repo's Bun-first rule — its `detached` was verified locally on
+Bun 1.4.2, not taken from the docs.
+
+Windows keeps `node:child_process` for a **different** failure: a Job Object terminates
+everything inside it when the parent goes, and `Bun.spawn().unref()` does not escape one.
+Bun's `detached` claims `UV_PROCESS_DETACHED` on Windows and would likely fold the two paths
+into one, but that is untested here and the Job Object escape is load-bearing — merging them
+needs a Windows reproduction first, not a doc claim.
 
 The consequence for anything that kills a quickchr process: **terminating the parent does not
 stop the VM.** Killing a `bun test` run, a CLI invocation, or a CI step leaves QEMU alive,

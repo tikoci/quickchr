@@ -262,10 +262,20 @@ describe("ChrInstance API surface (dryRun)", () => {
 		expect(instance.captureInterface).toBe(expected);
 	});
 
-	test("dryRun instance exposes tzspGatewayIp as QEMU user-mode gateway", async () => {
+	test("dryRun instance exposes hostGatewayIp as QEMU user-mode gateway", async () => {
 		const instance = await makeDryRun();
 		if (!instance) return;
-		expect(instance.tzspGatewayIp).toBe("10.0.2.2");
+		expect(instance.hostGatewayIp).toBe("10.0.2.2");
+	});
+
+	// #26: tzspGatewayIp is the old name for the same value. A caller on 0.4.x must
+	// keep working across the rename, so the alias is asserted to be the identical
+	// value rather than merely present — a drift between the two would hand one
+	// caller a stale address with no error anywhere.
+	test("deprecated tzspGatewayIp still carries the identical value", async () => {
+		const instance = await makeDryRun();
+		if (!instance) return;
+		expect(instance.tzspGatewayIp).toBe(instance.hostGatewayIp);
 	});
 
 	test("waitFor resolves true when condition passes immediately", async () => {

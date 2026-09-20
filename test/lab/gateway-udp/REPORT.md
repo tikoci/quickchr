@@ -60,7 +60,8 @@ remote action that didn't exist.)
 
 ### 4. Relationship to the existing TZSP path
 
-This is the same primitive `ChrInstance.tzspGatewayIp` (`10.0.2.2`) +
+This is the same primitive `ChrInstance.hostGatewayIp` (`10.0.2.2`, named
+`tzspGatewayIp` when this lab ran — renamed in #26) +
 `captureInterface` (`lo0`) already expose for `/tool/sniffer` TZSP streaming — but
 generalized: it is **not** TZSP-specific, and it reaches an ordinary bound UDP
 socket, not only a `tshark`/pcap capture on `lo0`.

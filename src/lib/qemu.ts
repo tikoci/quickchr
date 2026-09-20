@@ -386,6 +386,20 @@ export async function spawnQemu(
 		// After spawn, close parent's copy; child process inherits its own copy.
 		const logFd = openSync(logPath, "a");
 
+		// A backgrounded QEMU outlives the CLI invocation that started it, so it must
+		// leave the caller's process group. `detached: true` is `setsid()` on POSIX;
+		// `unref()` alone is not enough, because it only covers a *voluntary* parent
+		// exit. It leaves QEMU in the caller's process group, where a group signal
+		// reaches it: Ctrl-C in the terminal, a shell `timeout`, a CI step teardown,
+		// an agent harness killing a stuck command (#159).
+		//
+		// Killing a run's VMs deliberately is by QEMU process name, not by group
+		// (`scripts/ci-file-watchdog.ts`, and the integration workflow's cleanup
+		// steps), so detaching costs no cleanup reach.
+		//
+		// Windows keeps its own spawn below for a different failure — a Job Object
+		// takes everything in it when the parent goes — and the two are not merged
+		// because only this one can be verified here.
 		let spawnedPid: number;
 
 		if (process.platform === "win32") {
@@ -401,6 +415,11 @@ export async function spawnQemu(
 				stdio: ["ignore", logFd, logFd],
 				windowsHide: true,
 			});
+			// A failed exec surfaces asynchronously here, as an `error` event with no
+			// pid — and an unhandled `error` event is a crash, not a thrown
+			// QuickCHRError. Nothing awaits the child, so this listener is what keeps
+			// a qemu binary that is missing, or cannot be executed, reportable.
+			child.on("error", () => { /* surfaced by the liveness check below */ });
 			closeSync(logFd);
 			if (child.pid === undefined) {
 				throw new QuickCHRError("SPAWN_FAILED", "Failed to spawn QEMU process on Windows");
@@ -409,13 +428,14 @@ export async function spawnQemu(
 			spawnedPid = child.pid;
 		} else {
 			const proc = Bun.spawn(spawnCmd, {
+				detached: true,
 				stdout: logFd,
 				stderr: logFd,
 				stdin: "ignore",
 			});
 			closeSync(logFd);
-			// unref() lets the parent Bun process exit without waiting for QEMU.
-			// QEMU becomes an orphan adopted by init/launchd and keeps running.
+			// unref() lets the parent exit without waiting for QEMU; detached keeps
+			// QEMU alive when the parent is signalled rather than exiting.
 			proc.unref();
 			spawnedPid = proc.pid;
 		}

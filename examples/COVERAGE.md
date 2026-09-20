@@ -56,7 +56,7 @@ Legend: ✅ example · 📘 docs/MANUAL only · 🧪 covered by `test/` only.
 | `StartOptions.networks` (socket-connect) | ✅ mndp | |
 | `StartOptions.packages` / `portBase` | ✅ version-matrix | |
 | `StartOptions.bootDiskFormat` | ✅ rollback | |
-| `tzspGatewayIp` | ✅ udp-gateway | |
+| `hostGatewayIp` | ✅ udp-gateway | |
 | `waitFor()` | 📘 | custom-condition poll; JSDoc has the canonical example |
 | `setDeviceMode()` (live) | 📘 | power-cycles the VM; `device-mode` at-start is the safe path |
 | `availablePackages()` | 📘 | listing only; `installPackage` is the action |

@@ -5,7 +5,7 @@
  * QEMU user-mode (SLIRP) terminates Layer 2, but the gateway `10.0.2.2` IS the
  * host as seen from the VM. Any datagram the guest sends to `10.0.2.2:<port>` is
  * relayed to a host process bound on loopback `<port>` — no `hostfwd`, no extra
- * NIC. This is the general form of the TZSP path `ChrInstance.tzspGatewayIp`
+ * NIC. This is the general form of the TZSP path `ChrInstance.hostGatewayIp`
  * exposes.
  *
  * The catch: relayed datagrams arrive from a SLIRP-rewritten loopback source
@@ -47,11 +47,11 @@ if (import.meta.main) {
 				}),
 			);
 			check(await chr.waitForBoot(180_000), "CHR did not become REST-ready");
-			check(chr.tzspGatewayIp === "10.0.2.2", "expected SLIRP gateway 10.0.2.2");
+			check(chr.hostGatewayIp === "10.0.2.2", "expected SLIRP gateway 10.0.2.2");
 
 			// 3. Point RouterOS remote syslog at gateway:port, route the info topic.
 			await chr.exec(
-				`/system/logging/action/add name=qchrgw target=remote remote=${chr.tzspGatewayIp} remote-port=${port}`,
+				`/system/logging/action/add name=qchrgw target=remote remote=${chr.hostGatewayIp} remote-port=${port}`,
 			);
 			await chr.exec("/system/logging/add action=qchrgw topics=info");
 
