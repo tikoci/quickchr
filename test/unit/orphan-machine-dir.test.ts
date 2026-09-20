@@ -171,6 +171,21 @@ describe("an orphan directory is recoverable (#155)", () => {
 		expect(machinesDirContents()).toEqual([]);
 	});
 
+	test.skipIf(process.platform === "win32")(
+		"a legacy name containing a backslash stays removable on POSIX",
+		async () => {
+			// `\` is an ordinary filename character here, and creation only rejected a
+			// leading `-` before this release. `list` still shows such a machine, so the
+			// path guard must not be what strands it.
+			const name = "lab\\old";
+			mkdirSync(join(TEST_DIR, "machines", name), { recursive: true });
+
+			const result = await runQuickchr(["remove", name]);
+			expect(result.exitCode).toBe(0);
+			expect(machinesDirContents()).toEqual([]);
+		},
+	);
+
 	test("remove still reports a genuinely missing machine as not found", async () => {
 		const result = await runQuickchr(["remove", "never-existed"]);
 		expect(result.exitCode).toBe(1);
@@ -184,6 +199,38 @@ describe("an orphan directory is recoverable (#155)", () => {
 		expect(result.stderr).toContain("not found");
 		expect(result.stderr).not.toContain("Available: half-made");
 		expect(result.stderr).toContain("Leftover directories");
+	});
+
+	test("a create still in flight is not deleted as an orphan", async () => {
+		// add()/start() write machine.json last, so between ensureDir() and saveMachine()
+		// an active create is indistinguishable from an orphan by directory contents.
+		// The start-lock is what separates them.
+		const live = Bun.spawn(["sleep", "60"], { stdout: "ignore", stderr: "ignore" });
+		try {
+			const dir = join(TEST_DIR, "machines", "inflight");
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, ".start-lock"), String(live.pid));
+			writeFileSync(join(dir, "disk.img"), "partial");
+
+			const result = await runQuickchr(["remove", "inflight"]);
+			expect(result.exitCode).toBe(1);
+			expect(result.stderr).toContain("MACHINE_LOCKED");
+			expect(existsSync(dir)).toBe(true);
+		} finally {
+			live.kill();
+			await live.exited;
+		}
+	});
+
+	test("a stale lock from a dead creator is still recoverable", async () => {
+		const dir = join(TEST_DIR, "machines", "crashed");
+		mkdirSync(dir, { recursive: true });
+		// A pid that cannot be alive — acquireLock() replaces a lock whose owner is gone.
+		writeFileSync(join(dir, ".start-lock"), "999999");
+
+		const result = await runQuickchr(["remove", "crashed"]);
+		expect(result.exitCode).toBe(0);
+		expect(existsSync(dir)).toBe(false);
 	});
 
 	test("a traversal name never deletes outside machines/<name>/", async () => {

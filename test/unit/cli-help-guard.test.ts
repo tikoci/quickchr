@@ -145,6 +145,16 @@ describe("unknown flags on machine-creating commands (#156)", () => {
 		expect(dataDirContents()).toEqual([]);
 	});
 
+	test("the --no- spelling of a value flag is rejected too", async () => {
+		// `--no-name` parses as { name: false }, which flag() also turns into undefined —
+		// the same auto-named-machine hazard as a bare `--name`, through the other door.
+		const result = await runQuickchr(["add", "--no-name", "--version", "7.24.3"]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("--no-name");
+		expect(result.stderr).toContain("not a supported negation");
+		expect(dataDirContents()).toEqual([]);
+	});
+
 	test("--no-x negation is not mistaken for a missing value", async () => {
 		const result = await runQuickchr(["start", "--dry-run", "--version", "7.24.3", "--no-device-mode", "--no-winbox"]);
 		expect(result.exitCode).toBe(0);

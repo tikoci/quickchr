@@ -54,15 +54,22 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   path. Pre-existing; found while auditing the deletion paths after the `remove ..`
   fix above.
 
-- A known flag given without its value is an error rather than a silent default.
-  `quickchr add --name --version 7.24.3` parsed `--name` as a boolean, dropped it,
-  and created an auto-named machine. (#156)
+- A known flag given without its value is an error rather than a silent default, in
+  both spellings: `quickchr add --name --version 7.24.3` parsed `--name` as `true` and
+  `quickchr add --no-name` parsed it as `false`, and either way the machine got an
+  auto-generated name. `--no-device-mode` remains a supported negation. (#156)
+
+- `quickchr remove` no longer deletes a machine directory whose create is still in
+  flight. Between `ensureDir()` and `saveMachine()` an active `add`/`start` looks
+  exactly like an orphan, so removal now takes the same start-lock: a live creator
+  makes it fail with `MACHINE_LOCKED`, while a lock whose owner is gone is still
+  recoverable.
 
 - Machine and named-socket names are validated before anything is written: no
   leading `-`, and letters, digits, dot, underscore and hyphen only. Both become a
   path segment under the data dir, so this also closes a path-traversal hole in
   `socket::<name>`. Existing machines created under the older, looser rules stay
-  startable. (#156)
+  able to start. (#156)
 
 - A failed `quickchr add` no longer leaves a machine directory behind. One with no
   readable `machine.json` was invisible to `list`, unremovable by `remove`, and

@@ -43,7 +43,11 @@ export function assertValidResourceName(name: string, kind: string): void {
 export function isPathSafeName(name: string): boolean {
 	if (name.length === 0) return false;
 	if (name === "." || name === "..") return false;
-	if (name.includes("/") || name.includes("\\") || name.includes("\0")) return false;
+	if (name.includes("/") || name.includes("\0")) return false;
+	// `\` is a path separator on Windows and an ordinary filename character on POSIX.
+	// Rejecting it everywhere would strand a machine named `lab\old` under the older,
+	// looser creation rules: `list` still shows it, so `remove` has to still clear it.
+	if (process.platform === "win32" && name.includes("\\")) return false;
 	return true;
 }
 

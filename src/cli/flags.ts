@@ -52,22 +52,46 @@ const VALUE_FLAGS = new Set([
 	"license-level", "license-account", "license-password",
 ]);
 
-/** Flags given without the value they require. */
+/** Value-taking flags with a documented `--no-` spelling, where `false` is a real
+ *  instruction rather than a value that went missing. `--no-device-mode` is the only
+ *  one today; it is listed in `start --help`. */
+const NEGATABLE_VALUE_FLAGS = new Set(["device-mode"]);
+
+/** Flags given without the value they require.
+ *
+ *  Both spellings have to be caught. `--name` followed by another flag parses as
+ *  `true`, and `--no-name` parses as `false`; either way `flag()` returns `undefined`
+ *  and the machine gets an auto-generated name. Only a string (or a repeatable flag's
+ *  string[]) is a value. */
 export function valuelessFlags(
 	flags: Record<string, string | boolean | string[]>,
 	known: readonly string[],
-): string[] {
-	return Object.keys(flags).filter(
-		(name) => known.includes(name) && VALUE_FLAGS.has(name) && flags[name] === true,
-	);
+): Array<{ name: string; negated: boolean }> {
+	const result: Array<{ name: string; negated: boolean }> = [];
+	for (const name of Object.keys(flags)) {
+		if (!known.includes(name) || !VALUE_FLAGS.has(name)) continue;
+		const value = flags[name];
+		if (typeof value === "string" || Array.isArray(value)) continue;
+		if (value === false && NEGATABLE_VALUE_FLAGS.has(name)) continue;
+		result.push({ name, negated: value === false });
+	}
+	return result;
 }
 
 /** Human-readable complaint for `valuelessFlags()` output. Empty when nothing is missing. */
-export function valuelessFlagMessage(valueless: readonly string[], command: string): string {
+export function valuelessFlagMessage(
+	valueless: ReadonlyArray<{ name: string; negated: boolean }>,
+	command: string,
+): string {
 	if (valueless.length === 0) return "";
+	const lines = valueless.map(({ name, negated }) =>
+		negated
+			? `  --no-${name}  (not a supported negation — --${name} takes a value)`
+			: `  --${name} <value>`,
+	);
 	return [
 		`Error: flag${valueless.length > 1 ? "s" : ""} for 'quickchr ${command}' missing a value:`,
-		...valueless.map((name) => `  --${name} <value>`),
+		...lines,
 		`Run 'quickchr ${command} --help' for the full list.`,
 	].join("\n");
 }

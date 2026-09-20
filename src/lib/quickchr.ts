@@ -1526,7 +1526,7 @@ export class QuickCHR {
 		opts = normalizeStartOptions(opts);
 		// Cheap guard before any I/O: a name that reads as a flag is always a mistake.
 		// The full charset rules are applied below, but only when this call creates the
-		// machine — a machine named under the older, looser rules must stay startable.
+		// machine — a machine named under the older, looser rules must still start.
 		if (opts.name?.startsWith("-")) {
 			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-" (it would be read as a flag)`);
 		}
@@ -2237,6 +2237,22 @@ export class QuickCHR {
 		// turns ".." into the data dir itself. Say why rather than answering `false`.
 		assertPathSafeName(name, "machine");
 		if (!isOrphanMachineDir(name)) return false;
+
+		// A create still in flight is indistinguishable from an orphan by directory
+		// contents alone — add()/start() write machine.json last, so the window between
+		// ensureDir() and saveMachine() looks exactly like a half-made machine. The
+		// start-lock is what tells them apart, so take it: acquireLock() throws
+		// MACHINE_LOCKED while a live creator holds it, and replaces one whose owner is
+		// gone — which is the case this recovery exists for.
+		const lockPath = join(getMachineDir(name), ".start-lock");
+		acquireLock(lockPath);
+
+		// The creator may have finished between the check above and the lock.
+		if (!isOrphanMachineDir(name)) {
+			try { unlinkSync(lockPath); } catch { /* ignore */ }
+			return false;
+		}
+
 		removeState(name);
 		return true;
 	}
