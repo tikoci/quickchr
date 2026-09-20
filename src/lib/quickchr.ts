@@ -73,7 +73,7 @@ import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec, CONSOLE_LOGIN_COST_MS } from "./console.ts";
 import { restRequest, restGet, restPost } from "./rest.ts";
-import { createNamedSocket, getNamedSocket, addSocketMember, removeSocketMember, getSocketSlot } from "./socket-registry.ts";
+import { getNamedSocket, joinNamedSocket, removeSocketMember, getSocketSlot } from "./socket-registry.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import {
 	formatDeviceModeSelection,
@@ -228,10 +228,9 @@ function qemuVersionForArch(platform: PlatformInfo, arch: Arch): string | undefi
 function registerSocketMembers(state: MachineState): void {
 	for (const name of getSocketNamedNetworks(state)) {
 		try {
-			if (!getNamedSocket(name)) {
-				createNamedSocket(name, { autoCreated: true });
-			}
-			addSocketMember(name, state.name);
+			// Create-if-missing and join under one registry lock: two concurrent starts
+			// both pass a test-then-create, and both then claim the same endpoint slot.
+			joinNamedSocket(name, state.name, { autoCreated: true });
 		} catch (e) {
 			// A full two-member link is a refusal, not a warning: carrying on would spawn
 			// QEMU with no endpoint to bind, and on a `dgram` link a second machine

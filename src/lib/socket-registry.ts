@@ -3,7 +3,7 @@
  * Socket entries are stored as JSON files in ~/.local/share/quickchr/networks/.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, openSync, closeSync, writeSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { getDataDir } from "./state.ts";
@@ -103,9 +103,124 @@ function normalizeEntry(raw: Partial<SocketEntry> & { name: string; mode: Socket
 	};
 }
 
+/** Write the entry so a concurrent reader never sees a half-written file.
+ *
+ *  `writeFileSync` truncates and then fills, so another process reading in that window
+ *  gets invalid JSON and `getNamedSocket()` reports the socket as missing. Two starts
+ *  racing to join one link hit it — observed on 3 of 12 rounds of a two-process
+ *  repro. Write-then-rename makes the swap atomic. */
 function saveEntry(entry: SocketEntry): void {
-	writeFileSync(socketPath(entry.name), JSON.stringify(entry, null, "\t") + "\n");
+	const target = socketPath(entry.name);
+	const tmp = `${target}.${process.pid}.tmp`;
+	writeFileSync(tmp, JSON.stringify(entry, null, "\t") + "\n");
+	renameSync(tmp, target);
 	_cache.set(entry.name, entry);
+}
+
+/** How long to wait for another process to finish its read-modify-write. The critical
+ *  section is one small file write, so this is many orders of magnitude of headroom;
+ *  it exists so a crashed holder cannot wedge a start forever. */
+const LOCK_TIMEOUT_MS = 5_000;
+
+/** Serialize a read-modify-write of one registry entry across processes.
+ *
+ *  `addSocketMember()` reads the entry, picks a free slot and writes it back. Two
+ *  machines joining one link concurrently both read `[null, null]`, both take slot 0,
+ *  and the second write wins — so both QEMUs are handed the same `local.path`, and on
+ *  a `dgram` link the second silently unlinks the first's socket and steals the link.
+ *  A two-process repro lost an endpoint on 12 of 12 rounds.
+ *
+ *  `quickchr start a & quickchr start b &` is the shape that hits this, and it is
+ *  exactly how the field report drove its multi-CHR lab. The per-machine
+ *  `.start-lock` cannot help: the two contenders are different machines. */
+const _heldLocks = new Set<string>();
+
+/** How long a lock file may be unreadable before it counts as abandoned.
+ *
+ *  A holder creates the file and writes its pid in two syscalls, so there is a window
+ *  where the file exists and is empty. Deleting on first sight of an empty file takes
+ *  the lock away from a live holder, and then two processes both believe they hold it
+ *  — which is how three concurrent joiners all reported success while only two held an
+ *  endpoint. The window is microseconds; a crashed holder is still reclaimed. */
+const LOCK_STALE_GRACE_MS = 500;
+
+function withEntryLock<T>(name: string, fn: () => T): T {
+	const lockPath = `${socketPath(name)}.lock`;
+	// Reentrant within a process: removeSocketMember() deletes an exhausted
+	// auto-created link through removeNamedSocket(), which takes the same lock.
+	if (_heldLocks.has(lockPath)) return fn();
+
+	const deadline = Date.now() + LOCK_TIMEOUT_MS;
+	let unreadableSince: number | undefined;
+	let held = false;
+
+	while (!held) {
+		try {
+			const fd = openSync(lockPath, "wx"); // O_CREAT | O_EXCL — atomic
+			writeSync(fd, String(process.pid));
+			closeSync(fd);
+			held = true;
+			_heldLocks.add(lockPath);
+			break;
+		} catch { /* someone else holds it */ }
+
+		// A holder that died mid-write would otherwise wedge every later start.
+		let ownerPid = Number.NaN;
+		try { ownerPid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10); } catch { /* unreadable */ }
+
+		if (!Number.isFinite(ownerPid) || ownerPid <= 0) {
+			// Empty or gone: either the holder has not written its pid yet, or it
+			// released between our open and our read. Give it the grace period before
+			// concluding anything, rather than deleting a lock someone else holds.
+			unreadableSince ??= Date.now();
+			if (Date.now() - unreadableSince > LOCK_STALE_GRACE_MS) {
+				try { rmSync(lockPath, { force: true }); } catch { /* another waiter got there first */ }
+				unreadableSince = undefined;
+			}
+			Bun.sleepSync(5);
+			continue;
+		}
+		unreadableSince = undefined;
+
+		let ownerAlive = true;
+		try { process.kill(ownerPid, 0); } catch { ownerAlive = false; }
+		if (!ownerAlive) {
+			try { rmSync(lockPath, { force: true }); } catch { /* another waiter got there first */ }
+			continue;
+		}
+
+		if (Date.now() > deadline) {
+			throw new QuickCHRError(
+				"STATE_ERROR",
+				`Timed out waiting for the registry lock on named socket "${name}" (held by pid ${ownerPid}).`,
+			);
+		}
+		Bun.sleepSync(10);
+	}
+
+	try {
+		return fn();
+	} finally {
+		_heldLocks.delete(lockPath);
+		try { rmSync(lockPath, { force: true }); } catch { /* best effort */ }
+	}
+}
+
+/** Read an entry straight from disk, bypassing the in-memory cache.
+ *
+ *  The cache is a write-through workaround for Bun's Windows FS caching, and it is
+ *  correct within one process — but under `withEntryLock()` the file may have been
+ *  changed by *another* process since we last read it, so a cached copy is exactly
+ *  the wrong thing to modify. */
+function reloadEntry(name: string): SocketEntry | undefined {
+	try {
+		const entry = normalizeEntry(JSON.parse(readFileSync(socketPath(name), "utf-8")));
+		_cache.set(name, entry);
+		return entry;
+	} catch {
+		_cache.delete(name);
+		return undefined;
+	}
 }
 
 function allocatePort(existing: SocketEntry[]): number {
@@ -118,13 +233,24 @@ export function createNamedSocket(
 	name: string,
 	opts?: { mode?: SocketMode; port?: number; mcastGroup?: string; autoCreated?: boolean },
 ): SocketEntry {
+	return withEntryLock(name, () => {
+		if (reloadEntry(name)) {
+			throw new QuickCHRError("STATE_ERROR", `Named socket "${name}" already exists`);
+		}
+		return createEntry(name, opts);
+	});
+}
+
+/** Build and persist a new entry. Caller holds the entry lock and has already
+ *  established that the name is free. */
+function createEntry(
+	name: string,
+	opts?: { mode?: SocketMode; port?: number; mcastGroup?: string; autoCreated?: boolean },
+): SocketEntry {
 	// The name becomes a filename under networks/ and is echoed back in every
 	// `--add-network socket::<name>`, so it is validated before anything is written —
 	// `networks sockets create --help` used to persist a socket called "--help" (#156).
 	assertValidResourceName(name, "named socket");
-	if (_cache.has(name) || existsSync(socketPath(name))) {
-		throw new QuickCHRError("STATE_ERROR", `Named socket "${name}" already exists`);
-	}
 
 	const mode = opts?.mode ?? defaultSocketMode();
 	// Silently dropping an option the caller passed is the class of bug this whole
@@ -191,6 +317,10 @@ export function listNamedSockets(): SocketEntry[] {
 }
 
 export function removeNamedSocket(name: string): boolean {
+	return withEntryLock(name, () => removeEntry(name));
+}
+
+function removeEntry(name: string): boolean {
 	const wasCached = _cache.has(name);
 	_cache.delete(name);
 	// QEMU does not unlink its unix sockets on exit — it rebinds over a stale one, so
@@ -237,10 +367,29 @@ export function getSocketSlot(entry: SocketEntry, machineName: string): number |
 }
 
 export function addSocketMember(name: string, machineName: string): void {
-	const entry = getNamedSocket(name);
-	if (!entry) {
-		throw new QuickCHRError("STATE_ERROR", `Named socket "${name}" not found`);
-	}
+	withEntryLock(name, () => {
+		const entry = reloadEntry(name);
+		if (!entry) {
+			throw new QuickCHRError("STATE_ERROR", `Named socket "${name}" not found`);
+		}
+		claimEndpoint(entry, machineName);
+	});
+}
+
+/** Create the link if it does not exist, then join it — under one lock.
+ *
+ *  `start()` used to test-then-create, which two concurrent starts both pass, so both
+ *  create the entry and one silently overwrites the other's slot claim. */
+export function joinNamedSocket(name: string, machineName: string, opts?: { autoCreated?: boolean }): SocketEntry {
+	return withEntryLock(name, () => {
+		const entry = reloadEntry(name) ?? createEntry(name, { autoCreated: opts?.autoCreated ?? false });
+		claimEndpoint(entry, machineName);
+		return entry;
+	});
+}
+
+/** Give `machineName` an endpoint and persist. Caller holds the entry lock. */
+function claimEndpoint(entry: SocketEntry, machineName: string): void {
 	let changed = false;
 	// `mcast` has no endpoints and no cap; the slot array *is* the capacity.
 	if (entry.endpoints && !entry.endpoints.includes(machineName)) {
@@ -249,7 +398,7 @@ export function addSocketMember(name: string, machineName: string): void {
 			const held = entry.endpoints.filter((m): m is string => m !== null);
 			throw new QuickCHRError(
 				"NETWORK_UNAVAILABLE",
-				`Named socket "${name}" is a ${entry.mode} link and carries ${entry.endpoints.length} machines; ` +
+				`Named socket "${entry.name}" is a ${entry.mode} link and carries ${entry.endpoints.length} machines; ` +
 				`${held.join(" and ")} already hold both ends. ` +
 				`Stop one of them, or create an N-way segment with 'quickchr networks sockets create <name> --mode mcast'.`,
 			);
@@ -265,15 +414,17 @@ export function addSocketMember(name: string, machineName: string): void {
 }
 
 export function removeSocketMember(name: string, machineName: string): void {
-	const entry = getNamedSocket(name);
-	if (!entry) return;
-	entry.members = entry.members.filter((m) => m !== machineName);
-	if (entry.endpoints) {
-		entry.endpoints = entry.endpoints.map((m) => (m === machineName ? null : m));
-	}
-	if (entry.members.length === 0 && entry.autoCreated) {
-		removeNamedSocket(name);
-	} else {
-		saveEntry(entry);
-	}
+	withEntryLock(name, () => {
+		const entry = reloadEntry(name);
+		if (!entry) return;
+		entry.members = entry.members.filter((m) => m !== machineName);
+		if (entry.endpoints) {
+			entry.endpoints = entry.endpoints.map((m) => (m === machineName ? null : m));
+		}
+		if (entry.members.length === 0 && entry.autoCreated) {
+			removeNamedSocket(name);
+		} else {
+			saveEntry(entry);
+		}
+	});
 }

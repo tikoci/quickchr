@@ -734,6 +734,19 @@ reading:
   instead of arriving later as `UNIX socket path '...' is too long` against a path the
   caller never chose.
 
+Claiming an endpoint is a cross-process read-modify-write, so it takes a **registry
+lock** and re-reads from disk inside it. Without one, `quickchr start a & quickchr start
+b &` — the shape the field report actually used — has both machines read `[null, null]`,
+both take slot 0, and the second write win: both QEMUs get the same `local.path`, and
+the duplicate-path theft above does the rest. A two-process repro lost an endpoint on
+12 of 12 rounds. Entries are also written with write-then-rename, because a truncating
+write let a concurrent reader see invalid JSON and report the socket as missing.
+
+The lock itself had the same class of bug on its first cut: a waiter that found the
+lock file created but not yet written to judged it stale and deleted it, so two
+processes believed they held it. A lock file whose pid is unreadable is now given a
+grace period before it counts as abandoned, which still reclaims a crashed holder.
+
 Endpoints are held in **numbered slots** rather than derived from live membership.
 Slot 0 is the listener (`listen-connect`) or endpoint A (`dgram`); the first machine
 to start has to name its peer's path before that peer exists, and a slot is the only

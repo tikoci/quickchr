@@ -138,6 +138,13 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 - `createNamedSocket()` rejects an `mcastGroup` on a non-`mcast` link rather than
   dropping it silently. (#158)
 
+- Joining a named socket is serialized with a registry lock and written atomically.
+  Two machines started concurrently (`quickchr start a & quickchr start b &`) both read
+  the same free endpoint and one overwrote the other, handing both QEMUs the same
+  socket path — which on a `dgram` link means the second silently takes the link over.
+  A truncating write could also leave a concurrent reader seeing invalid JSON and
+  reporting the socket as missing. (#158)
+
 - `createUser()` now resolves only once the credentials it created are actually
   accepted, instead of once the user record is visible in `/rest/user`. Callers
   that use a new user immediately — which is every caller — were relying on the
