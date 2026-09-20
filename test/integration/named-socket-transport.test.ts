@@ -10,10 +10,15 @@ import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
 
 /**
- * Integration test — a named socket's default transport actually carries frames,
- * in either start order (#158).
+ * Integration test — a named socket's default transport actually carries frames (#158).
  *
  * Requires QEMU installed. Skipped in CI unless QUICKCHR_INTEGRATION=1.
+ *
+ * The default is platform-dependent, so this file has two arms and each runs only where
+ * its transport exists (`defaultSocketMode()`): `dgram` on POSIX, `listen-connect` on
+ * Windows, which has no AF_UNIX SOCK_DGRAM. Asserting one default on both platforms is
+ * what made this file red on every Windows leg — it created a `dgram` link there and got
+ * the documented refusal from `resolveSocketNamed()`.
  *
  * The unit tier proves the argument strings are right. It cannot prove the three
  * things the #158 decision rests on, all of which live past QEMU:
@@ -29,13 +34,27 @@ import { bootTestTimeout } from "./timeouts.ts";
  *
  * The connector-first case is the one that matters: it is exactly the case
  * `listen-connect` cannot serve.
+ *
+ * The Windows arm cannot claim any of those three — `listen-connect` has a start order
+ * and no reconnect — so it proves the thing that is actually unproven there: that the
+ * default a Windows user gets from `networks sockets create <name>` carries frames at
+ * all. Until #166 the mode was unreachable (`isFirst` was never true, so nobody ever
+ * listened), and DESIGN.md's transport table still records it as never measured.
  */
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
+/** Not a convenience: `dgram` and `listen-connect` are mutually exclusive by platform,
+ *  so each arm is skipped where its transport cannot exist rather than where it is
+ *  merely inconvenient. `defaultSocketMode()` is the single source of that split. */
+const IS_WINDOWS = process.platform === "win32";
 
 const FIRST = "integration-dgram-first";
 const SECOND = "integration-dgram-second";
 const LINK = "integration-dgram-link";
+
+const LISTENER = "integration-lc-listener";
+const CONNECTOR = "integration-lc-connector";
+const LC_LINK = "integration-lc-link";
 
 /** Generous, and it costs nothing on a healthy link: the wait returns on the first
  *  reply. It only runs to expiry when the segment truly does not forward, which is a
@@ -50,7 +69,23 @@ async function cleanupMachine(name: string): Promise<void> {
 	try { await existing.remove(); } catch { /* ignore */ }
 }
 
-describe.skipIf(SKIP)("named socket default transport", () => {
+/** Structural, so neither arm needs a static import of quickchr.ts at module scope. */
+type Pinger = {
+	exec(command: string): Promise<{ output: string }>;
+	waitFor(predicate: () => Promise<boolean>, timeoutMs: number): Promise<boolean>;
+};
+
+/** Converge before asserting — the first echo after an address is added is consumed by
+ *  neighbour resolution, so loss only becomes the thing under test once a reply has
+ *  landed. Returns whatever `waitFor` decided; the caller asserts on it. */
+function pingConverges(from: Pinger, peer: string): Promise<boolean> {
+	return from.waitFor(async () => {
+		const probe = await from.exec(`/ping ${peer} count=1`);
+		return probe.output.includes("packet-loss=0%");
+	}, PING_CONVERGENCE_MS);
+}
+
+describe.skipIf(SKIP || IS_WINDOWS)("named socket default transport — dgram", () => {
 	beforeAll(async () => {
 		await cleanupMachine(FIRST);
 		await cleanupMachine(SECOND);
@@ -104,11 +139,7 @@ describe.skipIf(SKIP)("named socket default transport", () => {
 			// consumed by neighbor resolution, so loss only becomes the thing under test
 			// once a reply has landed.
 			const from = second;
-			const reachable = await from.waitFor(async () => {
-				const probe = await from.exec("/ping 10.74.0.2 count=1");
-				return probe.output.includes("packet-loss=0%");
-			}, PING_CONVERGENCE_MS);
-			expect(reachable).toBe(true);
+			expect(await pingConverges(from, "10.74.0.2")).toBe(true);
 
 			expect((await second.exec("/ping 10.74.0.2 count=3")).output).toContain("packet-loss=0%");
 			// Both directions: a datagram pair is two independent bindings, and only one
@@ -127,14 +158,76 @@ describe.skipIf(SKIP)("named socket default transport", () => {
 			if (!restarted) throw new Error("named socket vanished");
 			expect(getSocketSlot(restarted, FIRST)).toBe(1);
 
-			const backUp = await from.waitFor(async () => {
-				const probe = await from.exec("/ping 10.74.0.2 count=1");
-				return probe.output.includes("packet-loss=0%");
-			}, PING_CONVERGENCE_MS);
-			expect(backUp).toBe(true);
+			expect(await pingConverges(from, "10.74.0.2")).toBe(true);
 		} finally {
 			await cleanupMachine(FIRST);
 			await cleanupMachine(SECOND);
 		}
 	}, bootTestTimeout({ boots: 3 }));
+});
+
+describe.skipIf(SKIP || !IS_WINDOWS)("named socket default transport — listen-connect", () => {
+	beforeAll(async () => {
+		await cleanupMachine(LISTENER);
+		await cleanupMachine(CONNECTOR);
+		_resetSocketCache();
+		removeNamedSocket(LC_LINK);
+	});
+
+	afterAll(async () => {
+		await cleanupMachine(LISTENER);
+		await cleanupMachine(CONNECTOR);
+		removeNamedSocket(LC_LINK);
+	});
+
+	test("the default a Windows user gets carries traffic, listener first", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		type Instance = Awaited<ReturnType<typeof QuickCHR.start>>;
+		let listener: Instance | undefined;
+		let connector: Instance | undefined;
+
+		// No `mode`: the point is the transport a bare `networks sockets create` picks
+		// here, not one this test names.
+		const created = createNamedSocket(LC_LINK);
+		expect(created.mode).toBe("listen-connect");
+		expect(typeof created.port).toBe("number");
+
+		try {
+			// Start order is load-bearing, unlike the dgram arm: slot 0 takes `listen=`
+			// and slot 1 `connect=`, and a `connect=` with nothing listening runs on
+			// silently and never retries. Slot 0 must therefore also start first.
+			listener = await QuickCHR.start({
+				...imageTarget(),
+				background: true,
+				name: LISTENER,
+				networks: ["user", { type: "socket", name: LC_LINK }],
+			});
+			connector = await QuickCHR.start({
+				...imageTarget(),
+				background: true,
+				name: CONNECTOR,
+				networks: ["user", { type: "socket", name: LC_LINK }],
+			});
+
+			const entry = getNamedSocket(LC_LINK);
+			if (!entry) throw new Error("named socket vanished");
+			expect(getSocketSlot(entry, LISTENER)).toBe(0);
+			expect(getSocketSlot(entry, CONNECTOR)).toBe(1);
+
+			// ether1 is the SLIRP management NIC; ether2 is the named link.
+			await listener.exec("/ip/address/add interface=ether2 address=10.75.0.1/24");
+			await connector.exec("/ip/address/add interface=ether2 address=10.75.0.2/24");
+
+			expect(await pingConverges(listener, "10.75.0.2")).toBe(true);
+			expect((await listener.exec("/ping 10.75.0.2 count=3")).output).toContain("packet-loss=0%");
+			expect((await connector.exec("/ping 10.75.0.1 count=3")).output).toContain("packet-loss=0%");
+		} finally {
+			await cleanupMachine(LISTENER);
+			await cleanupMachine(CONNECTOR);
+		}
+		// No restart leg here, deliberately. QEMU's `listen=` accepts one peer and the
+		// reconnect is not modelled, so a restart is a known-dead case for this
+		// transport (DESIGN.md, "What the transports actually do") — which is exactly
+		// why `dgram` is the default everywhere it exists.
+	}, bootTestTimeout({ boots: 2 }));
 });
