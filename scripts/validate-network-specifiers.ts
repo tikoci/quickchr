@@ -72,6 +72,10 @@ function skippedLines(lines: string[]): Set<number> {
 		for (let back = i; back >= 0; back--) {
 			if (levels[back]) { level = levels[back] as number; break; }
 		}
+		// No heading above the marker (a file preamble): stop at the next heading of any
+		// level. Left at 0 the forward scan never breaks and the marker silently exempts
+		// the whole file — a hole in the very check this is.
+		if (level === 0) level = 6;
 		for (let j = i; j < lines.length; j++) {
 			if (j > i && levels[j] && (levels[j] as number) <= level) break;
 			skipped.add(j + 1);

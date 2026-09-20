@@ -933,7 +933,7 @@ you never have to open a file under the data dir to find out what your link is.
 | `--mode` | Transport | Machines | Start order | Notes |
 |---|---|---|---|---|
 | `dgram` (default on macOS/Linux) | a pair of unix datagram sockets | 2 | either first | no host port, no UDP syscalls; needs QEMU 7.2+ |
-| `listen-connect` (default on Windows) | TCP pair on loopback | 2 | either first — whichever starts first listens | no retry: if the listening end restarts, restart the other end too |
+| `listen-connect` (default on Windows) | TCP pair on loopback | 2 | the listening end first | the first machine to *join* takes the listening end and keeps it; a connector never retries, so start that machine first |
 | `mcast` | UDP multicast on `230.0.0.1` | any number | any | the only N-way segment — **and the only one that fails silently** |
 
 `mcast` is worth the warning it prints at create time: it does not work on macOS, and
@@ -943,7 +943,11 @@ Use it when you genuinely need more than two machines on one segment, and check 
 link before you trust it.
 
 The two-machine modes hold their ends in named slots, so a machine that stops and
-starts again comes back on the same end. A third machine is refused, with a pointer
+starts again comes back on the same end. That is what makes a restart safe, and it is
+also why `listen-connect` has a start order at all: the roles are fixed when the two
+machines first join, and from then on the listening end has to be running before the
+connecting one starts, because QEMU's `connect=` fails silently and never retries.
+`dgram` has no such constraint — either end may start first, every time. A third machine is refused, with a pointer
 to `--mode mcast`:
 
 ```console

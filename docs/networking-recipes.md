@@ -147,7 +147,8 @@ quickchr start --name r2 --add-network socket::lab-switch
 A named link carries a transport, chosen at create time and reported by every command
 that touches it. The default is a pair of unix datagram sockets (`--mode dgram`): no
 host port, no UDP, and either machine may start first. `--mode listen-connect` is a
-TCP pair on loopback and the Windows default; `--mode mcast` is the only way to put
+TCP pair on loopback and the Windows default — the first machine to join takes the
+listening end and keeps it, so from then on that one starts first; `--mode mcast` is the only way to put
 more than two machines on one segment.
 
 **Prefer the default unless you need three or more machines.** `mcast` does not work

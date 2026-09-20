@@ -2257,6 +2257,15 @@ async function handleSockets(argv: string[]) {
 			console.error("Usage: quickchr networks sockets create <name> [--mode dgram|listen-connect|mcast] [--port <n>] [--group <addr>]");
 			process.exit(1);
 		}
+		// `parseFlags` stores `true` for a flag with no value and `flag()` turns that back
+		// into `undefined`, so a bare `--mode` would silently fall through to the default
+		// — the same shape as #156's valueless-flag bug.
+		for (const key of ["mode", "port", "group"]) {
+			if (typeof flags[key] === "boolean") {
+				console.error(`Error: --${key} requires a value.`);
+				process.exit(1);
+			}
+		}
 		const mode = flag(flags, "mode");
 		if (mode !== undefined && !(SOCKET_MODES as readonly string[]).includes(mode)) {
 			console.error(`Error: unknown --mode "${mode}" — expected one of ${SOCKET_MODES.join(", ")}.`);
@@ -2333,8 +2342,9 @@ Socket create options:
 Transports:
   dgram            A pair of unix datagram sockets. No ports, no UDP syscalls,
                    and either machine may start first. Two machines. POSIX only.
-  listen-connect   A TCP pair on loopback. Two machines; whichever starts first
-                   listens. The Windows default.
+  listen-connect   A TCP pair on loopback. Two machines; the first to join takes
+                   the listening end and keeps it, and must be started first
+                   thereafter. The Windows default.
   mcast            UDP multicast — the only N-way segment, but broken on macOS
                    and in UDP-blocked sandboxes, and silent when it fails.
 

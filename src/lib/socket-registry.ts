@@ -14,8 +14,9 @@ import { assertValidResourceName, assertPathSafeName } from "./names.ts";
  *  - `dgram` — a pair of unix datagram sockets (QEMU >= 7.2). No ports, no UDP
  *    syscalls, and **either end may start first**. Two members. POSIX only:
  *    Windows' AF_UNIX has no SOCK_DGRAM.
- *  - `listen-connect` — a TCP pair on loopback. Two members; whichever starts
- *    first takes the listening slot. The Windows default.
+ *  - `listen-connect` — a TCP pair on loopback. Two members; the first to join takes
+ *    the listening slot and keeps it, so that machine starts first thereafter.
+ *    The Windows default.
  *  - `mcast` — UDP multicast, the only N-way segment. Broken on macOS and in
  *    sandboxes that block UDP, and it fails *silently* in both (see DESIGN.md).
  */
@@ -165,6 +166,14 @@ function withEntryLock<T>(name: string, fn: () => T): T {
 	let held = false;
 
 	while (!held) {
+		// Checked here, not only on the live-owner path: a lock another process keeps
+		// recreating would otherwise reset the grace timer forever and never time out.
+		if (Date.now() > deadline) {
+			throw new QuickCHRError(
+				"STATE_ERROR",
+				`Timed out after ${LOCK_TIMEOUT_MS}ms waiting for the registry lock on named socket "${name}".`,
+			);
+		}
 		try {
 			const fd = openSync(lockPath, "wx"); // O_CREAT | O_EXCL — atomic
 			writeSync(fd, String(process.pid));
@@ -199,12 +208,6 @@ function withEntryLock<T>(name: string, fn: () => T): T {
 			continue;
 		}
 
-		if (Date.now() > deadline) {
-			throw new QuickCHRError(
-				"STATE_ERROR",
-				`Timed out waiting for the registry lock on named socket "${name}" (held by pid ${ownerPid}).`,
-			);
-		}
 		Bun.sleepSync(10);
 	}
 

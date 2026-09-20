@@ -1775,6 +1775,12 @@ export class QuickCHR {
 		ensureDir(machineDir);
 		const lockPath = join(machineDir, ".start-lock");
 		acquireLock(lockPath);
+		// Endpoints are claimed before QEMU is spawned, because resolution needs to know
+		// which end this machine holds. A launch that fails before its state is persisted
+		// has no instance lifecycle to release them later, so a failed start would leave a
+		// machine holding an end of a link it never used — and two of those fill the link.
+		// Cleared once saveMachine() has committed the claim.
+		let unpersistedSocketClaim: MachineState | undefined;
 		try {
 
 		// Download and prepare image
@@ -1853,6 +1859,7 @@ export class QuickCHR {
 			{ platform, qemuVersion: qemuVersionForArch(platform, state.arch) },
 			hostfwd,
 		);
+		unpersistedSocketClaim = state;
 		reportSocketTransports(state, logger);
 
 		const launchConfig: QemuLaunchConfig = {
@@ -1879,6 +1886,7 @@ export class QuickCHR {
 			state.status = "stopped";
 			state.lastStartedAt = new Date().toISOString();
 			saveMachine(state);
+			unpersistedSocketClaim = undefined;
 			return createInstance(state);
 		}
 
@@ -1886,6 +1894,7 @@ export class QuickCHR {
 		state.lastStartedAt = new Date().toISOString();
 
 		saveMachine(state);
+		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);
 
@@ -1988,6 +1997,10 @@ export class QuickCHR {
 
 			return instance;
 		} catch (err) {
+			// Release an endpoint this launch claimed but never committed. stop()/remove()
+			// would do it for a machine that reached persisted state; one that did not has
+			// no instance to do it.
+			if (unpersistedSocketClaim) unregisterSocketMembers(unpersistedSocketClaim);
 			// Clean up an orphaned machine directory if the spawn failed before readable
 			// state was saved — same predicate as add()'s cleanup, so a truncated
 			// machine.json is not mistaken for a finished machine.
@@ -2150,6 +2163,9 @@ export class QuickCHR {
 	): Promise<ChrInstance> {
 		const lockPath = join(state.machineDir, ".start-lock");
 		acquireLock(lockPath);
+		// Same pre-persistence window as start(): a relaunch that claims an endpoint and
+		// then fails to spawn would keep it, with no instance to release it.
+		let unpersistedSocketClaim: MachineState | undefined;
 		try {
 
 		const diskPath = join(state.machineDir, "disk.img");
@@ -2190,6 +2206,7 @@ export class QuickCHR {
 			{ platform, qemuVersion: qemuVersionForArch(platform, state.arch) },
 			hostfwd,
 		);
+		unpersistedSocketClaim = state;
 		reportSocketTransports(state, logger ?? createLogger());
 
 		const launchConfig: QemuLaunchConfig = {
@@ -2216,6 +2233,7 @@ export class QuickCHR {
 			state.status = "stopped";
 			state.lastStartedAt = new Date().toISOString();
 			saveMachine(state);
+			unpersistedSocketClaim = undefined;
 			return createInstance(state);
 		}
 
@@ -2223,6 +2241,7 @@ export class QuickCHR {
 		state.status = "running";
 		state.lastStartedAt = new Date().toISOString();
 		saveMachine(state);
+		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);
 
@@ -2288,6 +2307,9 @@ export class QuickCHR {
 		} catch { /* never propagate */ }
 
 		return instance;
+		} catch (err) {
+			if (unpersistedSocketClaim) unregisterSocketMembers(unpersistedSocketClaim);
+			throw err;
 		} finally {
 			try { unlinkSync(lockPath); } catch { /* ignore */ }
 		}

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	createNamedSocket,
@@ -16,7 +17,12 @@ import {
 } from "../../src/lib/socket-registry.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
-const TEST_DIR = join(import.meta.dir, ".tmp-socket-registry-test");
+/** A short base, not `import.meta.dir`: a `dgram` endpoint path is
+ *  `<dir>/networks/<name>.<slot>.sock`, and the whole thing has to fit `sun_path`'s
+ *  104 bytes. Under the repo it depends on how deep the checkout is, so these tests
+ *  would pass here and fail on a longer path — which is exactly how the limit was
+ *  found in the first place. */
+const TEST_DIR = mkdtempSync(join(tmpdir(), "qchr-test-"));
 const origDataDir = process.env.QUICKCHR_DATA_DIR;
 
 beforeEach(() => {

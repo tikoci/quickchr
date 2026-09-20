@@ -140,6 +140,9 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   `port` at all — it addresses its ends by filesystem path, so a number there was a
   field that looked meaningful and was not. (#158)
 
+- A named-socket option given without its value (`--mode`, `--port`, `--group` with
+  nothing after it) is rejected instead of silently taking the default. (#158)
+
 - `quickchr networks sockets remove` refuses a link its machines are still using.
   Removing the entry also unlinks the endpoint sockets, so the peer's `remote.path`
   stops naming anything and a running link dies silently. (#158)

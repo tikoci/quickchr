@@ -8,7 +8,8 @@
  * place quickchr knew the answer and did not say it.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { formatNetworks } from "../../src/cli/format.ts";
@@ -21,7 +22,12 @@ import {
 	getSocketSlot,
 } from "../../src/lib/socket-registry.ts";
 
-const TEST_DIR = join(import.meta.dir, ".tmp-socket-transport");
+/** A short base, not `import.meta.dir`: a `dgram` endpoint path is
+ *  `<dir>/networks/<name>.<slot>.sock`, and the whole thing has to fit `sun_path`'s
+ *  104 bytes. Under the repo it depends on how deep the checkout is, so these tests
+ *  would pass here and fail on a longer path — which is exactly how the limit was
+ *  found in the first place. */
+const TEST_DIR = mkdtempSync(join(tmpdir(), "qchr-test-"));
 const CLI = join(import.meta.dir, "../../src/cli/index.ts");
 const origDataDir = process.env.QUICKCHR_DATA_DIR;
 
@@ -150,6 +156,17 @@ describe("networks sockets create", () => {
 		const port = await runQuickchr(["networks", "sockets", "create", "lab", "--mode", "dgram", "--port", "4000"]);
 		expect(port.exitCode).toBe(1);
 		expect(port.stderr).toContain("uses no port");
+	});
+
+	test("a known option given without its value is refused, not defaulted", async () => {
+		// `parseFlags` stores `true` for a valueless flag and `flag()` maps that back to
+		// `undefined`, so a bare `--mode` would silently take the platform default —
+		// the same shape as #156's valueless-flag bug on `add`.
+		for (const key of ["mode", "port", "group"]) {
+			const bare = await runQuickchr(["networks", "sockets", "create", "lab", `--${key}`]);
+			expect({ key, exitCode: bare.exitCode }).toEqual({ key, exitCode: 1 });
+			expect(bare.stderr).toContain(`--${key} requires a value`);
+		}
 	});
 
 	test("a non-numeric --port is refused", async () => {

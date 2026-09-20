@@ -754,6 +754,14 @@ thing both ends can agree on in advance. It also fixes (2) properly: a listener 
 stops and restarts comes back as the listener instead of demoting itself to a second
 connector.
 
+A consequence worth stating, because it is easy to document wrongly: the roles are
+fixed when the two machines *first* join, so `listen-connect` still has a start order
+afterwards — the listening machine must be up before the connecting one, since
+`connect=` fails silently and never retries. `dgram` has no ordering constraint at any
+point. A claim is also released if the launch that made it never reaches persisted
+state, so a start that fails after claiming an endpoint does not leave a link occupied
+by a machine that is not running.
+
 The acceptance bar, and the reason the visibility work is not cosmetic: **nothing about
 a named socket should require opening a file under the data dir.** Every place the
 field report had to read `machine.json` is a place quickchr knew the answer and did not
