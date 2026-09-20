@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadMachine } from "../../src/lib/state.ts";
+import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
 
@@ -26,6 +27,16 @@ const SKIP = !process.env.QUICKCHR_INTEGRATION;
 const HUB = "integration-mac-hub";
 const SPOKE = "integration-mac-spoke";
 const LINK_PORT = 5473;
+const ADMIN = basicAuth("admin", "");
+
+/** How long to let ARP settle before loss becomes the thing under test.
+ *
+ *  Deliberately generous, because the cost is asymmetric: the wait returns the
+ *  moment the first reply lands, so a healthy link pays ~one round-trip, while
+ *  a budget too tight for a loaded TCG runner reintroduces the exact flake this
+ *  exists to remove. It only runs to expiry when the segment genuinely does not
+ *  forward — a hard failure worth waiting to be sure of. */
+const PING_CONVERGENCE_MS = 60_000;
 
 async function cleanupMachine(name: string): Promise<void> {
 	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -35,11 +46,18 @@ async function cleanupMachine(name: string): Promise<void> {
 	try { await existing.remove(); } catch { /* ignore */ }
 }
 
-/** MACs RouterOS reports for its own ethernet interfaces, lowercased. */
+/** MACs RouterOS reports for its own ethernet interfaces, lowercased.
+ *
+ *  Read through `chrGet()` rather than `instance.rest()`: per
+ *  `testing.instructions.md`, integration REST reads go through the one client so
+ *  a transport failure captures post-readiness forensics instead of a bare throw. */
 async function guestMacs(
-	instance: { rest(path: string): Promise<unknown> },
+	instance: Parameters<typeof chrGet>[0],
+	after?: string,
 ): Promise<string[]> {
-	const rows = await instance.rest("/interface/ethernet") as Array<{ "mac-address"?: string }>;
+	const resp = await chrGet(instance, "/rest/interface/ethernet", ADMIN, { after });
+	expect(resp.status).toBe(200);
+	const rows = JSON.parse(resp.body) as Array<{ "mac-address"?: string }>;
 	return rows.map((r) => (r["mac-address"] ?? "").toLowerCase()).filter(Boolean);
 }
 
@@ -98,6 +116,21 @@ describe.skipIf(SKIP)("NIC MAC addressing across a shared L2 segment", () => {
 			//    ether2 is the socket link.
 			await hub.exec("/ip/address/add interface=ether2 address=10.73.0.1/24");
 			await spoke.exec("/ip/address/add interface=ether2 address=10.73.0.2/24");
+
+			// Converge first, then assert. The first echo after an address is added
+			// is consumed by ARP resolution, so a bare `count=3` sees 33% loss on a
+			// perfectly healthy link — observed once in review at this exact head,
+			// passing on the immediate rerun. Waiting for the *first* reply separates
+			// "neighbor not resolved yet" from "the segment does not forward", and
+			// keeps the real assertion below at zero loss rather than relaxing it.
+			const from = hub;
+			const reachable = await from.waitFor(async () => {
+				const probe = await from.exec("/ping 10.73.0.2 count=1");
+				return probe.output.includes("packet-loss=0%");
+			}, PING_CONVERGENCE_MS);
+			expect(reachable).toBe(true);
+
+			// Now the link is warm, loss is the thing under test.
 			const ping = await hub.exec("/ping 10.73.0.2 count=3");
 			expect(ping.output).toContain("packet-loss=0%");
 
@@ -107,7 +140,7 @@ describe.skipIf(SKIP)("NIC MAC addressing across a shared L2 segment", () => {
 			await spoke.stop();
 			spoke = await QuickCHR.start({ background: true, name: SPOKE });
 			expect(loadMachine(SPOKE)?.networks.map((n) => n.mac)).toEqual(before);
-			expect(await guestMacs(spoke)).toEqual(
+			expect(await guestMacs(spoke, "stop() then start() of an existing machine")).toEqual(
 				(before ?? []).map((m) => m ?? ""),
 			);
 		} finally {
