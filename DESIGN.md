@@ -917,7 +917,17 @@ so that branch already used `node:child_process` with `detached: true` — and c
 comment describing precisely the hazard the POSIX branch was exposed to. The two platforms
 fail differently (a Job Object on parent *exit*; a process group on a *signal*), which is
 why the asymmetry survived review: the Windows comment reads as Windows trivia rather than
-as the general rule. It is the general rule. Both platforms now take one path.
+as the general rule. It is the general rule, and `detached: true` is now set on both.
+
+The *spawner* still differs, and deliberately. POSIX uses `Bun.spawn`, per the repo's
+Bun-first rule, with its `detached` verified here on Bun 1.4.2 rather than taken from the
+documentation — `test/unit/posix-detach.test.ts` is that verification. Windows keeps
+`node:child_process`, because its Job Object escape is load-bearing and can only be
+demonstrated on Windows. Bun documents `detached` as `UV_PROCESS_DETACHED` there, which
+would probably collapse the two branches into one; that is a change to make from a Windows
+reproduction, not from a doc claim. The first draft of this fix did unify them on
+`node:child_process`, which review correctly called out as reaching for Node where Bun has
+the API — the unification was the easy half, and the wrong half to keep.
 
 Detaching does not weaken cleanup, because nothing that sweeps QEMU sweeps by group —
 `scripts/ci-file-watchdog.ts` and the integration workflow both kill by process name. That

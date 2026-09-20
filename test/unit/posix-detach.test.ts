@@ -61,8 +61,19 @@ describe.skipIf(isWindows)("POSIX spawnQemu — detached from the caller's proce
 	});
 
 	afterEach(() => {
-		for (const pid of [childPid, harnessPid]) {
-			if (pid !== undefined && alive(pid)) {
+		// The pid file, not just `childPid` — a failure before the read leaves the
+		// stand-in running, and detaching is exactly what stops killing the harness
+		// from reaping it. The fix under test makes this cleanup load-bearing.
+		const pids = new Set<number>();
+		if (childPid !== undefined) pids.add(childPid);
+		try {
+			const recorded = Number(readFileSync(join(machineDir, "qemu.pid"), "utf-8").trim());
+			if (Number.isInteger(recorded) && recorded > 0) pids.add(recorded);
+		} catch { /* no pid file — nothing was spawned */ }
+		if (harnessPid !== undefined) pids.add(harnessPid);
+
+		for (const pid of pids) {
+			if (alive(pid)) {
 				try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
 			}
 		}

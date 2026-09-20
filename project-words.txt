@@ -305,6 +305,7 @@ pfr
 pgrep
 physicalcpu
 pidfile
+pids
 piix
 pingable
 pipefail

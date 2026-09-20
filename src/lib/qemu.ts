@@ -387,39 +387,58 @@ export async function spawnQemu(
 		const logFd = openSync(logPath, "a");
 
 		// A backgrounded QEMU outlives the CLI invocation that started it, so it must
-		// leave the caller's process group on every platform — `detached: true` is
-		// `setsid()` on POSIX and `CREATE_NEW_PROCESS_GROUP` outside the parent job
-		// object on Windows.
-		//
-		// The two platforms fail differently without it, which is why this was
-		// Windows-only for so long. On Windows the parent exiting is enough: a Job
-		// Object terminates everything in it, and `Bun.spawn().unref()` does not
-		// escape one. On POSIX `unref()` is sufficient for a *voluntary* parent exit —
-		// QEMU is adopted by init/launchd — but it leaves QEMU in the caller's process
-		// group, so a signal aimed at the group takes the VM with it: Ctrl-C in the
-		// terminal, a shell `timeout`, a CI step teardown, or an agent harness killing
-		// a stuck command. That is #159: a `start` that returned would still lose its
-		// machine to a Ctrl-C meant for the CLI.
+		// leave the caller's process group. `detached: true` is `setsid()` on POSIX;
+		// `unref()` alone is not enough, because it only covers a *voluntary* parent
+		// exit. It leaves QEMU in the caller's process group, where a group signal
+		// reaches it: Ctrl-C in the terminal, a shell `timeout`, a CI step teardown,
+		// an agent harness killing a stuck command (#159).
 		//
 		// Killing a run's VMs deliberately is by QEMU process name, not by group
 		// (`scripts/ci-file-watchdog.ts`, and the integration workflow's cleanup
-		// steps), so nothing that intends to sweep QEMU loses its reach here.
-		const { spawn: cpSpawn } = await import("node:child_process");
-		const [spawnBin, ...spawnArgs] = spawnCmd;
-		if (!spawnBin) throw new QuickCHRError("SPAWN_FAILED", "Empty QEMU args");
-		const child = cpSpawn(spawnBin, spawnArgs, {
-			detached: true,
-			stdio: ["ignore", logFd, logFd],
-			windowsHide: true,
-		});
-		closeSync(logFd);
-		if (child.pid === undefined) {
-			throw new QuickCHRError("SPAWN_FAILED", "Failed to spawn QEMU process");
+		// steps), so detaching costs no cleanup reach.
+		//
+		// Windows keeps its own spawn below for a different failure — a Job Object
+		// takes everything in it when the parent goes — and the two are not merged
+		// because only this one can be verified here.
+		let spawnedPid: number;
+
+		if (process.platform === "win32") {
+			// On Windows, Bun.spawn().unref() does NOT escape the Windows Job Object.
+			// When the parent CLI process exits, Windows terminates all processes in
+			// the same job, killing QEMU. Use node:child_process with detached: true
+			// to create QEMU in a new process group outside the parent job object.
+			const { spawn: cpSpawn } = await import("node:child_process");
+			const [spawnBin, ...spawnArgs] = spawnCmd;
+			if (!spawnBin) throw new QuickCHRError("SPAWN_FAILED", "Empty QEMU args");
+			const child = cpSpawn(spawnBin, spawnArgs, {
+				detached: true,
+				stdio: ["ignore", logFd, logFd],
+				windowsHide: true,
+			});
+			// A failed exec surfaces asynchronously here, as an `error` event with no
+			// pid — and an unhandled `error` event is a crash, not a thrown
+			// QuickCHRError. Nothing awaits the child, so this listener is what keeps
+			// a qemu binary that is missing, or cannot be executed, reportable.
+			child.on("error", () => { /* surfaced by the liveness check below */ });
+			closeSync(logFd);
+			if (child.pid === undefined) {
+				throw new QuickCHRError("SPAWN_FAILED", "Failed to spawn QEMU process on Windows");
+			}
+			child.unref();
+			spawnedPid = child.pid;
+		} else {
+			const proc = Bun.spawn(spawnCmd, {
+				detached: true,
+				stdout: logFd,
+				stderr: logFd,
+				stdin: "ignore",
+			});
+			closeSync(logFd);
+			// unref() lets the parent exit without waiting for QEMU; detached keeps
+			// QEMU alive when the parent is signalled rather than exiting.
+			proc.unref();
+			spawnedPid = proc.pid;
 		}
-		// unref() lets the parent exit without waiting for QEMU; detached keeps QEMU
-		// alive when the parent is signalled rather than exiting.
-		child.unref();
-		const spawnedPid: number = child.pid;
 
 		// Give QEMU 1.5 s to fully initialise — if it exits immediately the
 		// arguments were bad (e.g. port already in use). Detect this early so
