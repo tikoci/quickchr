@@ -670,6 +670,91 @@ Three CLI defects reported from one external agent's 3-CHR lab were the same def
 
 The rule the three share: **clearing quickchr's own mess must never require knowing that the data dir exists.** A recovery step whose only form is `rm -rf ~/.local/share/quickchr/machines/<name>` is not a recovery step; it is a leak of an internal layout into the user's hands. The same rule is why machine and socket names are validated before anything is written — both become a path segment, so "what names are legal" is a storage-layout question the user should never have to answer.
 
+### A named socket says what it is
+
+An external agent's 3-CHR lab brought up two CHRs on `--add-network socket::skylab-mir`,
+got interfaces up, addresses assigned, and 100% packet loss with no error anywhere. It
+found the cause by opening `machine.json`: the link was UDP multicast, and the sandbox
+blocked outbound UDP at the syscall level.
+
+Three separate defects converged on that one silence.
+
+1. **The only transport the CLI could reach was the one that fails silently.**
+   `createNamedSocket()` defaulted to `mcast`, and `networks sockets create` had no flag
+   to pick anything else.
+2. **`listen-connect`, the alternative the registry already modelled, had never worked.**
+   The role came from `entry.members.length === 0` at resolve time, but
+   `registerSocketMembers()` runs *before* `resolveAllNetworks()`, so the starting
+   machine had always added itself by then. `isFirst` was never true; every member
+   resolved to `connect=`; nobody ever listened.
+3. **Nothing printed the transport.** `start` did not name it, and `format.ts` tested
+   `s.type === "socket-named"` while the parser emits `{ type: "socket" }`, so `list`
+   and `info` fell through to `JSON.stringify` for every named socket.
+
+#### What the transports actually do
+
+Measured on QEMU 11.1.1, macOS Intel, CHR 7.24.4, rather than reasoned about:
+
+| | `mcast` | `listen-connect` | `dgram` over unix |
+|---|---|---|---|
+| start order | any | listener first | **either end first** |
+| frames verified | broken on macOS | (was unreachable) | ICMP both ways, plus MNDP and IPv6 ND |
+| host ports | a multicast group | a TCP port | none |
+| UDP syscalls | required | none | none |
+| machines | any number | 2 | 2 |
+| where a failure lives | host kernel / sandbox policy | quickchr's own registry | quickchr's own registry |
+
+The decisive point is not "TCP works on macOS" — it is **which silence quickchr can
+see.** A TCP pair does not fail loudly either: `connect=` to a dead port runs on with
+no error, no log and no exit, never retries when the listener appears later, and
+`listen=` accepts exactly one peer while leaving the listening socket open, so a third
+member's connect succeeds at the kernel level and receives nothing. But those failures
+are member count and endpoint occupancy, which are already persisted. A multicast
+failure lives in the host kernel, and no amount of bookkeeping can see it.
+
+#### The decision
+
+**A named socket defaults to `dgram` on macOS and Linux, and `listen-connect` on
+Windows** (AF_UNIX there has no `SOCK_DGRAM`). `mcast` stays first-class as the only
+N-way segment, and says at create time that it fails silently.
+
+The resolved default is **persisted at creation, never re-derived**. A
+`networks/<name>.json` states the transport it was made with, so one specifier never
+silently means two things — the objection that ruled out a platform-sniffing default
+in the first place.
+
+Two dgram failure modes the design has to own, both found by probing rather than
+reading:
+
+- **A duplicate `local.path` silently steals the link.** A second QEMU unlinks the
+  first's socket and binds its own: the inode changes, both processes stay alive, and
+  neither logs anything. This is why a third machine is a refusal rather than a
+  warning, and why endpoints are claimed before QEMU is spawned.
+- **`sun_path` is 104 bytes.** Checked at create time so the error names the data dir,
+  instead of arriving later as `UNIX socket path '...' is too long` against a path the
+  caller never chose.
+
+Endpoints are held in **numbered slots** rather than derived from live membership.
+Slot 0 is the listener (`listen-connect`) or endpoint A (`dgram`); the first machine
+to start has to name its peer's path before that peer exists, and a slot is the only
+thing both ends can agree on in advance. It also fixes (2) properly: a listener that
+stops and restarts comes back as the listener instead of demoting itself to a second
+connector.
+
+The acceptance bar, and the reason the visibility work is not cosmetic: **nothing about
+a named socket should require opening a file under the data dir.** Every place the
+field report had to read `machine.json` is a place quickchr knew the answer and did not
+print it. The same reasoning applies to the CLI's own options — a `--group` that cannot
+apply is an error rather than a silently dropped argument.
+
+#### Still open
+
+`dgram` and `listen-connect` both cap at two machines, and `mcast` — the N-way answer —
+is broken on macOS. **quickchr still has no 3-node rootless L2 segment on macOS.** That
+was true before this change; it is now explicit rather than presenting as a RouterOS
+fault. The fix is a frame-repeating hub, and "no daemon" is a standing design decision,
+so it is tracked separately rather than smuggled in here.
+
 ### Out of Scope (decided)
 
 Explicitly rejected, with rationale, so they aren't re-proposed:

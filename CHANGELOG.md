@@ -27,6 +27,21 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   and resolved version; pinned versions skip the network and offline channel
   resolution degrades to the documented `unresolved` sentinel.
 
+- `quickchr networks sockets create` takes `--mode dgram|listen-connect|mcast`,
+  `--port` and `--group`. The registry has always modelled more than one transport;
+  until now the CLI could only reach UDP multicast. Creating an `mcast` link prints
+  the caveat that it is broken on macOS and in UDP-blocked sandboxes, and that it
+  fails silently in both. (#158)
+
+- `quickchr start` names the transport each named socket resolved to, and
+  `quickchr networks sockets` lists it. Nothing about a named socket now requires
+  opening a file under the data dir. (#158)
+
+- `bun run check` parses every `--add-network` specifier printed in the docs through
+  `parseNetworkSpecifier`, so a spelling the CLI does not accept fails lint. A block
+  documenting syntax that does not exist yet opts out with
+  `<!-- specifier-lint: skip — reason -->`, and the reason is required. (#157)
+
 ### Fixed
 
 - `--help` is handled before any side effect, for every subcommand. `quickchr add --help`
@@ -78,7 +93,44 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   clears a stranded one, `MACHINE_EXISTS` says which case it is, and `doctor` points
   at `quickchr remove <name>` rather than `rm -rf`. (#155)
 
+- A named socket in `listen-connect` mode is no longer a guaranteed dead link. The
+  listener role came from `members.length === 0` at resolve time, but members are
+  registered *before* networks are resolved, so the starting machine had always added
+  itself and `isFirst` was never true — every member resolved to `connect=` and nobody
+  listened. The two ends are now held in persisted slots, so the role survives a stop
+  and start instead of silently demoting the listener to a second connector. (#158)
+
+- `quickchr list` and `quickchr info` print `socket::<name>` for a named socket
+  instead of the raw specifier object. `format.ts` tested for a `socket-named` type
+  the parser never emits, so the branch could not match. (#158)
+
+- The `MANUAL.md` and `docs/networking-recipes.md` specifier tables listed
+  `socket-listen:<port>` / `socket-connect:<port>` / `socket-mcast:<group>:<port>`.
+  Those are the internal `NetworkSpecifier` type names; the CLI takes
+  `socket:listen:<port>`. Both now show the CLI spelling, with the TypeScript form
+  noted beside it. (#157)
+
 ### Changed
+
+- **A named socket now defaults to a pair of unix datagram sockets** (`--mode dgram`)
+  on macOS and Linux, and to a TCP pair (`--mode listen-connect`) on Windows, which
+  has no AF_UNIX datagram socket. The previous default, UDP multicast, is the only
+  N-way transport but fails *silently* on macOS and wherever UDP is blocked —
+  interfaces up, addresses assigned, 100% packet loss, nothing logged. `dgram` needs
+  no host port and no UDP syscall, and either machine may start first. Existing
+  `networks/<name>.json` entries carry an explicit mode and are unaffected; use
+  `--mode mcast` for more than two machines on one segment. Requires QEMU 7.2+, which
+  is checked before spawn. (#158)
+
+- A third machine joining a two-machine named socket is refused, naming the machines
+  that hold the ends and pointing at `--mode mcast`. It is checked before any image
+  download. This is not a cosmetic cap: a second QEMU binding the same unix path
+  unlinks the first's socket and takes the link over with nothing logged on either
+  side, and a third peer on a TCP pair connects successfully and then receives
+  nothing. (#158)
+
+- `createNamedSocket()` rejects an `mcastGroup` on a non-`mcast` link rather than
+  dropping it silently. (#158)
 
 - `createUser()` now resolves only once the credentials it created are actually
   accepted, instead of once the user record is visible in `/rest/user`. Callers
