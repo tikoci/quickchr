@@ -144,10 +144,21 @@ quickchr start --name r1 --add-network socket::lab-switch
 quickchr start --name r2 --add-network socket::lab-switch
 ```
 
-Low-level equivalents: `socket-listen:<port>` / `socket-connect:<port>` /
-`socket-mcast:<group>:<port>`. **`socket-mcast` is broken on macOS** (QEMU sets only
-`SO_REUSEADDR`); it works on Linux/CI. Details: [`mndp.md`](./mndp.md),
-[`networking.md`](./networking.md).
+A named link carries a transport, chosen at create time and reported by every command
+that touches it. The default is a pair of unix datagram sockets (`--mode dgram`): no
+host port, no UDP, and either machine may start first. `--mode listen-connect` is a
+TCP pair on loopback and the Windows default; `--mode mcast` is the only way to put
+more than two machines on one segment.
+
+**Prefer the default unless you need three or more machines.** `mcast` does not work
+on macOS (QEMU sets only `SO_REUSEADDR`) and does not work where UDP is blocked, and
+in both cases it fails *silently* — interfaces up, addresses assigned, 100% loss,
+nothing logged.
+
+Low-level equivalents, if you want the raw netdev rather than a registered name:
+`socket:listen:<port>` / `socket:connect:<port>` / `socket:mcast:<group>:<port>` on
+the CLI, or `{ type: "socket-listen", port }` and friends from TypeScript. Details:
+[`mndp.md`](./mndp.md), [`networking.md`](./networking.md).
 
 ---
 

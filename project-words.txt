@@ -356,6 +356,7 @@ rst
 rta
 runspace
 runspaces
+sandboxed
 savevm
 scaleway
 scp
@@ -404,6 +405,7 @@ sve
 svl
 svm
 swapusage
+syscall
 syscalls
 sysfs
 sysinit

@@ -28,7 +28,8 @@ management; you add a *second* NIC for L2.)
 |---|---|---|---|
 | `user` | ❌ | no | management only (hostfwd) |
 | `socket-connect` / `socket-listen` (TCP) | ✅ **all platforms** | no | host is a TCP peer; QEMU streams length-prefixed frames; `socket-connect` is loopback-only (`socket-listen` binds `0.0.0.0`) |
-| `socket-mcast` (`socket::name`, `socket:mcast:…`) | ✅ Linux · ❌ **macOS** | no | multi-VM L2 segment; macOS host capture & VM-to-VM both fail (see caveat) |
+| `socket-mcast` (`socket:mcast:…`, or a named socket created `--mode mcast`) | ✅ Linux · ❌ **macOS** | no | multi-VM L2 segment; macOS host capture & VM-to-VM both fail (see caveat) |
+| `socket::<name>` — a named link, by default a unix datagram pair | ❌ | no | VM-to-VM only; the host is not a peer. Carries MNDP *between* the two machines on every platform |
 | `vmnet-shared` / `bridged` (macOS) | ✅ | yes¹ | host is on the bridge; sniff the `bridgeN` iface |
 | `tap` (Linux) | ✅ | yes¹ | host owns the tap; sniff it |
 

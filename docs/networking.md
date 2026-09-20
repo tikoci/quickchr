@@ -435,6 +435,8 @@ Windows networking for QEMU is messy. The rootless path (user-mode) works well. 
 
 ## Reference: `quickchr network add` (future)
 
+<!-- specifier-lint: skip — this whole section documents a proposed command; its `--add-network <registered-name>` forms are not syntax the parser accepts today -->
+
 > **Note:** The primary networking model is **resolution-based discovery** — generic specifiers
 > (`shared`, `bridged:<ifname>`) resolve to available platform infrastructure at start time.
 > See [DESIGN.md](../DESIGN.md) "Networking — Discover, Don't Configure" for the design rationale.
@@ -521,7 +523,7 @@ When quickchr sees a named network in the registry, it builds QEMU args based on
 | Registry `type` | QEMU args generated | Wrapper needed? |
 |---|---|---|
 | `user` | `-netdev user,id=netN,hostfwd=...` | No |
-| `socket::name` | `-netdev socket,id=netN,listen/:port` or `connect` | No |
+| `socket::name` | depends on the link's mode — `-netdev dgram,local.type=unix,...` (default), `-netdev socket,listen=/connect=`, or `-netdev socket,mcast=` | No |
 | `socket_vmnet-shared` | `-netdev socket,id=netN,fd=3` (or fd=5,7 for multi-NIC) | Yes: `socket_vmnet_client <socketPath>` |
 | `socket_vmnet-bridged` | `-netdev socket,id=netN,fd=3` | Yes: `socket_vmnet_client <socketPath>` |
 | `tap` | `-netdev tap,id=netN,ifname=<ifname>,script=no,downscript=no` | No |
