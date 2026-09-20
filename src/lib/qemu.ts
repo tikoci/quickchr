@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware, requireQemuImg } from "./platform.ts";
-import { buildHostfwdString } from "./network.ts";
+import { buildHostfwdString, deviceArgs } from "./network.ts";
 import { ensureDir } from "./state.ts";
 import { restGet } from "./rest.ts";
 import { classifyProbeError, recordBootProbe, serialLogEnabled, type BootProbeStats } from "./diagnostics.ts";
@@ -137,8 +137,15 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 	return args;
 }
 
-/** Build networking arguments from NetworkConfig array. */
-function buildNetworkArgs(
+/** Build networking arguments from a `NetworkConfig` array.
+ *
+ *  Exported because it is one of the two places a NIC reaches QEMU (the other is
+ *  `resolveAllNetworks()` in `network.ts`, whose output the `net.resolved` branch
+ *  below passes straight through). Testing it through {@link buildQemuArgs} would
+ *  require a QEMU binary on the host, which the unit tier does not have — and a
+ *  test that skips itself when QEMU is missing would assert nothing on CI, which
+ *  is how a MAC-less NIC got shipped in the first place (#154). */
+export function buildNetworkArgs(
 	args: string[],
 	ports: Record<string, PortMapping>,
 	networks: NetworkConfig[],
@@ -157,39 +164,39 @@ function buildNetworkArgs(
 		if (spec === "vmnet-shared") {
 			args.push(
 				"-netdev", `vmnet-shared,id=${id}`,
-				"-device", `virtio-net-pci,netdev=${id}`,
+				...deviceArgs(net),
 			);
 		} else if (typeof spec === "object" && spec.type === "vmnet-bridged") {
 			args.push(
 				"-netdev", `vmnet-bridged,id=${id},ifname=${spec.iface}`,
-				"-device", `virtio-net-pci,netdev=${id}`,
+				...deviceArgs(net),
 			);
 		} else if (typeof spec === "object" && spec.type === "socket-listen") {
 			args.push(
 				"-netdev", `socket,id=${id},listen=:${spec.port}`,
-				"-device", `virtio-net-pci,netdev=${id}`,
+				...deviceArgs(net),
 			);
 		} else if (typeof spec === "object" && spec.type === "socket-connect") {
 			args.push(
 				"-netdev", `socket,id=${id},connect=127.0.0.1:${spec.port}`,
-				"-device", `virtio-net-pci,netdev=${id}`,
+				...deviceArgs(net),
 			);
 		} else if (typeof spec === "object" && spec.type === "socket-mcast") {
 			args.push(
 				"-netdev", `socket,id=${id},mcast=${spec.group}:${spec.port}`,
-				"-device", `virtio-net-pci,netdev=${id}`,
+				...deviceArgs(net),
 			);
 		} else if (typeof spec === "object" && spec.type === "tap") {
 			args.push(
 				"-netdev", `tap,id=${id},ifname=${spec.ifname},script=no,downscript=no`,
-				"-device", `virtio-net-pci,netdev=${id}`,
+				...deviceArgs(net),
 			);
 		} else {
 			// Default: user-mode networking with port forwarding (only on the first user NIC)
 			const hostfwd = buildHostfwdString(ports);
 			args.push(
 				"-netdev", `user,id=${id}${hostfwd ? "," + hostfwd : ""}`,
-				"-device", `virtio-net-pci,netdev=${id}`,
+				...deviceArgs(net),
 			);
 		}
 	}

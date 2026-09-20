@@ -106,6 +106,12 @@ export interface NetworkConfig {
 	specifier: NetworkSpecifier;
 	/** QEMU netdev id (net0, net1, ...). */
 	id: string;
+	/** Locally-administered MAC, assigned at creation and persisted so it survives
+	 *  restart. Without it QEMU hands every guest the same default sequence and two
+	 *  machines on one L2 segment collide — see `deriveMac` in `network.ts` (#154).
+	 *  Never reassigned: changing it on a booted machine orphans RouterOS's interface
+	 *  identity. Absent on machines created before #154, which keep QEMU's defaults. */
+	mac?: string;
 	/** Resolved QEMU args (populated at launch time, not persisted). */
 	resolved?: ResolvedNetwork;
 }
