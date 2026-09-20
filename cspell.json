@@ -14,7 +14,10 @@
 	],
 	"useGitignore": true,
 	"minWordLength": 3,
-	"flagWords": ["hte", "teh"],
+	"flagWords": [
+		"hte",
+		"teh"
+	],
 	"ignoreWords": [
 		"anchoruser",
 		"behaviour",
@@ -62,6 +65,8 @@
 			"addWords": true
 		}
 	],
-	"dictionaries": ["project-words"],
+	"dictionaries": [
+		"project-words"
+	],
 	"words": []
 }

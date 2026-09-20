@@ -650,6 +650,26 @@ the CLI/library surface is tracked in
 
 A recurring lesson from downstream agents (donny, centrs, restraml): the friction is usually **finding** an existing capability, not a missing one. Issue #18 (centrs) nearly rebuilt UDP forwarding, `socket-connect` L2, and the guest→host gateway — all of which already existed — because the only way to choose among them was reading `src/lib/network.ts`. Rule: **every CLI-documented capability also needs a library-facing, by-goal surface** — JSDoc at the call site, a by-goal recipe (`docs/networking-recipes.md`), and coverage in the `routeros-quickchr` skill — or agents won't find it. Connection handoff for harnesses goes through `ChrInstance.descriptor()` / `quickchr inspect` / `quickchr env` (credential-bearing by design), never by reading `machine.json`. The structured, versioned **descriptor v1** contract that centrs consumes for `--quickchr` targets — its shape, per-service semantics, scope boundaries, and staged implementation plan — is specified in [`docs/centrs-interface.md`](./docs/centrs-interface.md) (issue [#71](https://github.com/tikoci/quickchr/issues/71)).
 
+### Tips — pointing at the better path without becoming chrome
+
+`quickchr exec` is a raw `/rest/execute` pipe: whatever the caller types is what RouterOS is asked to run, and quickchr has no opinion about whether the command is well-formed. centrs does — it checks a command's shape against the device's own command tree before running it and has per-path help — so `centrs --quickchr <name> <command>` is the better path for anything more than a one-liner. An agent that does not know this reads quickchr's source to find out, which is the discoverability failure described above, one layer up.
+
+The answer is a **tip**: one dim line, at the moment the better path applies. Three rules keep tips from turning into noise (`src/cli/tips.ts`):
+
+1. **stderr, always.** stdout is the command's result and must stay parseable — `quickchr inspect --json | jq` cannot be made to filter advice out of its own input.
+2. **A tip names a next command or a better-suited tool.** It never restates what just happened, and never appears where the command already said the thing.
+3. **Suppressible via `QUICKCHR_NO_TIPS=1`, and not gated on TTY.** The audience for "you probably wanted X" is agents and first-time users, and both usually run without one.
+
+### A mistyped or failed command leaves no state
+
+Three CLI defects reported from one external agent's 3-CHR lab were the same defect: quickchr turned a mistake into durable state and then could not describe it.
+
+- `--help` reached subcommands as an ordinary argument, so `add --help` created a machine and `networks sockets create --help` persisted a socket named `--help`. Help is now answered in the dispatcher, before dispatch, so a new subcommand cannot miss the guard.
+- An unrecognised flag on `add`/`start` was inert, so a typo downloaded 43 MB and created a machine. Those two commands — the ones that create machines — now check their flags against a registry (`src/cli/flags.ts`) first. The read-only commands stay tolerant.
+- A failure between `ensureDir()` and `saveMachine()` stranded a directory that `list` could not show, `remove` would not delete, and `add` still refused to reuse. `add` now cleans up after itself, and — because a SIGKILL still can strand one — `remove` clears a directory with no readable `machine.json`, `MACHINE_EXISTS` distinguishes the two cases, and `doctor` names `quickchr remove`, not `rm -rf`.
+
+The rule the three share: **clearing quickchr's own mess must never require knowing that the data dir exists.** A recovery step whose only form is `rm -rf ~/.local/share/quickchr/machines/<name>` is not a recovery step; it is a leak of an internal layout into the user's hands. The same rule is why machine and socket names are validated before anything is written — both become a path segment, so "what names are legal" is a storage-layout question the user should never have to answer.
+
 ### Out of Scope (decided)
 
 Explicitly rejected, with rationale, so they aren't re-proposed:

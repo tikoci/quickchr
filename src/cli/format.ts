@@ -2,18 +2,30 @@
  * CLI output formatting — tables, colors, status indicators.
  */
 
-import { listMachineNames } from "../lib/state.ts";
+import { listMachineNames, listOrphanMachineDirs } from "../lib/state.ts";
 
 /** Format a "machine not found" error with helpful suggestions. */
 export function machineNotFoundMessage(name: string): string {
-	const names = listMachineNames();
+	// listMachineNames() is directory-based, so it also returns half-created machines.
+	// Offering one as "Available" is what made `remove` name a machine in the same
+	// breath as refusing to find it (#155) — so orphans get their own line.
+	const orphans = listOrphanMachineDirs();
+	const names = listMachineNames().filter((n) => !orphans.includes(n));
 	let msg = `Machine "${name}" not found.`;
+	if (orphans.includes(name)) {
+		msg = `Machine "${name}" has a leftover directory with no readable machine.json — a create that did not finish.`;
+		msg += `\n  Clear it with: quickchr remove ${name}`;
+		return msg;
+	}
 	if (names.length === 0) {
 		msg += `\n  No machines exist. Create one: quickchr start`;
 	} else if (names.length <= 5) {
 		msg += `\n  Available: ${names.join(", ")}`;
 	} else {
 		msg += `\n  Run 'quickchr list' to see available machines.`;
+	}
+	if (orphans.length > 0) {
+		msg += `\n  Leftover directories (no readable machine.json): ${orphans.join(", ")} — clear with 'quickchr remove <name>'`;
 	}
 	return msg;
 }

@@ -7,6 +7,7 @@ import { join, } from "node:path";
 import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { networkModeToConfigs } from "./network.ts";
+import { assertPathSafeName, isPathSafeName } from "./names.ts";
 
 /** Get the quickchr data directory root. Override with QUICKCHR_DATA_DIR env var. */
 export function getDataDir(): string {
@@ -133,6 +134,34 @@ export function listMachineNames(): string[] {
 		.map((e) => e.name);
 }
 
+/** True when `name` has a machine directory but no readable `machine.json` — a create
+ *  that did not finish. `list` cannot show it and `start` cannot boot it, but
+ *  `listMachineNames()` (directory-based) still counts it, so it blocks re-add (#155). */
+export function isOrphanMachineDir(name: string): boolean {
+	// A traversal name resolves to a directory that exists and holds no machine.json —
+	// the data dir itself, for ".." — so the path check has to come first or the
+	// predicate answers "orphan" about something that is not a machine directory.
+	if (!isPathSafeName(name)) return false;
+	const dir = getMachineDir(name);
+	if (!existsSync(dir)) return false;
+	return !isReadableMachine(name);
+}
+
+/** Every machine directory with no readable `machine.json`. */
+export function listOrphanMachineDirs(): string[] {
+	return listMachineNames().filter((name) => !isReadableMachine(name));
+}
+
+/** `loadMachine()` without the throw — a truncated or corrupt `machine.json` is as
+ *  unusable as a missing one, and both make the directory an orphan. */
+function isReadableMachine(name: string): boolean {
+	try {
+		return loadMachine(name) !== undefined;
+	} catch {
+		return false;
+	}
+}
+
 /** Get all port bases currently in use by existing machines. */
 export function getUsedPortBases(): number[] {
 	return loadAllMachines().map((m) => m.portBase);
@@ -153,6 +182,9 @@ export function getUsedMacs(): Set<string> {
 
 /** Delete a machine and all its files. */
 export function removeMachine(name: string): void {
+	// This is an `rmSync(..., { recursive: true })`; the name must never be able to
+	// point outside machines/<name>/.
+	assertPathSafeName(name, "machine");
 	const dir = getMachineDir(name);
 	if (!existsSync(dir)) {
 		throw new QuickCHRError("MACHINE_NOT_FOUND", `Machine "${name}" not found`);

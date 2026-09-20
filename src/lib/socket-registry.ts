@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync
 import { join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { getDataDir } from "./state.ts";
+import { assertValidResourceName, assertPathSafeName } from "./names.ts";
 
 export interface SocketEntry {
 	name: string;
@@ -41,6 +42,11 @@ export function getSocketRegistryDir(): string {
 }
 
 function socketPath(name: string): string {
+	// The single place a name becomes a path, so the traversal guard lives here
+	// rather than at each caller: `networks sockets remove ../victim` used to delete
+	// <dataDir>/victim.json, and a longer prefix reached outside the data dir entirely.
+	// createNamedSocket() applies the stricter creation rules on top of this.
+	assertPathSafeName(name, "named socket");
 	return join(getSocketRegistryDir(), `${name}.json`);
 }
 
@@ -72,6 +78,10 @@ export function createNamedSocket(
 	name: string,
 	opts?: { mode?: "mcast" | "listen-connect"; port?: number; mcastGroup?: string; autoCreated?: boolean },
 ): SocketEntry {
+	// The name becomes a filename under networks/ and is echoed back in every
+	// `--add-network socket::<name>`, so it is validated before anything is written —
+	// `networks sockets create --help` used to persist a socket called "--help" (#156).
+	assertValidResourceName(name, "named socket");
 	if (_cache.has(name) || existsSync(socketPath(name))) {
 		throw new QuickCHRError("STATE_ERROR", `Named socket "${name}" already exists`);
 	}

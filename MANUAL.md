@@ -486,12 +486,33 @@ mutate any machine's `machine.json`.
 | `QUICKCHR_SERIAL_LOG` | `=1` tees the guest serial console to `<machineDir>/serial.log`. **Secret-bearing** — serial provisioning types the generated password in cleartext |
 | `QUICKCHR_DEEP_BOOT_DIAGNOSTICS` | `=1` lets a boot-timeout capture write to the guest (a mangle counting rule + host probes) to localize a silent packet drop. Skipped when `QUICKCHR_PRESERVE_ON_FAILURE=1` |
 | `MIKROTIK_WEB_ACCOUNT`, `MIKROTIK_WEB_PASSWORD` | License credentials fallback |
+| `QUICKCHR_NO_TIPS` | `=1` suppresses the dim `tip:` lines quickchr prints on stderr |
 | `NO_COLOR` | Disable ANSI styling |
 
 `--json` is honored on `list`, `status`, `get`, `env`, `snapshot`, and a
 few others; `inspect` is always JSON and accepts `--json` for parity. Check
 `quickchr help <command>`. Errors are caught at the top level and exit `1`
 with a `[code] message` line plus the install hint when present.
+
+**Help.** `--help` / `-h` on any subcommand prints that subcommand's help, exits `0`,
+and touches no state — including `quickchr add --help`, which is a machine-creating
+command. Anything after a bare `--` is your payload and is never scanned for flags:
+
+```bash
+quickchr exec my-chr -- ":put [/system/resource/get version]"
+```
+
+**Unknown flags.** `add` and `start` reject a flag they do not know rather than
+ignoring it, and suggest the closest match. The read-only commands still tolerate
+stray arguments.
+
+**Names.** Machine and named-socket names may contain letters, digits, `.`, `_`
+and `-`, must start with a letter or digit, and are capped at 64 characters. Both
+become a directory or file name under the data dir (§8).
+
+**Tips.** quickchr prints an occasional one-line `tip:` on **stderr** pointing at a
+better-suited command or tool. They never go to stdout, so piping `--json` output is
+unaffected. `QUICKCHR_NO_TIPS=1` turns them off.
 
 ---
 
@@ -508,6 +529,8 @@ QuickCHR.start(opts?: StartOptions): Promise<ChrInstance>
 QuickCHR.add(opts?: StartOptions): Promise<MachineState>
 QuickCHR.list(): MachineState[]
 QuickCHR.get(name: string): ChrInstance | null
+QuickCHR.listOrphans(): string[]
+QuickCHR.removeOrphan(name: string): boolean
 QuickCHR.doctor(): Promise<DoctorResult>
 QuickCHR.resolveVersion(channel: Channel): Promise<string>
 ```
@@ -525,6 +548,24 @@ process).
 `get()` returns `null` if the machine doesn't exist; otherwise it
 loads `machine.json`, refreshes PID liveness, and returns a runtime
 handle. `list()` is `get()` for everything in `machines/`.
+
+`listOrphans()` / `removeOrphan()` cover the gap between the two: a directory under
+`machines/` with no readable `machine.json`, left by a create that a crash or a
+SIGKILL interrupted. It still occupies the name, so `add()` refuses it, but no
+machine answers to it.
+
+How `get()` and `list()` behave depends on *why* the state is unreadable, and the
+two differ:
+
+| State | `get(name)` | `list()` |
+|---|---|---|
+| `machine.json` missing | `null` | omits it |
+| `machine.json` present but not valid JSON | **throws** (`loadMachine()` propagates the parse error) | **throws** — one corrupt file fails the whole listing |
+
+`listOrphans()` and `removeOrphan()` treat both the same — unreadable is unreadable —
+so `quickchr remove <name>` clears either. `removeOrphan()` returns `false` for a real
+machine (use `get(name)?.remove()` for those) and for a name that does not exist, and
+throws `INVALID_NAME` for a name that is not a usable path segment.
 
 ### `ChrInstance`
 
@@ -1120,6 +1161,22 @@ derived Basic auth header. Do not commit or publicly log these values.
 
 `quickchr exec <name> <command>` and `chr.exec(command, opts)` both
 funnel through the same transport selector.
+
+> **`exec` does not validate your command.** It is a pipe: whatever you pass is what
+> RouterOS is asked to run, and a malformed command comes back as RouterOS's own
+> rejection. For anything beyond a one-liner, use
+> [centrs](https://github.com/tikoci/centrs), which checks a command against the
+> device's own command tree *before* running it and has per-path help:
+>
+> ```bash
+> centrs retrieve --quickchr my-chr /system/resource   # read state
+> centrs execute  --quickchr my-chr <command>          # read/write command
+> centrs explain  <command>                            # analyze without running
+> ```
+>
+> centrs resolves the machine's live connection facts through `quickchr inspect`
+> (see [`docs/centrs-interface.md`](./docs/centrs-interface.md)) — it never reads
+> `machine.json`, and neither should you.
 
 ### Transports
 

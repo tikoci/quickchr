@@ -25,6 +25,7 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION } from "./types.ts";
+import { assertValidResourceName, assertPathSafeName } from "./names.ts";
 import packageJson from "../../package.json";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
@@ -45,6 +46,8 @@ import {
 	getMachineDir,
 	getMachinesDir,
 	listMachineNames,
+	isOrphanMachineDir,
+	listOrphanMachineDirs,
 	refreshAllStatuses,
 	isMachineRunning,
 	ensureDir,
@@ -84,7 +87,7 @@ import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
 import { assertSufficientQuickchrStorage, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
-import { existsSync, readdirSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
+import { existsSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // --- Architecture-aware defaults ---
@@ -1390,9 +1393,8 @@ export class QuickCHR {
 	 *  `extraDisks`) are materialized immediately and require `qemu-img` on the host. */
 	static async add(opts: StartOptions = {}): Promise<MachineState> {
 		opts = normalizeStartOptions(opts);
-		if (opts.name?.startsWith("-")) {
-			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
-		}
+		// add() always creates, so the full name rules apply before any I/O.
+		if (opts.name !== undefined) assertValidResourceName(opts.name, "machine");
 
 		let version: string;
 		if (opts.version) {
@@ -1435,7 +1437,15 @@ export class QuickCHR {
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
 		if (existingNames.includes(name)) {
-			throw new QuickCHRError("MACHINE_EXISTS", `Machine "${name}" already exists. Use 'quickchr start ${name}' to start it.`);
+			// A directory with no readable machine.json is a half-created machine, not a
+			// machine — `list` cannot show it and `start` cannot boot it, so saying
+			// "already exists" sends the user looking for something that is not there (#155).
+			throw isOrphanMachineDir(name)
+				? new QuickCHRError(
+					"MACHINE_EXISTS",
+					`Machine "${name}" has a leftover directory with no readable machine.json — a create that did not finish. Clear it with 'quickchr remove ${name}', then retry.`,
+				)
+				: new QuickCHRError("MACHINE_EXISTS", `Machine "${name}" already exists. Use 'quickchr start ${name}' to start it.`);
 		}
 
 		const usedBases = getUsedPortBases();
@@ -1484,6 +1494,20 @@ export class QuickCHR {
 			};
 			saveMachine(state);
 			return state;
+		} catch (err) {
+			// A failed create must leave nothing behind: the directory exists from this
+			// call's ensureDir(), and without readable state it is invisible to `list`
+			// and unremovable by `remove` while still blocking re-add (#155).
+			//
+			// The test is "no *readable* machine.json", not "no machine.json" — a
+			// saveMachine() that died mid-write (disk full) leaves a truncated file, and
+			// a file-exists check would take that for a finished machine and strand the
+			// directory it was supposed to clean up. Nothing runs after saveMachine()
+			// but `return state`, so a readable file here means the create succeeded.
+			if (isOrphanMachineDir(name)) {
+				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
+			}
+			throw err;
 		} finally {
 			try { unlinkSync(lockPath); } catch { /* ignore */ }
 		}
@@ -1500,9 +1524,11 @@ export class QuickCHR {
 	 */
 	static async start(opts: StartOptions = {}): Promise<ChrInstance> {
 		opts = normalizeStartOptions(opts);
-		// Validate name early (before any I/O) so callers get a fast, clear error
+		// Cheap guard before any I/O: a name that reads as a flag is always a mistake.
+		// The full charset rules are applied below, but only when this call creates the
+		// machine — a machine named under the older, looser rules must still start.
 		if (opts.name?.startsWith("-")) {
-			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-"`);
+			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-" (it would be read as a flag)`);
 		}
 
 		const logger = createLogger(opts.onProgress);
@@ -1567,6 +1593,8 @@ export class QuickCHR {
 		// Resolve name
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
+		// Only a *new* name has to satisfy the current rules — see the guard at the top.
+		if (!existingNames.includes(name)) assertValidResourceName(name, "machine");
 
 		// Check if machine already exists
 		const existing = loadMachine(name);
@@ -1658,6 +1686,7 @@ export class QuickCHR {
 		// Acquire a lock to prevent concurrent starts of the same machine
 		const machineDir = getMachineDir(name);
 		assertSufficientQuickchrStorage(`start CHR ${name}`);
+		const dirCreatedHere = !existsSync(machineDir);
 		ensureDir(machineDir);
 		const lockPath = join(machineDir, ".start-lock");
 		acquireLock(lockPath);
@@ -1870,9 +1899,14 @@ export class QuickCHR {
 
 			return instance;
 		} catch (err) {
-			// Clean up orphaned machine directory if spawn failed before machine.json was saved
-			const machineJsonPath = join(machineDir, "machine.json");
-			if (!existsSync(machineJsonPath)) {
+			// Clean up an orphaned machine directory if the spawn failed before readable
+			// state was saved — same predicate as add()'s cleanup, so a truncated
+			// machine.json is not mistaken for a finished machine.
+			//
+			// `dirCreatedHere` is the difference from add(): start() also starts machines
+			// that already exist, and a directory this call did not create is never ours
+			// to delete, whatever state it is in.
+			if (dirCreatedHere && isOrphanMachineDir(name)) {
 				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
 			}
 			throw err;
@@ -2186,6 +2220,43 @@ export class QuickCHR {
 		return createInstance(state);
 	}
 
+	/** Names of machine directories with no readable `machine.json` — half-created
+	 *  machines that `list()` cannot show and `get()` cannot resolve (#155). */
+	static listOrphans(): string[] {
+		return listOrphanMachineDirs();
+	}
+
+	/** Delete a half-created machine directory. Returns false when `name` is a real
+	 *  machine (use `get(name)?.remove()`) or does not exist at all.
+	 *
+	 *  A crash or SIGKILL can strand a directory even with add()'s cleanup in place, and
+	 *  a stranded directory blocks re-add while being invisible to `list` — so clearing
+	 *  one must not require knowing that the data dir exists. */
+	static removeOrphan(name: string): boolean {
+		// Explicit, before the predicate: this deletes a directory tree, and `join()`
+		// turns ".." into the data dir itself. Say why rather than answering `false`.
+		assertPathSafeName(name, "machine");
+		if (!isOrphanMachineDir(name)) return false;
+
+		// A create still in flight is indistinguishable from an orphan by directory
+		// contents alone — add()/start() write machine.json last, so the window between
+		// ensureDir() and saveMachine() looks exactly like a half-made machine. The
+		// start-lock is what tells them apart, so take it: acquireLock() throws
+		// MACHINE_LOCKED while a live creator holds it, and replaces one whose owner is
+		// gone — which is the case this recovery exists for.
+		const lockPath = join(getMachineDir(name), ".start-lock");
+		acquireLock(lockPath);
+
+		// The creator may have finished between the check above and the lock.
+		if (!isOrphanMachineDir(name)) {
+			try { unlinkSync(lockPath); } catch { /* ignore */ }
+			return false;
+		}
+
+		removeState(name);
+		return true;
+	}
+
 	/** Run doctor checks for prerequisites. */
 	static async doctor(): Promise<DoctorResult> {
 		const checks: DoctorResult["checks"] = [];
@@ -2374,29 +2445,20 @@ export class QuickCHR {
 		}
 
 		// Orphaned machine directories (have files but no machine.json)
-		const machinesDir = getMachinesDir();
-		if (existsSync(machinesDir)) {
-			const dirs = readdirSync(machinesDir, { withFileTypes: true })
-				.filter(e => e.isDirectory());
-			const orphans: string[] = [];
-			for (const dir of dirs) {
-				const mjPath = join(machinesDir, dir.name, "machine.json");
-				if (!existsSync(mjPath)) {
-					orphans.push(dir.name);
-				}
-			}
+		if (existsSync(getMachinesDir())) {
+			const orphans = listOrphanMachineDirs();
 			if (orphans.length > 0) {
-				const removeLines = orphans.map((o) => `  rm -rf ${join(machinesDir, o)}`).join("\n");
+				const removeLines = orphans.map((o) => `  quickchr remove ${o}`).join("\n");
 				checks.push({
 					label: "Orphaned machine dirs",
 					status: "warn",
-					detail: `${orphans.length} dir(s) without machine.json: ${orphans.join(", ")}\nRemove manually:\n${removeLines}`,
+					detail: `${orphans.length} dir(s) with no readable machine.json: ${orphans.join(", ")}\nClear them with:\n${removeLines}`,
 				});
 			} else {
 				checks.push({
 					label: "Machine state",
 					status: "ok",
-					detail: `${dirs.length} machine(s), no orphans`,
+					detail: `${listMachineNames().length} machine(s), no orphans`,
 				});
 			}
 		}

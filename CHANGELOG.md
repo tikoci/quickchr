@@ -10,11 +10,73 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Added
 
+- Tips: a one-line pointer on stderr at the moment a better-suited tool applies,
+  suppressible with `QUICKCHR_NO_TIPS=1`. `exec --help` and a bare `quickchr exec`
+  now name `centrs retrieve|execute --quickchr <name>`, which validates a
+  RouterOS-shaped command before running it and has per-verb help — `quickchr exec`
+  is a raw `/rest/execute` pipe and always was. Tips go to stderr, never stdout,
+  so `--json` output stays parseable.
+
+- `QuickCHR.listOrphans()` and `QuickCHR.removeOrphan(name)` — half-created machine
+  directories are now addressable from the public API, not just by `rm -rf` on the
+  data dir.
+
 - `quickchr cache add` and the public `cacheAdd()` API resolve and prefetch one
   CHR image without requiring QEMU or creating a machine. `quickchr cache key`
   and `cacheKey()` expose the actual cache directory, concrete architecture,
   and resolved version; pinned versions skip the network and offline channel
   resolution degrades to the documented `unresolved` sentinel.
+
+### Fixed
+
+- `--help` is handled before any side effect, for every subcommand. `quickchr add --help`
+  used to generate a machine name and download 43 MB while printing nothing, and
+  `quickchr networks sockets create --help` used to persist a named socket called
+  `--help` on the default start port. The guard lives in the dispatcher, so a new
+  subcommand cannot miss it; everything after a bare `--` is left alone as the
+  caller's payload. (#156)
+
+- `quickchr add` and `quickchr start` reject an unrecognised flag instead of
+  ignoring it, with a "did you mean" suggestion for a near miss. A typo that
+  downloads 43 MB and creates a machine is not a good default. (#156)
+
+- `quickchr remove ..` deleted the entire data directory — every machine, the image
+  cache and the socket registry — and reported success. `join(machinesDir, "..")`
+  normalizes to the data dir, which exists and holds no `machine.json`, so the orphan
+  check took it for a half-created machine. Names that are not usable path segments
+  (empty, `.`, `..`, or containing a separator) are now rejected before any path is
+  derived from them, at every site that deletes. Introduced with the orphan recovery
+  below and caught in review before release.
+
+- `quickchr networks sockets remove ../<name>` deleted a `.json` file outside the
+  socket registry, and a longer prefix reached outside the data dir entirely. The
+  traversal guard now sits in `socketPath()`, the one place a named socket becomes a
+  path. Pre-existing; found while auditing the deletion paths after the `remove ..`
+  fix above.
+
+- A known flag given without its value is an error rather than a silent default, in
+  both spellings: `quickchr add --name --version 7.24.3` parsed `--name` as `true` and
+  `quickchr add --no-name` parsed it as `false`, and either way the machine got an
+  auto-generated name. `--no-device-mode` remains a supported negation. (#156)
+
+- `quickchr remove` no longer deletes a machine directory whose create is still in
+  flight. Between `ensureDir()` and `saveMachine()` an active `add`/`start` looks
+  exactly like an orphan, so removal now takes the same start-lock: a live creator
+  makes it fail with `MACHINE_LOCKED`, while a lock whose owner is gone is still
+  recoverable.
+
+- Machine and named-socket names are validated before anything is written: no
+  leading `-`, and letters, digits, dot, underscore and hyphen only. Both become a
+  path segment under the data dir, so this also closes a path-traversal hole in
+  `socket::<name>`. Existing machines created under the older, looser rules stay
+  able to start. (#156)
+
+- A failed `quickchr add` no longer leaves a machine directory behind. One with no
+  readable `machine.json` was invisible to `list`, unremovable by `remove`, and
+  still blocked re-add with `MACHINE_EXISTS` — recoverable only by knowing the data
+  dir exists. `add` now removes the directory it created when it fails, `remove`
+  clears a stranded one, `MACHINE_EXISTS` says which case it is, and `doctor` points
+  at `quickchr remove <name>` rather than `rm -rf`. (#155)
 
 ### Changed
 
