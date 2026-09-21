@@ -47,8 +47,8 @@ export interface ProvisioningRequest {
  * provisioning runs, so it answers "has QEMU been launched" — a different question
  * that happens to have the same answer most of the time. `clean()` is where the two
  * come apart: it replaces the disk with the factory image, so the guest genuinely is
- * fresh again, and gating on `lastStartedAt` left such a machine permanently
- * unprovisionable. `clean()` now clears both fields, and this reads both:
+ * fresh again, and gating on `lastStartedAt` left such a machine unable to be
+ * provisioned ever again. `clean()` now clears both fields, and this reads both:
  * `provisioning` is the positive record, `lastStartedAt` the conservative fallback
  * for a guest that booted at least once and may hold configuration quickchr did not
  * put there — including machines created before `provisioning` existed.

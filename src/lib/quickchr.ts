@@ -611,8 +611,8 @@ function createInstance(state: MachineState): ChrInstance {
 
 			// Update state. `provisioning` and `lastStartedAt` go with the credentials:
 			// both describe a guest that no longer exists, and together they are what
-			// closes the provisioning window. Leaving them behind is what made a cleaned
-			// machine permanently unprovisionable — the disk was factory-fresh and
+			// closes the provisioning window. Leaving them behind is what stopped a cleaned
+			// machine from ever being provisioned again — the disk was factory-fresh and
 			// `start()` still refused to provision it (#176). `cleanedAt` keeps the
 			// forensic clue that the timestamp carried.
 			const cleanedAt = new Date().toISOString();
