@@ -97,6 +97,39 @@ describe("assertProvisioningWindow", () => {
 		}
 	});
 
+	test("the remediation route replays the request rather than saying \"start it again\"", () => {
+		// A refused request is never persisted, and clean() clears `user` and
+		// `disableAdmin` because they are guest state — so a plain start after the
+		// reset would drop the very options that were refused.
+		try {
+			assertProvisioningWindow(booted(), { user: { name: "lab", password: "Pass1" } });
+			throw new Error("expected a refusal");
+		} catch (e) {
+			const message = (e as { message: string }).message;
+			expect(message).toContain("repeat the original start command");
+			expect(message).not.toContain("then start it again");
+		}
+	});
+
+	test("the packages route names the packages, and sends install-all through clean()", () => {
+		// installPackage() takes names and has no install-all form, so naming it for
+		// `--install-all-packages` would point at an API that cannot do the job.
+		try {
+			assertProvisioningWindow(booted(), { packages: ["container", "ups"] });
+			throw new Error("expected a refusal");
+		} catch (e) {
+			expect((e as { message: string }).message).toContain('instance.installPackage(["container","ups"])');
+		}
+		try {
+			assertProvisioningWindow(booted(), { installAllPackages: true });
+			throw new Error("expected a refusal");
+		} catch (e) {
+			const message = (e as { message: string }).message;
+			expect(message).toContain("repeat the original start command");
+			expect(message).not.toContain("installPackage(");
+		}
+	});
+
 	test("license names the CLI route that already ships", () => {
 		expect(() => assertProvisioningWindow(booted(), { license: "p10" })).toThrow(/quickchr set pw-test --license/);
 	});

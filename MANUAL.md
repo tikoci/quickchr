@@ -864,7 +864,13 @@ Routes that still work after the window has closed:
 | license | `quickchr set <name> --license` |
 | device-mode | `instance.setDeviceMode()` (library; power-cycles the VM) |
 | packages | `instance.installPackage()` (library; reboots the guest) |
-| anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window — the next `start` re-applies the machine's stored provisioning options, at first-boot cost |
+| anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window, at first-boot cost |
+
+`clean()` retains provisioning *intent* — packages, device-mode, managed login — so the
+next `start` re-applies those on its own. It clears `user`, `disableAdmin` and
+`licenseLevel`, which are facts about the erased guest rather than intent, and a refused
+request is never persisted. **Repeat the original command after the reset** rather than
+a bare `quickchr start <name>`, or those options are silently left out.
 
 **Always read back what we wrote.** This catches version-specific drift
 in REST responses and surfaces actionable errors instead of silent

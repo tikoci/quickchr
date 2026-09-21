@@ -195,17 +195,32 @@ export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
 
 /** Where a step can still be applied once the window has closed. Every step has a
  *  route — `clean()` resets the disk and reopens the window for all of them — but
- *  the cheaper one is named first where it exists. */
-function postBootRoute(step: ProvisioningStep, name: string): string {
-	switch (step) {
+ *  the cheaper one is named first where it exists.
+ *
+ *  The `clean()` route says **repeat the original command**, not "start it again".
+ *  A refused request is never persisted, and `clean()` clears `user` and
+ *  `disableAdmin` because they are guest state, so a plain start after the reset
+ *  would quietly drop exactly the options that were just refused. (`packages`,
+ *  `deviceMode` and `secureLogin` are retained intent and would come back on their
+ *  own — repeating the command is simply correct for all of them.)
+ *
+ *  It also takes the request, not just the step, because the route depends on what
+ *  was asked for: `installPackage()` takes package names and cannot express
+ *  `--install-all-packages`, so that one goes through `clean()` as well. */
+function postBootRoute(ask: ProvisioningAsk, request: ProvisioningRequest, name: string): string {
+	const replay = `quickchr clean ${name} (resets the disk), then repeat the original start command`;
+	switch (ask.step) {
 		case "license":
 			return `quickchr set ${name} --license`;
 		case "deviceMode":
-			return `instance.setDeviceMode() from the library (no CLI route yet — tikoci/quickchr#176)`;
+			return "instance.setDeviceMode() from the library (no CLI route yet — tikoci/quickchr#176)";
 		case "packages":
-			return `instance.installPackage() from the library (no CLI route yet — tikoci/quickchr#24)`;
+			// installPackage() has no install-all form — availablePackages() would have
+			// to be enumerated first — so the honest route for that request is a reset.
+			if (request.installAllPackages) return replay;
+			return `instance.installPackage(${JSON.stringify(request.packages ?? [])}) from the library (no CLI route yet — tikoci/quickchr#24)`;
 		default:
-			return `quickchr clean ${name} (resets the disk), then start it again`;
+			return replay;
 	}
 }
 
@@ -227,7 +242,7 @@ export function assertProvisioningWindow(
 	if (pending.length === 0) return asks;
 
 	const lines = pending.map(
-		(ask) => `  ${ask.description} — apply it with: ${postBootRoute(ask.step, state.name)}`,
+		(ask) => `  ${ask.description} — apply it with: ${postBootRoute(ask, request, state.name)}`,
 	);
 	const satisfied = asks.filter((ask) => ask.satisfied);
 	if (satisfied.length > 0) {
@@ -239,7 +254,8 @@ export function assertProvisioningWindow(
 		`Machine "${state.name}" has already booted, so provisioning cannot run against it — ` +
 		"the guest may no longer hold the default configuration provisioning expects.\n" +
 		lines.join("\n") +
-		`\nTo provision from scratch: quickchr clean ${state.name} (resets the disk to the factory ` +
-		"image and reopens the provisioning window), or recreate the machine.",
+		`\nTo provision from scratch: quickchr clean ${state.name} resets the disk to the factory ` +
+		"image and reopens the provisioning window — then repeat the command above, since a " +
+		"refused request is not remembered.",
 	);
 }
