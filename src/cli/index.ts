@@ -222,10 +222,20 @@ export async function applyAccelFlag(flags: Record<string, string | boolean | st
 
 /** Resolve --secure-login/--no-secure-login, falling back to the secure-login setting
  *  only when neither flag was passed. Shared by cmdAdd, cmdStart, and cmdStart's
- *  --all bulk-restart path. */
-export async function resolveSecureLoginFlag(flags: Record<string, string | boolean | string[]>): Promise<boolean | undefined> {
+ *  --all bulk-restart path.
+ *
+ *  `applySetting: false` restricts the answer to what the user actually typed. The
+ *  setting is a *creation* default, so carrying it into the restart of an existing
+ *  machine would turn `quickchr start <name>` — and every machine in
+ *  `start --all` — into a request to provision a guest whose window has closed, which
+ *  now refuses out loud (#176). An explicit flag still counts as an ask. */
+export async function resolveSecureLoginFlag(
+	flags: Record<string, string | boolean | string[]>,
+	opts?: { applySetting?: boolean },
+): Promise<boolean | undefined> {
 	if (flags["secure-login"] === false) return false;
 	if (flagBool(flags, "secure-login")) return true;
+	if (opts?.applySetting === false) return undefined;
 	const { resolveSetting } = await import("../lib/settings.ts");
 	return resolveSetting("secure-login").value === true ? true : undefined;
 }
@@ -662,7 +672,11 @@ async function cmdAdd(argv: string[]) {
 		opts.user = { name: uname, password: password ?? "" };
 	}
 	opts.disableAdmin = flagBool(flags, "disable-admin");
-	opts.secureLogin = await resolveSecureLoginFlag(flags);
+	{
+		const { QuickCHR } = await import("../lib/quickchr.ts");
+		const restarting = !!opts.name && QuickCHR.get(opts.name) !== null;
+		opts.secureLogin = await resolveSecureLoginFlag(flags, { applySetting: !restarting });
+	}
 
 	const state = await QuickCHR.add(opts);
 
@@ -1273,7 +1287,7 @@ async function cmdStart(argv: string[]) {
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const { statusIcon, link, bold, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 		const timeoutExtra = await resolveTimeoutExtraMs(flags);
-		const secureLogin = await resolveSecureLoginFlag(flags);
+		const secureLogin = await resolveSecureLoginFlag(flags, { applySetting: false });
 		const stopped = QuickCHR.list().filter((m) => m.status !== "running");
 		if (stopped.length === 0) {
 			console.log("No stopped instances.");
@@ -2976,9 +2990,16 @@ Options:
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
   --device-mode <m>     Set device-mode on first boot: rose|advanced|basic|home|auto|skip
+  --device-mode-enable <f>  Set one or more device-mode flags to yes (e.g. container)
+  --device-mode-disable <f> Set one or more device-mode flags to no
+  --no-device-mode      Skip device-mode provisioning entirely
   --add-network <spec>  Add a network NIC (repeatable). Specs: user, shared, bridged:<if>,
                         socket::<name>, tap:<if>. Default: single user NIC.
-  --no-network          Start with no NICs (headless)`);
+  --no-network          Start with no NICs (headless)
+
+Provisioning flags apply on the machine's **first boot** — whether they are given
+here or on that first 'start'. After the guest has booted they are refused rather
+than ignored; 'quickchr clean <name>' resets the disk and reopens the window.`);
 			break;
 		case "setup":
 			console.log(`quickchr setup
@@ -3067,6 +3088,11 @@ Options:
   --device-mode-enable <f>  Set one or more device-mode flags to yes
   --device-mode-disable <f> Set one or more device-mode flags to no
   --no-device-mode      Skip device-mode provisioning entirely
+
+Provisioning flags (packages, login, device-mode, license) apply only on a machine's
+**first boot**. On a machine that has booted they are refused, naming where the
+change can still be made — 'quickchr clean <name>' resets the disk and reopens the
+window for all of them.
   --timeout-extra <s>, -T <s>  Add extra seconds to the auto-computed boot timeout
   --dry-run             Print what would run without starting`);
 			break;

@@ -5,16 +5,22 @@ import { QuickCHR } from "../../src/lib/quickchr.ts";
 import { loadMachine, saveMachine } from "../../src/lib/state.ts";
 import { getInstanceCredentials, saveInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "../../src/lib/credentials.ts";
 import { resolveAuth, resolveCreds } from "../../src/lib/auth.ts";
+import { assertProvisioningWindow, isProvisioningWindowOpen } from "../../src/lib/provisioning-window.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
 /**
  * Anchors what `clean()` leaves behind (#79 / B6 of #110).
  *
  * `clean()` replaces the disk with a fresh image, so every guest-side account is
- * gone — and nothing recreates it, because a post-clean `start()` does not
- * re-provision. The credential facts in machine.json must therefore go with the
- * disk, leaving credential resolution on the documented factory fallback:
- * `admin` with an empty password.
+ * gone. The credential facts in machine.json must therefore go with the disk, leaving
+ * credential resolution on the documented factory fallback: `admin` with an empty
+ * password.
+ *
+ * The provisioning gate goes with them (#176). It used to stay behind: `lastStartedAt`
+ * survived the reset, so `start()` took the no-provisioning path and the erased account
+ * was never recreated — a factory-fresh disk quickchr would not provision. `clean()` now
+ * clears the gate too, so the retained provisioning *intent* is applied again on the
+ * next start.
  */
 
 const TEST_DIR = join(import.meta.dir, ".tmp-clean-credential-state");
@@ -129,6 +135,35 @@ describe("clean() credential state (#79)", () => {
 
 		expect(existsSync(join(machineDir(), "ssh"))).toBe(false);
 		expect(await Bun.file(join(machineDir(), "disk.img")).text()).toBe("fresh-factory-image");
+	});
+
+	test("reopens the provisioning window the fresh disk deserves", async () => {
+		seedProvisionedMachine();
+		const seeded = loadMachine(NAME) as MachineState;
+		expect(isProvisioningWindowOpen(seeded)).toBe(false);
+
+		const instance = QuickCHR.get(NAME);
+		await (instance as NonNullable<typeof instance>).clean();
+
+		const after = loadMachine(NAME) as MachineState;
+		expect(isProvisioningWindowOpen(after)).toBe(true);
+		expect(after.provisioning).toBeUndefined();
+		expect(after.lastStartedAt).toBeUndefined();
+		// The clue lastStartedAt carried is not lost, just relabelled.
+		expect(after.cleanedAt).toBeString();
+	});
+
+	test("a provisioning option is accepted again after clean(), not refused", async () => {
+		seedProvisionedMachine();
+		const before = loadMachine(NAME) as MachineState;
+		expect(() => assertProvisioningWindow(before, { deviceMode: { enable: ["container"] } }))
+			.toThrow(/has already booted/);
+
+		const instance = QuickCHR.get(NAME);
+		await (instance as NonNullable<typeof instance>).clean();
+
+		const after = loadMachine(NAME) as MachineState;
+		expect(() => assertProvisioningWindow(after, { deviceMode: { enable: ["container"] } })).not.toThrow();
 	});
 
 	test("keeps provisioning intent that is not guest state", async () => {

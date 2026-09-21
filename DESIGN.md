@@ -579,12 +579,56 @@ Always read back what we write. One extra REST API call after a provisioning act
 
 ### Provisioning Scope
 
-quickchr provisions at first boot and (optionally) on restart:
+quickchr provisions at a machine's **first boot** — see "The provisioning window"
+below for why, and for what happens to an option that arrives later:
 - **User creation** — create user, set password, optionally disable admin
 - **Package install** — SCP `.npk` files, reboot to activate
 - **License** — `/system/license/renew` for trial
 - **Device-mode** — `/system/device-mode/update mode=rose container=yes ...` for restricted features (containers, traffic-gen, routerboard). Opt-in: not configured unless explicitly requested via CLI `--device-mode` or API `deviceMode` option. CHR ships with `mode=advanced` which is sufficient for most use cases. Device-mode requires a hard QEMU power-cycle to confirm changes — this is the MikroTik-mandated confirmation mechanism (physical button press on real hardware, cold reboot on VM). The wizard defaults to `rose` when the user opts in, since it enables containers. See: https://help.mikrotik.com/docs/spaces/ROS/pages/93749258/Device-mode
 - **Config import** — planned: load `.rsc` or `.backup` at creation time
+
+#### The provisioning window — and why `lastStartedAt` could not be the gate
+
+Every provisioning step assumes the guest holds RouterOS' default configuration, so
+provisioning runs in a window that closes at **first boot** — not at `add`. A machine
+created with no provisioning flags can still take them on its first `start`, which is
+the behaviour agents actually rely on.
+
+The gate was `!state.lastStartedAt`, and that field does not mean what the gate needed.
+It is stamped immediately after `spawnQemu`, before the guest is known to have booted
+and before provisioning runs, so it records "QEMU has been launched" rather than "the
+guest has been configured". The two agree most of the time, which is why the
+conflation survived — and come apart in three ways, each a defect (#176):
+
+- **`clean()`** replaces the disk with the factory image but left `lastStartedAt`
+  behind, so a genuinely fresh guest could never be provisioned again. `clean()` now
+  clears the gate along with the credentials it already cleared, keeping `cleanedAt`
+  for the forensic clue. A cleaned machine's next start re-applies the retained
+  provisioning *intent* and costs what a first boot costs.
+- **Provisioning that throws after a successful boot** leaves a running,
+  half-provisioned machine with the gate closed. The record is stamped only on
+  success, so this case is at least *visible* now; making it retryable — re-running
+  only the steps that did not land — is the remaining half of #176 and is what
+  `provisioning.steps` exists to support.
+- **A first start with no provisioning options** closed the gate although nothing had
+  been configured.
+
+`MachineState.provisioning` is the positive record: when provisioning last completed
+and which steps ran. `isProvisioningWindowOpen()` reads it and falls back to
+`lastStartedAt` for machines that predate the field, so no existing machine
+re-provisions itself on its next start. This is the desired-config/runtime-state split
+of #58, applied to the one field where the conflation was already producing bugs
+rather than to `machine.json` wholesale.
+
+**Nothing may drop a provisioning option in silence.** `start()` used to pass
+`undefined` in place of the caller's options on every path but a first boot, so all
+seven were discarded with no warning, no error and a normal-length boot — the only way
+to notice was to read the value back. An option outside the window now throws
+`PROVISIONING_WINDOW_CLOSED`, naming each option and the route that still works
+(`quickchr set <name> --license`, the library's `setDeviceMode()` / `installPackage()`,
+or `clean()` for anything else). An option state already records is treated as a
+no-op, so passing the same flags on every start — the shape a script naturally takes —
+is not an error.
 
 Provisioning via REST API is preferred (simple HTTP calls). Serial console provisioning (prompt detection + buffer tracking, as in chr-armed) is a fallback for locked environments. Key lessons from chr-armed serial work: use `\r` not `\r\n` on PTY; accumulate buffer with offset tracking to prevent re-matching; detect prompts dynamically, don't use fixed delays.
 

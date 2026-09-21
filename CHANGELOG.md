@@ -8,6 +8,43 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Fixed
+
+- Provisioning options are no longer silently dropped on a machine that has already
+  booted. `quickchr start <name> --device-mode-enable container` (and `--add-package`,
+  `--add-user`, `--disable-admin`, `--license-*`, `--install-all-packages`,
+  `--secure-login`) were parsed, accepted and discarded — no warning, no error, normal
+  boot time, and the only way to find out was to read the value back. They now refuse
+  with `PROVISIONING_WINDOW_CLOSED`, naming each option and where the change can still
+  be made. An option machine state already records is reported as already applied
+  instead of failing, so passing the same flags on every start still works. (#176)
+
+- `clean()` reopens the provisioning window. It resets the disk to the factory image,
+  but the gate that decides whether provisioning may run survived the reset, so a
+  factory-fresh machine could never be provisioned again — the account `clean()` erased
+  was never recreated. `clean()` now clears that gate along with the credential facts it
+  already cleared, and the next `start()` re-applies the machine's retained provisioning
+  intent. Budget for it: that start costs what a first boot costs. (#176)
+
+### Added
+
+- `MachineState.provisioning` — when provisioning last completed on the current disk and
+  which steps ran. It replaces `lastStartedAt` as the "already provisioned" gate, which
+  never meant that: `lastStartedAt` is stamped before the guest has booted and before
+  provisioning runs. Machines created before this field keep their current behaviour.
+  `MachineState.cleanedAt` records the last `clean()`. (#176)
+
+- `quickchr add --help` lists `--device-mode-enable` / `--device-mode-disable` /
+  `--no-device-mode`, which `add` has always accepted, and both `add --help` and
+  `start --help` now say that provisioning flags apply on a machine's first boot. (#176)
+
+### Changed
+
+- The `secure-login` *setting* applies when a machine is created, not when an existing
+  one is restarted. It is a creation default; carrying it into a restart turned a plain
+  `quickchr start <name>` — and every machine in `start --all` — into a request to
+  provision a booted guest. An explicit `--secure-login` flag is unchanged. (#176)
+
 ## [0.4.8] — 2026-09-21
 
 ### Added

@@ -844,9 +844,27 @@ port mappings work on any 7.x.
    flag only gates CLI/SSH/Winbox login, not REST.
 
 Each step is independent. A failure in step N stops further steps but
-does not roll back N–1. Re-running `start` re-applies pending
-provisioning from `machine.json` only if the machine had not been fully
-provisioned previously.
+does not roll back N–1, and the machine is left without a provisioning
+record — quickchr does not claim a half-provisioned guest was provisioned.
+
+**The provisioning window closes at the machine's first boot** — not at
+`add`. A machine created with no provisioning options can still take them
+on its first `start`, which is where they are applied from `machine.json`.
+After that boot the guest may hold configuration quickchr did not put
+there, so provisioning cannot run against it: an option passed anyway is
+**refused**, never ignored, with `PROVISIONING_WINDOW_CLOSED` naming where
+the change can still be made. An option `machine.json` already records is
+reported as already applied rather than failing, so passing the same flags
+on every start is fine.
+
+Routes that still work after the window has closed:
+
+| change | route |
+|---|---|
+| license | `quickchr set <name> --license` |
+| device-mode | `instance.setDeviceMode()` (library; power-cycles the VM) |
+| packages | `instance.installPackage()` (library; reboots the guest) |
+| anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window — the next `start` re-applies the machine's stored provisioning options, at first-boot cost |
 
 **Always read back what we wrote.** This catches version-specific drift
 in REST responses and surfaces actionable errors instead of silent
