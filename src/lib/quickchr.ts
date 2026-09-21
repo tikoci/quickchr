@@ -598,9 +598,13 @@ function createInstance(state: MachineState): ChrInstance {
 			// (anchored by the "clean() resets disk to factory defaults" integration
 			// test). `disableAdmin` goes with them because it is read as a live fact
 			// about the guest (buildDescriptor's `disableAdminLockout`) and a fresh
-			// image has admin enabled again. Provisioning *intent* — packages,
-			// deviceMode, secureLogin — is not guest state and survives, and is what the
-			// next `start()` re-applies now that the window reopens.
+			// image has admin enabled again. `licenseLevel` goes with them for the same
+			// reason: it is a read-back of the license the erased disk held, not an
+			// intent — quickchr never persists the license *input* — so leaving it
+			// behind would report a level the fresh image does not have. Provisioning
+			// *intent* — packages, deviceMode, secureLogin — is not guest state and
+			// survives, and is what the next `start()` re-applies now that the window
+			// reopens.
 			deleteInstanceCredentials(state.name);
 			// The managed keypair authenticated to the account factory reset erased,
 			// so it is dead credential material sitting in the machine dir. Removing
@@ -625,6 +629,7 @@ function createInstance(state: MachineState): ChrInstance {
 				current.disableAdmin = undefined;
 				current.provisioning = undefined;
 				current.lastStartedAt = undefined;
+				current.licenseLevel = undefined;
 				current.cleanedAt = cleanedAt;
 				saveMachine(current);
 			}
@@ -635,6 +640,7 @@ function createInstance(state: MachineState): ChrInstance {
 			state.disableAdmin = undefined;
 			state.provisioning = undefined;
 			state.lastStartedAt = undefined;
+			state.licenseLevel = undefined;
 			state.cleanedAt = cleanedAt;
 		},
 

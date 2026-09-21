@@ -15,6 +15,7 @@
  * route that would work.
  */
 
+import { getInstanceCredentials } from "./credentials.ts";
 import {
 	formatDeviceModeSelection,
 	resolveDeviceModeOptions,
@@ -81,33 +82,56 @@ function licenseLevelOf(license: LicenseInput): string {
 	return (typeof license === "string" ? license : license.level) ?? "p1";
 }
 
+/** Did the request's password actually reach the guest? The persisted `state.user`
+ *  carries a placeholder, never the password, so the comparison goes to the secret
+ *  store. An unreadable store answers "no": a name match alone would let a password
+ *  *change* pass as a no-op and be dropped in silence, which is the whole bug. */
+function userCredentialMatches(state: MachineState, user: { name: string; password: string }): boolean {
+	if (state.user?.name !== user.name) return false;
+	try {
+		const stored = getInstanceCredentials(state.name);
+		return stored?.user === user.name && stored.password === user.password;
+	} catch {
+		return false;
+	}
+}
+
 /**
- * Which provisioning steps this request actually asks for, and which of them state
- * already records.
+ * Which provisioning steps this request actually asks for, and which of them already
+ * landed on the current guest.
  *
- * "Satisfied" is a claim about `machine.json`, not about the guest — quickchr cannot
- * read the guest without booting it, which is the thing being decided. It exists so a
- * caller that passes the same options on every start (the shape a script naturally
- * takes) is not punished for asking for what it already got.
+ * **Satisfaction requires the step in `provisioning.steps`, not just a matching value
+ * in `machine.json`.** Most of those fields — `installAllPackages`, `packages`,
+ * `deviceMode`, `secureLogin` — are *desired config*, written at `add()` before
+ * anything ran. Comparing against them alone would call a first boot that threw
+ * half-way through "already applied" and drop the retry in silence, which is exactly
+ * the failure this module exists to prevent. The step record is the only evidence that
+ * a step ran, so it gates every row.
+ *
+ * Even then this is a claim about what quickchr applied, not about what is in the
+ * guest — quickchr cannot read the guest without booting it, which is the thing being
+ * decided. It exists so a caller that passes the same options on every start (the
+ * shape a script naturally takes) is not punished for asking for what it already got.
  */
 export function classifyProvisioningRequest(
 	state: MachineState,
 	request: ProvisioningRequest,
 ): ProvisioningAsk[] {
 	const asks: ProvisioningAsk[] = [];
+	const applied = new Set(state.provisioning?.steps ?? []);
 
 	if (request.installAllPackages) {
 		asks.push({
 			step: "packages",
 			description: "--install-all-packages",
-			satisfied: state.installAllPackages === true,
+			satisfied: applied.has("packages") && state.installAllPackages === true,
 		});
 	} else if (request.packages?.length) {
 		const installed = new Set(state.packages ?? []);
 		asks.push({
 			step: "packages",
 			description: `packages ${request.packages.join(", ")}`,
-			satisfied: request.packages.every((pkg) => installed.has(pkg)),
+			satisfied: applied.has("packages") && request.packages.every((pkg) => installed.has(pkg)),
 		});
 	}
 
@@ -116,7 +140,7 @@ export function classifyProvisioningRequest(
 		asks.push({
 			step: "deviceMode",
 			description: `device-mode (${formatDeviceModeSelection(resolveDeviceModeOptions(request.deviceMode))})`,
-			satisfied: deviceModeKey(state.deviceMode) === requestedDeviceMode,
+			satisfied: applied.has("deviceMode") && deviceModeKey(state.deviceMode) === requestedDeviceMode,
 		});
 	}
 
@@ -125,7 +149,7 @@ export function classifyProvisioningRequest(
 		asks.push({
 			step: "license",
 			description: `license (${level})`,
-			satisfied: state.licenseLevel === level,
+			satisfied: applied.has("license") && state.licenseLevel === level,
 		});
 	}
 
@@ -133,7 +157,7 @@ export function classifyProvisioningRequest(
 		asks.push({
 			step: "user",
 			description: `user "${request.user.name}"`,
-			satisfied: state.user?.name === request.user.name,
+			satisfied: applied.has("user") && userCredentialMatches(state, request.user),
 		});
 	}
 
@@ -141,7 +165,7 @@ export function classifyProvisioningRequest(
 		asks.push({
 			step: "disableAdmin",
 			description: "--disable-admin",
-			satisfied: state.disableAdmin === true,
+			satisfied: applied.has("disableAdmin") && state.disableAdmin === true,
 		});
 	}
 
@@ -149,7 +173,7 @@ export function classifyProvisioningRequest(
 		asks.push({
 			step: "secureLogin",
 			description: "managed login (--secure-login)",
-			satisfied: state.secureLogin === true,
+			satisfied: applied.has("secureLogin") && state.secureLogin === true,
 		});
 	}
 

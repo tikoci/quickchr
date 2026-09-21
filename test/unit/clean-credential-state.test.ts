@@ -44,6 +44,8 @@ function seedProvisionedMachine(): MachineState {
 
 	const state: MachineState = {
 		name: NAME,
+		licenseLevel: "p1",
+		provisioning: { at: new Date().toISOString(), steps: ["user", "secureLogin", "disableAdmin"] },
 		version: VERSION,
 		arch: "x86",
 		cpu: 1,
@@ -164,6 +166,17 @@ describe("clean() credential state (#79)", () => {
 
 		const after = loadMachine(NAME) as MachineState;
 		expect(() => assertProvisioningWindow(after, { deviceMode: { enable: ["container"] } })).not.toThrow();
+	});
+
+	test("drops the license level the erased disk held", async () => {
+		seedProvisionedMachine();
+		const instance = QuickCHR.get(NAME);
+		await (instance as NonNullable<typeof instance>).clean();
+
+		// A read-back of the old guest's license, never an intent quickchr can replay —
+		// the license *input* is not persisted. Left behind it would report a level the
+		// fresh image does not have, and read as "already applied" on a later request.
+		expect(loadMachine(NAME)?.licenseLevel).toBeUndefined();
 	});
 
 	test("keeps provisioning intent that is not guest state", async () => {

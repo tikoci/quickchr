@@ -19,6 +19,9 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   be made. An option machine state already records is reported as already applied
   instead of failing, so passing the same flags on every start still works. (#176)
 
+- `clean()` clears `licenseLevel`, which was a read-back of the license the erased disk
+  held rather than an intent quickchr can replay. (#176)
+
 - `clean()` reopens the provisioning window. It resets the disk to the factory image,
   but the gate that decides whether provisioning may run survived the reset, so a
   factory-fresh machine could never be provisioned again — the account `clean()` erased
@@ -29,7 +32,10 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 ### Added
 
 - `MachineState.provisioning` — when provisioning last completed on the current disk and
-  which steps ran. It replaces `lastStartedAt` as the "already provisioned" gate, which
+  which steps ran. An option counts as already applied only when its step is in that
+  record: most of the fields it would otherwise be compared against are written at
+  `add()` as desired config, so a first boot that threw half-way through would have read
+  as "already applied" and dropped the retry. It replaces `lastStartedAt` as the "already provisioned" gate, which
   never meant that: `lastStartedAt` is stamped before the guest has booted and before
   provisioning runs. Machines created before this field keep their current behaviour.
   `MachineState.cleanedAt` records the last `clean()`. (#176)

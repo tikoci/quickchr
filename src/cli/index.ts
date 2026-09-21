@@ -225,10 +225,12 @@ export async function applyAccelFlag(flags: Record<string, string | boolean | st
  *  --all bulk-restart path.
  *
  *  `applySetting: false` restricts the answer to what the user actually typed. The
- *  setting is a *creation* default, so carrying it into the restart of an existing
- *  machine would turn `quickchr start <name>` — and every machine in
- *  `start --all` — into a request to provision a guest whose window has closed, which
- *  now refuses out loud (#176). An explicit flag still counts as an ask. */
+ *  setting is a *first-boot* default, so carrying it into the start of a machine whose
+ *  provisioning window has closed would turn `quickchr start <name>` — and every such
+ *  machine in `start --all` — into a request to provision a booted guest, which now
+ *  refuses out loud (#176). Callers therefore pass the target's own window state, not
+ *  "does this machine exist": a machine that was `add`ed and never started still gets
+ *  the setting on its first boot. An explicit flag always counts as an ask. */
 export async function resolveSecureLoginFlag(
 	flags: Record<string, string | boolean | string[]>,
 	opts?: { applySetting?: boolean },
@@ -674,8 +676,12 @@ async function cmdAdd(argv: string[]) {
 	opts.disableAdmin = flagBool(flags, "disable-admin");
 	{
 		const { QuickCHR } = await import("../lib/quickchr.ts");
-		const restarting = !!opts.name && QuickCHR.get(opts.name) !== null;
-		opts.secureLogin = await resolveSecureLoginFlag(flags, { applySetting: !restarting });
+		const { isProvisioningWindowOpen } = await import("../lib/provisioning-window.ts");
+		const target = opts.name ? QuickCHR.get(opts.name) : null;
+		// A machine that exists but has never booted is still on its first boot, so the
+		// setting applies; only a closed window suppresses it.
+		const applySetting = !target || isProvisioningWindowOpen(target.state);
+		opts.secureLogin = await resolveSecureLoginFlag(flags, { applySetting });
 	}
 
 	const state = await QuickCHR.add(opts);
@@ -1287,14 +1293,17 @@ async function cmdStart(argv: string[]) {
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const { statusIcon, link, bold, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 		const timeoutExtra = await resolveTimeoutExtraMs(flags);
-		const secureLogin = await resolveSecureLoginFlag(flags, { applySetting: false });
 		const stopped = QuickCHR.list().filter((m) => m.status !== "running");
 		if (stopped.length === 0) {
 			console.log("No stopped instances.");
 			return;
 		}
+		const { isProvisioningWindowOpen } = await import("../lib/provisioning-window.ts");
 		for (const m of stopped) {
 			console.log(`Starting ${bold(m.name)}...`);
+			// Per machine, not per invocation: a never-started machine in this batch is
+			// still entitled to the secure-login setting on its first boot.
+			const secureLogin = await resolveSecureLoginFlag(flags, { applySetting: isProvisioningWindowOpen(m) });
 			const instance = await QuickCHR.start({ name: m.name, background: true, timeoutExtra, secureLogin });
 			const creds = await resolveDisplayCredentials(instance.state);
 			console.log(`${statusIcon("running")} ${bold(instance.name)}  REST: ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}  SSH: ${formatSshCommand(creds.user, instance.sshPort)}`);

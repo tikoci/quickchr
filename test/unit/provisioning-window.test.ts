@@ -101,9 +101,49 @@ describe("assertProvisioningWindow", () => {
 		expect(() => assertProvisioningWindow(booted(), { license: "p10" })).toThrow(/quickchr set pw-test --license/);
 	});
 
+	test("a provisioning run that threw does not read as satisfied — the retry is refused", () => {
+		// The trap this module exists to avoid. `installAllPackages`, `packages`,
+		// `deviceMode` and `secureLogin` are persisted at add() as *desired config*, so
+		// a first boot that reached _provisionInstance and threw leaves them matching a
+		// retry exactly — while `lastStartedAt` has already closed the window. Without
+		// the step-record gate the retry would classify as "already applied" and be
+		// dropped in silence, which is the original bug wearing a different hat.
+		const halfProvisioned = machine({
+			lastStartedAt: new Date().toISOString(),
+			// no `provisioning` record — the run never completed
+			installAllPackages: true,
+			deviceMode: { mode: "rose", enable: ["container"] },
+			secureLogin: true,
+			disableAdmin: true,
+		});
+		for (const request of [
+			{ installAllPackages: true },
+			{ deviceMode: { mode: "rose", enable: ["container"] } },
+			{ secureLogin: true },
+			{ disableAdmin: true },
+		]) {
+			expect(() => assertProvisioningWindow(halfProvisioned, request), JSON.stringify(request))
+				.toThrow(/has already booted/);
+		}
+	});
+
+	test("satisfaction needs the step record, not just a matching value", () => {
+		const applied = (steps: MachineState["provisioning"]) =>
+			machine({ lastStartedAt: new Date().toISOString(), licenseLevel: "p1", provisioning: steps });
+
+		expect(() => assertProvisioningWindow(applied({ at: "2026-01-01T00:00:00.000Z", steps: [] }), { license: "p1" }))
+			.toThrow(/has already booted/);
+		expect(() => assertProvisioningWindow(applied({ at: "2026-01-01T00:00:00.000Z", steps: ["license"] }), { license: "p1" }))
+			.not.toThrow();
+	});
+
 	test("an option state already records is a no-op, not a refusal", () => {
 		const state = machine({
 			lastStartedAt: new Date().toISOString(),
+			provisioning: {
+				at: new Date().toISOString(),
+				steps: ["packages", "deviceMode", "license", "user", "disableAdmin", "secureLogin"],
+			},
 			licenseLevel: "p1",
 			deviceMode: { mode: "rose", enable: ["container"] },
 			packages: ["container"],
@@ -115,19 +155,32 @@ describe("assertProvisioningWindow", () => {
 			license: "p1",
 			deviceMode: { mode: "rose", enable: ["container"] },
 			packages: ["container"],
-			user: { name: "quickchr", password: "stored" },
 			disableAdmin: true,
 			secureLogin: true,
 		});
 		expect(satisfied.map((a) => a.step).sort()).toEqual(
-			["deviceMode", "disableAdmin", "license", "packages", "secureLogin", "user"],
+			["deviceMode", "disableAdmin", "license", "packages", "secureLogin"],
 		);
 		expect(satisfied.every((a) => a.satisfied)).toBe(true);
+	});
+
+	test("a user whose password cannot be verified is refused, not waved through", () => {
+		// `state.user.password` is a placeholder — the real one lives in the secret
+		// store — so a name match alone would let `--add-user lab:NewPass1` pass as a
+		// no-op and silently leave the old password in place.
+		const state = machine({
+			lastStartedAt: new Date().toISOString(),
+			provisioning: { at: new Date().toISOString(), steps: ["user"] },
+			user: { name: "lab", password: "**stored in secrets**" },
+		});
+		expect(() => assertProvisioningWindow(state, { user: { name: "lab", password: "NewPass1" } }))
+			.toThrow(/has already booted/);
 	});
 
 	test("device-mode comparison is order-independent but not value-blind", () => {
 		const state = machine({
 			lastStartedAt: new Date().toISOString(),
+			provisioning: { at: new Date().toISOString(), steps: ["deviceMode"] },
 			deviceMode: { mode: "rose", enable: ["container", "routerboard"] },
 		});
 		expect(() => assertProvisioningWindow(state, {
@@ -138,7 +191,11 @@ describe("assertProvisioningWindow", () => {
 	});
 
 	test("a satisfied option is still reported alongside one that is refused", () => {
-		const state = machine({ lastStartedAt: new Date().toISOString(), licenseLevel: "p1" });
+		const state = machine({
+			lastStartedAt: new Date().toISOString(),
+			licenseLevel: "p1",
+			provisioning: { at: new Date().toISOString(), steps: ["license"] },
+		});
 		expect(() => assertProvisioningWindow(state, { license: "p1", disableAdmin: true }))
 			.toThrow(/already applied, unchanged: license \(p1\)/);
 	});
