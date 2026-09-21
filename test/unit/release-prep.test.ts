@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	extraNpmTags,
 	nextVersion,
 	npmTag,
 	releaseNotesForVersion,
@@ -29,6 +30,20 @@ describe("npmTag", () => {
 		expect(npmTag("0.5.0")).toBe("next");
 		expect(npmTag("0.4.3")).toBe("latest");
 		expect(npmTag("1.0.0")).toBe("latest");
+	});
+});
+
+describe("extraNpmTags", () => {
+	test("a stable release also advances next; a pre-release moves nothing", () => {
+		// `next` has no separately maintained line, so it must never point at
+		// something older than `latest`.
+		expect(extraNpmTags("0.4.8")).toEqual(["next"]);
+		expect(extraNpmTags("1.0.0")).toEqual(["next"]);
+		expect(extraNpmTags("0.5.0")).toEqual([]);
+	});
+
+	test("never makes a pre-release latest", () => {
+		expect(extraNpmTags("0.5.1")).not.toContain("latest");
 	});
 });
 

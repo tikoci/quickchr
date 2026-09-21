@@ -17,6 +17,9 @@ name: Release
 #   3. Create tag vX.Y.Z and the GitHub Release (notes = changelog section).
 #   4. Publish to npm with --provenance. Dist-tag from the odd/even-minor
 #      scheme: odd minor (0.5.x) → `next`, even minor (0.4.x) → `latest`.
+#      A stable release then also moves `next` onto it, so `next` never points at
+#      something older than `latest` — there is no separately maintained
+#      pre-release line, so a fix ships on main and `@next` must not lag it.
 #
 # Dry-run mode runs every check and prints the would-be version/notes but
 # creates no tag/release and publishes nothing.
@@ -51,6 +54,7 @@ jobs:
     outputs:
       version: ${{ steps.prep.outputs.version }}
       npm-tag: ${{ steps.prep.outputs.npm-tag }}
+      npm-extra-tags: ${{ steps.prep.outputs.npm-extra-tags }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
@@ -88,15 +92,20 @@ jobs:
             | tee /tmp/release-prep.txt
           VERSION=$(grep -m1 '^version=' /tmp/release-prep.txt | cut -d= -f2)
           NPM_TAG=$(grep -m1 '^npm-tag=' /tmp/release-prep.txt | cut -d= -f2)
+          # Empty is a legitimate value here (a pre-release moves no extra tag),
+          # so this one is not checked for emptiness below.
+          EXTRA_TAGS=$(grep -m1 '^npm-extra-tags=' /tmp/release-prep.txt | cut -d= -f2)
           if [ -z "$VERSION" ] || [ -z "$NPM_TAG" ]; then
             echo "::error::release-prep did not emit version/npm-tag — aborting"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "npm-tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
+          echo "npm-extra-tags=$EXTRA_TAGS" >> "$GITHUB_OUTPUT"
           {
             echo "## Release ${VERSION}"
             echo "- npm tag: \`${NPM_TAG}\`"
+            echo "- also moved onto this version: \`${EXTRA_TAGS:-(none)}\`"
             echo "- dry run: ${DRY_RUN}"
             echo ""
             echo "### Notes"
@@ -190,12 +199,78 @@ jobs:
           NPM_TAG: ${{ needs.prepare.outputs.npm-tag }}
         run: bunx npm publish --access public --provenance --tag "$NPM_TAG"
 
+      # `next` has no separately maintained line — a fix lands on main and ships in
+      # the next stable — so leaving it behind strands `@next` on an old release.
+      # Runs after publish: the version must exist before a tag can point at it.
+      #
+      # This step is the one place a failure cannot be repaired by re-running
+      # anything: the version is already published, so a re-dispatch dies on the
+      # "already published" gate in prepare, and re-running this job re-runs
+      # `npm publish` first and dies the same way. Hence the retry, and hence the
+      # error naming the exact repair — which is idempotent and needs no CI.
+      # The release itself is complete and correct if this fails; only the tag
+      # move is outstanding.
+      - name: Move trailing dist-tags onto this version
+        if: ${{ needs.prepare.outputs.npm-extra-tags != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          EXTRA_TAGS: ${{ needs.prepare.outputs.npm-extra-tags }}
+        run: |
+          set -eo pipefail
+          PKG_NAME=$(node -p "require('./package.json').name")
+          # A `while read` here would run in a pipeline subshell, where a failed
+          # dist-tag add cannot reliably fail the step.
+          IFS=','
+          failed=""
+          for tag in $EXTRA_TAGS; do
+            [ -n "$tag" ] || continue
+            ok=false
+            for attempt in 1 2 3; do
+              echo "dist-tag add ${PKG_NAME}@${VERSION} ${tag} (attempt ${attempt}/3)"
+              if bunx npm dist-tag add "${PKG_NAME}@${VERSION}" "$tag"; then
+                ok=true
+                break
+              fi
+              [ "$attempt" = "3" ] || sleep $((attempt * 10))
+            done
+            if [ "$ok" != "true" ]; then
+              failed="${failed}${failed:+ }${tag}"
+              echo "::error::could not move '${tag}' onto ${PKG_NAME}@${VERSION} after 3 attempts"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            # $failed is space-separated; IFS is still ',' from the loop above.
+            unset IFS
+            {
+              echo "## ⚠️ Published, but a dist-tag did not move"
+              echo ""
+              echo "\`${PKG_NAME}@${VERSION}\` **is published** — the release is complete."
+              echo "These tags still point at an older version: \`${failed}\`."
+              echo ""
+              echo "Re-dispatching the release will NOT fix this (the version now exists)."
+              echo "Repair from a shell with npm publish rights — idempotent, safe to repeat:"
+              echo ""
+              echo '```bash'
+              for tag in $failed; do
+                echo "npm dist-tag add ${PKG_NAME}@${VERSION} ${tag}"
+              done
+              echo "npm view ${PKG_NAME} dist-tags"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
       - name: Publish summary
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
           NPM_TAG: ${{ needs.prepare.outputs.npm-tag }}
+          EXTRA_TAGS: ${{ needs.prepare.outputs.npm-extra-tags }}
         run: |
           {
             echo "## Published"
             echo "- \`@tikoci/quickchr@${VERSION}\` → npm dist-tag \`${NPM_TAG}\`"
+            if [ -n "$EXTRA_TAGS" ]; then
+              echo "- also moved onto it: \`${EXTRA_TAGS}\`"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
