@@ -186,9 +186,12 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			await instance.stop();
 			await instance.clean();
 
-			// The disk that held `cleanuser` is gone and nothing re-provisions it,
-			// so the credential facts must go with it — otherwise every REST call,
-			// exec, and SCP after this authenticates as a user RouterOS erased (#79).
+			// The disk that held `cleanuser` is gone, so the credential facts must go
+			// with it — otherwise every REST call, exec, and SCP after this
+			// authenticates as a user RouterOS erased (#79). Note clean() reopens the
+			// provisioning window (#176), so what keeps `cleanuser` from coming back on
+			// the next start is that its *intent* was cleared here too — an explicit
+			// user is guest state, not a retained option like packages or secureLogin.
 			expect(instance.state.user).toBeUndefined();
 			expect(instance.state.managedSshKey).toBeUndefined();
 
