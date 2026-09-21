@@ -216,7 +216,9 @@ with a layered design:
 - **`release.yml`** — one-click publish from committed release state: freshness gate
   (no suite re-run — main is kept continuously release-able) + `package.json` version
   with a matching non-empty CHANGELOG section → tag + GitHub Release + `npm publish
-  --provenance` (odd minor → `next`, even → `latest`). CI never bumps versions or pushes
+  --provenance` (odd minor → `next`, even → `latest`; a stable release is then also
+  tagged `next`, since there is no separately maintained pre-release line and `next`
+  must not point at something older than `latest`). CI never bumps versions or pushes
   to protected `main`.
 - **`ros-versions.yml`** — daily: new RouterOS versions (per channel) with no linux-x86
   record in `ci-data/tested-versions.json` ride the `routeros-targets` matrix of a

@@ -8,6 +8,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.4.8] — 2026-09-21
+
 ### Added
 
 - `ChrInstance.hostGatewayIp` — the QEMU user-mode (SLIRP) gateway `10.0.2.2`, the
@@ -50,6 +52,122 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   `parseNetworkSpecifier`, so a spelling the CLI does not accept fails lint. A block
   documenting syntax that does not exist yet opts out with
   `<!-- specifier-lint: skip — reason -->`, and the reason is required. (#157)
+
+### Changed
+
+- **A named socket now defaults to a pair of unix datagram sockets** (`--mode dgram`)
+  on macOS and Linux, and to a TCP pair (`--mode listen-connect`) on Windows, which
+  has no AF_UNIX datagram socket. The previous default, UDP multicast, is the only
+  N-way transport but fails *silently* on macOS and wherever UDP is blocked —
+  interfaces up, addresses assigned, 100% packet loss, nothing logged. `dgram` needs
+  no host port and no UDP syscall, and either machine may start first. Use
+  `--mode mcast` for more than two machines on one segment. Requires QEMU 7.2+, which
+  is checked before spawn, and Windows is checked too — a `dgram` entry carried over
+  from a POSIX host is refused there with the command to recreate it.
+
+  A named socket you created yourself keeps the mode recorded in its
+  `networks/<name>.json` and is unaffected. One that `start` auto-created for you is
+  removed when its last member stops, as it always has been, so it comes back with
+  the new default the next time — and `start` now names the transport, so the change
+  is visible rather than silent. (#158)
+
+- A third machine joining a two-machine named socket is refused, naming the machines
+  that hold the ends and pointing at `--mode mcast`. It is checked before any image
+  download. This is not a cosmetic cap: a second QEMU binding the same unix path
+  unlinks the first's socket and takes the link over with nothing logged on either
+  side, and a third peer on a TCP pair connects successfully and then receives
+  nothing. (#158)
+
+- `createNamedSocket()` rejects an `mcastGroup` on a non-`mcast` link, and a `port` on
+  a `dgram` link, rather than dropping either silently. A `dgram` entry now carries no
+  `port` at all — it addresses its ends by filesystem path, so a number there was a
+  field that looked meaningful and was not. (#158)
+
+- A named-socket option given without its value (`--mode`, `--port`, `--group` with
+  nothing after it) is rejected instead of silently taking the default, and a `--port`
+  with trailing characters (`4000abc`) is rejected instead of parsing as `4000`. (#158)
+
+- A machine that is not running no longer holds an end of a named link. A foreground
+  run that has exited, and `clean()`, both reached "stopped" without going through
+  `stop()`, so they kept their endpoint and could block a third machine or the link's
+  removal. (#158)
+
+- Automatic socket port allocation is serialized registry-wide. It reads every entry to
+  pick `max + 1`, so a per-entry lock did not help when the contenders were different
+  names: three `mcast` links created at once all took port 4000, silently collapsing
+  three segments into one shared group. Allocation also reads the registry from disk
+  and unions it with the in-memory cache, so a link another process has changed since
+  this one cached it cannot be handed out twice. (#158)
+
+- `quickchr networks sockets remove` refuses a link its machines are still using.
+  Removing the entry also unlinks the endpoint sockets, so the peer's `remote.path`
+  stops naming anything and a running link dies silently. (#158)
+
+- Joining a named socket is serialized with a registry lock and written atomically.
+  Two machines started concurrently (`quickchr start a & quickchr start b &`) both read
+  the same free endpoint and one overwrote the other, handing both QEMUs the same
+  socket path — which on a `dgram` link means the second silently takes the link over.
+  A truncating write could also leave a concurrent reader seeing invalid JSON and
+  reporting the socket as missing. A start that claims one link and then fails on a
+  second, full one releases the first claim too. (#158)
+
+- `createUser()` now resolves only once the credentials it created are actually
+  accepted, instead of once the user record is visible in `/rest/user`. Callers
+  that use a new user immediately — which is every caller — were relying on the
+  stronger fact while the function only promised the weaker one. A new
+  `waitForAuth()` in `src/lib/provision.ts` polls for the stronger one — a
+  module export alongside `createUser()`, not part of the `@tikoci/quickchr`
+  barrel — and reports
+  `{ attempts, elapsedMs }`; `QUICKCHR_DEBUG=1` logs one line per created user.
+  Hardening for #69, not a proven fix for it: the Windows 401 that prompted this
+  did not reproduce locally, where every fresh user was accepted on the first
+  attempt under both TCG and HVF. The wait applies to the `full` group only:
+  RouterOS separates authentication from authorization, and a valid user in a
+  limited group answers the probe with 401 (no `rest-api`) or HTTP 500 (no
+  `read`/`web`), so gating those would fail a correctly created user.
+
+- CI owners now prefetch and verify a declared image-and-package manifest in a
+  named, separately timed step, then save the immutable v5 cache before tests.
+  Restore-key extras are reconciled away so old targets cannot accumulate until
+  auto-prune evicts fixed fixtures. Product-test failures no longer leave a
+  platform cold, and declared external downloads no longer inflate per-file
+  timing. Raw images are checked against their partition extents, package sets
+  carry an atomic extraction manifest, and each leg boots the exact version
+  named by its cache key.
+
+- **`npm i @tikoci/quickchr@next` no longer serves an old package.** A stable release
+  now also moves the `next` dist-tag onto itself. There is no separately maintained
+  pre-release line — a quickchr bug is fixed on `main` and ships in the next stable — so
+  `next` had sat at `0.3.1` while `latest` advanced through all of `0.4.x`. A
+  pre-release still publishes to `next` only and never becomes `latest`.
+
+- **The tested Bun runtime is pinned.** `.bun-version` (currently `1.4.2`) is the single
+  source of truth, and every workflow installs Bun through
+  `setup-bun`'s `bun-version-file`. `bun run check` fails if a `setup-bun` step
+  omits it or if the pin is not an exact `x.y.z`. Previously each CI run installed
+  whatever Bun was newest, so a runtime upgrade could land — and break the build —
+  without any repository change to review (#148).
+
+### Deprecated
+
+- `ChrInstance.tzspGatewayIp` — renamed to `hostGatewayIp`. The value was never
+  TZSP-specific: it is the host as seen from the guest, and it carries any guest→host
+  UDP (remote syslog, NetFlow, a plain socket) with no forward and no extra NIC. The old
+  name invited readers to assume a sniffer-only primitive and skip the recipe that
+  covers their case. The alias is still populated with the identical value — a unit test
+  asserts the two cannot drift — and will be removed no earlier than `0.5.0`.
+  Migration is a rename at the call site. (#26)
+
+### Removed
+
+- `--vmnet-shared` and `--vmnet-bridge <iface>` are gone from `add` and `start`. Both
+  were exactly expressible as `--add-network shared` / `--add-network bridged:<iface>`,
+  and both were broken: `--vmnet-shared` alone applied no network at all (it was read
+  with `flag()`, which returns `undefined` for a boolean), and `--vmnet-shared lab`
+  "worked" only by eating the machine name. Typing either now fails with
+  `INVALID_ARGUMENT` naming the replacement, rather than being silently ignored. The
+  `vmnet-shared` *netdev* and the legacy `machine.json` migration keep the name and are
+  untouched — only the CLI flag was removed. (#164)
 
 ### Fixed
 
@@ -156,117 +274,6 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   Those are the internal `NetworkSpecifier` type names; the CLI takes
   `socket:listen:<port>`. Both now show the CLI spelling, with the TypeScript form
   noted beside it. (#157)
-
-### Deprecated
-
-- `ChrInstance.tzspGatewayIp` — renamed to `hostGatewayIp`. The value was never
-  TZSP-specific: it is the host as seen from the guest, and it carries any guest→host
-  UDP (remote syslog, NetFlow, a plain socket) with no forward and no extra NIC. The old
-  name invited readers to assume a sniffer-only primitive and skip the recipe that
-  covers their case. The alias is still populated with the identical value — a unit test
-  asserts the two cannot drift — and will be removed no earlier than the next minor.
-  Migration is a rename at the call site. (#26)
-
-### Removed
-
-- `--vmnet-shared` and `--vmnet-bridge <iface>` are gone from `add` and `start`. Both
-  were exactly expressible as `--add-network shared` / `--add-network bridged:<iface>`,
-  and both were broken: `--vmnet-shared` alone applied no network at all (it was read
-  with `flag()`, which returns `undefined` for a boolean), and `--vmnet-shared lab`
-  "worked" only by eating the machine name. Typing either now fails with
-  `INVALID_ARGUMENT` naming the replacement, rather than being silently ignored. The
-  `vmnet-shared` *netdev* and the legacy `machine.json` migration keep the name and are
-  untouched — only the CLI flag was removed. (#164)
-
-### Changed
-
-- **A named socket now defaults to a pair of unix datagram sockets** (`--mode dgram`)
-  on macOS and Linux, and to a TCP pair (`--mode listen-connect`) on Windows, which
-  has no AF_UNIX datagram socket. The previous default, UDP multicast, is the only
-  N-way transport but fails *silently* on macOS and wherever UDP is blocked —
-  interfaces up, addresses assigned, 100% packet loss, nothing logged. `dgram` needs
-  no host port and no UDP syscall, and either machine may start first. Use
-  `--mode mcast` for more than two machines on one segment. Requires QEMU 7.2+, which
-  is checked before spawn, and Windows is checked too — a `dgram` entry carried over
-  from a POSIX host is refused there with the command to recreate it.
-
-  A named socket you created yourself keeps the mode recorded in its
-  `networks/<name>.json` and is unaffected. One that `start` auto-created for you is
-  removed when its last member stops, as it always has been, so it comes back with
-  the new default the next time — and `start` now names the transport, so the change
-  is visible rather than silent. (#158)
-
-- A third machine joining a two-machine named socket is refused, naming the machines
-  that hold the ends and pointing at `--mode mcast`. It is checked before any image
-  download. This is not a cosmetic cap: a second QEMU binding the same unix path
-  unlinks the first's socket and takes the link over with nothing logged on either
-  side, and a third peer on a TCP pair connects successfully and then receives
-  nothing. (#158)
-
-- `createNamedSocket()` rejects an `mcastGroup` on a non-`mcast` link, and a `port` on
-  a `dgram` link, rather than dropping either silently. A `dgram` entry now carries no
-  `port` at all — it addresses its ends by filesystem path, so a number there was a
-  field that looked meaningful and was not. (#158)
-
-- A named-socket option given without its value (`--mode`, `--port`, `--group` with
-  nothing after it) is rejected instead of silently taking the default, and a `--port`
-  with trailing characters (`4000abc`) is rejected instead of parsing as `4000`. (#158)
-
-- A machine that is not running no longer holds an end of a named link. A foreground
-  run that has exited, and `clean()`, both reached "stopped" without going through
-  `stop()`, so they kept their endpoint and could block a third machine or the link's
-  removal. (#158)
-
-- Automatic socket port allocation is serialized registry-wide. It reads every entry to
-  pick `max + 1`, so a per-entry lock did not help when the contenders were different
-  names: three `mcast` links created at once all took port 4000, silently collapsing
-  three segments into one shared group. Allocation also reads the registry from disk
-  and unions it with the in-memory cache, so a link another process has changed since
-  this one cached it cannot be handed out twice. (#158)
-
-- `quickchr networks sockets remove` refuses a link its machines are still using.
-  Removing the entry also unlinks the endpoint sockets, so the peer's `remote.path`
-  stops naming anything and a running link dies silently. (#158)
-
-- Joining a named socket is serialized with a registry lock and written atomically.
-  Two machines started concurrently (`quickchr start a & quickchr start b &`) both read
-  the same free endpoint and one overwrote the other, handing both QEMUs the same
-  socket path — which on a `dgram` link means the second silently takes the link over.
-  A truncating write could also leave a concurrent reader seeing invalid JSON and
-  reporting the socket as missing. A start that claims one link and then fails on a
-  second, full one releases the first claim too. (#158)
-
-- `createUser()` now resolves only once the credentials it created are actually
-  accepted, instead of once the user record is visible in `/rest/user`. Callers
-  that use a new user immediately — which is every caller — were relying on the
-  stronger fact while the function only promised the weaker one. A new
-  `waitForAuth()` in `src/lib/provision.ts` polls for the stronger one — a
-  module export alongside `createUser()`, not part of the `@tikoci/quickchr`
-  barrel — and reports
-  `{ attempts, elapsedMs }`; `QUICKCHR_DEBUG=1` logs one line per created user.
-  Hardening for #69, not a proven fix for it: the Windows 401 that prompted this
-  did not reproduce locally, where every fresh user was accepted on the first
-  attempt under both TCG and HVF. The wait applies to the `full` group only:
-  RouterOS separates authentication from authorization, and a valid user in a
-  limited group answers the probe with 401 (no `rest-api`) or HTTP 500 (no
-  `read`/`web`), so gating those would fail a correctly created user.
-
-- CI owners now prefetch and verify a declared image-and-package manifest in a
-  named, separately timed step, then save the immutable v5 cache before tests.
-  Restore-key extras are reconciled away so old targets cannot accumulate until
-  auto-prune evicts fixed fixtures. Product-test failures no longer leave a
-  platform cold, and declared external downloads no longer inflate per-file
-  timing. Raw images are checked against their partition extents, package sets
-  carry an atomic extraction manifest, and each leg boots the exact version
-  named by its cache key.
-- **The tested Bun runtime is pinned.** `.bun-version` (currently `1.4.2`) is the single
-  source of truth, and every workflow installs Bun through
-  `setup-bun`'s `bun-version-file`. `bun run check` fails if a `setup-bun` step
-  omits it or if the pin is not an exact `x.y.z`. Previously each CI run installed
-  whatever Bun was newest, so a runtime upgrade could land — and break the build —
-  without any repository change to review (#148).
-
-### Fixed
 
 - Every NIC now carries a stable, locally-administered MAC (`02:` plus five
   octets derived from the machine name and NIC index) instead of QEMU's default

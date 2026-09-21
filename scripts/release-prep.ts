@@ -14,8 +14,10 @@
  *   inserts `## [X.Y.Z] — YYYY-MM-DD` below a fresh [Unreleased] heading.
  * - CI mode fails if CHANGELOG.md lacks a non-empty `## [X.Y.Z]` section matching
  *   package.json.
- * - Prints machine-readable lines: `version=X.Y.Z` and `npm-tag=next|latest`
- *   (odd minor → next, even minor → latest — the repo's pre-release scheme).
+ * - Prints machine-readable lines: `version=X.Y.Z`, `npm-tag=next|latest`
+ *   (odd minor → next, even minor → latest — the repo's pre-release scheme), and
+ *   `npm-extra-tags=` (comma list) for tags moved onto the release after publish:
+ *   a stable release also advances `next` so it never lags `latest`.
  * - --notes-out writes just the released section body (the GitHub Release notes).
  * - --dry-run computes and prints everything but writes no files.
  */
@@ -47,6 +49,19 @@ export function npmTag(version: string): "next" | "latest" {
 	const m = version.match(/^\d+\.(\d+)\.\d+$/);
 	if (!m) throw new Error(`version "${version}" is not X.Y.Z`);
 	return Number(m[1]) % 2 !== 0 ? "next" : "latest";
+}
+
+/**
+ * Dist-tags to move onto the release *after* publishing it under `npmTag()`.
+ *
+ * There is no separately maintained pre-release line: a quickchr bug is fixed on
+ * main and ships in the next stable. So `next` must never point at something
+ * older than `latest` — left alone it strands `@next` consumers on whatever the
+ * last odd-minor release was. A stable release therefore also advances `next`.
+ * A pre-release publishes to `next` only; it must not become `latest`.
+ */
+export function extraNpmTags(version: string): string[] {
+	return npmTag(version) === "latest" ? ["next"] : [];
 }
 
 function escapeRegex(s: string): string {
@@ -153,6 +168,7 @@ async function main(): Promise<void> {
 		if (notesOut) writeFileSync(notesOut, `${notes}\n`);
 		console.log(`version=${version}`);
 		console.log(`npm-tag=${tag}`);
+		console.log(`npm-extra-tags=${extraNpmTags(version).join(",")}`);
 		console.log("from-package=true");
 		console.log(`\n--- release notes (${version}) ---\n${notes}`);
 		return;
@@ -179,6 +195,7 @@ async function main(): Promise<void> {
 
 	console.log(`version=${version}`);
 	console.log(`npm-tag=${tag}`);
+	console.log(`npm-extra-tags=${extraNpmTags(version).join(",")}`);
 	console.log(`dry-run=${dryRun}`);
 	console.log(`\n--- release notes (${version}) ---\n${notes}`);
 }

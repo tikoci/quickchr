@@ -99,7 +99,8 @@ prepare (gate: main-only + Integration freshness green
          + package.json version has a non-empty CHANGELOG section
          + tag/GitHub Release/npm version unused
          → unit re-check → tag+GitHub Release)
-  → publish (npm publish --provenance, dist-tag from odd/even minor)
+  → publish (npm publish --provenance, dist-tag from odd/even minor, then
+    trailing tags moved forward)
 ```
 
 The integration bar is the freshness gate: the latest completed `main.yml` run on `main`
@@ -530,11 +531,19 @@ gh workflow run release.yml                 # release package.json version
    are unused.
 2. **Tag/release**: create `vX.Y.Z` and the GitHub Release from the current main commit
    (notes = the changelog section).
-3. **Publish**: `npm publish --provenance` from the tag.
+3. **Publish**: `npm publish --provenance` from the tag, then `npm dist-tag add` for
+   any trailing tag (see below).
 
 **Pre-release vs stable** (from version minor — pick the version accordingly):
 - `0.1.x`, `0.3.x` — odd minor → `npm tag: next` (pre-release, GitHub Release marked pre-release)
 - `0.2.x`, `0.4.x` — even minor → `npm tag: latest` (stable release)
+
+**`next` never lags `latest`.** A stable release publishes to `latest` and is then also
+tagged `next` (`extraNpmTags()` in `scripts/release-prep.ts`; the "Move trailing
+dist-tags" step in `release.yml`). There is no separately maintained pre-release line —
+a quickchr bug is fixed on `main` and ships in the next stable — so a `next` left where
+the last odd-minor release put it silently serves `@next` consumers an old package.
+A pre-release still publishes to `next` only and never becomes `latest`.
 
 **Dry run** (`dry-run: true`): every gate and the version/notes computation run; nothing
 is tagged or published.
