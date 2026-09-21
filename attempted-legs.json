@@ -1274,5 +1274,31 @@
 		"planned": 12,
 		"sha": "e46e00d9fcaffb77d3095ade6f6a8b1188738686",
 		"ts": "2026-09-21T01:01:32.938Z"
+	},
+	"35552118511": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "push",
+		"incomplete": {
+			"linux-arm64|stable": {
+				"job_matched": false,
+				"platform": "linux-arm64",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "not-started",
+				"why": "no job, no checkpoint — the leg never started"
+			},
+			"linux-x86|stable": {
+				"job_matched": false,
+				"platform": "linux-x86",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "not-started",
+				"why": "no job, no checkpoint — the leg never started"
+			}
+		},
+		"planned": 2,
+		"sha": "e5b90c811748c50897f7f1ae327c65dbb8699531",
+		"ts": "2026-09-21T02:19:17.136Z"
 	}
 }
