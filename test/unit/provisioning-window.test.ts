@@ -1,10 +1,12 @@
 import { describe, test, expect } from "bun:test";
 import {
+	appliedDeviceModeRecord,
 	assertProvisioningWindow,
 	classifyProvisioningRequest,
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 } from "../../src/lib/provisioning-window.ts";
+import { resolveDeviceModeOptions } from "../../src/lib/device-mode.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
@@ -251,5 +253,54 @@ describe("assertProvisioningWindow", () => {
 		expect(hasProvisioningRequest({ deviceMode: { mode: "skip" } })).toBe(false);
 		expect(classifyProvisioningRequest(booted(), { deviceMode: { mode: "skip" } })).toEqual([]);
 		expect(assertProvisioningWindow(booted(), { deviceMode: { mode: "skip" } })).toEqual([]);
+	});
+});
+
+describe("appliedDeviceModeRecord", () => {
+	const applied = resolveDeviceModeOptions({ enable: ["container"] });
+
+	test("carries forward device-mode that actually ran", () => {
+		// The guest keeps settings an earlier apply landed — a device-mode update moves
+		// only the settings it names — so the record has to keep them too.
+		const state = machine({
+			deviceMode: { mode: "advanced", enable: ["ipsec"] },
+			provisioning: { at: "2026-01-01T00:00:00.000Z", steps: ["deviceMode"] },
+		});
+		expect(appliedDeviceModeRecord(state, applied))
+			.toEqual({ mode: "rose", enable: ["container", "ipsec"], disable: undefined });
+	});
+
+	test("drops intent that never reached the guest", () => {
+		// A first boot that threw at the packages step leaves `deviceMode` in state as
+		// desired config having never been applied. Folding it in here and then stamping
+		// `deviceMode` as applied would make a later start treat ipsec as satisfied.
+		const state = machine({
+			deviceMode: { mode: "advanced", enable: ["ipsec"] },
+			provisioning: { at: "2026-01-01T00:00:00.000Z", steps: ["packages"] },
+		});
+		expect(appliedDeviceModeRecord(state, applied))
+			.toEqual({ mode: "rose", enable: ["container"], disable: undefined });
+	});
+
+	test("and so a later start still asks for the intent that was never applied", () => {
+		// The harm the gate prevents, stated as the behaviour that matters: after a
+		// post-boot `set --device-mode-enable container`, a start that asks for the ipsec
+		// the guest never got must not read as satisfied.
+		const before = machine({
+			deviceMode: { mode: "advanced", enable: ["ipsec"] },
+			provisioning: { at: "2026-01-01T00:00:00.000Z", steps: ["packages"] },
+		});
+		const after = machine({
+			deviceMode: appliedDeviceModeRecord(before, applied),
+			provisioning: { at: "2026-01-01T00:00:00.000Z", steps: ["packages", "deviceMode"] },
+			lastStartedAt: "2026-01-01T00:00:00.000Z",
+		});
+		const [ask] = classifyProvisioningRequest(after, { deviceMode: { mode: "advanced", enable: ["ipsec"] } });
+		expect(ask?.satisfied).toBe(false);
+	});
+
+	test("no prior record at all is simply the applied selection", () => {
+		expect(appliedDeviceModeRecord(machine(), applied))
+			.toEqual({ mode: "rose", enable: ["container"], disable: undefined });
 	});
 });

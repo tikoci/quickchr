@@ -78,6 +78,24 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   step record a later `start` passing the same device-mode was refused rather than
   recognised as already applied. (#176)
 
+- `setDeviceMode()` uses the machine's own credentials. The device-mode REST helpers
+  hard-coded `Basic admin:`, which was correct while device-mode only ran during
+  first-boot provisioning — it is step 2 and the user step is step 4, so factory admin
+  was the only credential that existed. As a post-boot route it meant
+  `quickchr set <name> --device-mode…` failed with `HTTP 401` on any machine
+  provisioned with `--disable-admin`, which is a machine shape the route exists for.
+  The first-boot path still passes factory admin explicitly, because `state.user` is
+  written at `add()` and names an account that does not exist yet. (#176)
+
+- `setDeviceMode()` holds `.start-lock` for the whole operation. It terminates QEMU,
+  spawns a replacement and rewrites `machine.json` — a relaunch, and previously the
+  only one that did not take the lock, so a concurrent `start` could spawn a second
+  QEMU into the power-cycle window. (#176)
+
+- `quickchr set --name <machine> …` resolves the machine. `set` listed `--name` among
+  its flags but read only the positional, so the flag was accepted and ignored — while
+  `quickchr license --name <machine>` had always worked.
+
 - `setDeviceMode()` refuses a stopped machine (`MACHINE_STOPPED`, naming
   `quickchr start`) and one with no user-mode NIC (`NETWORK_UNAVAILABLE`). Both were
   undocumented preconditions that previously surfaced as a 60 s REST timeout. (#176)

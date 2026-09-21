@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
 	describeDeviceModeChange,
+	FACTORY_AUTH_HEADER,
 	formatDeviceModeFlags,
 	formatDeviceModeSelection,
 	mergeDeviceModeOptions,
@@ -354,5 +355,59 @@ describe("mergeDeviceModeOptions", () => {
 	test("a skipped selection records nothing", () => {
 		const current = { mode: "basic", enable: ["ipsec"] };
 		expect(mergeDeviceModeOptions(current, resolveDeviceModeOptions({ mode: "skip" }))).toBe(current);
+	});
+});
+
+describe("device-mode auth is the caller's, not a hard-coded admin (#176)", () => {
+	// All three helpers hard-coded `Basic admin:`. That was invisible while device-mode
+	// only ran during first-boot provisioning — it is step 2, the user step is step 4,
+	// so factory admin was the only credential in existence. The moment `set <name>
+	// --device-mode` made it a post-boot route, a machine provisioned with
+	// `--disable-admin` answered 401 — reproduced on CHR 7.24.4 before this was fixed,
+	// and those are exactly the machines the route was written for.
+	const managed = `Basic ${btoa("lab:lab-pass-1")}`;
+
+	test("the factory header is still the default, for the first-boot path", () => {
+		expect(FACTORY_AUTH_HEADER).toBe(`Basic ${btoa("admin:")}`);
+	});
+
+	test("waitForDeviceModeApi sends the header it is given", async () => {
+		let authorization: string | undefined;
+		const port = await startMockServer((req, res) => {
+			authorization = req.headers.authorization;
+			res.writeHead(204);
+			res.end();
+		});
+
+		await waitForDeviceModeApi(port, 1000, managed);
+
+		expect(authorization).toBe(managed);
+	});
+
+	test("readDeviceMode sends the header it is given", async () => {
+		let authorization: string | undefined;
+		const port = await startMockServer((req, res) => {
+			authorization = req.headers.authorization;
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end('{"mode":"rose","container":"true"}');
+		});
+
+		await readDeviceMode(port, managed);
+
+		expect(authorization).toBe(managed);
+	});
+
+	test("startDeviceModeUpdate sends the header it is given", async () => {
+		let authorization: string | undefined;
+		const port = await startMockServer(async (req, res) => {
+			authorization = req.headers.authorization;
+			await readRequestBody(req);
+			res.writeHead(202, { "Content-Type": "application/json" });
+			res.end('{"pending":true}');
+		});
+
+		await startDeviceModeUpdate(port, resolveDeviceModeOptions({ mode: "rose" }), managed);
+
+		expect(authorization).toBe(managed);
 	});
 });

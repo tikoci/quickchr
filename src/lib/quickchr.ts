@@ -80,8 +80,8 @@ import { getNamedSocket, joinNamedSocket, removeSocketMember, getSocketSlot } fr
 import { createLogger, type ProgressLogger } from "./log.ts";
 import {
 	describeDeviceModeChange,
+	FACTORY_AUTH_HEADER,
 	formatDeviceModeSelection,
-	mergeDeviceModeOptions,
 	readDeviceMode,
 	resolveDeviceModeOptions,
 	shouldApplyDeviceMode,
@@ -90,6 +90,7 @@ import {
 	waitForDeviceModeApi,
 } from "./device-mode.ts";
 import {
+	appliedDeviceModeRecord,
 	assertProvisioningWindow,
 	isProvisioningWindowOpen,
 } from "./provisioning-window.ts";
@@ -802,25 +803,46 @@ function createInstance(state: MachineState): ChrInstance {
 					"(mode=skip disables device-mode entirely; pass a mode or a feature to enable/disable).",
 				);
 			}
-			assertDeviceModeApplicable(state);
-			const launchConfig = await buildLaunchConfigFromState(state);
-			await applyDeviceMode(this as ChrInstance, state, resolved, launchConfig, log);
-			// Persist what is now true of the guest: the applied selection folded into
-			// what was already recorded, not the request on its own. Device-mode updates
-			// are cumulative — only the settings a request names move — so overwriting
-			// would leave `machine.json` describing a machine that does not exist.
-			const deviceMode = mergeDeviceModeOptions(state.deviceMode, resolved);
-			const current = loadMachine(state.name);
-			if (current) {
-				current.deviceMode = deviceMode;
-				saveMachine(current);
+			// The same `.start-lock` every other relaunch takes. This one is a relaunch:
+			// it terminates QEMU, spawns a replacement and rewrites `machine.json`, so a
+			// concurrent `start` would otherwise spawn a second QEMU into the power-cycle
+			// window and both would persist over each other.
+			const lockPath = join(state.machineDir, ".start-lock");
+			acquireLock(lockPath);
+			try {
+				// Inside the lock: the applicability check has to hold for the operation,
+				// not merely at the moment it was made.
+				assertDeviceModeApplicable(state);
+				const launchConfig = await buildLaunchConfigFromState(state);
+				// Post-boot auth, not factory admin: a machine provisioned with
+				// `--disable-admin` answers 401 to `admin:`, and those are exactly the
+				// machines this route exists for.
+				await applyDeviceMode(this as ChrInstance, state, resolved, launchConfig, log, resolveAuth(state).header);
+
+				// Persist what is now true of the guest: the applied selection folded into
+				// what was already *applied*, not the request on its own. Device-mode
+				// updates are cumulative — only the settings a request names move — so
+				// overwriting would leave `machine.json` describing a machine that does
+				// not exist.
+				//
+				// `appliedDeviceModeRecord` gates the carry-forward on the step record, for
+				// the reason #176 keeps running into: desired config is not evidence that
+				// a step ran.
+				const deviceMode = appliedDeviceModeRecord(state, resolved);
+				const current = loadMachine(state.name);
+				if (current) {
+					current.deviceMode = deviceMode;
+					saveMachine(current);
+				}
+				state.deviceMode = deviceMode;
+				// This is quickchr applying a provisioning step, so it belongs in the
+				// record the window reads (#176). It does not reopen the window — it adds
+				// the one step that just ran, so a later `start` passing the same
+				// device-mode is recognised as already applied instead of refused.
+				recordProvisioningStep(state, "deviceMode");
+			} finally {
+				try { unlinkSync(lockPath); } catch { /* ignore */ }
 			}
-			state.deviceMode = deviceMode;
-			// This is quickchr applying a provisioning step, so it belongs in the record
-			// the window reads (#176). It does not reopen the window — it adds the one
-			// step that just ran, so a later `start` passing the same device-mode is
-			// recognised as already applied instead of refused.
-			recordProvisioningStep(state, "deviceMode");
 		},
 
 		async availablePackages(): Promise<string[]> {
@@ -1442,23 +1464,34 @@ function assertDeviceModeApplicable(state: MachineState): void {
 }
 
 /** Apply a device-mode change to a running CHR instance (may require hard power-cycle).
- *  Extracted from _provisionInstance so setDeviceMode() can reuse the same logic. */
+ *  Extracted from _provisionInstance so setDeviceMode() can reuse the same logic.
+ *
+ *  `authHeader` is the caller's, because the two callers genuinely differ and the
+ *  difference is not cosmetic. During first-boot provisioning device-mode is step 2 and
+ *  the user step is step 4, so factory `admin:` is the *only* credential that exists
+ *  yet — `state.user` is already populated at that point but names an account nobody
+ *  has created, so resolving it here would 401 the shipped path. Post-boot the reverse
+ *  holds: a machine provisioned with `--disable-admin` answers 401 to factory admin,
+ *  which is what made `quickchr set <name> --device-mode` fail on exactly the machines
+ *  the route was written for. Same field, opposite answers, decided by the caller
+ *  rather than guessed here. */
 async function applyDeviceMode(
 	instance: ChrInstance,
 	machineState: MachineState,
 	resolvedDeviceMode: ReturnType<typeof resolveDeviceModeOptions>,
 	launchConfig: QemuLaunchConfig,
 	log: ProgressLogger,
+	authHeader: string,
 ): Promise<void> {
 	const httpPort = toChrPorts(machineState.ports).http;
 	const accel = await detectAccel(machineState.arch);
 	const bootTimeout = defaultBootTimeout(machineState.arch, undefined, accel);
-	await waitForDeviceModeApi(httpPort, 60_000);
+	await waitForDeviceModeApi(httpPort, 60_000, authHeader);
 	log.status(`Applying device-mode (${formatDeviceModeSelection(resolvedDeviceMode)})...`);
 
 	let alreadyActive = false;
 	try {
-		const beforeMode = await readDeviceMode(httpPort);
+		const beforeMode = await readDeviceMode(httpPort, authHeader);
 		log.debug(`Device-mode before update: ${JSON.stringify(beforeMode)}`);
 		alreadyActive = verifyDeviceMode(resolvedDeviceMode, beforeMode).ok;
 		// Say what the power cycle is buying before spending it. `mode` moves as a
@@ -1480,7 +1513,7 @@ async function applyDeviceMode(
 	let requiresPowerCycle = false;
 
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-		const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode);
+		const request = startDeviceModeUpdate(httpPort, resolvedDeviceMode, authHeader);
 		// RouterOS blocks this connection while waiting for hard power-cycle confirmation.
 		// We race against 2s: if still pending at 2s, RouterOS has entered blocking state
 		// and we can confirm by killing QEMU. If it resolves in <2s ("returned early"),
@@ -1526,10 +1559,10 @@ async function applyDeviceMode(
 			if (!rebooted) {
 				throw new QuickCHRError("BOOT_TIMEOUT", "RouterOS device-mode internal reboot timed out");
 			}
-			await waitForDeviceModeApi(httpPort, bootTimeout);
+			await waitForDeviceModeApi(httpPort, bootTimeout, authHeader);
 		}
 
-		const actualNow = await readDeviceMode(httpPort);
+		const actualNow = await readDeviceMode(httpPort, authHeader);
 		log.debug(`Device-mode after update attempt ${attempt}: ${JSON.stringify(actualNow)}`);
 		const immediateVerification = verifyDeviceMode(resolvedDeviceMode, actualNow);
 		if (immediateVerification.ok) {
@@ -1559,10 +1592,10 @@ async function applyDeviceMode(
 				`Device-mode activation reboot did not come back within ${bootTimeout / 1000}s`,
 			);
 		}
-		await waitForDeviceModeApi(httpPort, bootTimeout);
+		await waitForDeviceModeApi(httpPort, bootTimeout, authHeader);
 	}
 
-	const actual = await readDeviceMode(httpPort);
+	const actual = await readDeviceMode(httpPort, authHeader);
 	log.debug(`Device-mode post-reboot: ${JSON.stringify(actual)}`);
 	const verification = verifyDeviceMode(resolvedDeviceMode, actual);
 	if (!verification.ok) {
@@ -2226,7 +2259,9 @@ export class QuickCHR {
 		}
 
 		if (hasDeviceModeProvisioning) {
-			await applyDeviceMode(instance, machineState, resolvedDeviceMode, launchConfig, log);
+			// Factory admin on purpose: this runs at step 2 and the user step is step 4,
+			// so `machineState.user` names an account that does not exist yet.
+			await applyDeviceMode(instance, machineState, resolvedDeviceMode, launchConfig, log, FACTORY_AUTH_HEADER);
 			applied.push("deviceMode");
 		}
 

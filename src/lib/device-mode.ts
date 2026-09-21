@@ -168,9 +168,23 @@ export function formatDeviceModeSelection(options: ResolvedDeviceModeOptions): s
 	return parts.join(" ");
 }
 
-/** Wait until the device-mode REST endpoint is reachable with default admin auth. */
-export async function waitForDeviceModeApi(httpPort: number, timeoutMs: number = 60_000): Promise<void> {
-	const auth = `Basic ${btoa("admin:")}`;
+/** Factory credentials — `admin` with no password, as a fresh CHR ships.
+ *
+ *  The right auth for device-mode during *first-boot* provisioning, where it runs
+ *  before any account has been created, and the wrong auth afterwards: a machine
+ *  provisioned with `--disable-admin` answers 401. Post-boot callers resolve the
+ *  machine's own credentials instead — see `applyDeviceMode`. */
+export const FACTORY_AUTH_HEADER = `Basic ${btoa("admin:")}`;
+
+/** Wait until the device-mode REST endpoint is reachable.
+ *
+ *  `auth` defaults to factory admin, which is what a guest being provisioned for the
+ *  first time has. A machine past that point needs its own credentials passed in. */
+export async function waitForDeviceModeApi(
+	httpPort: number,
+	timeoutMs: number = 60_000,
+	auth: string = FACTORY_AUTH_HEADER,
+): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		try {
@@ -209,7 +223,11 @@ export async function waitForDeviceModeApi(httpPort: number, timeoutMs: number =
  * Uses restPost (node:http + agent:false) to bypass Bun's connection pool.
  * The 300s timeout is a safety limit — the caller is expected to kill QEMU well before then.
  */
-export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceModeOptions): Promise<{ status: number; body: string }> {
+export function startDeviceModeUpdate(
+	httpPort: number,
+	options: ResolvedDeviceModeOptions,
+	auth: string = FACTORY_AUTH_HEADER,
+): Promise<{ status: number; body: string }> {
 	if (!shouldApplyDeviceMode(options)) {
 		return Promise.resolve({ status: 200, body: "" });
 	}
@@ -220,7 +238,6 @@ export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceM
 		payload[name] = value;
 	}
 
-	const auth = `Basic ${btoa("admin:")}`;
 	return restPost(
 		`http://127.0.0.1:${httpPort}/rest/system/device-mode/update`,
 		auth,
@@ -229,8 +246,10 @@ export function startDeviceModeUpdate(httpPort: number, options: ResolvedDeviceM
 	);
 }
 
-export async function readDeviceMode(httpPort: number): Promise<Record<string, string>> {
-	const auth = `Basic ${btoa("admin:")}`;
+export async function readDeviceMode(
+	httpPort: number,
+	auth: string = FACTORY_AUTH_HEADER,
+): Promise<Record<string, string>> {
 	const { status, body } = await restGet(
 		`http://127.0.0.1:${httpPort}/rest/system/device-mode`,
 		auth,

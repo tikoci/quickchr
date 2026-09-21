@@ -95,6 +95,27 @@ of a refusal, and the merge is what keeps `machine.json` honest, because a devic
 update moves only the settings it names — an overwrite left the record claiming an
 earlier feature had never been asked for while the guest still had it.
 
+**Device-mode auth differs by caller, and the default is a trap for the post-boot
+one.** `waitForDeviceModeApi`, `readDeviceMode` and `startDeviceModeUpdate` default to
+`FACTORY_AUTH_HEADER` (`admin:`). That is correct for **first-boot** provisioning and
+only there: device-mode is step 2, the user step is step 4, so factory admin is the
+only credential that exists yet — and `machineState.user` is *already populated* at
+that point with an account nobody has created, so resolving it would 401 the shipped
+path. Post-boot the reverse holds: a machine provisioned with `--disable-admin`
+answers 401 to factory admin, which is what made `quickchr set <name> --device-mode`
+fail on exactly the machines the route was written for (reproduced on CHR 7.24.4).
+`applyDeviceMode()` therefore takes the header from its caller instead of deciding:
+`_provisionInstance` passes `FACTORY_AUTH_HEADER`, `setDeviceMode()` passes
+`resolveAuth(state).header`. Any new post-boot provisioning path inherits the same
+question — and `state.user` is not the answer to it until the user step has run.
+
+**A post-boot apply takes `.start-lock`.** `setDeviceMode()` terminates QEMU, spawns a
+replacement and rewrites `machine.json` — that is a relaunch, and it holds the same
+lock every other relaunch does. Without it a concurrent `start` spawns a second QEMU
+into the power-cycle window and both persist over each other. The applicability check
+goes *inside* the lock: it has to hold for the operation, not for the instant it was
+made.
+
 **RouterOS reports device-mode as strings.** `GET /rest/system/device-mode` answers
 `"container": "true"`, not `true`. A reader that tests `value === true` finds nothing
 enabled however many are on — which `quickchr get <name> device-mode` did, printing a

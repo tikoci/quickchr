@@ -28,7 +28,7 @@ async function cleanupMachine(name: string): Promise<void> {
 
 describe.skipIf(SKIP)("device-mode provisioning", () => {
 	beforeAll(async () => {
-		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features", "integration-dm-setmode", "integration-dm-post-boot", "integration-dm-stopped"]) {
+		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features", "integration-dm-setmode", "integration-dm-post-boot", "integration-dm-stopped", "integration-dm-cli"]) {
 			await cleanupMachine(name);
 		}
 	});
@@ -255,6 +255,61 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			await cleanupMachine("integration-dm-post-boot");
 		}
 	}, bootTestTimeout({ boots: 3 })); // + two hard power-cycles
+
+	test("the CLI command the refusal prints actually works, run as a process", async () => {
+		// The library path is covered above; this covers the route as a *user* meets it.
+		// A parser, dispatch or output regression would leave the command printed by
+		// PROVISIONING_WINDOW_CLOSED unusable while every other test here stayed green.
+		// It runs against a machine with admin disabled on purpose: device-mode ran on
+		// factory `admin:` for as long as it was first-boot-only, and this is the machine
+		// shape that broke when it became a post-boot route.
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
+		const { resolveAuth } = await import("../../src/lib/auth.ts");
+		const cli = new URL("../../src/cli/index.ts", import.meta.url).pathname;
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				...imageTarget(),
+				arch,
+				background: true,
+				name: "integration-dm-cli",
+				deviceMode: { mode: "skip" },
+				user: { name: "lab", password: "lab-pass-1" },
+				disableAdmin: true,
+			});
+
+			const proc = Bun.spawn(["bun", cli, "set", "integration-dm-cli", "--device-mode-enable", "container"], {
+				env: { ...process.env, NO_COLOR: "1", QUICKCHR_NO_PROMPT: "1" },
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+				proc.exited,
+			]);
+			const output = stdout + stderr;
+
+			expect({ exitCode, output }).toMatchObject({ exitCode: 0 });
+			// The settings that moved are announced before the power cycle is spent.
+			expect(output).toContain("container: no -> yes");
+			expect(output).toContain("Device-mode verified");
+			expect(output).toContain("quickchr get integration-dm-cli device-mode");
+
+			// And the guest agrees — read back with the machine's own credentials, since
+			// admin is disabled.
+			const reloaded = QuickCHR.get("integration-dm-cli");
+			const actual = await readDeviceMode(instance.ports.http, resolveAuth(reloaded?.state ?? instance.state).header);
+			expect(actual.container).toBe("yes");
+			expect(actual.mode).toBe("rose");
+		} finally {
+			await cleanupMachine("integration-dm-cli");
+		}
+	}, bootTestTimeout({ boots: 2 })); // + hard power-cycle
 
 	test("setDeviceMode() refuses a stopped machine instead of waiting out a REST timeout", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");

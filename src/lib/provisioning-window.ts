@@ -19,6 +19,8 @@ import { getInstanceCredentials } from "./credentials.ts";
 import {
 	formatDeviceModeFlags,
 	formatDeviceModeSelection,
+	mergeDeviceModeOptions,
+	type ResolvedDeviceModeOptions,
 	resolveDeviceModeOptions,
 	shouldApplyDeviceMode,
 } from "./device-mode.ts";
@@ -179,6 +181,29 @@ export function classifyProvisioningRequest(
 	}
 
 	return asks;
+}
+
+/**
+ * The device-mode record to persist after a post-boot apply.
+ *
+ * Cumulative, because the guest is: a device-mode update moves only the settings it
+ * names, so replacing the record with the request alone would leave `machine.json`
+ * claiming an earlier feature had never been asked for while the guest still had it.
+ *
+ * **But it only carries forward what actually ran.** `state.deviceMode` is desired
+ * config, written at `add()` before anything happens. A first boot that threw before
+ * the device-mode step leaves that intent sitting in state having never reached the
+ * guest — and folding it in here, then stamping `deviceMode` as applied, would make a
+ * later `start` treat settings the guest never received as already satisfied and drop
+ * them in silence. That is this module's own bug wearing a new hat, so it gets this
+ * module's own rule: the step record is the only evidence that a step ran.
+ */
+export function appliedDeviceModeRecord(
+	state: MachineState,
+	applied: ResolvedDeviceModeOptions,
+): DeviceModeOptions {
+	const priorRan = state.provisioning?.steps.includes("deviceMode") ?? false;
+	return mergeDeviceModeOptions(priorRan ? state.deviceMode : undefined, applied);
 }
 
 /** True when any step in this request would change something. */

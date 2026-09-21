@@ -1990,7 +1990,10 @@ async function applyLicense(argv: string[]) {
  *  `quickchr clean <name>` and a fresh provisioning run. */
 async function cmdSet(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
-	const name = positional[0];
+	// Positional first, `--name` as the fallback — the same order `applyLicense` uses,
+	// which `set --license` delegates to. Without this `quickchr set --name lab
+	// --license` printed a usage error while `quickchr license --name lab` worked.
+	const name = positional[0] ?? flag(flags, "name");
 
 	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|unlimited]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>]";
 	if (!name) {
