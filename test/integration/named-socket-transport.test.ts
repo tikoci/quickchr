@@ -76,7 +76,7 @@ type Pinger = {
 };
 
 /** Converge before asserting — the first echo after an address is added is consumed by
- *  neighbour resolution, so loss only becomes the thing under test once a reply has
+ *  neighbor resolution, so loss only becomes the thing under test once a reply has
  *  landed. Returns whatever `waitFor` decided; the caller asserts on it. */
 function pingConverges(from: Pinger, peer: string): Promise<boolean> {
 	return from.waitFor(async () => {
@@ -105,7 +105,10 @@ describe.skipIf(SKIP || IS_WINDOWS)("named socket default transport — dgram", 
 		let second: Instance | undefined;
 		let first: Instance | undefined;
 
-		createNamedSocket(LINK, { mode: "dgram" });
+		// No `mode`, matching the Windows arm: the point is the transport a bare
+		// `networks sockets create` picks here, not one this test names.
+		const created = createNamedSocket(LINK);
+		expect(created.mode).toBe("dgram");
 
 		try {
 			// SECOND joins and starts first, so it holds slot 0 and names a peer socket
@@ -126,6 +129,8 @@ describe.skipIf(SKIP || IS_WINDOWS)("named socket default transport — dgram", 
 			// 1. The endpoints are persisted, one per machine, and the starter took slot 0.
 			const entry = getNamedSocket(LINK);
 			if (!entry) throw new Error("named socket vanished");
+			// Re-read, not the value `createNamedSocket` returned: the transport has to
+			// survive the round-trip through the registry that both starts went through.
 			expect(entry.mode).toBe("dgram");
 			expect(getSocketSlot(entry, SECOND)).toBe(0);
 			expect(getSocketSlot(entry, FIRST)).toBe(1);
