@@ -17,6 +17,7 @@
 
 import { getInstanceCredentials } from "./credentials.ts";
 import {
+	formatDeviceModeFlags,
 	formatDeviceModeSelection,
 	resolveDeviceModeOptions,
 	shouldApplyDeviceMode,
@@ -213,7 +214,9 @@ function postBootRoute(ask: ProvisioningAsk, request: ProvisioningRequest, name:
 		case "license":
 			return `quickchr set ${name} --license`;
 		case "deviceMode":
-			return "instance.setDeviceMode() from the library (no CLI route yet — tikoci/quickchr#176)";
+			// Spelled out with the requested flags, because the route only helps if it
+			// can be run as printed — and `set` takes the same flag names `start` does.
+			return `quickchr set ${name} ${formatDeviceModeFlags(resolveDeviceModeOptions(request.deviceMode))} (power-cycles the machine)`;
 		case "packages":
 			// installPackage() has no install-all form — availablePackages() would have
 			// to be enumerated first — so the honest route for that request is a reset.

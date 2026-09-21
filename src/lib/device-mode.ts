@@ -63,6 +63,26 @@ function normalizeFeatureList(list: string[] | undefined): string[] {
 	return [...new Set(values)];
 }
 
+/** Keys `/system/device-mode` reports that are not feature flags. `mode` is the
+ *  device-mode itself; the rest are status RouterOS keeps alongside it. */
+export const DEVICE_MODE_NON_FEATURE_KEYS: ReadonlySet<string> = new Set([
+	"mode",
+	"allowed-versions",
+	"attempt-count",
+	"flagged",
+	"flagging-enabled",
+]);
+
+/** Is this feature on, as RouterOS reports it?
+ *
+ *  RouterOS answers `/system/device-mode` with **strings**: `"container": "true"`, not
+ *  `true`. A reader that tests `value === true` therefore finds nothing enabled, ever —
+ *  which is what `quickchr get <name> device-mode` did, printing a bare mode and no
+ *  feature line however many were on. Normalize before deciding. */
+export function isDeviceModeFeatureEnabled(value: unknown): boolean {
+	return toYesNo(value) === "yes";
+}
+
 function toYesNo(value: unknown): string {
 	if (typeof value === "boolean") return value ? "yes" : "no";
 	if (typeof value === "number") return value > 0 ? "yes" : "no";
@@ -279,5 +299,67 @@ export function verifyDeviceMode(
 		mismatches,
 		expected,
 		actual,
+	};
+}
+
+/** The `quickchr set` flags that would reproduce this selection.
+ *
+ *  Rendered from the *resolved* options, not the raw ones, so the command it prints
+ *  is the command that was actually going to run — `mode: "auto"` comes out as the
+ *  `rose` it resolves to rather than as an alias the reader has to expand. */
+export function formatDeviceModeFlags(options: ResolvedDeviceModeOptions): string {
+	if (options.skip) return "";
+	const parts: string[] = [];
+	if (options.mode) parts.push(`--device-mode ${options.mode}`);
+	const enable = Object.entries(options.features).filter(([, v]) => v === "yes").map(([k]) => k);
+	const disable = Object.entries(options.features).filter(([, v]) => v === "no").map(([k]) => k);
+	if (enable.length > 0) parts.push(`--device-mode-enable ${enable.sort().join(",")}`);
+	if (disable.length > 0) parts.push(`--device-mode-disable ${disable.sort().join(",")}`);
+	return parts.join(" ");
+}
+
+/** What a device-mode update would change, read against the guest's current record.
+ *
+ *  Only the differences — a change that costs a power cycle should say which settings
+ *  it is buying, and `expected == actual` rows are noise. Empty means nothing would
+ *  move, which is the caller's cue that no power cycle is needed. */
+export function describeDeviceModeChange(
+	options: ResolvedDeviceModeOptions,
+	actual: Record<string, string>,
+): string[] {
+	// `verifyDeviceMode` stays the single judge of what counts as a mismatch — only the
+	// key is read back out of its message, and the values come from the maps it returns.
+	const { expected, mismatches } = verifyDeviceMode(options, actual);
+	const changed = new Set(mismatches.map((mismatch) => mismatch.split(":")[0]));
+	return Object.entries(expected)
+		.filter(([key]) => changed.has(key))
+		.map(([key, want]) => `${key}: ${actual[key] ?? "(unset)"} -> ${want}`);
+}
+
+/** Fold an applied device-mode selection into what `machine.json` already records.
+ *
+ *  `setDeviceMode()` used to overwrite `state.deviceMode` with the request, so
+ *  `set <name> --device-mode-enable container` on a machine provisioned with
+ *  `ipsec=yes` left the record claiming ipsec had never been asked for. The guest
+ *  still had it: device-mode updates are cumulative, and only the settings named in
+ *  a request move. The record has to be cumulative too, or it describes a machine
+ *  that does not exist — and `classifyProvisioningRequest()` reads it. */
+export function mergeDeviceModeOptions(
+	current: DeviceModeOptions | undefined,
+	applied: ResolvedDeviceModeOptions,
+): DeviceModeOptions {
+	if (applied.skip) return current ?? {};
+	const enable = new Set(normalizeFeatureList(current?.enable));
+	const disable = new Set(normalizeFeatureList(current?.disable));
+	for (const [feature, value] of Object.entries(applied.features)) {
+		// A feature only ever sits on one side: the newest instruction for it wins.
+		enable.delete(feature);
+		disable.delete(feature);
+		(value === "yes" ? enable : disable).add(feature);
+	}
+	return {
+		mode: applied.mode ?? current?.mode,
+		enable: enable.size > 0 ? [...enable].sort() : undefined,
+		disable: disable.size > 0 ? [...disable].sort() : undefined,
 	};
 }

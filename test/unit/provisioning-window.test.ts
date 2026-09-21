@@ -87,8 +87,20 @@ describe("assertProvisioningWindow", () => {
 		const err = refusal(booted(), { deviceMode: { enable: ["container"] } });
 		expect(err.code).toBe("PROVISIONING_WINDOW_CLOSED");
 		expect(err.message).toContain("container=yes");
-		expect(err.message).toContain("setDeviceMode()");
+		expect(err.message).toContain("quickchr set pw-test --device-mode rose --device-mode-enable container");
 		expect(err.message).toContain("quickchr clean pw-test");
+	});
+
+	test("the device-mode route is a command, printed with the flags that were asked for", () => {
+		// It replaced "instance.setDeviceMode() from the library (no CLI route yet)",
+		// which told a CLI user to go and write TypeScript. A route only helps if it can
+		// be run as printed, so the flags come out resolved: `auto` prints as the `rose`
+		// it becomes, and the mode is named even when only a feature was requested,
+		// because that is the mode the change will land on.
+		const { message } = refusal(booted(), { deviceMode: { mode: "basic", enable: ["ipsec"], disable: ["smb"] } });
+		expect(message).toContain("quickchr set pw-test --device-mode basic --device-mode-enable ipsec --device-mode-disable smb");
+		expect(message).toContain("power-cycles the machine");
+		expect(message).not.toContain("no CLI route yet");
 	});
 
 	test("every provisioning option is refused, not just device-mode", () => {

@@ -79,7 +79,9 @@ import { restRequest, restGet, restPost } from "./rest.ts";
 import { getNamedSocket, joinNamedSocket, removeSocketMember, getSocketSlot } from "./socket-registry.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import {
+	describeDeviceModeChange,
 	formatDeviceModeSelection,
+	mergeDeviceModeOptions,
 	readDeviceMode,
 	resolveDeviceModeOptions,
 	shouldApplyDeviceMode,
@@ -793,15 +795,32 @@ function createInstance(state: MachineState): ChrInstance {
 			const log = logger ?? createLogger();
 			const resolved = resolveDeviceModeOptions(options);
 			for (const w of resolved.warnings) log.warn(`Device-mode: ${w}`);
+			if (!shouldApplyDeviceMode(resolved)) {
+				throw new QuickCHRError(
+					"INVALID_ARGUMENT",
+					`Nothing to set: device-mode options for "${state.name}" resolved to no change ` +
+					"(mode=skip disables device-mode entirely; pass a mode or a feature to enable/disable).",
+				);
+			}
+			assertDeviceModeApplicable(state);
 			const launchConfig = await buildLaunchConfigFromState(state);
 			await applyDeviceMode(this as ChrInstance, state, resolved, launchConfig, log);
-			// Persist updated device-mode in state
+			// Persist what is now true of the guest: the applied selection folded into
+			// what was already recorded, not the request on its own. Device-mode updates
+			// are cumulative — only the settings a request names move — so overwriting
+			// would leave `machine.json` describing a machine that does not exist.
+			const deviceMode = mergeDeviceModeOptions(state.deviceMode, resolved);
 			const current = loadMachine(state.name);
 			if (current) {
-				current.deviceMode = options;
+				current.deviceMode = deviceMode;
 				saveMachine(current);
 			}
-			state.deviceMode = options;
+			state.deviceMode = deviceMode;
+			// This is quickchr applying a provisioning step, so it belongs in the record
+			// the window reads (#176). It does not reopen the window — it adds the one
+			// step that just ran, so a later `start` passing the same device-mode is
+			// recognised as already applied instead of refused.
+			recordProvisioningStep(state, "deviceMode");
 		},
 
 		async availablePackages(): Promise<string[]> {
@@ -1374,6 +1393,54 @@ function recordProvisioning(state: MachineState, steps: ProvisioningStep[]): voi
 	state.provisioning = record;
 }
 
+/** Add one step to the provisioning record, keeping whatever is already there.
+ *
+ *  `recordProvisioning()` stamps a whole first-boot run; this is for a step applied on
+ *  its own afterwards — `setDeviceMode()` today, `installPackage()` when #24 lands.
+ *  `steps` accumulates and `at` moves to now, which is what `ProvisioningRecord`
+ *  promises: the last time quickchr applied provisioning to this disk.
+ *
+ *  It cannot reopen or close a window by accident. The only caller requires a running
+ *  machine, and a running machine has `lastStartedAt`, so the window was already shut
+ *  before this wrote anything. */
+function recordProvisioningStep(state: MachineState, step: ProvisioningStep): void {
+	const steps = [...new Set([...(state.provisioning?.steps ?? []), step])];
+	const record = { at: new Date().toISOString(), steps };
+	const current = loadMachine(state.name);
+	if (current) {
+		current.provisioning = record;
+		saveMachine(current);
+	}
+	state.provisioning = record;
+}
+
+/** Preconditions a post-boot device-mode change inherits from provisioning.
+ *
+ *  Both were undocumented and both fail confusingly when unchecked (#176):
+ *  `applyDeviceMode()` polls `waitForDeviceModeApi` before it does anything, so a
+ *  stopped machine spends 60 s to report a timeout, and a machine with no user-mode
+ *  NIC has no localhost route to REST at all and never recovers.
+ *
+ *  This is the same guard `start()` applies to provisioning, moved to the one step
+ *  that may also run afterwards. */
+function assertDeviceModeApplicable(state: MachineState): void {
+	if (!isMachineRunning(state)) {
+		throw new QuickCHRError(
+			"MACHINE_STOPPED",
+			`Device-mode is applied through the guest's REST API, so "${state.name}" has to be running. ` +
+			`Start it with 'quickchr start ${state.name}', then set device-mode.`,
+		);
+	}
+	if (!hasUserModeNetwork(state.networks)) {
+		throw new QuickCHRError(
+			"NETWORK_UNAVAILABLE",
+			`Device-mode is applied over localhost REST, which needs a user-mode network interface — ` +
+			`"${state.name}" has none, so quickchr cannot reach its REST API. ` +
+			"Recreate the machine with a user-mode NIC alongside its other networks.",
+		);
+	}
+}
+
 /** Apply a device-mode change to a running CHR instance (may require hard power-cycle).
  *  Extracted from _provisionInstance so setDeviceMode() can reuse the same logic. */
 async function applyDeviceMode(
@@ -1394,6 +1461,13 @@ async function applyDeviceMode(
 		const beforeMode = await readDeviceMode(httpPort);
 		log.debug(`Device-mode before update: ${JSON.stringify(beforeMode)}`);
 		alreadyActive = verifyDeviceMode(resolvedDeviceMode, beforeMode).ok;
+		// Say what the power cycle is buying before spending it. `mode` moves as a
+		// side-effect of enabling a feature — `--device-mode-enable container` resolves
+		// `auto` to `rose` — and a change nobody asked for should at least be announced
+		// (#176).
+		for (const change of describeDeviceModeChange(resolvedDeviceMode, beforeMode)) {
+			log.status(`  ${change}`);
+		}
 	} catch { /* CHR unexpectedly unreachable — proceed with update */ }
 
 	if (alreadyActive) {

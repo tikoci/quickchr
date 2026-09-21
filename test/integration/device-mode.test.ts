@@ -9,6 +9,10 @@ import { bootTestTimeout } from "./timeouts.ts";
  * and hard power-cycles the CHR to confirm the change. After restart,
  * the mode reported by RouterOS REST must match the requested value.
  *
+ * Also covers the post-boot half (#176): once the provisioning window has shut,
+ * `start()` refuses a device-mode option and names `quickchr set …`, and that route
+ * applies it — power cycle, cumulative record, and the preconditions it inherits.
+ *
  * Requires QEMU. Skipped unless QUICKCHR_INTEGRATION=1.
  */
 
@@ -24,7 +28,7 @@ async function cleanupMachine(name: string): Promise<void> {
 
 describe.skipIf(SKIP)("device-mode provisioning", () => {
 	beforeAll(async () => {
-		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features", "integration-dm-setmode"]) {
+		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features", "integration-dm-setmode", "integration-dm-post-boot", "integration-dm-stopped"]) {
 			await cleanupMachine(name);
 		}
 	});
@@ -185,4 +189,102 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			await cleanupMachine("integration-dm-setmode");
 		}
 	}, bootTestTimeout({ boots: 2 })); // + hard power-cycle
+
+	test("setDeviceMode() is the post-boot route the refusal names, and records itself", async () => {
+		// The second half of #176: a device-mode option refused on `start` has to be
+		// applicable *somewhere*, and the route the refusal prints is this one.
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
+		const { QuickCHRError } = await import("../../src/lib/types.ts");
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				...imageTarget(),
+				arch,
+				background: true,
+				name: "integration-dm-post-boot",
+				deviceMode: { mode: "advanced" },
+				secureLogin: false,
+			});
+
+			// The window is shut, so the same request through start() is refused — and the
+			// refusal names the CLI command that does work.
+			let refusal: unknown;
+			try {
+				await QuickCHR.start({ name: "integration-dm-post-boot", background: true, deviceMode: { enable: ["container"] } });
+			} catch (e) { refusal = e; }
+			expect(refusal).toBeInstanceOf(QuickCHRError);
+			expect((refusal as InstanceType<typeof QuickCHRError>).code).toBe("PROVISIONING_WINDOW_CLOSED");
+			expect((refusal as Error).message).toContain("quickchr set integration-dm-post-boot --device-mode rose --device-mode-enable container");
+
+			// Now take that route. Naming a feature without a mode resolves to rose, so
+			// `mode` moves from advanced as a side-effect — the thing the CLI announces.
+			await instance.setDeviceMode({ enable: ["container"] });
+
+			const actual = await readDeviceMode(instance.ports.http);
+			expect(actual.mode).toBe("rose");
+			expect(actual.container).toBe("yes");
+
+			// The step is recorded, which is what turns a later start passing the same
+			// device-mode into a recognised no-op rather than a second refusal.
+			expect(instance.state.provisioning?.steps).toContain("deviceMode");
+			await QuickCHR.start({ name: "integration-dm-post-boot", background: true, deviceMode: { mode: "rose", enable: ["container"] } });
+
+			// A change that is genuinely different is still refused.
+			let second: unknown;
+			try {
+				await QuickCHR.start({ name: "integration-dm-post-boot", background: true, deviceMode: { disable: ["smb"] } });
+			} catch (e) { second = e; }
+			expect(second).toBeInstanceOf(QuickCHRError);
+
+			// Applying it folds into the record rather than replacing it: container was
+			// asked for earlier and the guest still has it.
+			await instance.setDeviceMode({ disable: ["smb"] });
+			const after = await readDeviceMode(instance.ports.http);
+			expect(after.container).toBe("yes");
+			expect(after.smb).toBe("no");
+			expect(instance.state.deviceMode?.enable).toContain("container");
+			expect(instance.state.deviceMode?.disable).toContain("smb");
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine("integration-dm-post-boot");
+		}
+	}, bootTestTimeout({ boots: 3 })); // + two hard power-cycles
+
+	test("setDeviceMode() refuses a stopped machine instead of waiting out a REST timeout", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { QuickCHRError } = await import("../../src/lib/types.ts");
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({
+				...imageTarget(),
+				arch,
+				background: true,
+				name: "integration-dm-stopped",
+				deviceMode: { mode: "skip" },
+				secureLogin: false,
+			});
+			await instance.stop();
+
+			// applyDeviceMode() polls waitForDeviceModeApi before it does anything, so
+			// without the guard this is a 60s wait ending in a boot-timeout message about
+			// a guest that was never going to answer.
+			const started = Date.now();
+			let refusal: unknown;
+			try { await instance.setDeviceMode({ mode: "rose" }); } catch (e) { refusal = e; }
+			expect(refusal).toBeInstanceOf(QuickCHRError);
+			expect((refusal as InstanceType<typeof QuickCHRError>).code).toBe("MACHINE_STOPPED");
+			expect(Date.now() - started).toBeLessThan(10_000);
+		} finally {
+			await cleanupMachine("integration-dm-stopped");
+		}
+	}, bootTestTimeout({ boots: 1 }));
 });

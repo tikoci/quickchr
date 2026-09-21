@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
+	describeDeviceModeChange,
+	formatDeviceModeFlags,
 	formatDeviceModeSelection,
+	mergeDeviceModeOptions,
 	readDeviceMode,
 	resolveDeviceModeOptions,
 	shouldApplyDeviceMode,
@@ -291,5 +294,65 @@ describe("device-mode REST orchestration helpers", () => {
 			"install-any-version": "yes",
 			fetch: "no",
 		});
+	});
+});
+
+describe("formatDeviceModeFlags", () => {
+	test("renders the flags that would reproduce a selection", () => {
+		const resolved = resolveDeviceModeOptions({ mode: "basic", enable: ["ipsec", "container"], disable: ["smb"] });
+		expect(formatDeviceModeFlags(resolved))
+			.toBe("--device-mode basic --device-mode-enable container,ipsec --device-mode-disable smb");
+	});
+
+	test("prints the resolved mode, not the alias that was typed", () => {
+		// `auto` is quickchr's spelling; RouterOS has never heard of it. A route that
+		// printed `--device-mode auto` would still work, but it hides the fact that the
+		// change moves `mode` to rose — which is the surprise worth naming (#176).
+		expect(formatDeviceModeFlags(resolveDeviceModeOptions({ enable: ["container"] })))
+			.toBe("--device-mode rose --device-mode-enable container");
+	});
+
+	test("a skipped selection has no flags", () => {
+		expect(formatDeviceModeFlags(resolveDeviceModeOptions({ mode: "skip" }))).toBe("");
+	});
+});
+
+describe("describeDeviceModeChange", () => {
+	test("names only what moves, in the order it happens", () => {
+		const resolved = resolveDeviceModeOptions({ enable: ["container"] });
+		expect(describeDeviceModeChange(resolved, { mode: "advanced", container: "no", ipsec: "yes" }))
+			.toEqual(["mode: advanced -> rose", "container: no -> yes"]);
+	});
+
+	test("a setting the guest does not report at all is named, not skipped", () => {
+		const resolved = resolveDeviceModeOptions({ mode: "rose", enable: ["container"] });
+		expect(describeDeviceModeChange(resolved, { mode: "rose" })).toEqual(["container: (unset) -> yes"]);
+	});
+
+	test("empty when the guest already matches — the caller's cue to skip the power cycle", () => {
+		const resolved = resolveDeviceModeOptions({ mode: "rose", enable: ["container"] });
+		expect(describeDeviceModeChange(resolved, { mode: "rose", container: "yes" })).toEqual([]);
+	});
+});
+
+describe("mergeDeviceModeOptions", () => {
+	test("keeps settings an earlier run applied", () => {
+		// The record has to be cumulative because the guest is: a device-mode update
+		// moves only the settings it names. Overwriting made `machine.json` claim ipsec
+		// had never been asked for while the guest still had it.
+		const applied = resolveDeviceModeOptions({ enable: ["container"] });
+		expect(mergeDeviceModeOptions({ mode: "advanced", enable: ["ipsec"] }, applied))
+			.toEqual({ mode: "rose", enable: ["container", "ipsec"], disable: undefined });
+	});
+
+	test("the newest instruction for a feature wins, and moves it across sides", () => {
+		const applied = resolveDeviceModeOptions({ mode: "rose", disable: ["container"] });
+		expect(mergeDeviceModeOptions({ mode: "rose", enable: ["container", "ipsec"] }, applied))
+			.toEqual({ mode: "rose", enable: ["ipsec"], disable: ["container"] });
+	});
+
+	test("a skipped selection records nothing", () => {
+		const current = { mode: "basic", enable: ["ipsec"] };
+		expect(mergeDeviceModeOptions(current, resolveDeviceModeOptions({ mode: "skip" }))).toBe(current);
 	});
 });

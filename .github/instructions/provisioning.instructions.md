@@ -47,6 +47,59 @@ applied, not what is in the guest. A step absent from it was not applied *by
 quickchr* — weaker than "not present", and deliberately so, since quickchr cannot read
 the guest without booting it.
 
+### Which steps may still run after the window has closed
+
+The window is one gate standing in for seven separate judgements, and the judgements
+are not the same. Whether a step may run post-boot turns on one question: **does it
+unlock a capability, or does it rewrite working config?** A capability the guest did
+not have cannot have been used, so turning it on later cannot clobber anything. Config
+is the thing that drifts.
+
+| step | post-boot? | why | route |
+|---|---|---|---|
+| `license` | yes | account-level, orthogonal to config | `quickchr set <name> --license` |
+| `deviceMode` | yes | capability flag — it gates whether a feature *can* run and describes nothing about how the guest is configured. Config it was blocking could not have been applied while it was off. | `quickchr set <name> --device-mode…` |
+| `packages` | probably | additive, but `installPackage()` has no install-all form | `instance.installPackage()`; #24 for the CLI verb |
+| `user` | **no** | additive in principle, but it collides with a user of the same name created since, and a login is exactly the config a post-boot path must not rewrite | `clean()` + replay |
+| `disableAdmin` | **no** | depends on another usable login existing — precisely the state that drifts | `clean()` + replay |
+| `secureLogin` | **no** | same class as `user`: it creates a login | `clean()` + replay |
+
+`license` is the precedent, not a proposal — it has shipped as a post-boot CLI verb for
+some time. `deviceMode` is the second, and the list is meant to stay short: `set` is
+not a general "apply provisioning later" verb, and the three refusals above are
+refusals on purpose rather than gaps waiting to be filled.
+
+**Preconditions any post-boot provisioning path inherits.** Both fail confusingly when
+unchecked, which is why `assertDeviceModeApplicable()` exists:
+
+- **The machine must be running with REST reachable.** `applyDeviceMode()` polls
+  `waitForDeviceModeApi` before it does anything, so a stopped machine otherwise spends
+  60 s to report a timeout about a guest that was never going to answer.
+- **A user-mode NIC is required.** Provisioning reaches the guest over localhost REST;
+  `start()` already refuses provisioning on a socket-only machine for that reason, and
+  the post-boot path inherits it rather than discovering it as a timeout.
+- RouterOS 7.20.8+, as for provisioning generally.
+
+**Device-mode needs the power button, which is why it lives here.** RouterOS will not
+apply a device-mode change without a power cycle, and `/system/device-mode/update`
+issued from *inside* the guest never returns — it is waiting for a power cycle it
+cannot perform on itself. quickchr owns that button; a tool that reaches a router over
+the network does not and never will. Whatever the general "apply provisioning later"
+story becomes, the part that needs a power cycle can only live in quickchr.
+
+**A post-boot step records itself.** `setDeviceMode()` adds `deviceMode` to
+`provisioning.steps` (via `recordProvisioningStep`) and folds the applied selection
+into `state.deviceMode` rather than overwriting it. Both halves matter: the step record
+is what makes a later `start` passing the same device-mode a recognised no-op instead
+of a refusal, and the merge is what keeps `machine.json` honest, because a device-mode
+update moves only the settings it names — an overwrite left the record claiming an
+earlier feature had never been asked for while the guest still had it.
+
+**RouterOS reports device-mode as strings.** `GET /rest/system/device-mode` answers
+`"container": "true"`, not `true`. A reader that tests `value === true` finds nothing
+enabled however many are on — which `quickchr get <name> device-mode` did, printing a
+bare mode and no feature line at all. Normalize through `isDeviceModeFeatureEnabled()`.
+
 ## RouterOS Post-Boot REST Race
 
 `waitForBoot` polls `/rest/system/resource` with a two-consecutive-OK guard and detects

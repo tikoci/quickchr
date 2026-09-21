@@ -10,6 +10,11 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- `quickchr get <name> device-mode` lists the enabled and disabled features. RouterOS
+  reports them as strings (`"container": "true"`), and the check was `value === true`,
+  so no feature line ever printed however many were on — the read-back for a
+  device-mode change showed only the bare mode.
+
 - Provisioning options are no longer silently dropped on a machine that has already
   booted. `quickchr start <name> --device-mode-enable container` (and `--add-package`,
   `--add-user`, `--disable-admin`, `--license-*`, `--install-all-packages`,
@@ -44,7 +49,44 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   `--no-device-mode`, which `add` has always accepted, and both `add --help` and
   `start --help` now say that provisioning flags apply on a machine's first boot. (#176)
 
+- `quickchr set <name> --device-mode <m> [--device-mode-enable f,…] [--device-mode-disable f,…]`
+  — device-mode on a machine that has already booted, power cycle included. It is the
+  route `PROVISIONING_WINDOW_CLOSED` now names, printed with the flags that were asked
+  for so it can be run as given. Device-mode is a capability flag: it gates whether a
+  feature *can* run and describes nothing about how the guest is configured, so applying
+  it later cannot clobber working config. It belongs in quickchr because RouterOS only
+  applies the change across a power cycle, and the same request issued from inside the
+  guest never returns — it is waiting for a power cycle it cannot perform on itself.
+  `--add-user` / `--disable-admin` / `--secure-login` deliberately have no `set` route.
+  (#176)
+
+- `quickchr get <name>` and `quickchr set <name>` complete in bash, zsh and fish,
+  including machine names. Neither verb was in the completion tables at all.
+
 ### Changed
+
+- `quickchr set <name> --device-mode…` and `setDeviceMode()` print every setting that
+  will move — `mode: advanced -> rose`, `container: no -> yes` — before spending the
+  power cycle, and skip the restart when the guest already matches. Enabling a feature
+  without naming a mode resolves the mode to `rose`, so the mode moves too; that is now
+  announced rather than discovered afterwards.
+
+- `setDeviceMode()` folds the applied selection into `state.deviceMode` instead of
+  overwriting it, and records `deviceMode` in `provisioning.steps`. A device-mode update
+  moves only the settings it names, so overwriting left `machine.json` claiming an
+  earlier feature had never been asked for while the guest still had it; and without the
+  step record a later `start` passing the same device-mode was refused rather than
+  recognised as already applied. (#176)
+
+- `setDeviceMode()` refuses a stopped machine (`MACHINE_STOPPED`, naming
+  `quickchr start`) and one with no user-mode NIC (`NETWORK_UNAVAILABLE`). Both were
+  undocumented preconditions that previously surfaced as a 60 s REST timeout. (#176)
+
+- `--no-device-mode` behaves the same on `add` as on `start`. `add` had its own copy of
+  the device-mode flag reader that did not honour it, so
+  `quickchr add --no-device-mode --device-mode-enable container` enabled container while
+  the identical flags on `start` skipped device-mode with a warning. One reader now
+  serves `add`, `start` and `set`. (#176)
 
 - The `secure-login` *setting* applies on a machine's first boot, not on a start whose
   provisioning window has closed. It is a creation default; carrying it into a restart turned a plain

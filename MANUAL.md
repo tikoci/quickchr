@@ -245,6 +245,9 @@ machine as a directory to delete rather than state to load.
 Live REST query. Hits the running CHR and returns the requested group
 (or all if no group specified). Requires the machine to be running.
 
+`device-mode` lists the mode plus every feature RouterOS reports, split into
+enabled and disabled — the read-back for `quickchr set <name> --device-mode…`.
+
 #### `inspect <name> [--json]`
 
 Stable, versioned (`descriptorVersion: 1`) connection descriptor for a
@@ -335,11 +338,43 @@ Apply or renew a CHR trial license on a running instance. Resolves
 MikroTik.com credentials from `--license-account`/`--license-password`,
 the env vars, or the secret store. Requires RouterOS ≥ 7.20.8.
 
-#### `set <name> <subcommand>`
+#### `set <name> [--license | --device-mode <m>] [--device-mode-enable <f>] [--device-mode-disable <f>]`
 
-Currently exposes a small surface for in-place changes (e.g.,
-`set <name> license …`). The `set/get` architecture is still being
-designed; expect additions.
+Change a property on a machine that has **already booted** — the post-boot half
+of the provisioning flags. `add`/`start` apply them at first boot; `set` applies
+them now. It is the route `PROVISIONING_WINDOW_CLOSED` names, printed with the
+flags that were asked for so it can be run as given.
+
+| flag | what it does |
+|---|---|
+| `--license` | Apply or renew a CHR trial license (§ `license` above for credential resolution). |
+| `--device-mode <m>` | `rose`, `advanced`, `basic`, `home`, `auto`. |
+| `--device-mode-enable <f,…>` | Set one or more device-mode flags to yes. Repeatable, comma-separated. |
+| `--device-mode-disable <f,…>` | Set one or more to no. |
+
+**Device-mode restarts the machine.** RouterOS only applies a device-mode change
+across a power cycle, and quickchr owns the power button — which is why this lives
+here rather than in a tool that reaches a router over the network: the same request
+issued from inside the guest never returns, because it is waiting for a power cycle
+it cannot perform on itself. quickchr prints every setting that will move before it
+restarts, and skips the restart entirely when the guest already matches.
+
+Naming a feature without a mode resolves the mode to `rose` — so
+`set lab --device-mode-enable container` moves `mode` as well. That move is printed
+before it happens, not discovered afterwards.
+
+Preconditions: the machine must be **running** and have a **user-mode NIC**
+(device-mode is applied over localhost REST), on RouterOS ≥ 7.20.8. Each is a
+named refusal rather than a timeout.
+
+The change is folded into `machine.json` rather than overwriting it — device-mode
+updates move only the settings they name, so the record stays cumulative — and
+recorded in `provisioning.steps`, which makes a later `start` passing the same
+device-mode a recognised no-op instead of a refusal.
+
+**Not available here:** `--add-user`, `--disable-admin`, `--secure-login`. Those
+rewrite working config rather than unlock a capability, and they are the steps that
+drift; their route stays `quickchr clean <name>` followed by the original command.
 
 #### `snapshot <name> <list | save [snapname] | load <snapname> | delete <snapname>>` (alias `snap`)
 
@@ -869,7 +904,7 @@ Routes that still work after the window has closed:
 | change | route |
 |---|---|
 | license | `quickchr set <name> --license` |
-| device-mode | `instance.setDeviceMode()` (library; power-cycles the VM) |
+| device-mode | `quickchr set <name> --device-mode…` / `instance.setDeviceMode()` (power-cycles the VM) |
 | packages | `instance.installPackage()` (library; reboots the guest) |
 | anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window, at first-boot cost |
 
