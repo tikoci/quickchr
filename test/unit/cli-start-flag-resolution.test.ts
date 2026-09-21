@@ -153,36 +153,49 @@ describe("applyAccelFlag", () => {
 describe("resolveSecureLoginFlag", () => {
 	test("undefined when no flag and no setting/env configured", async () => {
 		const { flags } = parseFlags([]);
-		expect(await resolveSecureLoginFlag(flags)).toBeUndefined();
+		expect(await resolveSecureLoginFlag(flags, true)).toBeUndefined();
 	});
 
 	test("--no-secure-login always wins, even over an env/file value of true", async () => {
 		writeSettingsFile("QUICKCHR_SECURE_LOGIN=true\n");
 		process.env.QUICKCHR_SECURE_LOGIN = "true";
 		const { flags } = parseFlags(["--no-secure-login"]);
-		expect(await resolveSecureLoginFlag(flags)).toBe(false);
+		expect(await resolveSecureLoginFlag(flags, true)).toBe(false);
 	});
 
 	test("--secure-login wins over an unset setting", async () => {
 		const { flags } = parseFlags(["--secure-login"]);
-		expect(await resolveSecureLoginFlag(flags)).toBe(true);
+		expect(await resolveSecureLoginFlag(flags, true)).toBe(true);
 	});
 
 	test("falls back to the env var when neither flag is passed", async () => {
 		process.env.QUICKCHR_SECURE_LOGIN = "true";
 		const { flags } = parseFlags([]);
-		expect(await resolveSecureLoginFlag(flags)).toBe(true);
+		expect(await resolveSecureLoginFlag(flags, true)).toBe(true);
 	});
 
 	test("falls back to the settings file when neither flag nor env is set", async () => {
 		writeSettingsFile("QUICKCHR_SECURE_LOGIN=true\n");
 		const { flags } = parseFlags([]);
-		expect(await resolveSecureLoginFlag(flags)).toBe(true);
+		expect(await resolveSecureLoginFlag(flags, true)).toBe(true);
 	});
 
 	test("a false setting does not force secureLogin — leaves it undefined, not false", async () => {
 		writeSettingsFile("QUICKCHR_SECURE_LOGIN=false\n");
 		const { flags } = parseFlags([]);
-		expect(await resolveSecureLoginFlag(flags)).toBeUndefined();
+		expect(await resolveSecureLoginFlag(flags, true)).toBeUndefined();
+	});
+
+	test("applySetting=false suppresses the setting — the closed-window case (#176)", async () => {
+		// `quickchr start <booted-name>` with the setting on must not become a request
+		// to provision a booted guest, which PROVISIONING_WINDOW_CLOSED would refuse.
+		writeSettingsFile("QUICKCHR_SECURE_LOGIN=true\n");
+		const { flags } = parseFlags([]);
+		expect(await resolveSecureLoginFlag(flags, false)).toBeUndefined();
+	});
+
+	test("an explicit flag still wins when the setting is suppressed", async () => {
+		expect(await resolveSecureLoginFlag(parseFlags(["--secure-login"]).flags, false)).toBe(true);
+		expect(await resolveSecureLoginFlag(parseFlags(["--no-secure-login"]).flags, false)).toBe(false);
 	});
 });
