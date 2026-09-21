@@ -1098,5 +1098,25 @@
 		"planned": 1,
 		"sha": "1a2da7318f7a79a3b2811fcf3b59f7f43c938e73",
 		"ts": "2026-09-20T23:51:02.981Z"
+	},
+	"35547108826": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"windows-x86|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 181,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			}
+		},
+		"planned": 1,
+		"sha": "27875cb1356dd6bfbaa621f599be467f03918dde",
+		"ts": "2026-09-21T00:18:44.032Z"
 	}
 }
