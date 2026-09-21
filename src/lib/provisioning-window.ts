@@ -70,15 +70,38 @@ export interface ProvisioningAsk {
 	satisfied: boolean;
 }
 
-/** Normalized device-mode selection, order-independent, for comparing two requests. */
-function deviceModeKey(options?: DeviceModeOptions): string {
+/** A device-mode request flattened to `setting -> value`: `mode` plus one entry per
+ *  feature, normalized and order-independent. Empty when nothing is being asked for. */
+function deviceModeSelection(options?: DeviceModeOptions): Record<string, string> {
 	const resolved = resolveDeviceModeOptions(options);
-	if (!shouldApplyDeviceMode(resolved)) return "";
-	const features = Object.entries(resolved.features)
-		.map(([name, value]) => `${name}=${value}`)
-		.sort()
-		.join(" ");
-	return `mode=${resolved.mode ?? ""} ${features}`.trim();
+	if (!shouldApplyDeviceMode(resolved)) return {};
+	const selection: Record<string, string> = {};
+	if (resolved.mode) selection.mode = resolved.mode;
+	for (const [feature, value] of Object.entries(resolved.features)) {
+		selection[feature] = value;
+	}
+	return selection;
+}
+
+/** Does the applied record already carry every setting this request names?
+ *
+ *  **Subset, not equality**, because the record is cumulative and the request is not.
+ *  A device-mode update moves only the settings it names, so a machine that took
+ *  `--device-mode-enable container` and later `--device-mode-disable smb` has a record
+ *  of all three settings — and an exact comparison then refuses the very
+ *  `--device-mode-enable container` that a script has been passing on every start
+ *  since before the second change, naming a `quickchr set` command that is a no-op.
+ *  Every field the caller asked about matches; the fields they did not mention are
+ *  not theirs to match.
+ *
+ *  A field that is absent from the record, or present with a different value, is
+ *  still pending — this loosens what counts as equal, not what counts as applied. */
+function deviceModeSatisfiedBy(
+	applied: Record<string, string>,
+	requested: Record<string, string>,
+): boolean {
+	const entries = Object.entries(requested);
+	return entries.length > 0 && entries.every(([setting, value]) => applied[setting] === value);
 }
 
 function licenseLevelOf(license: LicenseInput): string {
@@ -138,12 +161,13 @@ export function classifyProvisioningRequest(
 		});
 	}
 
-	const requestedDeviceMode = deviceModeKey(request.deviceMode);
-	if (requestedDeviceMode) {
+	const requestedDeviceMode = deviceModeSelection(request.deviceMode);
+	if (Object.keys(requestedDeviceMode).length > 0) {
 		asks.push({
 			step: "deviceMode",
 			description: `device-mode (${formatDeviceModeSelection(resolveDeviceModeOptions(request.deviceMode))})`,
-			satisfied: applied.has("deviceMode") && deviceModeKey(state.deviceMode) === requestedDeviceMode,
+			satisfied: applied.has("deviceMode")
+				&& deviceModeSatisfiedBy(deviceModeSelection(state.deviceMode), requestedDeviceMode),
 		});
 	}
 

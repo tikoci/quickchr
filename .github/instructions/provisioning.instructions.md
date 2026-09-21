@@ -87,6 +87,17 @@ cannot perform on itself. quickchr owns that button; a tool that reaches a route
 the network does not and never will. Whatever the general "apply provisioning later"
 story becomes, the part that needs a power cycle can only live in quickchr.
 
+**Satisfaction is a subset test, not equality — because the record is cumulative and
+the request is not.** A machine that took `--device-mode-enable container` and later
+`--device-mode-disable smb` has a record of all three settings. Comparing the whole
+record against a request then refuses the very `--device-mode-enable container` a
+script has been passing on every start since before the second change, and names a
+`quickchr set` command that is a no-op. `classifyProvisioningRequest()` therefore
+checks every setting the request *names* against the record, and ignores the ones it
+does not. This loosens what counts as equal, never what counts as applied: a setting
+missing from the record, or present with the other value, is still pending, and
+`applied.has("deviceMode")` still gates the whole comparison.
+
 **A post-boot step records itself.** `setDeviceMode()` adds `deviceMode` to
 `provisioning.steps` (via `recordProvisioningStep`) and folds the applied selection
 into `state.deviceMode` rather than overwriting it. Both halves matter: the step record
@@ -109,12 +120,16 @@ fail on exactly the machines the route was written for (reproduced on CHR 7.24.4
 `resolveAuth(state).header`. Any new post-boot provisioning path inherits the same
 question — and `state.user` is not the answer to it until the user step has run.
 
-**A post-boot apply takes `.start-lock`.** `setDeviceMode()` terminates QEMU, spawns a
+**A post-boot apply takes `.start-lock`, and re-reads state under it.** `setDeviceMode()` terminates QEMU, spawns a
 replacement and rewrites `machine.json` — that is a relaunch, and it holds the same
 lock every other relaunch does. Without it a concurrent `start` spawns a second QEMU
 into the power-cycle window and both persist over each other. The applicability check
 goes *inside* the lock: it has to hold for the operation, not for the instant it was
-made.
+made. So does a `refreshMachineState()` — a `ChrInstance` closes over one snapshot
+taken when the handle was created, and a library consumer can hold that handle across
+another process's stop/start. `state.pid` is the sharp end: stale, it is either a
+process that has exited (a false `MACHINE_STOPPED`) or one the OS has since reused,
+which `hardRebootMachine()` would then terminate.
 
 **RouterOS reports device-mode as strings.** `GET /rest/system/device-mode` answers
 `"container": "true"`, not `true`. A reader that tests `value === true` finds nothing

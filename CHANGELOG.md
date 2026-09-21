@@ -87,6 +87,19 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   The first-boot path still passes factory admin explicitly, because `state.user` is
   written at `add()` and names an account that does not exist yet. (#176)
 
+- A device-mode option a machine already has is recognised as applied even when the
+  record has grown since. The comparison required the stored record to equal the
+  request, but the record is cumulative and a request is not: a machine that took
+  `--device-mode-enable container` and later `--device-mode-disable smb` then refused
+  the `--device-mode-enable container` a script had been passing on every start, and
+  pointed at a `quickchr set` command that would have done nothing. Every setting the
+  request names is checked; the ones it does not name are not compared. (#176)
+
+- `setDeviceMode()` re-reads `machine.json` under the lock. A `ChrInstance` closes over
+  the state it was created with, so a handle held across another process's stop/start
+  carried a stale `pid` — a false `MACHINE_STOPPED`, or a power cycle aimed at whatever
+  the OS had since given that pid to. (#176)
+
 - `setDeviceMode()` holds `.start-lock` for the whole operation. It terminates QEMU,
   spawns a replacement and rewrites `machine.json` — a relaunch, and previously the
   only one that did not take the lock, so a concurrent `start` could spawn a second

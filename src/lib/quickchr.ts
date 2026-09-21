@@ -810,6 +810,14 @@ function createInstance(state: MachineState): ChrInstance {
 			const lockPath = join(state.machineDir, ".start-lock");
 			acquireLock(lockPath);
 			try {
+				// Re-read under the lock before anything reads `state`. This handle's
+				// snapshot is taken once, at `createInstance`, and a library consumer can
+				// hold it across another process's stop/start — after which `state.pid`
+				// names a process that has exited (a false MACHINE_STOPPED) or, worse, one
+				// the OS has since reused, which `hardRebootMachine()` would then
+				// terminate. `state.provisioning` and `state.deviceMode` go stale the same
+				// way, and both feed `appliedDeviceModeRecord()`.
+				refreshMachineState(state);
 				// Inside the lock: the applicability check has to hold for the operation,
 				// not merely at the moment it was made.
 				assertDeviceModeApplicable(state);
@@ -1413,6 +1421,27 @@ function recordProvisioning(state: MachineState, steps: ProvisioningStep[]): voi
 		saveMachine(current);
 	}
 	state.provisioning = record;
+}
+
+/** Re-read `machine.json` into an existing state object, in place.
+ *
+ *  **In place** because `createInstance` closes over this object and exposes it as
+ *  `instance.state`: rebinding a local would leave the caller's view stale, and every
+ *  other method on the handle would keep reading the old snapshot.
+ *
+ *  Keys the reloaded record does not have are deleted rather than left behind.
+ *  `clean()` removes `provisioning`, `user` and `disableAdmin` precisely because they
+ *  stopped being true, so a leftover would be read as fact by the next caller —
+ *  `appliedDeviceModeRecord()` reads exactly one of them. A plain `Object.assign`
+ *  cannot express a field that went away. */
+export function refreshMachineState(state: MachineState): void {
+	const fresh = loadMachine(state.name);
+	if (!fresh) return;
+	const mutable = state as unknown as Record<string, unknown>;
+	for (const key of Object.keys(mutable)) {
+		if (!(key in fresh)) delete mutable[key];
+	}
+	Object.assign(state, fresh);
 }
 
 /** Add one step to the provisioning record, keeping whatever is already there.

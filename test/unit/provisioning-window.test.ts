@@ -221,6 +221,42 @@ describe("assertProvisioningWindow", () => {
 			.toThrow(/has already booted/);
 	});
 
+	test("a cumulative record still satisfies the request that built part of it", () => {
+		// The regression the cumulative merge introduced, in the shape a user meets it:
+		// `set --device-mode-enable container` then `set --device-mode-disable smb`
+		// leaves a record of all three settings, and exact comparison then refused the
+		// `--device-mode-enable container` a script had been passing on every start
+		// since before the second change — naming a `quickchr set` command that was a
+		// no-op, since container was already enabled.
+		const state = machine({
+			lastStartedAt: new Date().toISOString(),
+			provisioning: { at: new Date().toISOString(), steps: ["deviceMode"] },
+			deviceMode: { mode: "rose", enable: ["container"], disable: ["smb"] },
+		});
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "rose", enable: ["container"] } }))
+			.not.toThrow();
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "rose", disable: ["smb"] } }))
+			.not.toThrow();
+	});
+
+	test("subset loosens what counts as equal, not what counts as applied", () => {
+		// A setting the record does not mention is still pending, and so is one it
+		// mentions with the other value. Only the fields the caller asked about are
+		// matched — the ones they did not mention are not theirs to match.
+		const state = machine({
+			lastStartedAt: new Date().toISOString(),
+			provisioning: { at: new Date().toISOString(), steps: ["deviceMode"] },
+			deviceMode: { mode: "rose", enable: ["container"], disable: ["smb"] },
+		});
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "rose", enable: ["ipsec"] } }))
+			.toThrow(/has already booted/);
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "rose", enable: ["smb"] } }))
+			.toThrow(/has already booted/);
+		// The mode is part of every request, so a different one is a real change.
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "basic", enable: ["container"] } }))
+			.toThrow(/has already booted/);
+	});
+
 	test("device-mode comparison is order-independent but not value-blind", () => {
 		const state = machine({
 			lastStartedAt: new Date().toISOString(),
