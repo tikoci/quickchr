@@ -46,10 +46,11 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Changed
 
-- The `secure-login` *setting* applies when a machine is created, not when an existing
-  one is restarted. It is a creation default; carrying it into a restart turned a plain
+- The `secure-login` *setting* applies on a machine's first boot, not on a start whose
+  provisioning window has closed. It is a creation default; carrying it into a restart turned a plain
   `quickchr start <name>` — and every machine in `start --all` — into a request to
-  provision a booted guest. An explicit `--secure-login` flag is unchanged. (#176)
+  provision a booted guest. A machine that was `add`ed and never started still gets it.
+  An explicit `--secure-login` flag is unchanged. (#176)
 
 ## [0.4.8] — 2026-09-21
 
