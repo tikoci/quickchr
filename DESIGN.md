@@ -747,16 +747,26 @@ Three separate defects converged on that one silence.
 
 #### What the transports actually do
 
-Measured on QEMU 11.1.1, macOS Intel, CHR 7.24.4, rather than reasoned about:
+Measured on QEMU 11.1.1, macOS Intel, CHR 7.24.4, rather than reasoned about — except
+the `listen-connect` column, measured later on `windows-x86`/TCG, CHR 7.24.4 (see below):
 
 | | `mcast` | `listen-connect` | `dgram` over unix |
 |---|---|---|---|
 | start order | any | listener first | **either end first** |
-| frames verified | broken on macOS | (was unreachable) | ICMP both ways, plus MNDP and IPv6 ND |
+| frames verified | broken on macOS | ICMP both ways | ICMP both ways, plus MNDP and IPv6 ND |
 | host ports | a multicast group | a TCP port | none |
 | send call | unconnected `sendto()`, `AF_INET` | TCP `send()` | `send()`, `AF_UNIX` |
 | machines | any number | 2 | 2 |
 | where a failure lives | host kernel / sandbox policy | quickchr's own registry | quickchr's own registry |
+
+`listen-connect` read `(was unreachable)` in that row until #172. It is the Windows
+default, so it is the one transport whose first end-to-end proof had to come from CI:
+run [35545697945](https://github.com/tikoci/quickchr/actions/runs/35545697945) created
+the link with no `--mode` at all, started slot 0 and slot 1 in that order, and pinged
+both ways over it. The QEMU side of the pair is not exotic — `network-mac.test.ts` had
+long covered the raw `socket-listen`/`socket-connect` specifiers on Windows — but the
+named-socket path around it (persisted mode, slot roles, auto-allocated port) had never
+been exercised on a real boot anywhere.
 
 The decisive point is not "TCP works on macOS" — it is **which silence quickchr can
 see.** A TCP pair does not fail loudly either: `connect=` to a dead port runs on with
