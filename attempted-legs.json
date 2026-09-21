@@ -1300,5 +1300,55 @@
 		"planned": 2,
 		"sha": "e5b90c811748c50897f7f1ae327c65dbb8699531",
 		"ts": "2026-09-21T02:19:17.136Z"
+	},
+	"35591875844": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "schedule",
+		"incomplete": {
+			"linux-arm64|stable": {
+				"job_matched": false,
+				"platform": "linux-arm64",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "not-started",
+				"why": "no job, no checkpoint — the leg never started"
+			},
+			"linux-x86|stable": {
+				"job_matched": false,
+				"platform": "linux-x86",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "not-started",
+				"why": "no job, no checkpoint — the leg never started"
+			},
+			"macos-arm64|stable": {
+				"job_matched": false,
+				"platform": "macos-arm64",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "not-started",
+				"why": "no job, no checkpoint — the leg never started"
+			},
+			"macos-x86|stable": {
+				"job_matched": false,
+				"platform": "macos-x86",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "not-started",
+				"why": "no job, no checkpoint — the leg never started"
+			},
+			"windows-x86|stable": {
+				"job_matched": false,
+				"platform": "windows-x86",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "not-started",
+				"why": "no job, no checkpoint — the leg never started"
+			}
+		},
+		"planned": 5,
+		"sha": "e5b90c811748c50897f7f1ae327c65dbb8699531",
+		"ts": "2026-09-21T11:31:35.336Z"
 	}
 }
