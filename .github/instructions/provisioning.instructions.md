@@ -1,5 +1,5 @@
 ---
-applyTo: "src/lib/provision.ts,src/lib/exec.ts,src/lib/qemu.ts,src/lib/license.ts,src/lib/device-mode.ts,src/lib/console.ts,src/lib/guest-snapshot.ts,test/integration/**"
+applyTo: "src/lib/provision.ts,src/lib/provisioning-window.ts,src/lib/exec.ts,src/lib/qemu.ts,src/lib/license.ts,src/lib/device-mode.ts,src/lib/console.ts,src/lib/guest-snapshot.ts,test/integration/**"
 ---
 
 # Provisioning & RouterOS Debugging Instructions
@@ -15,6 +15,37 @@ Do NOT add workarounds for `expired: true` on REST paths. If early REST response
 return unexpected data, the root cause is a **startup timing race** — not the expired
 flag. Identify the actual condition (timing, RouterOS version, specific endpoint) and
 fix that specifically.
+
+## The provisioning window closes at first boot — and nothing may drop an option silently
+
+`provision()` and everything `_provisionInstance` calls assume the guest holds
+RouterOS' default configuration: the first account, a factory device-mode, a package
+set nobody has touched. That assumption is only sound before the guest has booted, so
+provisioning runs inside a **window** that closes at first boot — not at `add`. A
+machine created with no provisioning flags can still take them on its first `start`.
+
+Two rules, both load-bearing (#176):
+
+- **The gate is `isProvisioningWindowOpen()`** (`src/lib/provisioning-window.ts`), not
+  `!state.lastStartedAt`. `lastStartedAt` is stamped right after `spawnQemu`, before
+  the guest is known to have booted and before provisioning runs — it answers "has
+  QEMU been launched", which is a different question with usually the same answer.
+  `clean()` is where they diverge: the disk is factory-fresh again, so the window
+  genuinely reopens. The gate therefore reads `state.provisioning` (stamped by
+  `_provisionInstance` on success, with the steps that ran) and falls back to
+  `lastStartedAt` for machines predating that field.
+- **An option outside the window is refused, never dropped.** `start()` used to pass
+  `undefined` in place of the caller's provisioning options on every path but a first
+  boot, so all seven were discarded in silence: no warning, no error, normal boot
+  time, and `--device-mode-enable container` left `container` false. It now throws
+  `PROVISIONING_WINDOW_CLOSED` naming each option and where it can still be applied.
+  An option that state already records is a no-op instead, so a script passing the
+  same flags on every start is not punished for asking for what it already has.
+
+Note what the record does **not** claim: `provisioning.steps` lists what quickchr
+applied, not what is in the guest. A step absent from it was not applied *by
+quickchr* — weaker than "not present", and deliberately so, since quickchr cannot read
+the guest without booting it.
 
 ## RouterOS Post-Boot REST Race
 
@@ -141,10 +172,11 @@ boot forensics (`src/lib/guest-snapshot.ts`). Rules, all measured on 7.21.5/7.23
   `clean()` clears the guest-side credential facts it invalidates — the stored
   instance credentials, `state.user`, `state.managedSshKey`, `state.disableAdmin`,
   and the keypair under `<machineDir>/ssh/` — so credential resolution lands on
-  factory admin on its own (#79). It does **not** re-provision: `start()` only
-  re-applies stored provisioning options on a machine that never started
-  (`lastStartedAt` unset), so a cleaned machine stays factory-fresh until the
-  provisioning options are passed again.
+  factory admin on its own (#79). Since #176 it also clears the **provisioning gate**
+  (`state.provisioning` and `state.lastStartedAt`, recording `cleanedAt` in their
+  place), so the retained provisioning *intent* is applied again on the next
+  `start()`. Budget for it: a cleaned machine's next start re-provisions and costs
+  what a first boot costs, not what a bare restart costs.
 
 ### A serial login costs ~11 s — budget it separately from the command
 

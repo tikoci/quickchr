@@ -186,9 +186,12 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			await instance.stop();
 			await instance.clean();
 
-			// The disk that held `cleanuser` is gone and nothing re-provisions it,
-			// so the credential facts must go with it — otherwise every REST call,
-			// exec, and SCP after this authenticates as a user RouterOS erased (#79).
+			// The disk that held `cleanuser` is gone, so the credential facts must go
+			// with it — otherwise every REST call, exec, and SCP after this
+			// authenticates as a user RouterOS erased (#79). Note clean() reopens the
+			// provisioning window (#176), so what keeps `cleanuser` from coming back on
+			// the next start is that its *intent* was cleared here too — an explicit
+			// user is guest state, not a retained option like packages or secureLogin.
 			expect(instance.state.user).toBeUndefined();
 			expect(instance.state.managedSshKey).toBeUndefined();
 
@@ -232,6 +235,58 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 			await cleanupMachine("integration-clean-test");
 		}
 	}, bootTestTimeout({ boots: 2 })); // provisioned boot + post-clean() relaunch (#79)
+
+	test("clean() reopens the provisioning window — retained intent is re-applied live", async () => {
+		// The state-only tests prove the gate reopens; only a real CHR proves the next
+		// boot actually *provisions* again — that createUser runs, authenticates, and
+		// the second boot survives it (#176). `secureLogin` is the cheapest retained
+		// intent that does real provisioning work: no package download, no
+		// power-cycle, but a managed account created and verified against the guest.
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const NAME = "integration-clean-rerun";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			await cleanupMachine(NAME);
+			instance = await QuickCHR.start({
+				...imageTarget(),
+				background: true,
+				name: NAME,
+				secureLogin: true,
+			});
+
+			const first = instance.state.user?.name;
+			expect(first).toBeDefined();
+			expect(instance.state.provisioning?.steps).toContain("secureLogin");
+
+			await instance.stop();
+			await instance.clean();
+
+			// clean() keeps secureLogin as intent and clears the guest-side account it
+			// erased, so the machine is factory-fresh with a pending managed login.
+			expect(instance.state.secureLogin).toBe(true);
+			expect(instance.state.user).toBeUndefined();
+			expect(instance.state.provisioning).toBeUndefined();
+
+			// A *plain* start — no options — must re-provision from that intent.
+			const relaunched = await QuickCHR.start({ name: NAME });
+			instance = relaunched;
+
+			expect(relaunched.state.provisioning?.steps).toContain("secureLogin");
+			const recreated = relaunched.state.user?.name;
+			expect(recreated).toBeDefined();
+
+			// The account exists on the guest, not just in machine.json: authenticate
+			// as it. resolveAuth() prefers state.user, so instance.rest() is that check.
+			const resource = await relaunched.rest("/system/resource") as { "board-name"?: string };
+			expect(resource["board-name"]).toStartWith("CHR");
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine(NAME);
+		}
+	}, bootTestTimeout({ boots: 2 })); // provisioned boot + re-provisioned post-clean() boot
 });
 
 describe.skipIf(SKIP)("instance channels — serial console", () => {

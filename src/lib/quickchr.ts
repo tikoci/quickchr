@@ -20,6 +20,7 @@ import type {
 	NetworkTopologyEntry,
 	PlatformInfo,
 	PortMapping,
+	ProvisioningStep,
 	QgaCommand,
 	ServiceEndpoint,
 	SnapshotInfo,
@@ -86,6 +87,10 @@ import {
 	verifyDeviceMode,
 	waitForDeviceModeApi,
 } from "./device-mode.ts";
+import {
+	assertProvisioningWindow,
+	isProvisioningWindowOpen,
+} from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
@@ -593,8 +598,13 @@ function createInstance(state: MachineState): ChrInstance {
 			// (anchored by the "clean() resets disk to factory defaults" integration
 			// test). `disableAdmin` goes with them because it is read as a live fact
 			// about the guest (buildDescriptor's `disableAdminLockout`) and a fresh
-			// image has admin enabled again. Provisioning *intent* — packages,
-			// deviceMode, secureLogin — is not guest state and survives.
+			// image has admin enabled again. `licenseLevel` goes with them for the same
+			// reason: it is a read-back of the license the erased disk held, not an
+			// intent — quickchr never persists the license *input* — so leaving it
+			// behind would report a level the fresh image does not have. Provisioning
+			// *intent* — packages, deviceMode, secureLogin — is not guest state and
+			// survives, and is what the next `start()` re-applies now that the window
+			// reopens.
 			deleteInstanceCredentials(state.name);
 			// The managed keypair authenticated to the account factory reset erased,
 			// so it is dead credential material sitting in the machine dir. Removing
@@ -603,7 +613,13 @@ function createInstance(state: MachineState): ChrInstance {
 			// (verified locally), so a leftover key would break `installSshKey()`.
 			rmSync(join(state.machineDir, "ssh"), { recursive: true, force: true });
 
-			// Update state
+			// Update state. `provisioning` and `lastStartedAt` go with the credentials:
+			// both describe a guest that no longer exists, and together they are what
+			// closes the provisioning window. Leaving them behind is what stopped a cleaned
+			// machine from ever being provisioned again — the disk was factory-fresh and
+			// `start()` still refused to provision it (#176). `cleanedAt` keeps the
+			// forensic clue that the timestamp carried.
+			const cleanedAt = new Date().toISOString();
 			const current = loadMachine(state.name);
 			if (current) {
 				current.status = "stopped";
@@ -611,6 +627,10 @@ function createInstance(state: MachineState): ChrInstance {
 				current.user = undefined;
 				current.managedSshKey = undefined;
 				current.disableAdmin = undefined;
+				current.provisioning = undefined;
+				current.lastStartedAt = undefined;
+				current.licenseLevel = undefined;
+				current.cleanedAt = cleanedAt;
 				saveMachine(current);
 			}
 			state.status = "stopped";
@@ -618,6 +638,10 @@ function createInstance(state: MachineState): ChrInstance {
 			state.user = undefined;
 			state.managedSshKey = undefined;
 			state.disableAdmin = undefined;
+			state.provisioning = undefined;
+			state.lastStartedAt = undefined;
+			state.licenseLevel = undefined;
+			state.cleanedAt = cleanedAt;
 		},
 
 		async monitor(command: string): Promise<string> {
@@ -1337,6 +1361,19 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 	};
 }
 
+/** Persist what provisioning landed on the current disk, in state and on disk.
+ *  A run with nothing to do still records — an empty `steps` says "provisioning ran
+ *  and had nothing to apply", which is a different fact from never having run. */
+function recordProvisioning(state: MachineState, steps: ProvisioningStep[]): void {
+	const record = { at: new Date().toISOString(), steps };
+	const current = loadMachine(state.name);
+	if (current) {
+		current.provisioning = record;
+		saveMachine(current);
+	}
+	state.provisioning = record;
+}
+
 /** Apply a device-mode change to a running CHR instance (may require hard power-cycle).
  *  Extracted from _provisionInstance so setDeviceMode() can reuse the same logic. */
 async function applyDeviceMode(
@@ -1696,11 +1733,27 @@ export class QuickCHR {
 		// Check if machine already exists
 		const existing = loadMachine(name);
 		if (existing) {
+			// Both paths below re-launch a guest quickchr did not just create, so neither
+			// can run provisioning. Refuse before either of them: dropping the options in
+			// silence is what #176 removes, and the running-machine path is the quieter of
+			// the two — it returns a handle without so much as a boot.
+			const satisfied = assertProvisioningWindow(existing, {
+				installAllPackages: opts.installAllPackages,
+				packages: opts.packages,
+				deviceMode: opts.deviceMode,
+				user: opts.user,
+				disableAdmin: opts.disableAdmin,
+				license: opts.license,
+				secureLogin: opts.secureLogin,
+			});
+			for (const ask of satisfied) {
+				(logger ?? createLogger()).status(`${ask.description} is already applied — nothing to do.`);
+			}
 			if (isMachineRunning(existing)) {
 				return createInstance(existing);
 			}
 			// First boot of add()-created machine: apply pending provisioning from stored state
-			if (!existing.lastStartedAt) {
+			if (isProvisioningWindowOpen(existing)) {
 				const pendingOpts = {
 					installAllPackages: opts.installAllPackages ?? existing.installAllPackages,
 					packages: opts.packages?.length ? opts.packages : (existing.packages.length > 0 ? existing.packages : undefined),
@@ -2052,6 +2105,9 @@ export class QuickCHR {
 		logger?: ProgressLogger,
 	): Promise<void> {
 		const log = logger ?? createLogger();
+		// What actually ran, persisted at the end as MachineState.provisioning — the
+		// record that says this guest has been provisioned, and with what (#176).
+		const applied: ProvisioningStep[] = [];
 		const resolvedDeviceMode = resolveDeviceModeOptions(opts.deviceMode);
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 		assertProvisioningSupportedVersion(machineState.version, describeProvisioningOperation({
@@ -2082,6 +2138,7 @@ export class QuickCHR {
 				saveMachine(current);
 			}
 			machineState.packages = installed;
+			applied.push("packages");
 		} else if (opts.packages && opts.packages.length > 0) {
 			const installed = await installPackages(opts.packages, machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
 			await waitForBootWithProgress(instance, bootTimeout, log, "  Waiting for CHR to reboot after package installation...");
@@ -2091,10 +2148,12 @@ export class QuickCHR {
 				saveMachine(current);
 			}
 			machineState.packages = installed;
+			applied.push("packages");
 		}
 
 		if (hasDeviceModeProvisioning) {
 			await applyDeviceMode(instance, machineState, resolvedDeviceMode, launchConfig, log);
+			applied.push("deviceMode");
 		}
 
 		if (opts.license) {
@@ -2123,6 +2182,7 @@ export class QuickCHR {
 					saveMachine(current);
 				}
 				machineState.licenseLevel = actualLevel as LicenseLevel;
+				applied.push("license");
 				log.status(`  License applied: free → ${actualLevel}`);
 			} catch (e) {
 				if (e instanceof QuickCHRError) throw e;
@@ -2134,6 +2194,9 @@ export class QuickCHR {
 		}
 
 		if (opts.user || opts.disableAdmin || opts.secureLogin === true) {
+			if (opts.user) applied.push("user");
+			if (opts.disableAdmin) applied.push("disableAdmin");
+			if (opts.secureLogin === true) applied.push("secureLogin");
 			const result = await provision(chrPorts.http, machineState.name, opts.user, opts.disableAdmin, opts.secureLogin, log, machineState.machineDir, machineState.portBase, chrPorts.ssh);
 			if (result.user || result.managedSshKey) {
 				// Persist user info + managed SSH key fact in state (password placeholder —
@@ -2161,6 +2224,12 @@ export class QuickCHR {
 				}
 			}
 		}
+
+		// Stamped only here, after every requested step returned. A run that throws
+		// leaves the record absent, which is honest — the guest is half-provisioned and
+		// quickchr should not claim otherwise. (Making that case *retryable* is the
+		// remaining half of #176; the step list is what a retry will read.)
+		recordProvisioning(machineState, applied);
 	}
 
 	/** Re-launch an existing stopped machine. */

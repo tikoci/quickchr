@@ -222,10 +222,27 @@ export async function applyAccelFlag(flags: Record<string, string | boolean | st
 
 /** Resolve --secure-login/--no-secure-login, falling back to the secure-login setting
  *  only when neither flag was passed. Shared by cmdAdd, cmdStart, and cmdStart's
- *  --all bulk-restart path. */
-export async function resolveSecureLoginFlag(flags: Record<string, string | boolean | string[]>): Promise<boolean | undefined> {
+ *  --all bulk-restart path.
+ *
+ *  `applySetting` is **required**, and deliberately so. The setting is a *first-boot*
+ *  default: carrying it into the start of a machine whose provisioning window has
+ *  closed turns `quickchr start <name>` — and every such machine in `start --all` —
+ *  into a request to provision a booted guest, which now refuses out loud (#176).
+ *  Callers pass the target's own window state, not "does this machine exist": a
+ *  machine that was `add`ed and never started is still on its first boot and keeps
+ *  the setting. An explicit flag always wins over both.
+ *
+ *  Making the argument required is the guard. An earlier pass left `cmdStart`'s
+ *  single-target call on the defaulted form while believing it had been updated, so
+ *  the restart regression stayed live behind a fix that had landed in `cmdAdd`
+ *  instead. A missing argument is now a type error rather than a silent default. */
+export async function resolveSecureLoginFlag(
+	flags: Record<string, string | boolean | string[]>,
+	applySetting: boolean,
+): Promise<boolean | undefined> {
 	if (flags["secure-login"] === false) return false;
 	if (flagBool(flags, "secure-login")) return true;
+	if (!applySetting) return undefined;
 	const { resolveSetting } = await import("../lib/settings.ts");
 	return resolveSetting("secure-login").value === true ? true : undefined;
 }
@@ -662,7 +679,8 @@ async function cmdAdd(argv: string[]) {
 		opts.user = { name: uname, password: password ?? "" };
 	}
 	opts.disableAdmin = flagBool(flags, "disable-admin");
-	opts.secureLogin = await resolveSecureLoginFlag(flags);
+	// `add` always creates a machine, so its provisioning window is open by definition.
+	opts.secureLogin = await resolveSecureLoginFlag(flags, true);
 
 	const state = await QuickCHR.add(opts);
 
@@ -1273,14 +1291,17 @@ async function cmdStart(argv: string[]) {
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const { statusIcon, link, bold, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 		const timeoutExtra = await resolveTimeoutExtraMs(flags);
-		const secureLogin = await resolveSecureLoginFlag(flags);
 		const stopped = QuickCHR.list().filter((m) => m.status !== "running");
 		if (stopped.length === 0) {
 			console.log("No stopped instances.");
 			return;
 		}
+		const { isProvisioningWindowOpen } = await import("../lib/provisioning-window.ts");
 		for (const m of stopped) {
 			console.log(`Starting ${bold(m.name)}...`);
+			// Per machine, not per invocation: a never-started machine in this batch is
+			// still entitled to the secure-login setting on its first boot.
+			const secureLogin = await resolveSecureLoginFlag(flags, isProvisioningWindowOpen(m));
 			const instance = await QuickCHR.start({ name: m.name, background: true, timeoutExtra, secureLogin });
 			const creds = await resolveDisplayCredentials(instance.state);
 			console.log(`${statusIcon("running")} ${bold(instance.name)}  REST: ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}  SSH: ${formatSshCommand(creds.user, instance.sshPort)}`);
@@ -1372,7 +1393,16 @@ async function cmdStart(argv: string[]) {
 	}
 
 	opts.disableAdmin = flagBool(flags, "disable-admin");
-	opts.secureLogin = await resolveSecureLoginFlag(flags);
+	{
+		const { QuickCHR } = await import("../lib/quickchr.ts");
+		const { isProvisioningWindowOpen } = await import("../lib/provisioning-window.ts");
+		const target = opts.name ? QuickCHR.get(opts.name) : null;
+		// No machine yet, or one that was added and never booted: still a first boot,
+		// so the setting applies. Only a closed window suppresses it — otherwise a
+		// plain `quickchr start <booted-name>` would ask to provision a booted guest
+		// and be refused.
+		opts.secureLogin = await resolveSecureLoginFlag(flags, !target || isProvisioningWindowOpen(target.state));
+	}
 
 	// Background default: true. Explicitly foreground only with --fg / --foreground / --no-background / --no-bg.
 	const wantFg =
@@ -2976,9 +3006,16 @@ Options:
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
   --device-mode <m>     Set device-mode on first boot: rose|advanced|basic|home|auto|skip
+  --device-mode-enable <f>  Set one or more device-mode flags to yes (e.g. container)
+  --device-mode-disable <f> Set one or more device-mode flags to no
+  --no-device-mode      Skip device-mode provisioning entirely
   --add-network <spec>  Add a network NIC (repeatable). Specs: user, shared, bridged:<if>,
                         socket::<name>, tap:<if>. Default: single user NIC.
-  --no-network          Start with no NICs (headless)`);
+  --no-network          Start with no NICs (headless)
+
+Provisioning flags apply on the machine's **first boot** — whether they are given
+here or on that first 'start'. After the guest has booted they are refused rather
+than ignored; 'quickchr clean <name>' resets the disk and reopens the window.`);
 			break;
 		case "setup":
 			console.log(`quickchr setup
@@ -3067,6 +3104,11 @@ Options:
   --device-mode-enable <f>  Set one or more device-mode flags to yes
   --device-mode-disable <f> Set one or more device-mode flags to no
   --no-device-mode      Skip device-mode provisioning entirely
+
+Provisioning flags (packages, login, device-mode, license) apply only on a machine's
+**first boot**. On a machine that has booted they are refused, naming where the
+change can still be made — 'quickchr clean <name>' resets the disk and reopens the
+window for all of them.
   --timeout-extra <s>, -T <s>  Add extra seconds to the auto-computed boot timeout
   --dry-run             Print what would run without starting`);
 			break;

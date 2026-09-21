@@ -250,6 +250,31 @@ export interface MachineConfig {
 	bootDiskFormat?: BootDiskFormat;
 }
 
+/** One provisioning step, as recorded on {@link ProvisioningRecord.steps}. */
+export type ProvisioningStep =
+	| "packages"
+	| "deviceMode"
+	| "license"
+	| "user"
+	| "disableAdmin"
+	| "secureLogin";
+
+/**
+ * What provisioning actually landed on the *current* guest disk (#176).
+ *
+ * Absent means the guest has never been provisioned. `clean()` clears it along with
+ * the disk, which is what reopens the provisioning window — `lastStartedAt` cannot
+ * carry this, because it records that QEMU was launched, not that the guest was
+ * configured, and the two come apart at every `clean()`.
+ */
+export interface ProvisioningRecord {
+	/** ISO timestamp of the provisioning run that completed. */
+	at: string;
+	/** Steps that ran in that run. Not a full inventory of the guest — a step absent
+	 *  here was not applied *by quickchr*, which is a weaker claim than "not present". */
+	steps: ProvisioningStep[];
+}
+
 /**
  * Facts about the SSH keypair quickchr generated and installed for its managed
  * user during provisioning. Persisted on {@link MachineState} so consumers (the
@@ -272,7 +297,14 @@ export interface ManagedSshKey {
 
 export interface MachineState extends MachineConfig {
 	createdAt: string;
+	/** Last QEMU spawn. Stamped before the guest is known to have booted, so it says
+	 *  nothing about whether the guest was configured — see {@link provisioning}.
+	 *  Cleared by `clean()`, which replaces the disk that boot belonged to. */
 	lastStartedAt?: string;
+	/** Provisioning that landed on the current disk, if any (#176). */
+	provisioning?: ProvisioningRecord;
+	/** Last `clean()`, which reset the disk to the factory image. */
+	cleanedAt?: string;
 	status: "stopped" | "running" | "error";
 	pid?: number;
 	/** Path to the machine directory. */
@@ -838,6 +870,10 @@ export type ErrorCode =
 	| "INVALID_NETWORK"
 	| "INVALID_FORWARD_SPEC"
 	| "PROVISIONING_VERSION_UNSUPPORTED"
+	// A provisioning option handed to a machine whose provisioning window has closed:
+	// the guest has booted, so quickchr cannot assume it still holds the default
+	// configuration provisioning expects. Never silently dropped (#176).
+	| "PROVISIONING_WINDOW_CLOSED"
 	| "INSUFFICIENT_DISK_SPACE"
 	| "STATE_ERROR"
 	| "INVALID_SIZE_STRING"

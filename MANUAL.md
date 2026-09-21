@@ -207,10 +207,17 @@ flag. The next `start` therefore logs in as factory `admin` with an empty
 password. EFI vars are deliberately **kept** (they store boot order, not
 guest state; wiping them costs an arm64 device rescan).
 
-`clean` does not re-provision: the boot options in `machine.json`
-(`packages`, `deviceMode`, `secureLogin`) are re-applied only on a machine
-that has never started, so a cleaned machine comes back factory-fresh. Pass
-the provisioning flags again, or `remove` and re-create, to get them back.
+`clean` itself never provisions — it only resets the disk. What it does do is
+**reopen the provisioning window** (#176), so the *next* `start` re-applies the
+provisioning intent `machine.json` still holds: `packages`, `deviceMode`,
+`secureLogin`. Budget for that start accordingly; it costs what a first boot costs,
+not what a restart costs.
+
+What does **not** come back on its own is anything `clean` had to clear because it
+described the erased guest rather than an intent — `user`, `disableAdmin`,
+`licenseLevel` — and any option from a request that was *refused*, since a refused
+request is never persisted. Pass those flags again, which is why the refusal says to
+repeat the original command rather than to run a bare `start`.
 
 ### Inspection
 
@@ -844,9 +851,33 @@ port mappings work on any 7.x.
    flag only gates CLI/SSH/Winbox login, not REST.
 
 Each step is independent. A failure in step N stops further steps but
-does not roll back N–1. Re-running `start` re-applies pending
-provisioning from `machine.json` only if the machine had not been fully
-provisioned previously.
+does not roll back N–1, and the machine is left without a provisioning
+record — quickchr does not claim a half-provisioned guest was provisioned.
+
+**The provisioning window closes at the machine's first boot** — not at
+`add`. A machine created with no provisioning options can still take them
+on its first `start`, which is where they are applied from `machine.json`.
+After that boot the guest may hold configuration quickchr did not put
+there, so provisioning cannot run against it: an option passed anyway is
+**refused**, never ignored, with `PROVISIONING_WINDOW_CLOSED` naming where
+the change can still be made. An option `machine.json` already records is
+reported as already applied rather than failing, so passing the same flags
+on every start is fine.
+
+Routes that still work after the window has closed:
+
+| change | route |
+|---|---|
+| license | `quickchr set <name> --license` |
+| device-mode | `instance.setDeviceMode()` (library; power-cycles the VM) |
+| packages | `instance.installPackage()` (library; reboots the guest) |
+| anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window, at first-boot cost |
+
+`clean()` retains provisioning *intent* — packages, device-mode, managed login — so the
+next `start` re-applies those on its own. It clears `user`, `disableAdmin` and
+`licenseLevel`, which are facts about the erased guest rather than intent, and a refused
+request is never persisted. **Repeat the original command after the reset** rather than
+a bare `quickchr start <name>`, or those options are silently left out.
 
 **Always read back what we wrote.** This catches version-specific drift
 in REST responses and surfaces actionable errors instead of silent
@@ -1366,7 +1397,13 @@ stored instance credentials, `state.user`, the managed SSH keypair under
 `<machineDir>/ssh/`, and `disableAdmin` — because the accounts they named
 went with the disk. The machine comes back as a factory CHR: `admin` with
 an empty password, which is what `rest()`, `exec()`, and `inspect` resolve
-to afterwards. Nothing is re-provisioned automatically.
+to afterwards.
+
+`clean()` performs no provisioning of its own, but it does reopen the provisioning
+window: the next `start` re-applies the retained intent (`packages`, `deviceMode`,
+`secureLogin`) as a first boot would. The credential facts above are cleared rather
+than retained, so an explicit `--add-user` / `--disable-admin` — and anything from a
+request that was refused, which is never persisted — has to be passed again.
 
 ### Snapshots
 
