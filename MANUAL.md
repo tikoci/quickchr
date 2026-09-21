@@ -207,10 +207,17 @@ flag. The next `start` therefore logs in as factory `admin` with an empty
 password. EFI vars are deliberately **kept** (they store boot order, not
 guest state; wiping them costs an arm64 device rescan).
 
-`clean` does not re-provision: the boot options in `machine.json`
-(`packages`, `deviceMode`, `secureLogin`) are re-applied only on a machine
-that has never started, so a cleaned machine comes back factory-fresh. Pass
-the provisioning flags again, or `remove` and re-create, to get them back.
+`clean` itself never provisions — it only resets the disk. What it does do is
+**reopen the provisioning window** (#176), so the *next* `start` re-applies the
+provisioning intent `machine.json` still holds: `packages`, `deviceMode`,
+`secureLogin`. Budget for that start accordingly; it costs what a first boot costs,
+not what a restart costs.
+
+What does **not** come back on its own is anything `clean` had to clear because it
+described the erased guest rather than an intent — `user`, `disableAdmin`,
+`licenseLevel` — and any option from a request that was *refused*, since a refused
+request is never persisted. Pass those flags again, which is why the refusal says to
+repeat the original command rather than to run a bare `start`.
 
 ### Inspection
 
@@ -1390,7 +1397,13 @@ stored instance credentials, `state.user`, the managed SSH keypair under
 `<machineDir>/ssh/`, and `disableAdmin` — because the accounts they named
 went with the disk. The machine comes back as a factory CHR: `admin` with
 an empty password, which is what `rest()`, `exec()`, and `inspect` resolve
-to afterwards. Nothing is re-provisioned automatically.
+to afterwards.
+
+`clean()` performs no provisioning of its own, but it does reopen the provisioning
+window: the next `start` re-applies the retained intent (`packages`, `deviceMode`,
+`secureLogin`) as a first boot would. The credential facts above are cleared rather
+than retained, so an explicit `--add-user` / `--disable-admin` — and anything from a
+request that was refused, which is never persisted — has to be passed again.
 
 ### Snapshots
 

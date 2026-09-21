@@ -5,6 +5,7 @@ import {
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 } from "../../src/lib/provisioning-window.ts";
+import { QuickCHRError } from "../../src/lib/types.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
 /**
@@ -56,6 +57,20 @@ describe("provisioning window", () => {
 	});
 });
 
+/** The refusal `assertProvisioningWindow` threw, or a failure if it returned.
+ *  Mirrors `expectQuickCHRError` in download.test.ts — the sentinel is outside the
+ *  try, so a call that does not throw fails on its own terms rather than being
+ *  caught by the block meant for the refusal. */
+function refusal(state: MachineState, request: Parameters<typeof assertProvisioningWindow>[1]): QuickCHRError {
+	try {
+		assertProvisioningWindow(state, request);
+	} catch (e) {
+		expect(e).toBeInstanceOf(QuickCHRError);
+		return e as QuickCHRError;
+	}
+	throw new Error("expected assertProvisioningWindow to refuse, but it returned");
+}
+
 describe("assertProvisioningWindow", () => {
 	const booted = () => machine({ lastStartedAt: new Date().toISOString() });
 
@@ -69,16 +84,11 @@ describe("assertProvisioningWindow", () => {
 	});
 
 	test("the refusal names the option and a route that works", () => {
-		try {
-			assertProvisioningWindow(booted(), { deviceMode: { enable: ["container"] } });
-			throw new Error("expected a refusal");
-		} catch (e) {
-			const err = e as { code?: string; message: string };
-			expect(err.code).toBe("PROVISIONING_WINDOW_CLOSED");
-			expect(err.message).toContain("container=yes");
-			expect(err.message).toContain("setDeviceMode()");
-			expect(err.message).toContain("quickchr clean pw-test");
-		}
+		const err = refusal(booted(), { deviceMode: { enable: ["container"] } });
+		expect(err.code).toBe("PROVISIONING_WINDOW_CLOSED");
+		expect(err.message).toContain("container=yes");
+		expect(err.message).toContain("setDeviceMode()");
+		expect(err.message).toContain("quickchr clean pw-test");
 	});
 
 	test("every provisioning option is refused, not just device-mode", () => {
@@ -101,33 +111,20 @@ describe("assertProvisioningWindow", () => {
 		// A refused request is never persisted, and clean() clears `user` and
 		// `disableAdmin` because they are guest state — so a plain start after the
 		// reset would drop the very options that were refused.
-		try {
-			assertProvisioningWindow(booted(), { user: { name: "lab", password: "Pass1" } });
-			throw new Error("expected a refusal");
-		} catch (e) {
-			const message = (e as { message: string }).message;
-			expect(message).toContain("repeat the original start command");
-			expect(message).not.toContain("then start it again");
-		}
+		const { message } = refusal(booted(), { user: { name: "lab", password: "Pass1" } });
+		expect(message).toContain("repeat the original start command");
+		expect(message).not.toContain("then start it again");
 	});
 
 	test("the packages route names the packages, and sends install-all through clean()", () => {
 		// installPackage() takes names and has no install-all form, so naming it for
 		// `--install-all-packages` would point at an API that cannot do the job.
-		try {
-			assertProvisioningWindow(booted(), { packages: ["container", "ups"] });
-			throw new Error("expected a refusal");
-		} catch (e) {
-			expect((e as { message: string }).message).toContain('instance.installPackage(["container","ups"])');
-		}
-		try {
-			assertProvisioningWindow(booted(), { installAllPackages: true });
-			throw new Error("expected a refusal");
-		} catch (e) {
-			const message = (e as { message: string }).message;
-			expect(message).toContain("repeat the original start command");
-			expect(message).not.toContain("installPackage(");
-		}
+		expect(refusal(booted(), { packages: ["container", "ups"] }).message)
+			.toContain('instance.installPackage(["container","ups"])');
+
+		const installAll = refusal(booted(), { installAllPackages: true }).message;
+		expect(installAll).toContain("repeat the original start command");
+		expect(installAll).not.toContain("installPackage(");
 	});
 
 	test("license names the CLI route that already ships", () => {
