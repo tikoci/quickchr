@@ -916,6 +916,169 @@
 		"sha": "8aaa319c54ad11ffd28bf3db85fff478364f0649",
 		"ts": "2026-09-20T23:12:37.807Z"
 	},
+	"35542607992": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"linux-arm64|development": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1812,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.25beta5",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-arm64|long-term": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1793,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.23.7",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-arm64|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1800,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-x86|development": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1245,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.25beta5",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-x86|long-term": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1331,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.23.7",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-x86|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1244,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"macos-arm64|development": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1575,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.25beta5",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"macos-arm64|long-term": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1694,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.23.7",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"macos-arm64|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1654,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"macos-x86|development": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 3602,
+				"job_matched": true,
+				"platform": "macos-x86",
+				"resolved": "7.25beta5",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "development",
+				"terminal": "runner-lost",
+				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
+			},
+			"macos-x86|long-term": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 3782,
+				"job_matched": true,
+				"platform": "macos-x86",
+				"resolved": "7.23.7",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "long-term",
+				"terminal": "runner-lost",
+				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
+			},
+			"macos-x86|stable": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 3782,
+				"job_matched": true,
+				"platform": "macos-x86",
+				"resolved": "7.24.4",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "stable",
+				"terminal": "runner-lost",
+				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
+			},
+			"windows-x86|development": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 1863,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.25beta5",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'failure' before the suite could instrument itself"
+			},
+			"windows-x86|long-term": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 2007,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.23.7",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'failure' before the suite could instrument itself"
+			},
+			"windows-x86|stable": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 1752,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.24.4",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'failure' before the suite could instrument itself"
+			}
+		},
+		"planned": 15,
+		"sha": "8aaa319c54ad11ffd28bf3db85fff478364f0649",
+		"ts": "2026-09-21T00:14:01.815Z"
+	},
 	"35545697945": {
 		"attempt": "1",
 		"complete": 0,
