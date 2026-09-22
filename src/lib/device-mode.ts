@@ -4,6 +4,7 @@
 
 import type { DeviceModeOptions } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
+import { shellQuote } from "./names.ts";
 import { restGet, restPost } from "./rest.ts";
 
 export const KNOWN_DEVICE_MODES = ["home", "advanced", "basic", "rose"] as const;
@@ -352,19 +353,25 @@ export function verifyDeviceMode(
 	};
 }
 
-/** The `quickchr set` flags that would reproduce this selection.
+/** The `quickchr set` flags that would reproduce this selection, shell-quoted.
  *
  *  Rendered from the *resolved* options, not the raw ones, so the command it prints
  *  is the command that was actually going to run — `mode: "auto"` comes out as the
- *  `rose` it resolves to rather than as an alias the reader has to expand. */
+ *  `rose` it resolves to rather than as an alias the reader has to expand.
+ *
+ *  Quoted because `resolveDeviceModeOptions()` deliberately passes unknown modes and
+ *  features through for forward compatibility (it warns, RouterOS validates), so a
+ *  value with a space or a `;` in it reaches this function intact. Unquoted, the
+ *  advertised command would silently become a different command. Ordinary values are
+ *  returned unquoted, so the common case still reads like something a person typed. */
 export function formatDeviceModeFlags(options: ResolvedDeviceModeOptions): string {
 	if (options.skip) return "";
 	const parts: string[] = [];
-	if (options.mode) parts.push(`--device-mode ${options.mode}`);
+	if (options.mode) parts.push(`--device-mode ${shellQuote(options.mode)}`);
 	const enable = Object.entries(options.features).filter(([, v]) => v === "yes").map(([k]) => k);
 	const disable = Object.entries(options.features).filter(([, v]) => v === "no").map(([k]) => k);
-	if (enable.length > 0) parts.push(`--device-mode-enable ${enable.sort().join(",")}`);
-	if (disable.length > 0) parts.push(`--device-mode-disable ${disable.sort().join(",")}`);
+	if (enable.length > 0) parts.push(`--device-mode-enable ${shellQuote(enable.sort().join(","))}`);
+	if (disable.length > 0) parts.push(`--device-mode-disable ${shellQuote(disable.sort().join(","))}`);
 	return parts.join(" ");
 }
 

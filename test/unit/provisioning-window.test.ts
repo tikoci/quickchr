@@ -93,6 +93,25 @@ describe("assertProvisioningWindow", () => {
 		expect(err.message).toContain("quickchr clean pw-test");
 	});
 
+	test("a legacy machine name is quoted, so the route addresses the right machine", () => {
+		// `assertValidResourceName()` only guards names at creation — a lookup keeps
+		// older, looser names addressable (`isPathSafeName()` rejects only empty, ".",
+		// ".." and a path separator). Unquoted, `quickchr set lab old --device-mode rose`
+		// pasted into a shell addresses a machine called `lab` with a stray positional.
+		const state = machine({ name: "lab old", lastStartedAt: new Date().toISOString() });
+		const { message } = refusal(state, { deviceMode: { enable: ["container"] } });
+		expect(message).toContain("quickchr set 'lab old' --device-mode rose");
+		expect(message).toContain("quickchr clean 'lab old'");
+	});
+
+	test("an unknown feature value is quoted too — resolution lets it through on purpose", () => {
+		// resolveDeviceModeOptions() passes unknown features through for forward
+		// compatibility (it warns; RouterOS validates), so a value with a space in it
+		// reaches the printed command intact and would split into extra arguments.
+		const { message } = refusal(booted(), { deviceMode: { enable: ["install any version"] } });
+		expect(message).toContain("--device-mode-enable 'install any version'");
+	});
+
 	test("the device-mode route is a command, printed with the flags that were asked for", () => {
 		// It replaced "instance.setDeviceMode() from the library (no CLI route yet)",
 		// which told a CLI user to go and write TypeScript. A route only helps if it can

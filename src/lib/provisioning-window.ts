@@ -16,6 +16,7 @@
  */
 
 import { getInstanceCredentials } from "./credentials.ts";
+import { shellQuote } from "./names.ts";
 import {
 	formatDeviceModeFlags,
 	formatDeviceModeSelection,
@@ -265,14 +266,18 @@ export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
  *  was asked for: `installPackage()` takes package names and cannot express
  *  `--install-all-packages`, so that one goes through `clean()` as well. */
 function postBootRoute(ask: ProvisioningAsk, request: ProvisioningRequest, name: string): string {
-	const replay = `quickchr clean ${name}   # resets the disk, then repeat the original start command`;
+	// Every interpolation is quoted: `assertValidResourceName()` only guards names at
+	// creation, so a real machine can still be called `lab old`, and the advertised
+	// `quickchr set lab old …` addresses a machine called `lab`.
+	const quoted = shellQuote(name);
+	const replay = `quickchr clean ${quoted}   # resets the disk, then repeat the original start command`;
 	switch (ask.step) {
 		case "license":
-			return `quickchr set ${name} --license`;
+			return `quickchr set ${quoted} --license`;
 		case "deviceMode":
 			// Spelled out with the requested flags, because the route only helps if it
 			// can be run as printed — and `set` takes the same flag names `start` does.
-			return `quickchr set ${name} ${formatDeviceModeFlags(resolveDeviceModeOptions(request.deviceMode))}   # power-cycles the machine`;
+			return `quickchr set ${quoted} ${formatDeviceModeFlags(resolveDeviceModeOptions(request.deviceMode))}   # power-cycles the machine`;
 		case "packages":
 			// installPackage() has no install-all form — availablePackages() would have
 			// to be enumerated first — so the honest route for that request is a reset.
@@ -317,6 +322,6 @@ export function assertProvisioningWindow(
 		"the guest may no longer hold the default configuration provisioning expects.\n" +
 		lines.join("\n") +
 		"\nTo provision from scratch, reset the disk to the factory image and reopen the window:\n" +
-		`      quickchr clean ${state.name}   # then repeat the original start command — a refused request is not remembered`,
+		`      quickchr clean ${shellQuote(state.name)}   # then repeat the original start command — a refused request is not remembered`,
 	);
 }

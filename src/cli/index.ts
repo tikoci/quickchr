@@ -2057,6 +2057,7 @@ async function applyDeviceModeChange(name: string, deviceMode: DeviceModeOptions
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold, dim, machineNotFoundMessage } = await import("./format.ts");
 	const { formatDeviceModeSelection, resolveDeviceModeOptions } = await import("../lib/device-mode.ts");
+	const { shellQuote } = await import("../lib/names.ts");
 
 	const instance = QuickCHR.get(name);
 	if (!instance) {
@@ -2073,7 +2074,9 @@ async function applyDeviceModeChange(name: string, deviceMode: DeviceModeOptions
 	// setDeviceMode() checks the preconditions (running, user-mode NIC), prints the
 	// settings that will actually move, and skips the power cycle when none would.
 	await instance.setDeviceMode(deviceMode);
-	console.log(`Device-mode set. Read it back with: quickchr get ${name} device-mode`);
+	// Quoted for the same reason the refusal routes are: a legacy machine name can
+	// contain a space, and an unquoted read-back hint would name a different machine.
+	console.log(`Device-mode set. Read it back with: quickchr get ${shellQuote(name)} device-mode`);
 }
 
 async function cmdLicense(argv: string[]) {

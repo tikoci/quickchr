@@ -104,6 +104,13 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   call rejects outright — so a guest that came back mid-race failed the operation a
   second before it would have succeeded. (#176)
 
+- Commands quickchr prints for you to run are shell-quoted. Machine names are only
+  validated at creation — a lookup keeps older, looser names addressable — so a machine
+  called `lab old` was advertised as `quickchr set lab old …`, which addresses a machine
+  called `lab`. Device-mode values are quoted for the same reason: unknown modes and
+  features are passed through on purpose, so one with a space in it reached the printed
+  command intact. Ordinary names and values are left unquoted. (#176)
+
 - The commands `PROVISIONING_WINDOW_CLOSED` names can be pasted into a shell. Their
   caveats were parenthetical prose appended to the command, and `(` opens a subshell, so
   `quickchr set lab … (power-cycles the machine)` was a bash syntax error and

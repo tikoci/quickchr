@@ -70,3 +70,27 @@ export function isValidResourceName(name: string): boolean {
 		return false;
 	}
 }
+
+/** POSIX-shell-safe form of `value`, for a command quickchr prints for someone to run.
+ *
+ *  Needed because `assertValidResourceName()` only guards names at *creation*. A
+ *  lookup has to keep older, looser names addressable — `isPathSafeName()` above
+ *  rejects only empty, `.`, `..` and a path separator — so a real machine can be
+ *  called `lab old` or `my;lab`, and `quickchr set lab old --device-mode rose` pasted
+ *  into a shell addresses a machine called `lab`. Device-mode feature names have the
+ *  same problem from the other end: `resolveDeviceModeOptions()` deliberately passes
+ *  unknown features through for forward compatibility, so a typo with a space in it
+ *  reaches the printed command intact.
+ *
+ *  Values that need no quoting are returned unchanged, because the overwhelmingly
+ *  common case is an ordinary name and a command in quotes reads like machine output
+ *  rather than something a person would type.
+ *
+ *  What this does **not** fix: a legacy name starting with `-` is read as a flag no
+ *  matter how it is quoted, since quoting is the shell's business and the flag parse
+ *  is quickchr's. New names cannot start with `-` (#156); an old one that does needs
+ *  renaming, not escaping. */
+export function shellQuote(value: string): string {
+	if (value.length > 0 && /^[A-Za-z0-9._:=@,+/-]+$/.test(value)) return value;
+	return `'${value.replaceAll("'", "'\\''")}'`;
+}

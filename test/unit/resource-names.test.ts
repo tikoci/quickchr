@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { assertValidResourceName, isValidResourceName } from "../../src/lib/names.ts";
+import { assertValidResourceName, isValidResourceName, shellQuote } from "../../src/lib/names.ts";
 import { _resetSocketCache, createNamedSocket } from "../../src/lib/socket-registry.ts";
 import { parseNetworkSpecifier } from "../../src/lib/network.ts";
 
@@ -113,5 +113,40 @@ describe("named sockets validate their name (#156)", () => {
 		expect(result.exitCode).toBe(1);
 		expect(result.stderr).toContain("Invalid named socket name");
 		expect(existsSync(join(TEST_DIR, "networks", "-bad.json"))).toBe(false);
+	});
+});
+
+describe("shellQuote — a printed command has to survive a paste", () => {
+	test("ordinary names and values are left alone", () => {
+		// The overwhelmingly common case. A command in quotes reads like machine output
+		// rather than something a person would type, so quoting is not applied blindly.
+		for (const value of ["lab", "7.24.4-x86-1", "container,ipsec", "rose", "a.b_c-d"]) {
+			expect({ value, quoted: shellQuote(value) }).toEqual({ value, quoted: value });
+		}
+	});
+
+	test("a legacy name with a space is quoted", () => {
+		// `assertValidResourceName()` guards names only at creation; a lookup has to keep
+		// older, looser names addressable, so a real machine can be called `lab old` —
+		// and `quickchr set lab old --device-mode rose` addresses a machine called `lab`.
+		expect(shellQuote("lab old")).toBe("'lab old'");
+	});
+
+	test("shell metacharacters are neutralised", () => {
+		expect(shellQuote("my;lab")).toBe("'my;lab'");
+		expect(shellQuote("lab$(id)")).toBe("'lab$(id)'");
+		expect(shellQuote("lab&rm")).toBe("'lab&rm'");
+	});
+
+	test("an embedded single quote is closed, escaped and reopened", () => {
+		// The one case naive single-quoting gets wrong, and the reason this is a helper
+		// rather than a template literal at each call site.
+		expect(shellQuote("lab's")).toBe("'lab'\\''s'");
+	});
+
+	test("an empty value still produces an argument", () => {
+		// Unquoted, an empty value disappears from the command entirely and every
+		// argument after it shifts left.
+		expect(shellQuote("")).toBe("''");
 	});
 });

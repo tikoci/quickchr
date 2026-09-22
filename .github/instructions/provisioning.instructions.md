@@ -140,6 +140,17 @@ along with `quickchr clean lab (resets the disk), …` failing in zsh. A route t
 cannot be run as printed is a route that does not work, which is the whole point of
 naming one.
 
+Pasteable also means **shell-quoted**. `assertValidResourceName()` guards names only
+at creation; a lookup has to keep older, looser names addressable (`isPathSafeName()`
+rejects only empty, `.`, `..` and a path separator), so a real machine can be called
+`lab old` — and `quickchr set lab old --device-mode rose` addresses a machine called
+`lab`. Device-mode values have the same problem from the other end, since
+`resolveDeviceModeOptions()` passes unknown modes and features through on purpose.
+Every interpolation into a printed command goes through `shellQuote()`, which leaves
+ordinary values alone so the common case still reads like something a person typed.
+It does **not** rescue a legacy name starting with `-`: quoting is the shell's
+business and the flag parse is quickchr's, so that one needs renaming.
+
 **`--no-device-mode` carries `{ mode: "skip" }`, not `undefined`.** `start()` resolves
 a silent request against stored intent (`opts.deviceMode ?? existing.deviceMode`), so
 `undefined` made the flag indistinguishable from not passing it: a machine created with

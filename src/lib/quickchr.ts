@@ -28,7 +28,7 @@ import type {
 	StartOptions,
 } from "./types.ts";
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION, HOST_GATEWAY_IP } from "./types.ts";
-import { assertValidResourceName, assertPathSafeName } from "./names.ts";
+import { assertValidResourceName, assertPathSafeName, shellQuote } from "./names.ts";
 import packageJson from "../../package.json";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
@@ -1479,7 +1479,7 @@ function assertDeviceModeApplicable(state: MachineState): void {
 		throw new QuickCHRError(
 			"MACHINE_STOPPED",
 			`Device-mode is applied through the guest's REST API, so "${state.name}" has to be running. ` +
-			`Start it with 'quickchr start ${state.name}', then set device-mode.`,
+			`Start it with 'quickchr start ${shellQuote(state.name)}', then set device-mode.`,
 		);
 	}
 	if (!hasUserModeNetwork(state.networks)) {
