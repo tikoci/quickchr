@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
+	describeDeviceModeChange,
+	FACTORY_AUTH_HEADER,
+	formatDeviceModeFlags,
 	formatDeviceModeSelection,
+	mergeDeviceModeOptions,
 	readDeviceMode,
 	resolveDeviceModeOptions,
 	shouldApplyDeviceMode,
@@ -231,17 +235,50 @@ describe("device-mode REST reads", () => {
 });
 
 describe("device-mode REST orchestration helpers", () => {
-	test("waitForDeviceModeApi sends default admin auth and returns on 2xx", async () => {
+	test("waitForDeviceModeApi sends default admin auth and returns on device-mode data", async () => {
 		let authorization: string | undefined;
 		const port = await startMockServer((req, res) => {
 			authorization = req.headers.authorization;
-			res.writeHead(204);
-			res.end();
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end('{"mode":"advanced","container":"false"}');
 		});
 
 		await waitForDeviceModeApi(port, 1000);
 
 		expect(authorization).toBe(`Basic ${btoa("admin:")}`);
+	});
+
+	test("waitForDeviceModeApi keeps waiting through the post-boot race", async () => {
+		// RouterOS answers non-resource endpoints with resource-shaped data for a window
+		// after boot. Returning on the bare 2xx handed that body straight to
+		// readDeviceMode(), which rejects it outright — so a guest that came back
+		// mid-race failed the whole operation a second before it would have succeeded.
+		let calls = 0;
+		const port = await startMockServer((_req, res) => {
+			calls++;
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(calls === 1
+				? '{"board-name":"CHR","architecture-name":"x86_64"}'
+				: '{"mode":"rose","container":"true"}');
+		});
+
+		await waitForDeviceModeApi(port, 5000);
+
+		expect(calls).toBeGreaterThan(1);
+	});
+
+	test("waitForDeviceModeApi times out with the body it kept getting", async () => {
+		// A timeout that names what the endpoint was actually returning is the
+		// difference between "not ready" and "ready, but answering something else".
+		const port = await startMockServer((_req, res) => {
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end('{"board-name":"CHR"}');
+		});
+
+		const error = await waitForDeviceModeApi(port, 1500).catch((e) => e);
+
+		expect(error.code).toBe("BOOT_TIMEOUT");
+		expect(error.message).toContain("board-name");
 	});
 
 	test("waitForDeviceModeApi fails immediately on HTTP 401", async () => {
@@ -291,5 +328,119 @@ describe("device-mode REST orchestration helpers", () => {
 			"install-any-version": "yes",
 			fetch: "no",
 		});
+	});
+});
+
+describe("formatDeviceModeFlags", () => {
+	test("renders the flags that would reproduce a selection", () => {
+		const resolved = resolveDeviceModeOptions({ mode: "basic", enable: ["ipsec", "container"], disable: ["smb"] });
+		expect(formatDeviceModeFlags(resolved))
+			.toBe("--device-mode basic --device-mode-enable container,ipsec --device-mode-disable smb");
+	});
+
+	test("prints the resolved mode, not the alias that was typed", () => {
+		// `auto` is quickchr's spelling; RouterOS has never heard of it. A route that
+		// printed `--device-mode auto` would still work, but it hides the fact that the
+		// change moves `mode` to rose — which is the surprise worth naming (#176).
+		expect(formatDeviceModeFlags(resolveDeviceModeOptions({ enable: ["container"] })))
+			.toBe("--device-mode rose --device-mode-enable container");
+	});
+
+	test("a skipped selection has no flags", () => {
+		expect(formatDeviceModeFlags(resolveDeviceModeOptions({ mode: "skip" }))).toBe("");
+	});
+});
+
+describe("describeDeviceModeChange", () => {
+	test("names only what moves, in the order it happens", () => {
+		const resolved = resolveDeviceModeOptions({ enable: ["container"] });
+		expect(describeDeviceModeChange(resolved, { mode: "advanced", container: "no", ipsec: "yes" }))
+			.toEqual(["mode: advanced -> rose", "container: no -> yes"]);
+	});
+
+	test("a setting the guest does not report at all is named, not skipped", () => {
+		const resolved = resolveDeviceModeOptions({ mode: "rose", enable: ["container"] });
+		expect(describeDeviceModeChange(resolved, { mode: "rose" })).toEqual(["container: (unset) -> yes"]);
+	});
+
+	test("empty when the guest already matches — the caller's cue to skip the power cycle", () => {
+		const resolved = resolveDeviceModeOptions({ mode: "rose", enable: ["container"] });
+		expect(describeDeviceModeChange(resolved, { mode: "rose", container: "yes" })).toEqual([]);
+	});
+});
+
+describe("mergeDeviceModeOptions", () => {
+	test("keeps settings an earlier run applied", () => {
+		// The record has to be cumulative because the guest is: a device-mode update
+		// moves only the settings it names. Overwriting made `machine.json` claim ipsec
+		// had never been asked for while the guest still had it.
+		const applied = resolveDeviceModeOptions({ enable: ["container"] });
+		expect(mergeDeviceModeOptions({ mode: "advanced", enable: ["ipsec"] }, applied))
+			.toEqual({ mode: "rose", enable: ["container", "ipsec"], disable: undefined });
+	});
+
+	test("the newest instruction for a feature wins, and moves it across sides", () => {
+		const applied = resolveDeviceModeOptions({ mode: "rose", disable: ["container"] });
+		expect(mergeDeviceModeOptions({ mode: "rose", enable: ["container", "ipsec"] }, applied))
+			.toEqual({ mode: "rose", enable: ["ipsec"], disable: ["container"] });
+	});
+
+	test("a skipped selection records nothing", () => {
+		const current = { mode: "basic", enable: ["ipsec"] };
+		expect(mergeDeviceModeOptions(current, resolveDeviceModeOptions({ mode: "skip" }))).toBe(current);
+	});
+});
+
+describe("device-mode auth is the caller's, not a hard-coded admin (#176)", () => {
+	// All three helpers hard-coded `Basic admin:`. That was invisible while device-mode
+	// only ran during first-boot provisioning — it is step 2, the user step is step 4,
+	// so factory admin was the only credential in existence. The moment `set <name>
+	// --device-mode` made it a post-boot route, a machine provisioned with
+	// `--disable-admin` answered 401 — reproduced on CHR 7.24.4 before this was fixed,
+	// and those are exactly the machines the route was written for.
+	const managed = `Basic ${btoa("lab:lab-pass-1")}`;
+
+	test("the factory header is still the default, for the first-boot path", () => {
+		expect(FACTORY_AUTH_HEADER).toBe(`Basic ${btoa("admin:")}`);
+	});
+
+	test("waitForDeviceModeApi sends the header it is given", async () => {
+		let authorization: string | undefined;
+		const port = await startMockServer((req, res) => {
+			authorization = req.headers.authorization;
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end('{"mode":"rose"}');
+		});
+
+		await waitForDeviceModeApi(port, 1000, managed);
+
+		expect(authorization).toBe(managed);
+	});
+
+	test("readDeviceMode sends the header it is given", async () => {
+		let authorization: string | undefined;
+		const port = await startMockServer((req, res) => {
+			authorization = req.headers.authorization;
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end('{"mode":"rose","container":"true"}');
+		});
+
+		await readDeviceMode(port, managed);
+
+		expect(authorization).toBe(managed);
+	});
+
+	test("startDeviceModeUpdate sends the header it is given", async () => {
+		let authorization: string | undefined;
+		const port = await startMockServer(async (req, res) => {
+			authorization = req.headers.authorization;
+			await readRequestBody(req);
+			res.writeHead(202, { "Content-Type": "application/json" });
+			res.end('{"pending":true}');
+		});
+
+		await startDeviceModeUpdate(port, resolveDeviceModeOptions({ mode: "rose" }), managed);
+
+		expect(authorization).toBe(managed);
 	});
 });

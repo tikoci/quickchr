@@ -1,10 +1,12 @@
 import { describe, test, expect } from "bun:test";
 import {
+	appliedDeviceModeRecord,
 	assertProvisioningWindow,
 	classifyProvisioningRequest,
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 } from "../../src/lib/provisioning-window.ts";
+import { resolveDeviceModeOptions } from "../../src/lib/device-mode.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
@@ -87,8 +89,39 @@ describe("assertProvisioningWindow", () => {
 		const err = refusal(booted(), { deviceMode: { enable: ["container"] } });
 		expect(err.code).toBe("PROVISIONING_WINDOW_CLOSED");
 		expect(err.message).toContain("container=yes");
-		expect(err.message).toContain("setDeviceMode()");
+		expect(err.message).toContain("quickchr set pw-test --device-mode rose --device-mode-enable container");
 		expect(err.message).toContain("quickchr clean pw-test");
+	});
+
+	test("a legacy machine name is quoted, so the route addresses the right machine", () => {
+		// `assertValidResourceName()` only guards names at creation — a lookup keeps
+		// older, looser names addressable (`isPathSafeName()` rejects only empty, ".",
+		// ".." and a path separator). Unquoted, `quickchr set lab old --device-mode rose`
+		// pasted into a shell addresses a machine called `lab` with a stray positional.
+		const state = machine({ name: "lab old", lastStartedAt: new Date().toISOString() });
+		const { message } = refusal(state, { deviceMode: { enable: ["container"] } });
+		expect(message).toContain("quickchr set 'lab old' --device-mode rose");
+		expect(message).toContain("quickchr clean 'lab old'");
+	});
+
+	test("an unknown feature value is quoted too — resolution lets it through on purpose", () => {
+		// resolveDeviceModeOptions() passes unknown features through for forward
+		// compatibility (it warns; RouterOS validates), so a value with a space in it
+		// reaches the printed command intact and would split into extra arguments.
+		const { message } = refusal(booted(), { deviceMode: { enable: ["install any version"] } });
+		expect(message).toContain("--device-mode-enable 'install any version'");
+	});
+
+	test("the device-mode route is a command, printed with the flags that were asked for", () => {
+		// It replaced "instance.setDeviceMode() from the library (no CLI route yet)",
+		// which told a CLI user to go and write TypeScript. A route only helps if it can
+		// be run as printed, so the flags come out resolved: `auto` prints as the `rose`
+		// it becomes, and the mode is named even when only a feature was requested,
+		// because that is the mode the change will land on.
+		const { message } = refusal(booted(), { deviceMode: { mode: "basic", enable: ["ipsec"], disable: ["smb"] } });
+		expect(message).toContain("quickchr set pw-test --device-mode basic --device-mode-enable ipsec --device-mode-disable smb");
+		expect(message).toContain("power-cycles the machine");
+		expect(message).not.toContain("no CLI route yet");
 	});
 
 	test("every provisioning option is refused, not just device-mode", () => {
@@ -207,6 +240,42 @@ describe("assertProvisioningWindow", () => {
 			.toThrow(/has already booted/);
 	});
 
+	test("a cumulative record still satisfies the request that built part of it", () => {
+		// The regression the cumulative merge introduced, in the shape a user meets it:
+		// `set --device-mode-enable container` then `set --device-mode-disable smb`
+		// leaves a record of all three settings, and exact comparison then refused the
+		// `--device-mode-enable container` a script had been passing on every start
+		// since before the second change — naming a `quickchr set` command that was a
+		// no-op, since container was already enabled.
+		const state = machine({
+			lastStartedAt: new Date().toISOString(),
+			provisioning: { at: new Date().toISOString(), steps: ["deviceMode"] },
+			deviceMode: { mode: "rose", enable: ["container"], disable: ["smb"] },
+		});
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "rose", enable: ["container"] } }))
+			.not.toThrow();
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "rose", disable: ["smb"] } }))
+			.not.toThrow();
+	});
+
+	test("subset loosens what counts as equal, not what counts as applied", () => {
+		// A setting the record does not mention is still pending, and so is one it
+		// mentions with the other value. Only the fields the caller asked about are
+		// matched — the ones they did not mention are not theirs to match.
+		const state = machine({
+			lastStartedAt: new Date().toISOString(),
+			provisioning: { at: new Date().toISOString(), steps: ["deviceMode"] },
+			deviceMode: { mode: "rose", enable: ["container"], disable: ["smb"] },
+		});
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "rose", enable: ["ipsec"] } }))
+			.toThrow(/has already booted/);
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "rose", enable: ["smb"] } }))
+			.toThrow(/has already booted/);
+		// The mode is part of every request, so a different one is a real change.
+		expect(() => assertProvisioningWindow(state, { deviceMode: { mode: "basic", enable: ["container"] } }))
+			.toThrow(/has already booted/);
+	});
+
 	test("device-mode comparison is order-independent but not value-blind", () => {
 		const state = machine({
 			lastStartedAt: new Date().toISOString(),
@@ -239,5 +308,54 @@ describe("assertProvisioningWindow", () => {
 		expect(hasProvisioningRequest({ deviceMode: { mode: "skip" } })).toBe(false);
 		expect(classifyProvisioningRequest(booted(), { deviceMode: { mode: "skip" } })).toEqual([]);
 		expect(assertProvisioningWindow(booted(), { deviceMode: { mode: "skip" } })).toEqual([]);
+	});
+});
+
+describe("appliedDeviceModeRecord", () => {
+	const applied = resolveDeviceModeOptions({ enable: ["container"] });
+
+	test("carries forward device-mode that actually ran", () => {
+		// The guest keeps settings an earlier apply landed — a device-mode update moves
+		// only the settings it names — so the record has to keep them too.
+		const state = machine({
+			deviceMode: { mode: "advanced", enable: ["ipsec"] },
+			provisioning: { at: "2026-01-01T00:00:00.000Z", steps: ["deviceMode"] },
+		});
+		expect(appliedDeviceModeRecord(state, applied))
+			.toEqual({ mode: "rose", enable: ["container", "ipsec"], disable: undefined });
+	});
+
+	test("drops intent that never reached the guest", () => {
+		// A first boot that threw at the packages step leaves `deviceMode` in state as
+		// desired config having never been applied. Folding it in here and then stamping
+		// `deviceMode` as applied would make a later start treat ipsec as satisfied.
+		const state = machine({
+			deviceMode: { mode: "advanced", enable: ["ipsec"] },
+			provisioning: { at: "2026-01-01T00:00:00.000Z", steps: ["packages"] },
+		});
+		expect(appliedDeviceModeRecord(state, applied))
+			.toEqual({ mode: "rose", enable: ["container"], disable: undefined });
+	});
+
+	test("and so a later start still asks for the intent that was never applied", () => {
+		// The harm the gate prevents, stated as the behaviour that matters: after a
+		// post-boot `set --device-mode-enable container`, a start that asks for the ipsec
+		// the guest never got must not read as satisfied.
+		const before = machine({
+			deviceMode: { mode: "advanced", enable: ["ipsec"] },
+			provisioning: { at: "2026-01-01T00:00:00.000Z", steps: ["packages"] },
+		});
+		const after = machine({
+			deviceMode: appliedDeviceModeRecord(before, applied),
+			provisioning: { at: "2026-01-01T00:00:00.000Z", steps: ["packages", "deviceMode"] },
+			lastStartedAt: "2026-01-01T00:00:00.000Z",
+		});
+		const [ask] = classifyProvisioningRequest(after, { deviceMode: { mode: "advanced", enable: ["ipsec"] } });
+		expect(ask?.satisfied).toBe(false);
+	});
+
+	test("no prior record at all is simply the applied selection", () => {
+		expect(appliedDeviceModeRecord(machine(), applied))
+			.toEqual({ mode: "rose", enable: ["container"], disable: undefined });
 	});
 });

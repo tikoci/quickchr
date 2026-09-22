@@ -3,10 +3,10 @@
  * quickchr CLI entry point — command router.
  */
 
-import type { StartOptions, Arch, Channel, ServiceName, NetworkSpecifier } from "../lib/types.ts";
+import type { StartOptions, Arch, Channel, DeviceModeOptions, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
-import { ADD_FLAGS, REMOVED_FLAGS, START_FLAGS, VALUE_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
+import { ADD_FLAGS, REMOVED_FLAGS, SET_FLAGS, START_FLAGS, VALUE_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
 import { QuickCHRError } from "../lib/types.ts";
 import { CENTRS_EXEC_TIP, CENTRS_SEE_ALSO, tip, tipsForError } from "./tips.ts";
 import {
@@ -112,6 +112,49 @@ function flagList(flags: Record<string, string | boolean | string[]>, key: strin
 
 function csvList(values: string[]): string[] {
 	return [...new Set(values.flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean))];
+}
+
+/** The device-mode request the `--device-mode*` flags describe, or `undefined` when
+ *  they describe nothing.
+ *
+ *  One reader for all three verbs that take these flags. `add` and `start` had
+ *  separate copies and they had already drifted: only `start` honoured
+ *  `--no-device-mode`, so `quickchr add --no-device-mode --device-mode-enable container`
+ *  enabled container while the same flags on `start` skipped device-mode with a
+ *  warning. Two spellings of one intent producing opposite results is the silent-drop
+ *  failure in another costume (#176).
+ *
+ *  `--no-device-mode` means *skip device-mode entirely*, so it wins over the feature
+ *  lists and says so rather than quietly discarding them.
+ *
+ *  It returns an explicit `{ mode: "skip" }` rather than `undefined`, because
+ *  `undefined` means *the user said nothing* and the two are not the same instruction.
+ *  `start()` resolves a silent request against stored intent — `opts.deviceMode ??
+ *  existing.deviceMode` — so a machine created with `add --device-mode-enable
+ *  container` and then started with `--no-device-mode` provisioned container anyway,
+ *  power cycle included. Measured on CHR 7.24.4: 48 s and `container=yes`, from a flag
+ *  whose documented job is to skip the step. A flag that is accepted and does nothing
+ *  is the defect this whole area exists to remove (#176). */
+export function deviceModeFromFlags(
+	flags: Record<string, string | boolean | string[]>,
+): DeviceModeOptions | undefined {
+	const mode = flag(flags, "device-mode");
+	const enable = csvList(flagList(flags, "device-mode-enable"));
+	const disable = csvList(flagList(flags, "device-mode-disable"));
+
+	if (flags["device-mode"] === false) {
+		if (enable.length > 0 || disable.length > 0) {
+			console.warn("Warning: --device-mode-enable/--device-mode-disable ignored because --no-device-mode was set.");
+		}
+		return { mode: "skip" };
+	}
+	if (mode === undefined && enable.length === 0 && disable.length === 0) return undefined;
+
+	return {
+		mode: mode ?? "auto",
+		enable: enable.length > 0 ? enable : undefined,
+		disable: disable.length > 0 ? disable : undefined,
+	};
 }
 
 /** Build networks array from --add-network and --no-network. */
@@ -662,16 +705,7 @@ async function cmdAdd(argv: string[]) {
 		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
 	};
 
-	const deviceModeValue = flag(flags, "device-mode");
-	const deviceModeEnable = csvList(flagList(flags, "device-mode-enable"));
-	const deviceModeDisable = csvList(flagList(flags, "device-mode-disable"));
-	if (deviceModeValue !== undefined || deviceModeEnable.length > 0 || deviceModeDisable.length > 0) {
-		opts.deviceMode = {
-			mode: deviceModeValue ?? "auto",
-			enable: deviceModeEnable.length > 0 ? deviceModeEnable : undefined,
-			disable: deviceModeDisable.length > 0 ? deviceModeDisable : undefined,
-		};
-	}
+	opts.deviceMode = deviceModeFromFlags(flags);
 
 	const userStr = flag(flags, "add-user");
 	if (userStr) {
@@ -694,7 +728,12 @@ async function cmdAdd(argv: string[]) {
 	console.log(`  REST:    http://127.0.0.1:${ports.http}  ${dim("(after start)")}`);
 	console.log(`  Dir:     ${dim(state.machineDir)}`);
 	if (state.packages.length > 0) console.log(`  Packages: ${state.packages.join(", ")}  ${dim("(applied on first start)")}`);
-	if (state.deviceMode) console.log(`  Device-mode: ${state.deviceMode.mode ?? "auto"}  ${dim("(applied on first start)")}`);
+	if (state.deviceMode) {
+		const { shouldApplyDeviceMode: willApplyDm, resolveDeviceModeOptions: resolveDm } = await import("../lib/device-mode.ts");
+		console.log(willApplyDm(resolveDm(state.deviceMode))
+			? `  Device-mode: ${state.deviceMode.mode ?? "auto"}  ${dim("(applied on first start)")}`
+			: `  Device-mode: ${dim("skipped (--no-device-mode)")}`);
+	}
 	console.log();
 	console.log(`${dim("tip:")}  quickchr start ${state.name}`);
 }
@@ -1353,21 +1392,7 @@ async function cmdStart(argv: string[]) {
 		timeoutExtra: await resolveTimeoutExtraMs(flags),
 	};
 
-	const deviceModeValue = flag(flags, "device-mode");
-	const deviceModeEnable = csvList(flagList(flags, "device-mode-enable"));
-	const deviceModeDisable = csvList(flagList(flags, "device-mode-disable"));
-	const noDeviceMode = flags["device-mode"] === false;
-	if (noDeviceMode) {
-		if (deviceModeEnable.length > 0 || deviceModeDisable.length > 0) {
-			console.warn("Warning: --device-mode-enable/--device-mode-disable ignored because --no-device-mode was set.");
-		}
-	} else if (deviceModeValue !== undefined || deviceModeEnable.length > 0 || deviceModeDisable.length > 0) {
-		opts.deviceMode = {
-			mode: deviceModeValue ?? "auto",
-			enable: deviceModeEnable.length > 0 ? deviceModeEnable : undefined,
-			disable: deviceModeDisable.length > 0 ? deviceModeDisable : undefined,
-		};
-	}
+	opts.deviceMode = deviceModeFromFlags(flags);
 
 	// --license-* flags (credentials from env if not supplied)
 	const licenseLevel = flag(flags, "license-level");
@@ -1777,14 +1802,20 @@ async function cmdGet(argv: string[]) {
 	}
 
 	if (results["device-mode"]) {
+		const { DEVICE_MODE_NON_FEATURE_KEYS, isDeviceModeFeatureEnabled } = await import("../lib/device-mode.ts");
 		const dm = results["device-mode"] as Record<string, unknown>;
 		const mode = dm.mode ?? "(not set)";
 		console.log(`\n  ${bold("Device Mode")}`);
 		console.log(`    Mode: ${mode}`);
-		const features = Object.entries(dm)
-			.filter(([k, v]) => k !== "mode" && v === true)
-			.map(([k]) => k);
-		if (features.length > 0) console.log(`    Enabled: ${features.join(", ")}`);
+		// RouterOS reports these as strings ("true"/"false"), so the old `v === true`
+		// test matched nothing and the feature lines never printed — `get` could not
+		// read back what `set` had just written. Both lines are shown: after
+		// `--device-mode-disable smb` the interesting answer is the one that is off.
+		const features = Object.entries(dm).filter(([k]) => !DEVICE_MODE_NON_FEATURE_KEYS.has(k));
+		const enabled = features.filter(([, v]) => isDeviceModeFeatureEnabled(v)).map(([k]) => k);
+		const disabled = features.filter(([, v]) => !isDeviceModeFeatureEnabled(v)).map(([k]) => k);
+		if (enabled.length > 0) console.log(`    Enabled:  ${enabled.join(", ")}`);
+		if (disabled.length > 0) console.log(`    Disabled: ${disabled.join(", ")}`);
 	}
 
 	if (results.admin) {
@@ -1958,26 +1989,94 @@ async function applyLicense(argv: string[]) {
 	console.log(`License applied: ${before} → ${level}`);
 }
 
+/** `set` applies a change to a machine that has already booted.
+ *
+ *  It is the post-boot half of the provisioning flags, and deliberately narrow: only
+ *  the steps that are safe to run against a guest whose configuration quickchr no
+ *  longer knows get a home here (#176). `--license` is account-level. `--device-mode`
+ *  is a capability flag — it gates whether a feature *can* run and describes nothing
+ *  about how the guest is configured, so applying it later cannot clobber working
+ *  config; the config it was blocking could not have been applied while it was off.
+ *
+ *  `--add-user`, `--disable-admin` and `--secure-login` are excluded on purpose. They
+ *  are working config rather than a capability, they collide with whatever has been
+ *  created since, and they are the steps that drift. Their route stays
+ *  `quickchr clean <name>` and a fresh provisioning run. */
 async function cmdSet(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
-	const name = positional[0];
+	// Positional first, `--name` as the fallback — the same order `applyLicense` uses,
+	// which `set --license` delegates to. Without this `quickchr set --name lab
+	// --license` printed a usage error while `quickchr license --name lab` worked.
+	const name = positional[0] ?? flag(flags, "name");
 
+	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|unlimited]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>]";
 	if (!name) {
-		console.error("Usage: quickchr set <name> --license [--level=p1|p10|unlimited]");
+		console.error(usage);
+		process.exit(1);
+	}
+
+	const valueless = valuelessFlags(flags, SET_FLAGS);
+	if (valueless.length > 0) {
+		console.error(valuelessFlagMessage(valueless, "set"));
+		process.exit(1);
+	}
+
+	if (flags["device-mode"] === false) {
+		// `--no-device-mode` means "skip device-mode provisioning" on add/start. There is
+		// nothing to skip in an imperative set, so honouring it would be accepting a flag
+		// and doing nothing — the failure this whole area exists to stop.
+		console.error("--no-device-mode is a provisioning flag for 'add'/'start' (skip the step); 'set' applies a change, so pass a mode or a feature list instead.");
 		process.exit(1);
 	}
 
 	const wantsLicense = flagBool(flags, "license");
+	const deviceMode = deviceModeFromFlags(flags);
 
-	if (!wantsLicense) {
-		console.error("Nothing to set. Available flags: --license");
+	if (!wantsLicense && !deviceMode) {
+		console.error("Nothing to set. Available flags: --license, --device-mode, --device-mode-enable, --device-mode-disable");
 		process.exit(1);
 	}
 
+	// Device-mode first: it power-cycles the guest, and a license applied beforehand
+	// would be read back across a reboot it did not expect.
+	if (deviceMode) await applyDeviceModeChange(name, deviceMode);
 	if (wantsLicense) {
 		const subcmdArgs = [name, ...Object.entries(flags).flatMap(([k, v]) => v === true ? [`--${k}`] : [`--${k}=${v}`]), ...positional.slice(1)];
 		await applyLicense(subcmdArgs);
 	}
+}
+
+/** `set <name> --device-mode…` — the post-boot route the refusal names.
+ *
+ *  Device-mode needs a **power cycle**: RouterOS will not apply it otherwise, and
+ *  `/system/device-mode/update` issued from inside the guest simply never returns,
+ *  because it is waiting for a power cycle it cannot perform on itself. quickchr owns
+ *  the power button, which is why this lives here and not in a tool that talks to a
+ *  router over the network. */
+async function applyDeviceModeChange(name: string, deviceMode: DeviceModeOptions) {
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { bold, dim, machineNotFoundMessage } = await import("./format.ts");
+	const { formatDeviceModeSelection, resolveDeviceModeOptions } = await import("../lib/device-mode.ts");
+	const { shellQuote } = await import("../lib/names.ts");
+
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+
+	const selection = formatDeviceModeSelection(resolveDeviceModeOptions(deviceMode));
+	console.log(`Setting device-mode on ${bold(name)}: ${selection}`);
+	// Hedged on purpose: a request the guest already satisfies costs nothing, and
+	// setDeviceMode() skips the power cycle in that case. Promising a restart before
+	// reading the guest would make the quiet no-op look like a failure to restart.
+	console.log(dim("  RouterOS only applies device-mode across a power cycle, so any setting that moves restarts the machine."));
+	// setDeviceMode() checks the preconditions (running, user-mode NIC), prints the
+	// settings that will actually move, and skips the power cycle when none would.
+	await instance.setDeviceMode(deviceMode);
+	// Quoted for the same reason the refusal routes are: a legacy machine name can
+	// contain a space, and an unquoted read-back hint would name a different machine.
+	console.log(`Device-mode set. Read it back with: quickchr get ${shellQuote(name)} device-mode`);
 }
 
 async function cmdLicense(argv: string[]) {
@@ -2937,8 +3036,8 @@ Commands:
                           (raw /rest/execute — see 'quickchr exec --help' for centrs)
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
-  get <name> [group]          Show machine config (license, device-mode, admin)
-  set <name> --license    Apply/renew CHR trial license
+  get <name> [group]      Show machine config (license, device-mode, admin)
+  set <name> [flags]      Change a booted machine (license, device-mode)
   license <name>          Deprecated — use 'set <name> --license'
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
@@ -3237,14 +3336,30 @@ When no group is given, all properties are shown.
 The machine must be running to query live properties.`);
 			break;
 		case "set":
-			console.log(`quickchr set <name> --license [options]
+			console.log(`quickchr set <name> [--license | --device-mode...] [options]
 
-Set properties on a CHR instance.
+Change a property on a machine that has already booted. This is the post-boot
+half of the provisioning flags: 'add'/'start' apply them at first boot, 'set'
+applies them now.
 
   <name>              Name of a running CHR instance (required).
 
 Flags:
   --license           Apply or renew a CHR trial license.
+  --device-mode <m>   Set device-mode: rose|advanced|basic|home|auto
+  --device-mode-enable <f>   Set one or more device-mode flags to yes (e.g. container)
+  --device-mode-disable <f>  Set one or more device-mode flags to no
+
+Device-mode notes:
+  RouterOS only applies device-mode across a power cycle, so 'set' restarts the
+  machine (roughly double a plain start). Enabling a feature without naming a
+  mode resolves the mode to 'rose'; quickchr prints every setting that moves
+  before it restarts. The machine must be running and have a user-mode NIC.
+  Read it back with 'quickchr get <name> device-mode'.
+
+Not available here: --add-user, --disable-admin and --secure-login. Those rewrite
+working config rather than unlock a capability, so their route stays
+'quickchr clean <name>' followed by the original add/start command.
 
 License options (used with --license):
   --level <level>     License level: p1 (1 Gbps), p10 (10 Gbps), unlimited (default: p1)

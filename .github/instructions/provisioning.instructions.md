@@ -47,6 +47,141 @@ applied, not what is in the guest. A step absent from it was not applied *by
 quickchr* — weaker than "not present", and deliberately so, since quickchr cannot read
 the guest without booting it.
 
+### Which steps may still run after the window has closed
+
+The window is one gate standing in for seven separate judgements, and the judgements
+are not the same. Whether a step may run post-boot turns on one question: **does it
+unlock a capability, or does it rewrite working config?** A capability the guest did
+not have cannot have been used, so turning it on later cannot clobber anything. Config
+is the thing that drifts.
+
+| step | post-boot? | why | route |
+|---|---|---|---|
+| `license` | yes | account-level, orthogonal to config | `quickchr set <name> --license` |
+| `deviceMode` | yes | capability flag — it gates whether a feature *can* run and describes nothing about how the guest is configured. Config it was blocking could not have been applied while it was off. | `quickchr set <name> --device-mode…` |
+| `packages` | probably | additive, but `installPackage()` has no install-all form | `instance.installPackage()`; #24 for the CLI verb |
+| `user` | **no** | additive in principle, but it collides with a user of the same name created since, and a login is exactly the config a post-boot path must not rewrite | `clean()` + replay |
+| `disableAdmin` | **no** | depends on another usable login existing — precisely the state that drifts | `clean()` + replay |
+| `secureLogin` | **no** | same class as `user`: it creates a login | `clean()` + replay |
+
+`license` is the precedent, not a proposal — it has shipped as a post-boot CLI verb for
+some time. `deviceMode` is the second, and the list is meant to stay short: `set` is
+not a general "apply provisioning later" verb, and the three refusals above are
+refusals on purpose rather than gaps waiting to be filled.
+
+**Preconditions any post-boot provisioning path inherits.** Both fail confusingly when
+unchecked, which is why `assertDeviceModeApplicable()` exists:
+
+- **The machine must be running with REST reachable.** `applyDeviceMode()` polls
+  `waitForDeviceModeApi` before it does anything, so a stopped machine otherwise spends
+  60 s to report a timeout about a guest that was never going to answer.
+- **A user-mode NIC is required.** Provisioning reaches the guest over localhost REST;
+  `start()` already refuses provisioning on a socket-only machine for that reason, and
+  the post-boot path inherits it rather than discovering it as a timeout.
+- RouterOS 7.20.8+, as for provisioning generally.
+
+**Device-mode needs the power button, which is why it lives here.** RouterOS will not
+apply a device-mode change without a power cycle, and `/system/device-mode/update`
+issued from *inside* the guest never returns — it is waiting for a power cycle it
+cannot perform on itself. quickchr owns that button; a tool that reaches a router over
+the network does not and never will. Whatever the general "apply provisioning later"
+story becomes, the part that needs a power cycle can only live in quickchr.
+
+**Satisfaction is a subset test, not equality — because the record is cumulative and
+the request is not.** A machine that took `--device-mode-enable container` and later
+`--device-mode-disable smb` has a record of all three settings. Comparing the whole
+record against a request then refuses the very `--device-mode-enable container` a
+script has been passing on every start since before the second change, and names a
+`quickchr set` command that is a no-op. `classifyProvisioningRequest()` therefore
+checks every setting the request *names* against the record, and ignores the ones it
+does not. This loosens what counts as equal, never what counts as applied: a setting
+missing from the record, or present with the other value, is still pending, and
+`applied.has("deviceMode")` still gates the whole comparison.
+
+**A post-boot step records itself.** `setDeviceMode()` adds `deviceMode` to
+`provisioning.steps` (via `recordProvisioningStep`) and folds the applied selection
+into `state.deviceMode` rather than overwriting it. Both halves matter: the step record
+is what makes a later `start` passing the same device-mode a recognised no-op instead
+of a refusal, and the merge is what keeps `machine.json` honest, because a device-mode
+update moves only the settings it names — an overwrite left the record claiming an
+earlier feature had never been asked for while the guest still had it.
+
+**Device-mode auth differs by caller, and the default is a trap for the post-boot
+one.** `waitForDeviceModeApi`, `readDeviceMode` and `startDeviceModeUpdate` default to
+`FACTORY_AUTH_HEADER` (`admin:`). That is correct for **first-boot** provisioning and
+only there: device-mode is step 2, the user step is step 4, so factory admin is the
+only credential that exists yet — and `machineState.user` is *already populated* at
+that point with an account nobody has created, so resolving it would 401 the shipped
+path. Post-boot the reverse holds: a machine provisioned with `--disable-admin`
+answers 401 to factory admin, which is what made `quickchr set <name> --device-mode`
+fail on exactly the machines the route was written for (reproduced on CHR 7.24.4).
+`applyDeviceMode()` therefore takes the header from its caller instead of deciding:
+`_provisionInstance` passes `FACTORY_AUTH_HEADER`, `setDeviceMode()` passes
+`resolveAuth(state).header`. Any new post-boot provisioning path inherits the same
+question — and `state.user` is not the answer to it until the user step has run.
+
+**A post-boot apply takes `.start-lock`, and re-reads state under it.** `setDeviceMode()` terminates QEMU, spawns a
+replacement and rewrites `machine.json` — that is a relaunch, and it holds the same
+lock every other relaunch does. Without it a concurrent `start` spawns a second QEMU
+into the power-cycle window and both persist over each other. The applicability check
+goes *inside* the lock: it has to hold for the operation, not for the instant it was
+made. So does a `refreshMachineState()` — a `ChrInstance` closes over one snapshot
+taken when the handle was created, and a library consumer can hold that handle across
+another process's stop/start. `state.pid` is the sharp end: stale, it is either a
+process that has exited (a false `MACHINE_STOPPED`) or one the OS has since reused,
+which `hardRebootMachine()` would then terminate.
+
+**A refusal's route must be a line you can paste.** `postBootRoute()` emits one
+runnable command per step, with its caveat as a comment in that line's own language —
+`#` for shell, `//` for the library API. The caveats used to be parenthetical prose
+appended to the command (`quickchr set lab … (power-cycles the machine)`), and `(`
+opens a subshell, so the advertised recovery was a **bash syntax error** — verified,
+along with `quickchr clean lab (resets the disk), …` failing in zsh. A route that
+cannot be run as printed is a route that does not work, which is the whole point of
+naming one.
+
+Pasteable also means **shell-quoted**. `assertValidResourceName()` guards names only
+at creation; a lookup has to keep older, looser names addressable (`isPathSafeName()`
+rejects only empty, `.`, `..` and a path separator), so a real machine can be called
+`lab old` — and `quickchr set lab old --device-mode rose` addresses a machine called
+`lab`. Device-mode values have the same problem from the other end, since
+`resolveDeviceModeOptions()` passes unknown modes and features through on purpose.
+Every interpolation into a printed command goes through `shellQuote()`, which leaves
+ordinary values alone so the common case still reads like something a person typed.
+It does **not** rescue a legacy name starting with `-`: quoting is the shell's
+business and the flag parse is quickchr's, so that one needs renaming.
+
+**`--no-device-mode` carries `{ mode: "skip" }`, not `undefined`.** `start()` resolves
+a silent request against stored intent (`opts.deviceMode ?? existing.deviceMode`), so
+`undefined` made the flag indistinguishable from not passing it: a machine created with
+`add --device-mode-enable container` and started with `--no-device-mode` provisioned
+container anyway — measured at 48 s with `container=yes`, from a flag documented as
+skipping the step. Any future "skip this step" flag has the same trap: **silence and
+refusal are different instructions**, and only one of them may fall through to stored
+intent.
+
+**A non-2xx from `/system/device-mode/update` is an answer, not a race.**
+`applyDeviceMode()` throws on it immediately rather than entering the retry loop. It
+used to retry five times over ~33 s and then report a *mismatch*
+(`bogus-feature: expected=yes, actual=(missing)`) while RouterOS had said
+`HTTP 400 — unknown parameter bogus-feature` on the first attempt. RouterOS also counts
+update attempts (`attempt-count` on `/system/device-mode`), so the retries spent a
+budget that is not quickchr's to spend. Only a 2xx that returned *before* activation is
+worth retrying — that one really is the blocking-confirmation race.
+
+**`waitForDeviceModeApi()` waits for device-mode data, not for a 2xx.** The post-boot
+race documented above applies to this endpoint, and `readDeviceMode()` rejects a
+resource-shaped body outright — so returning on a bare 2xx handed the next line a body
+it would throw on, failing the operation a second before it would have succeeded. The
+waiter polls until the body parses as device-mode (has `mode`, no `board-name`), and
+its timeout message carries the body it kept getting, so "not ready" and "ready but
+answering something else" stay distinguishable.
+
+**RouterOS reports device-mode as strings.** `GET /rest/system/device-mode` answers
+`"container": "true"`, not `true`. A reader that tests `value === true` finds nothing
+enabled however many are on — which `quickchr get <name> device-mode` did, printing a
+bare mode and no feature line at all. Normalize through `isDeviceModeFeatureEnabled()`.
+
 ## RouterOS Post-Boot REST Race
 
 `waitForBoot` polls `/rest/system/resource` with a two-consecutive-OK guard and detects

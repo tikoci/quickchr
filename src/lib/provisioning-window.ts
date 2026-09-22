@@ -16,8 +16,12 @@
  */
 
 import { getInstanceCredentials } from "./credentials.ts";
+import { shellQuote } from "./names.ts";
 import {
+	formatDeviceModeFlags,
 	formatDeviceModeSelection,
+	mergeDeviceModeOptions,
+	type ResolvedDeviceModeOptions,
 	resolveDeviceModeOptions,
 	shouldApplyDeviceMode,
 } from "./device-mode.ts";
@@ -67,15 +71,38 @@ export interface ProvisioningAsk {
 	satisfied: boolean;
 }
 
-/** Normalized device-mode selection, order-independent, for comparing two requests. */
-function deviceModeKey(options?: DeviceModeOptions): string {
+/** A device-mode request flattened to `setting -> value`: `mode` plus one entry per
+ *  feature, normalized and order-independent. Empty when nothing is being asked for. */
+function deviceModeSelection(options?: DeviceModeOptions): Record<string, string> {
 	const resolved = resolveDeviceModeOptions(options);
-	if (!shouldApplyDeviceMode(resolved)) return "";
-	const features = Object.entries(resolved.features)
-		.map(([name, value]) => `${name}=${value}`)
-		.sort()
-		.join(" ");
-	return `mode=${resolved.mode ?? ""} ${features}`.trim();
+	if (!shouldApplyDeviceMode(resolved)) return {};
+	const selection: Record<string, string> = {};
+	if (resolved.mode) selection.mode = resolved.mode;
+	for (const [feature, value] of Object.entries(resolved.features)) {
+		selection[feature] = value;
+	}
+	return selection;
+}
+
+/** Does the applied record already carry every setting this request names?
+ *
+ *  **Subset, not equality**, because the record is cumulative and the request is not.
+ *  A device-mode update moves only the settings it names, so a machine that took
+ *  `--device-mode-enable container` and later `--device-mode-disable smb` has a record
+ *  of all three settings — and an exact comparison then refuses the very
+ *  `--device-mode-enable container` that a script has been passing on every start
+ *  since before the second change, naming a `quickchr set` command that is a no-op.
+ *  Every field the caller asked about matches; the fields they did not mention are
+ *  not theirs to match.
+ *
+ *  A field that is absent from the record, or present with a different value, is
+ *  still pending — this loosens what counts as equal, not what counts as applied. */
+function deviceModeSatisfiedBy(
+	applied: Record<string, string>,
+	requested: Record<string, string>,
+): boolean {
+	const entries = Object.entries(requested);
+	return entries.length > 0 && entries.every(([setting, value]) => applied[setting] === value);
 }
 
 function licenseLevelOf(license: LicenseInput): string {
@@ -135,12 +162,13 @@ export function classifyProvisioningRequest(
 		});
 	}
 
-	const requestedDeviceMode = deviceModeKey(request.deviceMode);
-	if (requestedDeviceMode) {
+	const requestedDeviceMode = deviceModeSelection(request.deviceMode);
+	if (Object.keys(requestedDeviceMode).length > 0) {
 		asks.push({
 			step: "deviceMode",
 			description: `device-mode (${formatDeviceModeSelection(resolveDeviceModeOptions(request.deviceMode))})`,
-			satisfied: applied.has("deviceMode") && deviceModeKey(state.deviceMode) === requestedDeviceMode,
+			satisfied: applied.has("deviceMode")
+				&& deviceModeSatisfiedBy(deviceModeSelection(state.deviceMode), requestedDeviceMode),
 		});
 	}
 
@@ -180,6 +208,29 @@ export function classifyProvisioningRequest(
 	return asks;
 }
 
+/**
+ * The device-mode record to persist after a post-boot apply.
+ *
+ * Cumulative, because the guest is: a device-mode update moves only the settings it
+ * names, so replacing the record with the request alone would leave `machine.json`
+ * claiming an earlier feature had never been asked for while the guest still had it.
+ *
+ * **But it only carries forward what actually ran.** `state.deviceMode` is desired
+ * config, written at `add()` before anything happens. A first boot that threw before
+ * the device-mode step leaves that intent sitting in state having never reached the
+ * guest — and folding it in here, then stamping `deviceMode` as applied, would make a
+ * later `start` treat settings the guest never received as already satisfied and drop
+ * them in silence. That is this module's own bug wearing a new hat, so it gets this
+ * module's own rule: the step record is the only evidence that a step ran.
+ */
+export function appliedDeviceModeRecord(
+	state: MachineState,
+	applied: ResolvedDeviceModeOptions,
+): DeviceModeOptions {
+	const priorRan = state.provisioning?.steps.includes("deviceMode") ?? false;
+	return mergeDeviceModeOptions(priorRan ? state.deviceMode : undefined, applied);
+}
+
 /** True when any step in this request would change something. */
 export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
 	return !!(
@@ -197,6 +248,13 @@ export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
  *  route — `clean()` resets the disk and reopens the window for all of them — but
  *  the cheaper one is named first where it exists.
  *
+ *  **Every route is a line you can paste and run**, with its caveat as a comment in
+ *  that line's own language — `#` for a shell command, `//` for the library API. This
+ *  is not cosmetic: the caveats used to be parenthetical prose appended to the command
+ *  (`quickchr set lab … (power-cycles the machine)`), and `(` opens a subshell, so the
+ *  advertised recovery was a bash syntax error. A route that cannot be run as printed
+ *  is a route that does not work, which is the whole thing this module exists to stop.
+ *
  *  The `clean()` route says **repeat the original command**, not "start it again".
  *  A refused request is never persisted, and `clean()` clears `user` and
  *  `disableAdmin` because they are guest state, so a plain start after the reset
@@ -208,17 +266,23 @@ export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
  *  was asked for: `installPackage()` takes package names and cannot express
  *  `--install-all-packages`, so that one goes through `clean()` as well. */
 function postBootRoute(ask: ProvisioningAsk, request: ProvisioningRequest, name: string): string {
-	const replay = `quickchr clean ${name} (resets the disk), then repeat the original start command`;
+	// Every interpolation is quoted: `assertValidResourceName()` only guards names at
+	// creation, so a real machine can still be called `lab old`, and the advertised
+	// `quickchr set lab old …` addresses a machine called `lab`.
+	const quoted = shellQuote(name);
+	const replay = `quickchr clean ${quoted}   # resets the disk, then repeat the original start command`;
 	switch (ask.step) {
 		case "license":
-			return `quickchr set ${name} --license`;
+			return `quickchr set ${quoted} --license`;
 		case "deviceMode":
-			return "instance.setDeviceMode() from the library (no CLI route yet — tikoci/quickchr#176)";
+			// Spelled out with the requested flags, because the route only helps if it
+			// can be run as printed — and `set` takes the same flag names `start` does.
+			return `quickchr set ${quoted} ${formatDeviceModeFlags(resolveDeviceModeOptions(request.deviceMode))}   # power-cycles the machine`;
 		case "packages":
 			// installPackage() has no install-all form — availablePackages() would have
 			// to be enumerated first — so the honest route for that request is a reset.
 			if (request.installAllPackages) return replay;
-			return `instance.installPackage(${JSON.stringify(request.packages ?? [])}) from the library (no CLI route yet — tikoci/quickchr#24)`;
+			return `instance.installPackage(${JSON.stringify(request.packages ?? [])})   // library API; no CLI verb yet — tikoci/quickchr#24`;
 		default:
 			return replay;
 	}
@@ -241,9 +305,12 @@ export function assertProvisioningWindow(
 	const pending = asks.filter((ask) => !ask.satisfied);
 	if (pending.length === 0) return asks;
 
-	const lines = pending.map(
-		(ask) => `  ${ask.description} — apply it with: ${postBootRoute(ask, request, state.name)}`,
-	);
+	// Commands go on their own line, indented, so they can be copied without dragging
+	// the surrounding prose along with them.
+	const lines = pending.flatMap((ask) => [
+		`  ${ask.description} — apply it with:`,
+		`      ${postBootRoute(ask, request, state.name)}`,
+	]);
 	const satisfied = asks.filter((ask) => ask.satisfied);
 	if (satisfied.length > 0) {
 		lines.push(`  (already applied, unchanged: ${satisfied.map((a) => a.description).join("; ")})`);
@@ -254,8 +321,7 @@ export function assertProvisioningWindow(
 		`Machine "${state.name}" has already booted, so provisioning cannot run against it — ` +
 		"the guest may no longer hold the default configuration provisioning expects.\n" +
 		lines.join("\n") +
-		`\nTo provision from scratch: quickchr clean ${state.name} resets the disk to the factory ` +
-		"image and reopens the provisioning window — then repeat the command above, since a " +
-		"refused request is not remembered.",
+		"\nTo provision from scratch, reset the disk to the factory image and reopen the window:\n" +
+		`      quickchr clean ${shellQuote(state.name)}   # then repeat the original start command — a refused request is not remembered`,
 	);
 }

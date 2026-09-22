@@ -268,10 +268,13 @@ export type ProvisioningStep =
  * configured, and the two come apart at every `clean()`.
  */
 export interface ProvisioningRecord {
-	/** ISO timestamp of the provisioning run that completed. */
+	/** ISO timestamp of the last time quickchr applied provisioning to this disk —
+	 *  a first-boot run, or a post-boot step such as `setDeviceMode()`. */
 	at: string;
-	/** Steps that ran in that run. Not a full inventory of the guest — a step absent
-	 *  here was not applied *by quickchr*, which is a weaker claim than "not present". */
+	/** Steps that have run on this disk, accumulated: a first-boot run stamps the set
+	 *  it applied, and a post-boot step adds itself. Not a full inventory of the guest —
+	 *  a step absent here was not applied *by quickchr*, which is a weaker claim than
+	 *  "not present". */
 	steps: ProvisioningStep[];
 }
 

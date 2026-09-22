@@ -29,8 +29,22 @@ const START_ONLY_FLAGS = [
 	"license-level", "license-account", "license-password",
 ] as const;
 
+/** `set` applies a change to a machine that has already booted, so it takes the
+ *  post-boot subset of the provisioning flags plus `--license`'s credential flags.
+ *
+ *  It is listed here for the **valueless** check, not for strictness: `set` still
+ *  tolerates an unknown flag like every other non-creating command. The check that
+ *  matters is arity — `quickchr set lab --device-mode` with no value parses as a
+ *  boolean and would otherwise reach "Nothing to set", which blames the user for the
+ *  wrong thing. */
+const SET_ONLY_FLAGS = [
+	"name", "license", "level", "account", "password",
+	"device-mode", "device-mode-enable", "device-mode-disable",
+] as const;
+
 export const ADD_FLAGS: readonly string[] = CREATE_FLAGS;
 export const START_FLAGS: readonly string[] = [...CREATE_FLAGS, ...START_ONLY_FLAGS];
+export const SET_FLAGS: readonly string[] = SET_ONLY_FLAGS;
 
 /** Every flag that takes a value, across every command — `parseFlags`'s arity table.
  *
