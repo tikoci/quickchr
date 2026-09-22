@@ -125,7 +125,16 @@ function csvList(values: string[]): string[] {
  *  failure in another costume (#176).
  *
  *  `--no-device-mode` means *skip device-mode entirely*, so it wins over the feature
- *  lists and says so rather than quietly discarding them. */
+ *  lists and says so rather than quietly discarding them.
+ *
+ *  It returns an explicit `{ mode: "skip" }` rather than `undefined`, because
+ *  `undefined` means *the user said nothing* and the two are not the same instruction.
+ *  `start()` resolves a silent request against stored intent — `opts.deviceMode ??
+ *  existing.deviceMode` — so a machine created with `add --device-mode-enable
+ *  container` and then started with `--no-device-mode` provisioned container anyway,
+ *  power cycle included. Measured on CHR 7.24.4: 48 s and `container=yes`, from a flag
+ *  whose documented job is to skip the step. A flag that is accepted and does nothing
+ *  is the defect this whole area exists to remove (#176). */
 export function deviceModeFromFlags(
 	flags: Record<string, string | boolean | string[]>,
 ): DeviceModeOptions | undefined {
@@ -137,7 +146,7 @@ export function deviceModeFromFlags(
 		if (enable.length > 0 || disable.length > 0) {
 			console.warn("Warning: --device-mode-enable/--device-mode-disable ignored because --no-device-mode was set.");
 		}
-		return undefined;
+		return { mode: "skip" };
 	}
 	if (mode === undefined && enable.length === 0 && disable.length === 0) return undefined;
 
@@ -719,7 +728,12 @@ async function cmdAdd(argv: string[]) {
 	console.log(`  REST:    http://127.0.0.1:${ports.http}  ${dim("(after start)")}`);
 	console.log(`  Dir:     ${dim(state.machineDir)}`);
 	if (state.packages.length > 0) console.log(`  Packages: ${state.packages.join(", ")}  ${dim("(applied on first start)")}`);
-	if (state.deviceMode) console.log(`  Device-mode: ${state.deviceMode.mode ?? "auto"}  ${dim("(applied on first start)")}`);
+	if (state.deviceMode) {
+		const { shouldApplyDeviceMode: willApplyDm, resolveDeviceModeOptions: resolveDm } = await import("../lib/device-mode.ts");
+		console.log(willApplyDm(resolveDm(state.deviceMode))
+			? `  Device-mode: ${state.deviceMode.mode ?? "auto"}  ${dim("(applied on first start)")}`
+			: `  Device-mode: ${dim("skipped (--no-device-mode)")}`);
+	}
 	console.log();
 	console.log(`${dim("tip:")}  quickchr start ${state.name}`);
 }

@@ -235,17 +235,50 @@ describe("device-mode REST reads", () => {
 });
 
 describe("device-mode REST orchestration helpers", () => {
-	test("waitForDeviceModeApi sends default admin auth and returns on 2xx", async () => {
+	test("waitForDeviceModeApi sends default admin auth and returns on device-mode data", async () => {
 		let authorization: string | undefined;
 		const port = await startMockServer((req, res) => {
 			authorization = req.headers.authorization;
-			res.writeHead(204);
-			res.end();
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end('{"mode":"advanced","container":"false"}');
 		});
 
 		await waitForDeviceModeApi(port, 1000);
 
 		expect(authorization).toBe(`Basic ${btoa("admin:")}`);
+	});
+
+	test("waitForDeviceModeApi keeps waiting through the post-boot race", async () => {
+		// RouterOS answers non-resource endpoints with resource-shaped data for a window
+		// after boot. Returning on the bare 2xx handed that body straight to
+		// readDeviceMode(), which rejects it outright — so a guest that came back
+		// mid-race failed the whole operation a second before it would have succeeded.
+		let calls = 0;
+		const port = await startMockServer((_req, res) => {
+			calls++;
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(calls === 1
+				? '{"board-name":"CHR","architecture-name":"x86_64"}'
+				: '{"mode":"rose","container":"true"}');
+		});
+
+		await waitForDeviceModeApi(port, 5000);
+
+		expect(calls).toBeGreaterThan(1);
+	});
+
+	test("waitForDeviceModeApi times out with the body it kept getting", async () => {
+		// A timeout that names what the endpoint was actually returning is the
+		// difference between "not ready" and "ready, but answering something else".
+		const port = await startMockServer((_req, res) => {
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end('{"board-name":"CHR"}');
+		});
+
+		const error = await waitForDeviceModeApi(port, 1500).catch((e) => e);
+
+		expect(error.code).toBe("BOOT_TIMEOUT");
+		expect(error.message).toContain("board-name");
 	});
 
 	test("waitForDeviceModeApi fails immediately on HTTP 401", async () => {
@@ -375,8 +408,8 @@ describe("device-mode auth is the caller's, not a hard-coded admin (#176)", () =
 		let authorization: string | undefined;
 		const port = await startMockServer((req, res) => {
 			authorization = req.headers.authorization;
-			res.writeHead(204);
-			res.end();
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end('{"mode":"rose"}');
 		});
 
 		await waitForDeviceModeApi(port, 1000, managed);

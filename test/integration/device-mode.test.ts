@@ -28,7 +28,7 @@ async function cleanupMachine(name: string): Promise<void> {
 
 describe.skipIf(SKIP)("device-mode provisioning", () => {
 	beforeAll(async () => {
-		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features", "integration-dm-setmode", "integration-dm-post-boot", "integration-dm-stopped", "integration-dm-cli"]) {
+		for (const name of ["integration-dm-rose", "integration-dm-skip", "integration-dm-features", "integration-dm-setmode", "integration-dm-post-boot", "integration-dm-stopped", "integration-dm-cli", "integration-dm-no-skip"]) {
 			await cleanupMachine(name);
 		}
 	});
@@ -255,6 +255,43 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 			await cleanupMachine("integration-dm-post-boot");
 		}
 	}, bootTestTimeout({ boots: 3 })); // + two hard power-cycles
+
+	test("--no-device-mode on start beats device-mode intent stored at add", async () => {
+		// `--no-device-mode` is documented as "skip device-mode provisioning entirely",
+		// and it used to be parsed into `undefined` — which `start()` cannot tell from
+		// the user saying nothing, so it fell through to `existing.deviceMode` and
+		// provisioned the stored request anyway, power cycle included. Measured before
+		// the fix: 48 s and container enabled, from a flag whose job is to skip.
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			const added = await QuickCHR.add({
+				...imageTarget(),
+				arch,
+				name: "integration-dm-no-skip",
+				deviceMode: { mode: "auto", enable: ["container"] },
+				secureLogin: false,
+			});
+			expect(added.deviceMode).toMatchObject({ enable: ["container"] });
+
+			instance = await QuickCHR.start({
+				name: "integration-dm-no-skip",
+				background: true,
+				deviceMode: { mode: "skip" },
+			});
+
+			const actual = await readDeviceMode(instance.ports.http);
+			expect(actual.container).toBe("no");
+			// The mode is untouched too — enabling a feature would have moved it to rose.
+			expect(actual.mode).toBe("advanced");
+		} finally {
+			await cleanupMachine("integration-dm-no-skip");
+		}
+	}, bootTestTimeout({ boots: 1 }));
 
 	test("the CLI command the refusal prints actually works, run as a process", async () => {
 		// The library path is covered above; this covers the route as a *user* meets it.

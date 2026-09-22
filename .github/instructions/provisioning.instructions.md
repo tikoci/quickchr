@@ -131,6 +131,41 @@ another process's stop/start. `state.pid` is the sharp end: stale, it is either 
 process that has exited (a false `MACHINE_STOPPED`) or one the OS has since reused,
 which `hardRebootMachine()` would then terminate.
 
+**A refusal's route must be a line you can paste.** `postBootRoute()` emits one
+runnable command per step, with its caveat as a comment in that line's own language —
+`#` for shell, `//` for the library API. The caveats used to be parenthetical prose
+appended to the command (`quickchr set lab … (power-cycles the machine)`), and `(`
+opens a subshell, so the advertised recovery was a **bash syntax error** — verified,
+along with `quickchr clean lab (resets the disk), …` failing in zsh. A route that
+cannot be run as printed is a route that does not work, which is the whole point of
+naming one.
+
+**`--no-device-mode` carries `{ mode: "skip" }`, not `undefined`.** `start()` resolves
+a silent request against stored intent (`opts.deviceMode ?? existing.deviceMode`), so
+`undefined` made the flag indistinguishable from not passing it: a machine created with
+`add --device-mode-enable container` and started with `--no-device-mode` provisioned
+container anyway — measured at 48 s with `container=yes`, from a flag documented as
+skipping the step. Any future "skip this step" flag has the same trap: **silence and
+refusal are different instructions**, and only one of them may fall through to stored
+intent.
+
+**A non-2xx from `/system/device-mode/update` is an answer, not a race.**
+`applyDeviceMode()` throws on it immediately rather than entering the retry loop. It
+used to retry five times over ~33 s and then report a *mismatch*
+(`bogus-feature: expected=yes, actual=(missing)`) while RouterOS had said
+`HTTP 400 — unknown parameter bogus-feature` on the first attempt. RouterOS also counts
+update attempts (`attempt-count` on `/system/device-mode`), so the retries spent a
+budget that is not quickchr's to spend. Only a 2xx that returned *before* activation is
+worth retrying — that one really is the blocking-confirmation race.
+
+**`waitForDeviceModeApi()` waits for device-mode data, not for a 2xx.** The post-boot
+race documented above applies to this endpoint, and `readDeviceMode()` rejects a
+resource-shaped body outright — so returning on a bare 2xx handed the next line a body
+it would throw on, failing the operation a second before it would have succeeded. The
+waiter polls until the body parses as device-mode (has `mode`, no `board-name`), and
+its timeout message carries the body it kept getting, so "not ready" and "ready but
+answering something else" stay distinguishable.
+
 **RouterOS reports device-mode as strings.** `GET /rest/system/device-mode` answers
 `"container": "true"`, not `true`. A reader that tests `value === true` finds nothing
 enabled however many are on — which `quickchr get <name> device-mode` did, printing a

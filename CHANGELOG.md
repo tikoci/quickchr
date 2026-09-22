@@ -87,6 +87,29 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   The first-boot path still passes factory admin explicitly, because `state.user` is
   written at `add()` and names an account that does not exist yet. (#176)
 
+- `--no-device-mode` skips device-mode on `start` even when the machine was created
+  with device-mode flags. It parsed to "the user said nothing", which `start()` resolves
+  against stored intent — so `add --device-mode-enable container` followed by
+  `start --no-device-mode` provisioned container anyway, power cycle included (measured:
+  48 s, `container=yes`, from a flag documented as skipping the step). (#176)
+
+- A device-mode update RouterOS rejects fails with RouterOS's own error instead of five
+  retries. `quickchr set <name> --device-mode-enable <unknown>` spent ~33 s and then
+  reported a mismatch, while RouterOS had answered `HTTP 400 — unknown parameter …` on
+  the first attempt; RouterOS also counts update attempts, so the retries spent a budget
+  that was not quickchr's to spend. Now 0.2 s and the actual complaint. (#176)
+
+- Device-mode readiness waits for device-mode data, not for any 2xx. RouterOS can answer
+  a non-resource endpoint with resource-shaped data briefly after boot, which the next
+  call rejects outright — so a guest that came back mid-race failed the operation a
+  second before it would have succeeded. (#176)
+
+- The commands `PROVISIONING_WINDOW_CLOSED` names can be pasted into a shell. Their
+  caveats were parenthetical prose appended to the command, and `(` opens a subshell, so
+  `quickchr set lab … (power-cycles the machine)` was a bash syntax error and
+  `quickchr clean lab (resets the disk), …` failed in zsh. Each route is now one
+  runnable line with its caveat as a trailing comment. (#176)
+
 - A device-mode option a machine already has is recognised as applied even when the
   record has grown since. The comparison required the stored record to equal the
   request, but the record is cumulative and a request is not: a machine that took

@@ -1572,6 +1572,22 @@ async function applyDeviceMode(
 		}
 
 		log.debug(`Device-mode update response: HTTP ${outcome.response.status}`);
+
+		// A rejection is an answer, not a race — say what RouterOS said and stop.
+		// Retrying here used to cost five POSTs and ~33 s and then report a *mismatch*
+		// (`bogus-feature: expected=yes, actual=(missing)`) while RouterOS had replied
+		// `HTTP 400 — unknown parameter bogus-feature` on the first attempt. RouterOS
+		// also counts device-mode update attempts (`attempt-count` on
+		// `/system/device-mode`), so the retries spend a budget that is not ours to
+		// spend. Only a 2xx that came back before activation is worth trying again.
+		const { status, body } = outcome.response;
+		if (status < 200 || status >= 300) {
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				`Device-mode update rejected by RouterOS: HTTP ${status} — ${body.trim() || "(empty body)"}`,
+			);
+		}
+
 		await Bun.sleep(5000);
 
 		let routerOsOffline = false;

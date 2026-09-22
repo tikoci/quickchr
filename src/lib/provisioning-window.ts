@@ -247,6 +247,13 @@ export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
  *  route — `clean()` resets the disk and reopens the window for all of them — but
  *  the cheaper one is named first where it exists.
  *
+ *  **Every route is a line you can paste and run**, with its caveat as a comment in
+ *  that line's own language — `#` for a shell command, `//` for the library API. This
+ *  is not cosmetic: the caveats used to be parenthetical prose appended to the command
+ *  (`quickchr set lab … (power-cycles the machine)`), and `(` opens a subshell, so the
+ *  advertised recovery was a bash syntax error. A route that cannot be run as printed
+ *  is a route that does not work, which is the whole thing this module exists to stop.
+ *
  *  The `clean()` route says **repeat the original command**, not "start it again".
  *  A refused request is never persisted, and `clean()` clears `user` and
  *  `disableAdmin` because they are guest state, so a plain start after the reset
@@ -258,19 +265,19 @@ export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
  *  was asked for: `installPackage()` takes package names and cannot express
  *  `--install-all-packages`, so that one goes through `clean()` as well. */
 function postBootRoute(ask: ProvisioningAsk, request: ProvisioningRequest, name: string): string {
-	const replay = `quickchr clean ${name} (resets the disk), then repeat the original start command`;
+	const replay = `quickchr clean ${name}   # resets the disk, then repeat the original start command`;
 	switch (ask.step) {
 		case "license":
 			return `quickchr set ${name} --license`;
 		case "deviceMode":
 			// Spelled out with the requested flags, because the route only helps if it
 			// can be run as printed — and `set` takes the same flag names `start` does.
-			return `quickchr set ${name} ${formatDeviceModeFlags(resolveDeviceModeOptions(request.deviceMode))} (power-cycles the machine)`;
+			return `quickchr set ${name} ${formatDeviceModeFlags(resolveDeviceModeOptions(request.deviceMode))}   # power-cycles the machine`;
 		case "packages":
 			// installPackage() has no install-all form — availablePackages() would have
 			// to be enumerated first — so the honest route for that request is a reset.
 			if (request.installAllPackages) return replay;
-			return `instance.installPackage(${JSON.stringify(request.packages ?? [])}) from the library (no CLI route yet — tikoci/quickchr#24)`;
+			return `instance.installPackage(${JSON.stringify(request.packages ?? [])})   // library API; no CLI verb yet — tikoci/quickchr#24`;
 		default:
 			return replay;
 	}
@@ -293,9 +300,12 @@ export function assertProvisioningWindow(
 	const pending = asks.filter((ask) => !ask.satisfied);
 	if (pending.length === 0) return asks;
 
-	const lines = pending.map(
-		(ask) => `  ${ask.description} — apply it with: ${postBootRoute(ask, request, state.name)}`,
-	);
+	// Commands go on their own line, indented, so they can be copied without dragging
+	// the surrounding prose along with them.
+	const lines = pending.flatMap((ask) => [
+		`  ${ask.description} — apply it with:`,
+		`      ${postBootRoute(ask, request, state.name)}`,
+	]);
 	const satisfied = asks.filter((ask) => ask.satisfied);
 	if (satisfied.length > 0) {
 		lines.push(`  (already applied, unchanged: ${satisfied.map((a) => a.description).join("; ")})`);
@@ -306,8 +316,7 @@ export function assertProvisioningWindow(
 		`Machine "${state.name}" has already booted, so provisioning cannot run against it — ` +
 		"the guest may no longer hold the default configuration provisioning expects.\n" +
 		lines.join("\n") +
-		`\nTo provision from scratch: quickchr clean ${state.name} resets the disk to the factory ` +
-		"image and reopens the provisioning window — then repeat the command above, since a " +
-		"refused request is not remembered.",
+		"\nTo provision from scratch, reset the disk to the factory image and reopen the window:\n" +
+		`      quickchr clean ${state.name}   # then repeat the original start command — a refused request is not remembered`,
 	);
 }

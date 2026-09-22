@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deviceModeFromFlags, parseFlags } from "../../src/cli/index.ts";
+import { resolveDeviceModeOptions, shouldApplyDeviceMode } from "../../src/lib/device-mode.ts";
 import type { MachineState, NetworkConfig } from "../../src/lib/types.ts";
 
 /**
@@ -114,7 +115,22 @@ describe("deviceModeFromFlags", () => {
 		// `add` enabled container while `start` skipped device-mode with a warning. Two
 		// spellings of one intent producing opposite results is #176 in another costume.
 		const { flags } = parseFlags(["lab", "--no-device-mode", "--device-mode-enable", "container"]);
-		expect(deviceModeFromFlags(flags)).toBeUndefined();
+		expect(deviceModeFromFlags(flags)).toEqual({ mode: "skip" });
+	});
+
+	test("skip is an instruction, not silence — that distinction is the whole flag", () => {
+		// `start()` resolves a silent request against stored intent
+		// (`opts.deviceMode ?? existing.deviceMode`), so returning `undefined` here made
+		// `--no-device-mode` indistinguishable from not passing it: a machine created
+		// with `add --device-mode-enable container` and started with `--no-device-mode`
+		// provisioned container anyway, power cycle included. Being *truthy* is what
+		// stops the `??` falling through; resolving to `skip` is what stops it applying.
+		const skip = deviceModeFromFlags(parseFlags(["lab", "--no-device-mode"]).flags);
+		expect(skip).toBeDefined();
+		expect(shouldApplyDeviceMode(resolveDeviceModeOptions(skip))).toBe(false);
+
+		// Saying nothing still means nothing, so stored intent still applies.
+		expect(deviceModeFromFlags(parseFlags(["lab"]).flags)).toBeUndefined();
 	});
 });
 

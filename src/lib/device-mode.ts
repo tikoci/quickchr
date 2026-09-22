@@ -176,7 +176,30 @@ export function formatDeviceModeSelection(options: ResolvedDeviceModeOptions): s
  *  machine's own credentials instead — see `applyDeviceMode`. */
 export const FACTORY_AUTH_HEADER = `Basic ${btoa("admin:")}`;
 
-/** Wait until the device-mode REST endpoint is reachable.
+/** Is this response body actually `/system/device-mode`, and not the post-boot race?
+ *
+ *  RouterOS can answer a non-resource endpoint with resource-shaped or otherwise wrong
+ *  data for a short window after boot — `provisioning.instructions.md` documents this
+ *  for exactly this endpoint, and `readDeviceMode()` carries a guard for it. A 2xx is
+ *  therefore not proof the endpoint is ready; a body with `mode` in it is. */
+function isDeviceModeBody(body: string): boolean {
+	let data: unknown;
+	try { data = JSON.parse(body); } catch { return false; }
+	const record = Array.isArray(data) ? data[0] : data;
+	if (!record || typeof record !== "object") return false;
+	const keys = record as Record<string, unknown>;
+	if ("board-name" in keys || "architecture-name" in keys) return false;
+	return "mode" in keys;
+}
+
+/** Wait until the device-mode REST endpoint is reachable **and answering with
+ *  device-mode data**.
+ *
+ *  Returning on a bare 2xx was a race the next line then paid for: `readDeviceMode()`
+ *  rejects a resource-shaped body outright, so a guest that came back mid-race failed
+ *  the whole operation instead of being waited out for one more second. This is the
+ *  poll-until-the-keys-are-there pattern `provisioning.instructions.md` prescribes for
+ *  every non-resource endpoint, applied where the waiting already happens.
  *
  *  `auth` defaults to factory admin, which is what a guest being provisioned for the
  *  first time has. A machine past that point needs its own credentials passed in. */
@@ -186,16 +209,20 @@ export async function waitForDeviceModeApi(
 	auth: string = FACTORY_AUTH_HEADER,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
+	let lastBody = "";
 	while (Date.now() < deadline) {
 		try {
-			const { status } = await restGet(
+			const { status, body } = await restGet(
 				`http://127.0.0.1:${httpPort}/rest/system/device-mode`,
 				auth,
 				3000,
 			);
 
 			if (status >= 200 && status < 300) {
-				return;
+				if (isDeviceModeBody(body)) return;
+				// Answering, but not with device-mode yet — keep waiting rather than
+				// handing the caller a body it will throw on.
+				lastBody = body;
 			}
 
 			if (status === 401) {
@@ -210,7 +237,11 @@ export async function waitForDeviceModeApi(
 		await Bun.sleep(1000);
 	}
 
-	throw new QuickCHRError("BOOT_TIMEOUT", `Device-mode API did not become ready on port ${httpPort}`);
+	throw new QuickCHRError(
+		"BOOT_TIMEOUT",
+		`Device-mode API did not become ready on port ${httpPort}` +
+		(lastBody ? ` (last response was not device-mode data: ${lastBody.slice(0, 200)})` : ""),
+	);
 }
 
 /**
