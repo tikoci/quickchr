@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { QuickCHR } from "../../src/index.ts";
-import { check, runExample } from "../lib.ts";
-import { command, configureClients, createLab, read, until, type Lab, type Row } from "./tool/lab.ts";
+import { check, exampleMachineName, runExample } from "../lib.ts";
+import { cancellation, command, configureClients, createLab, read, until, type Lab, type Row } from "./tool/lab.ts";
 import { probes } from "./tool/probes.ts";
 
 export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void>) => void, extended = false, evidence: Record<string, unknown> = {}) {
@@ -79,17 +79,24 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 
 		evidence.webhooks = received;
 		if (extended) {
-			evidence.probes = await probes(lab, true);
+			// Attached before probing so a failed probe still reports what it observed.
+			const probeEvidence: Record<string, unknown> = {};
+			evidence.probes = probeEvidence;
+			await probes(lab, true, probeEvidence);
+			// The probes reboot the controller, which can fire these rules first; require new ones.
+			const hooks = (prefix: string) => received.filter(r => r.body.startsWith(prefix)).length;
+			const downBefore = await fired("lab-down");
+			const downHooksBefore = hooks("DOWN cmr-remote");
 			const upBefore = await fired("lab-connected");
-			const webhookBefore = received.filter(r => r.body.startsWith("UP cmr-remote")).length;
+			const upHooksBefore = hooks("UP cmr-remote");
 			await remote.stop();
-			await until("remote down alert and webhook", async () => await fired("lab-down") > 0 && received.some(r => r.body.startsWith("DOWN cmr-remote")), 120_000);
+			await until("remote down alert and webhook", async () => await fired("lab-down") > downBefore && hooks("DOWN cmr-remote") > downHooksBefore, 120_000);
 			console.log("Remote disconnect alert and webhook verified");
 			remote = await QuickCHR.start({ name: remote.name });
-				lab.remote = remote;
-				lab.all[2] = remote;
+			lab.remote = remote;
+			lab.all[2] = remote;
 			await until("remote reconnected without re-pairing", async () => (await read(remote, "/cmr/client"))[0]?.status === "paired,connected");
-			await until("reconnected alert", async () => await fired("lab-connected") > upBefore && received.filter(r => r.body.startsWith("UP cmr-remote")).length > webhookBefore, 120_000);
+			await until("reconnected alert", async () => await fired("lab-connected") > upBefore && hooks("UP cmr-remote") > upHooksBefore, 120_000);
 			evidence.automaticReconnect = true;
 		}
 		evidence.webhooks = received;
@@ -106,43 +113,69 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 
 if (import.meta.main) {
 	const webhookStops: (() => Promise<void>)[] = [];
+	const prefix = exampleMachineName("cmr");
+	// Remove by name, not by handle: --probe restarts the remote, and only a fresh lookup
+	// carries the restarted QEMU's PID. Also catches a VM whose start failed after spawning.
+	const removeLab = async () => {
+		for (const machine of QuickCHR.list().filter(m => m.name.startsWith(`${prefix}-`))) {
+			try { await QuickCHR.get(machine.name)?.remove(); } catch { /* best-effort teardown */ }
+		}
+	};
+	let releaseHold: (() => void) | undefined;
+	const onSignal = () => {
+		if (releaseHold) return releaseHold();
+		if (!cancellation.requested) {
+			// Let in-flight starts finish; the next lab step throws and the finally below removes the VMs.
+			cancellation.requested = true;
+			console.log("\nCancelling; removing the lab VMs after the current step (Ctrl-C again to force)");
+			return;
+		}
+		void removeLab().finally(() => process.exit(130));
+	};
+	process.on("SIGINT", onSignal);
+	process.on("SIGTERM", onSignal);
 	try {
 		await runExample(async track => {
-			const lab = await createLab(track, "7.26beta1", !process.argv.includes("--first-bridge"));
-			const hold = process.argv.includes("--hold");
-			const evidence: Record<string, unknown> = {};
-			let failure: unknown;
 			try {
-				await exercise(lab, hold ? stop => webhookStops.push(stop) : undefined, process.argv.includes("--probe"), evidence);
-			} catch (error) {
-				failure = error;
-				evidence.failure = String(error);
-				const state: Record<string, unknown> = {};
-				for (const path of ["/cmr/client", "/routing/ospf/neighbor", "/routing/route", "/log"]) {
-					try {
-						const data = await read(lab.remote, path);
-						state[path] = path === "/log" ? data.filter(r => r.topics?.includes("cmr")).slice(-20) : data;
-					} catch (readError) { state[path] = String(readError); }
-				}
-				evidence.failureState = state;
-			}
-			const reportIndex = process.argv.indexOf("--report");
-			if (reportIndex >= 0) {
-				const reportPath = process.argv[reportIndex + 1];
-				check(reportPath, "--report needs a path");
-				await Bun.write(reportPath, `${JSON.stringify(evidence, null, 2)}\n`);
-			}
-			if (failure) throw failure;
-			if (hold) {
-				console.log("Lab is running; open the controller in WinBox 4. Ctrl-C removes all four VMs.");
-				for (const chr of lab.all) console.log(`${chr.name} WinBox port ${chr.ports.winbox}`);
-				await new Promise<void>(resolve => {
-					process.once("SIGINT", resolve);
-					process.once("SIGTERM", resolve);
-				});
+				await runLab(track);
+			} finally {
+				await removeLab();
 			}
 		});
 	} finally {
 		for (const stop of webhookStops) await stop();
+	}
+
+	async function runLab(track: Parameters<Parameters<typeof runExample>[0]>[0]) {
+		const lab = await createLab(track, "7.26beta1", !process.argv.includes("--first-bridge"), prefix);
+		const hold = process.argv.includes("--hold");
+		const evidence: Record<string, unknown> = {};
+		let failure: unknown;
+		try {
+			await exercise(lab, hold ? stop => webhookStops.push(stop) : undefined, process.argv.includes("--probe"), evidence);
+		} catch (error) {
+			failure = error;
+			evidence.failure = String(error);
+			const state: Record<string, unknown> = {};
+			for (const path of ["/cmr/client", "/routing/ospf/neighbor", "/routing/route", "/log"]) {
+				try {
+					const data = await read(lab.remote, path);
+					state[path] = path === "/log" ? data.filter(r => r.topics?.includes("cmr")).slice(-20) : data;
+				} catch (readError) { state[path] = String(readError); }
+			}
+			evidence.failureState = state;
+		}
+		const reportIndex = process.argv.indexOf("--report");
+		if (reportIndex >= 0) {
+			const reportPath = process.argv[reportIndex + 1];
+			check(reportPath, "--report needs a path");
+			await Bun.write(reportPath, `${JSON.stringify(evidence, null, 2)}\n`);
+		}
+		if (failure) throw failure;
+		if (hold) {
+			console.log("Lab is running; open the controller in WinBox 4. Ctrl-C removes all four VMs.");
+			for (const chr of lab.all) console.log(`${chr.name} WinBox port ${chr.ports.winbox}`);
+			await new Promise<void>(resolve => { releaseHold = resolve; });
+		}
 	}
 }

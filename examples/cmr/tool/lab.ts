@@ -10,6 +10,12 @@ async function cli(args: string[], inherit = false): Promise<string> {
 	return output;
 }
 
+/** Set on Ctrl-C: the next lab step throws, so the runner can tear down after any in-flight start. */
+export const cancellation = { requested: false };
+function checkCancelled(): void {
+	if (cancellation.requested) throw new Error("Cancelled");
+}
+
 export type Row = Record<string, string>;
 export function rows(value: unknown): Row[] {
 	if (Array.isArray(value)) return value as Row[];
@@ -17,10 +23,12 @@ export function rows(value: unknown): Row[] {
 }
 
 export async function read(chr: ChrInstance, path: string): Promise<Row[]> {
+	checkCancelled();
 	return rows(await chr.rest(path));
 }
 
 export async function command(chr: ChrInstance, script: string): Promise<string> {
+	checkCancelled();
 	const output = cliMode ? await cli(["exec", chr.name, script]) : (await chr.exec(script)).output;
 	check(!/^(failure:|syntax error|bad command name|expected |input does not match|no such item)/m.test(output), output);
 	return output;
@@ -29,16 +37,17 @@ export async function command(chr: ChrInstance, script: string): Promise<string>
 export async function until(description: string, predicate: () => Promise<boolean>, timeout = 90_000): Promise<void> {
 	const deadline = Date.now() + timeout;
 	while (Date.now() < deadline) {
+		checkCancelled();
 		if (await predicate()) return;
 		await Bun.sleep(1000);
 	}
 	throw new Error(`Timed out: ${description}`);
 }
 
-export async function createLab(track: <T extends ChrInstance>(instance: T) => T, version = "7.26beta1", initialBridge = true) {
-	const prefix = exampleMachineName("cmr");
+export async function createLab(track: <T extends ChrInstance>(instance: T) => T, version = "7.26beta1", initialBridge = true, prefix = exampleMachineName("cmr")) {
 	const link = (suffix: string): NetworkSpecifier => ({ type: "socket", name: `${prefix}-${suffix}` });
 	const boot = async (role: string, networks: NetworkSpecifier[], packages: string[] = []) => {
+		checkCancelled();
 		console.log(`Booting ${role} on ${version}`);
 		const name = `${prefix}-${role}`;
 		let chr: ChrInstance;
@@ -59,8 +68,14 @@ export async function createLab(track: <T extends ChrInstance>(instance: T) => T
 			check(instance, "CLI machine missing");
 			chr = track(instance);
 		} else {
-			chr = track(await QuickCHR.start({ name, version, arch: "x86", mem: 512, secureLogin: true,
-				networks: ["user", ...networks], packages }));
+			try {
+				chr = track(await QuickCHR.start({ name, version, arch: "x86", mem: 512, secureLogin: true,
+					networks: ["user", ...networks], packages }));
+			} catch (error) {
+				// Provisioning (e.g. the cmr package upload) can fail after QEMU is already running.
+				await QuickCHR.get(name)?.remove();
+				throw error;
+			}
 		}
 		await command(chr, `/system/identity/set name=cmr-${role}`);
 		await command(chr, '/system/note/set note="Disposable quickchr CMR lab"');

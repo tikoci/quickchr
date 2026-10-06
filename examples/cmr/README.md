@@ -57,7 +57,10 @@ license is sufficient. Version is pinned to 7.26beta1 for reproducibility.
 Add `--hold` to inspect the finished lab in WinBox 4 or WebFig. The script prints
 machine names and WinBox ports; use `quickchr inspect <name>` locally for generated
 login credentials. Ctrl-C in the hold phase removes all four VMs. Default runs
-remove them on success or failure; report JSON survives teardown. Reports contain
+remove them on success or failure; report JSON survives teardown. Ctrl-C during
+boot or probes stops after the current step and removes the VMs (a second Ctrl-C
+removes them at once). Teardown looks machines up by name, so a VM restarted by
+`--probe` is stopped too. Reports contain
 lab state and webhook messages, never descriptors or pairing passwords.
 
 For validated ad hoc commands in another terminal:

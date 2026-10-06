@@ -82,7 +82,13 @@ offers are documented behaviour, not bug reports.
 ## Verification
 
 - `bun run cmr.ts --probe --report …` with the output-reject rule: exit 0 in
-  5m22s, with no `examples-cmr-*` machines left afterwards.
+  about 5m20s.
+- Teardown: earlier `--probe` runs leaked the restarted remote's QEMU. The old
+  handle's `remove()` deleted the machine state without stopping the new
+  process, so `quickchr list` looked clean. Teardown now removes machines by
+  name. After a fixed `--probe` run, and after a Ctrl-C during boot, no
+  `qemu-system` process for the lab remained (checked with `ps`, not only
+  `quickchr list`).
 - `bun run check` and `bun test test/unit/`: 1,220 pass, 19 existing skips.
 - PowerShell parser: passed. No Windows or PowerShell end-to-end run is claimed.
 - Not part of the routine CI smoke subset; no hosted CI result is claimed.

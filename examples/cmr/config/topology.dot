@@ -1,20 +1,25 @@
 // examples/cmr lab topology. Render from examples/cmr: dot -Tsvg config/topology.dot -o config/topology.svg
 digraph cmr_lab {
     rankdir=TB;
-    nodesep=0.6;
+    nodesep=0.5;
     node [shape=box, style=rounded, fontname="Helvetica", fontsize=11];
     edge [fontname="Helvetica", fontsize=10, dir=both, penwidth=2];
 
-    controller [style="rounded,bold", label="cmr-controller | CHR 7.26beta1 + cmr package\nCMR server, tcp/54321\nloopback 10.255.0.1/32\nether2 192.0.2.1/30   ether3 203.0.113.1/30"];
-    transit    [label="cmr-transit | CHR 7.26beta1\nCMR client → 192.0.2.1\nloopback 10.255.0.2/32\nether2 192.0.2.2/30   ether3 198.51.100.1/30"];
-    local      [label="cmr-local | CHR 7.26beta1\nCMR client, no controller-addresses\n(finds controller by discovery)\nloopback 10.255.0.4/32\nether2 203.0.113.2/30"];
-    remote     [label="cmr-remote | CHR 7.26beta1\nCMR client → 10.255.0.1\n(reachable only via OSPF, 2 hops)\nloopback 10.255.0.3/32\nether2 198.51.100.2/30"];
+    controller [style="rounded,bold", label="cmr-controller | CHR 7.26beta1 + cmr package\nCMR server, tcp/54321   labels: lab, controller\nloopback 10.255.0.1/32\nether2 192.0.2.1/30   ether3 203.0.113.1/30"];
+    transit    [label="cmr-transit | CHR 7.26beta1\nCMR client → 192.0.2.1   labels: lab, transit\nloopback 10.255.0.2/32\nether2 192.0.2.2/30   ether3 198.51.100.1/30"];
+    local      [label="cmr-local | CHR 7.26beta1\nCMR client, no controller-addresses\n(finds controller by discovery)   labels: lab, local\nloopback 10.255.0.4/32\nether2 203.0.113.2/30"];
+    remote     [label="cmr-remote | CHR 7.26beta1\nCMR client → 10.255.0.1\n(reachable only via OSPF, 2 hops)   labels: lab, remote\nloopback 10.255.0.3/32\nether2 198.51.100.2/30"];
 
     controller -> transit [label=" socket::core\n OSPF ptp"];
     controller -> local   [label=" socket::local\n OSPF ptp"];
     transit -> remote     [label=" socket::remote\n OSPF ptp"];
 
-    host [shape=note, style="", fontcolor=gray30, color=gray50, label="Mac host: quickchr + QEMU/HVF\nevery CHR also has ether1 = QEMU user-mode NIC\n(REST/WinBox for the host, webhook target 10.0.2.2)\ntcp/54321 filtered on ether1, so CMR uses the links above"];
+    cmr [shape=note, style="", color="#1f77b4", fontcolor="#1f4f7f", label="CMR on the controller\l/cmr set enabled=yes track-topology=yes fetch-comments=yes auto-labels=all\lpairing: /cmr/device/pair with each client's login\l\lalerts, labels=lab (all four):\l  cpu > 85%   mem > 80%   disk > 80%   rebooted\l  upgrade-available   upgrade-done=success\lalerts, labels=remote:\l  bridge added   log warning ~ CMR-LAB-PROBE\l  disconnected > 10s → webhook DOWN\l  connected → webhook UP\l\lupgrade rule lab-pinned: labels=lab channel=7.26beta1 (never triggered)\llayout lab: add-devices labels=lab, rebuild-links → 4 nodes, 3 links\lrun-script labels=lab: one :put on all four routers\l"];
+    {rank=same; controller; cmr}
+    controller -> cmr [dir=none, style=dashed, penwidth=1, color="#1f77b4"];
+
+    host [shape=note, style="", fontcolor=gray30, color=gray50, label="Mac host: quickchr + QEMU/HVF, webhook listener at 10.0.2.2\nevery CHR also has ether1 = QEMU user-mode NIC (REST/WinBox)\ntcp/54321 dropped in / reset out on ether1, so CMR uses the links above"];
     {rank=same; remote; host}
     transit -> host [style=invis];
+    cmr -> host [dir=forward, style=dashed, penwidth=1, color="#1f77b4", fontcolor="#1f4f7f", label=" HTTP POST\n webhooks"];
 }

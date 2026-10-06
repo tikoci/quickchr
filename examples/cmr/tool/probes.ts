@@ -1,17 +1,20 @@
 import { check } from "../../lib.ts";
 import { command, pair, read, until, type Lab } from "./lab.ts";
 
-/** Deliberate beta probes run after the demonstration, on disposable routers only. */
-export async function probes(lab: Lab, preserveWebhooks = false) {
+/**
+ * Deliberate beta probes run after the demonstration, on disposable routers only.
+ * Observations land in `result` as they are made, so a caller that holds it keeps them if a later probe throws.
+ */
+export async function probes(lab: Lab, preserveWebhooks = false, result: Record<string, unknown> = {}) {
 	const { controller, local } = lab;
-	const result: Record<string, unknown> = {};
 	if (!preserveWebhooks) {
 		for (const name of ["lab-down", "lab-connected"]) await command(controller, `/cmr/alert/set [find name=${name}] disabled=yes`);
 	}
 	const quote = (s: string) => `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("$", "\\$")}"`;
 	const auth = (await controller.descriptor()).services["rest-api"];
 	check(auth.available && auth.auth, "Controller login missing");
-	const matrix = [];
+	const matrix: Record<string, string>[] = [];
+	result.pairingMatrix = matrix;
 	for (const clientRequirement of ["none", "password"]) {
 		for (const serverRequirement of ["none", "password", "confirm"]) {
 			await command(local, "/cmr/client/set enabled=no");
@@ -33,7 +36,6 @@ export async function probes(lab: Lab, preserveWebhooks = false) {
 			matrix.push({ clientRequirement, serverRequirement, before: before?.state ?? "ok", after: "paired,connected" });
 		}
 	}
-	result.pairingMatrix = matrix;
 	console.log("Pairing matrix verified: six fresh client/server combinations");
 	await command(controller, "/cmr/device/set [find identity=cmr-local] labels=lab,local");
 
@@ -53,9 +55,16 @@ export async function probes(lab: Lab, preserveWebhooks = false) {
 	result.fullVerboseExportHasServerSettings = /(?:^|\n)\/cmr\s+(?:set|\r?\nset)\b/.test(await command(controller, "/export verbose"));
 	await command(controller, "/system/backup/save name=cmr-lab password=CMR-Lab-Backup");
 	const before = { settings: await read(controller, "/cmr"), devices: (await read(controller, "/cmr/device")).map(r => ({ identity: r.identity, ids: r.ids, labels: r.labels })) };
+	result.binaryBackup = { before };
 	await command(controller, "/cmr/set enabled=no");
 	check((await read(controller, "/cmr"))[0]?.enabled === "no", "Backup control: server did not disable");
-	await controller.rest("/system/backup/load", { method: "POST", body: JSON.stringify({ name: "cmr-lab.backup", password: "CMR-Lab-Backup" }) });
+	try {
+		await controller.rest("/system/backup/load", { method: "POST", body: JSON.stringify({ name: "cmr-lab.backup", password: "CMR-Lab-Backup" }) });
+	} catch (error) {
+		// The load reboots RouterOS, so the reply can be lost (refused, reset or timed out); the
+		// polling below verifies the restore. An HTTP status (bad name, password, auth) stays fatal.
+		if (error instanceof Error && error.message.startsWith("REST ")) throw error;
+	}
 	await until("server enabled after binary backup restore", async () => {
 		try { return (await read(controller, "/cmr"))[0]?.enabled === "yes"; }
 		catch { return false; } // The restore reboots RouterOS; REST is expected to disconnect.
