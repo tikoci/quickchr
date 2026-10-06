@@ -1,0 +1,182 @@
+{
+  "version": "7.26beta1",
+  "timestamp": "2026-10-06T03:01:59.411Z",
+  "sourceReportSha256": "28d2dea6e6ba52b2a252ce46809e442e0ddd42fa0d6dd39733bd245f81cf4185",
+  "service": {
+    "name": "cmr",
+    "port": "54321"
+  },
+  "remoteRoute": [
+    {
+      "dst-address": "10.255.0.1/32",
+      "active": "true",
+      "ospf": "true",
+      "gateway": "198.51.100.1%ether2"
+    }
+  ],
+  "discovery": [
+    {
+      "controller-address": "203.0.113.1",
+      "controller-addresses": null,
+      "status": "paired,connected"
+    }
+  ],
+  "fanOut": "Columns: DEVICE, STATUS\r\nDEVICE                   STATUS \r\ncmr-controller           running\r\ncmr-transit@192.0.2.2    running\r\ncmr-remote@198.51.100.2  running\r\ncmr-local@203.0.113.2    running\r\n\r\nColumns: DEVICE, STATUS, OUTPUT\r\nDEVICE                   STATUS   OUTPUT      \r\ncmr-controller           success  cmr-b0607031\r\ncmr-transit@192.0.2.2    success  cmr-b0607031\r\ncmr-remote@198.51.100.2  success  cmr-b0607031\r\ncmr-local@203.0.113.2    success  cmr-b0607031\n",
+  "layout": {
+    "nodes": [
+      {
+        "name": "cmr-controller",
+        "layout": "lab",
+        "device": "cmr-controller"
+      },
+      {
+        "name": "cmr-transit",
+        "layout": "lab",
+        "device": "cmr-transit@192.0.2.2"
+      },
+      {
+        "name": "cmr-remote",
+        "layout": "lab",
+        "device": "cmr-remote@198.51.100.2"
+      },
+      {
+        "name": "cmr-local",
+        "layout": "lab",
+        "device": "cmr-local@203.0.113.2"
+      }
+    ],
+    "links": [
+      {
+        "layout": "lab",
+        "node1": "cmr-controller",
+        "node2": "cmr-transit"
+      },
+      {
+        "layout": "lab",
+        "node1": "cmr-controller",
+        "node2": "cmr-local"
+      },
+      {
+        "layout": "lab",
+        "node1": "cmr-transit",
+        "node2": "cmr-remote"
+      }
+    ]
+  },
+  "devices": [
+    {
+      "identity": "cmr-controller",
+      "version": "7.26beta1",
+      "address": null,
+      "controller": "true",
+      "connected": "false",
+      "labels": "lab,controller",
+      "upgrade-rule": "lab-pinned"
+    },
+    {
+      "identity": "cmr-transit",
+      "version": "7.26beta1",
+      "address": "192.0.2.2",
+      "controller": null,
+      "connected": "true",
+      "labels": "lab,transit",
+      "upgrade-rule": "lab-pinned"
+    },
+    {
+      "identity": "cmr-remote",
+      "version": "7.26beta1",
+      "address": "198.51.100.2",
+      "controller": null,
+      "connected": "true",
+      "labels": "lab,remote",
+      "upgrade-rule": "lab-pinned"
+    },
+    {
+      "identity": "cmr-local",
+      "version": "7.26beta1",
+      "address": "203.0.113.2",
+      "controller": null,
+      "connected": "true",
+      "labels": "lab,local",
+      "upgrade-rule": "lab-pinned"
+    }
+  ],
+  "alerts": [
+    {
+      "name": "lab-cpu",
+      "labels": "lab",
+      "fired": "0",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-memory",
+      "labels": "lab",
+      "fired": "0",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-disk",
+      "labels": "lab",
+      "fired": "0",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-reboot",
+      "labels": "lab",
+      "fired": "0",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-interface",
+      "labels": "remote",
+      "fired": "1",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-log",
+      "labels": "remote",
+      "fired": "1",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-available",
+      "labels": "lab",
+      "fired": "0",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-upgrade-done",
+      "labels": "lab",
+      "fired": "0",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-down",
+      "labels": "remote",
+      "fired": "0",
+      "action-failures": "0",
+      "devices-on": "0"
+    },
+    {
+      "name": "lab-connected",
+      "labels": "remote",
+      "fired": "1",
+      "action-failures": "0",
+      "devices-on": "1"
+    }
+  ],
+  "webhooks": [
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    }
+  ]
+}

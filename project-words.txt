@@ -65,6 +65,8 @@ cleanuser
 cli
 cloudbase
 cmdline
+cmr
+cmrpkgs
 coderabbit
 coderabbitai
 compdef
@@ -143,6 +145,9 @@ fflate
 fguser
 figcaption
 fmt
+fontcolor
+fontname
+fontsize
 fpath
 freemem
 fsfreeze
@@ -192,6 +197,7 @@ initcall
 initialise
 insmod
 inttest
+invis
 ipc
 ipxe
 iqr
@@ -271,6 +277,7 @@ nic
 nlevel
 noauth
 nodefaults
+nodesep
 nographic
 nohup
 nolocaladdr
@@ -299,6 +306,7 @@ pauth
 payam
 pci
 pdb
+penwidth
 perflevel
 pflash
 pfr
@@ -324,6 +332,7 @@ privs
 procs
 proplist
 provpass
+ptp
 publickey
 purgeable
 pxe
@@ -338,6 +347,7 @@ qmp
 qtree
 quickchr
 ramdisk
+rankdir
 readback
 readconfig
 recvfrom
@@ -365,6 +375,7 @@ routeros
 rsc
 rst
 rta
+rtt
 runspace
 runspaces
 sandboxed
@@ -441,6 +452,7 @@ totalmem
 tpm
 tsc
 tshark
+Tsvg
 ttl
 tuntap
 tzsp
