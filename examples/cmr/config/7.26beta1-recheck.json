@@ -1,0 +1,49 @@
+{
+  "purpose": "Independent recheck of SUPPORT-REPORTS.md on a fresh bridge-free four-CHR lab (createLab initialBridge=false), then a full --probe run with the ether1 output-reject fix",
+  "environment": { "routeros": "7.26beta1", "architecture": "x86", "host": "Intel macOS", "acceleration": "HVF", "quickchrBaseHead": "a258a7b" },
+  "window": "2026-10-06T03:28Z to 04:22Z",
+  "export": {
+    "commands": ["/cmr/export", "/cmr/export verbose", "/export verbose", "/export show-sensitive"],
+    "exported": ["/cmr alert", "/cmr layout", "/cmr upgrade", "/cmr client (with 'settings ignored because used by local controller')"],
+    "missing": ["/cmr set enabled/packages-directory/track-topology/fetch-comments/auto-labels", "/cmr/device labels"]
+  },
+  "clientConfirm": {
+    "clientCompletion": ["none", "password"],
+    "set": "syntax error (line 1 column 37)",
+    "parse": "syntax error (line 1 column 37)",
+    "serverCompletion": { "/cmr/set": ["confirm", "none", "password"], "/cmr/device/set": ["confirm", "none", "password"] },
+    "clientCommands": ["edit", "export", "forget", "get", "pair", "print", "push-button", "reset", "set"]
+  },
+  "firstInterfaceAdded": {
+    "interfaceTypeCompletion": ["any", "ethernet", "wifi", "bridge"],
+    "remote": { "rule": "interface-type=bridge", "first": "first-probe at 03:32:28, fired=0 through 03:34:00", "second": "second-probe at 03:34:11, fired=1 by 03:34:21, log 03:34:18" },
+    "transit": { "rule": "untyped interface-change=added", "first": "t-first fired=0 for 90 s", "second": "t-second logged 03:34:18" },
+    "local": { "rule": "untyped interface-change=added", "first": "local-br-first missed", "second": "local-br-second logged 03:36:38", "vrrp": "two vrrp additions never alerted (vrrp is not an interface-type value)" },
+    "perDeviceNotPerRule": "br-add-new created after remote had bridges fired on its first match (third-probe, 03:35:28)"
+  },
+  "clientToggle": {
+    "devices": ["cmr-transit", "cmr-local"],
+    "before": "paired,connected ok/ok",
+    "after": "waiting-for-pairing,connected 'password required/ok' for 45+ s; controller row flag p (REMOTE-PENDING), identity and labels kept",
+    "control": "clean /system/reboot and hard power-off kept pairing"
+  },
+  "reconnect": {
+    "cleanReboot": "remote /system/reboot: paired,connected 10 s after boot",
+    "hardPowerOff20s": "remote QEMU SIGTERM, 20 s down: paired,connected 6 s after REST ready",
+    "hardPowerOff90s": "remote QEMU SIGTERM, 90 s down: paired,connected 6 s after REST ready",
+    "controllerReboot": {
+      "withoutFix": "route to 10.255.0.1 absent 04:10:50-04:10:57; conntrack 10.0.2.15:44764->10.255.0.1:54321 syn-sent retransmitted until ~04:12:02; reconnected 04:12:21 from 198.51.100.2",
+      "withFix": "output reject tcp-reset on ether1: reconnected 22 s after controller reboot; reject counter 1 packet"
+    }
+  },
+  "fullProbeRunWithFix": {
+    "command": "bun run cmr.ts --probe --report",
+    "exit": 0,
+    "duration": "5m22s",
+    "automaticReconnect": true,
+    "webhooks": ["UP cmr-remote 198.51.100.2", "DOWN cmr-remote unknown", "UP cmr-remote 198.51.100.2"],
+    "pairingMatrix": "6/6 paired,connected",
+    "layout": { "nodes": 4, "links": 3 },
+    "labActionFailures": 0
+  }
+}

@@ -36,6 +36,11 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Added
 
+- `examples/cmr/` (beta lab, work in progress): four socket-linked RouterOS
+  7.26beta1 CHRs with OSPF, CMR pairing, topology, fleet scripts, alerts and HTTP
+  webhooks. Includes library and CLI drivers, a WinBox inspection mode, a
+  topology diagram and rechecked beta findings for MikroTik (`SUPPORT-REPORTS.md`).
+
 - `MachineState.provisioning` — when provisioning last completed on the current disk and
   which steps ran. An option counts as already applied only when its step is in that
   record: most of the fields it would otherwise be compared against are written at

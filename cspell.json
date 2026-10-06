@@ -10,7 +10,8 @@
 		"cspell.json",
 		"coverage",
 		"dist",
-		".claude/**"
+		".claude/**",
+		"**/*.svg"
 	],
 	"useGitignore": true,
 	"minWordLength": 3,

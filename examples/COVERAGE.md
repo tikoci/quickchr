@@ -22,10 +22,11 @@ Legend: ✅ example · 📘 docs/MANUAL only · 🧪 covered by `test/` only.
 | `snapshot` (save/load/list/delete) | ✅ rollback | |
 | `--forward` | ✅ service-forward | |
 | `--add-network` (socket:connect) | ✅ mndp `.sh` | |
+| `--add-network` (`socket::<name>`) | ✅ cmr CLI driver | four-router topology |
 | `--add-package` | ✅ dude, version-matrix | |
 | `--device-mode-enable` | ✅ device-mode | |
 | `remove` | ✅ all (teardown) | |
-| `stop` | 📘 | `remove` covers teardown; `stop` alone is rarely an example |
+| `stop` | 📘 | cmr uses the library method for its extended outage probe |
 | `clean` | 📘 | disk reset; low educational value vs `snapshot`/`remove` |
 | `console` | 📘 | interactive serial TTY — not scriptable in a runnable example |
 | `qga` | 📘🧪 | x86-only + KVM-gated; flaky as an example (see `test/integration/exec`) |
@@ -54,6 +55,8 @@ Legend: ✅ example · 📘 docs/MANUAL only · 🧪 covered by `test/` only.
 | `StartOptions.deviceMode` | ✅ device-mode | |
 | `StartOptions.extraPorts` | ✅ service-forward | |
 | `StartOptions.networks` (socket-connect) | ✅ mndp | |
+| `StartOptions.networks` (named socket) | ✅ cmr | three named links, OSPF and routed CMR |
+| `stop()` | ✅ cmr `--probe` | down alert, restart and automatic reconnect |
 | `StartOptions.packages` / `portBase` | ✅ version-matrix | |
 | `StartOptions.bootDiskFormat` | ✅ rollback | |
 | `hostGatewayIp` | ✅ udp-gateway | |
@@ -67,11 +70,10 @@ Legend: ✅ example · 📘 docs/MANUAL only · 🧪 covered by `test/` only.
 | `StartOptions.user` / `disableAdmin` | 📘 | provisioning detail in MANUAL |
 | `StartOptions.excludePorts` | 📘 | `--no-winbox`/`--no-api-ssl`; niche |
 | `StartOptions.bootSize` / `extraDisks` | 📘 | disk sizing; covered by MANUAL + `test/` |
-| `StartOptions.version` (pin) | 📘 | examples use `channel`; pin is a one-field swap |
+| `StartOptions.version` (pin) | ✅ cmr | beta feature pinned to 7.26beta1 |
 
 ## Deferred (planned)
 
 | Surface | Status |
 |---|---|
-| `socket::<name>` multi-CHR L2 (rootless-l2 / `socket-lan`) | ⏳ design-first, tracked in [tikoci/quickchr#25](https://github.com/tikoci/quickchr/issues/25) |
 | `shared` / `bridged:<if>` / `tap:<if>` networks | 📘 host-setup heavy (sudo / socket_vmnet); documented, not a rootless example |

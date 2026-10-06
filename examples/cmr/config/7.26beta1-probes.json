@@ -1,0 +1,135 @@
+{
+  "environment": {
+    "routeros": "7.26beta1",
+    "architecture": "x86",
+    "host": "Intel macOS",
+    "acceleration": "HVF",
+    "qemu": "11.1.1",
+    "bun": "1.4.2",
+    "quickchr": "0.4.8",
+    "quickchrBaseHead": "a258a7b"
+  },
+  "pairingMatrix": [
+    {
+      "clientRequirement": "none",
+      "serverRequirement": "none",
+      "before": "ok",
+      "after": "paired,connected"
+    },
+    {
+      "clientRequirement": "none",
+      "serverRequirement": "password",
+      "before": "device:ok, cmr:password required",
+      "after": "paired,connected"
+    },
+    {
+      "clientRequirement": "none",
+      "serverRequirement": "confirm",
+      "before": "device:ok, cmr:waiting confirmation",
+      "after": "paired,connected"
+    },
+    {
+      "clientRequirement": "password",
+      "serverRequirement": "none",
+      "before": "device:password required, cmr:ok",
+      "after": "paired,connected"
+    },
+    {
+      "clientRequirement": "password",
+      "serverRequirement": "password",
+      "before": "device:password required, cmr:password required",
+      "after": "paired,connected"
+    },
+    {
+      "clientRequirement": "password",
+      "serverRequirement": "confirm",
+      "before": "device:password required, cmr:waiting confirmation",
+      "after": "paired,connected"
+    }
+  ],
+  "clientConfirm": {
+    "result": "syntax error (line 1 column 37)",
+    "completion": [
+      "none",
+      "password"
+    ]
+  },
+  "defaultRuleEdit": "failure: can't edit default rule (/cmr/upgrade/set *0) (/cmr/upgrade/set; line 1)",
+  "directoryWithoutSlash": "input does not match any value of packages-directory (/cmr/set (packages-directory); line 1)",
+  "exportHasServerSettings": false,
+  "binaryBackup": {
+    "settingsEqual": true,
+    "deviceIdentityLabelPairingIdsEqual": true,
+    "disabledBeforeLoad": "no",
+    "enabledAfterLoad": "yes"
+  },
+  "firstBridge": [
+    {
+      "start": {
+        "time": "2026-10-06T02:50:16.743Z",
+        "count": 0,
+        "bridges": [
+          "cmr-lab-probe"
+        ]
+      },
+      "first": {
+        "time": "2026-10-06T02:51:21.760Z",
+        "count": 0
+      }
+    },
+    {
+      "second": {
+        "time": "2026-10-06T02:51:24.797Z",
+        "count": 1
+      },
+      "logs": [
+        {
+          ".id": "*4A",
+          "extra-info": "",
+          "message": "IFACE cmr-remote cmr-second-repro",
+          "time": "2026-10-06 02:51:23",
+          "topics": "cmr,info"
+        }
+      ]
+    }
+  ],
+  "restart": {
+    "observedAt": "2026-10-06T02:56:34.779Z",
+    "clientStatus": "waiting-for-pairing,connected",
+    "pairingStatusPrefix": "password required/ok",
+    "remoteNeighbors": [
+      {
+        "address": "198.51.100.1",
+        "state": "Full"
+      }
+    ],
+    "transitNeighbors": [
+      {
+        "address": "192.0.2.1",
+        "state": "Full"
+      },
+      {
+        "address": "198.51.100.2",
+        "state": "Full"
+      }
+    ],
+    "controllerRoute": [
+      {
+        "dst-address": "10.255.0.1/32",
+        "active": "true",
+        "ospf": "true",
+        "gateway": "198.51.100.1%ether2"
+      }
+    ],
+    "pingOutput": "  SEQ HOST                                     SIZE TTL TIME       STATUS      \r\n    0 10.255.0.1                                 56  63 1ms54us   \r\n    1 10.255.0.1                                 56  63 840us     \r\n    2 10.255.0.1                                 56  63 31ms871us \r\n    sent=3 received=3 packet-loss=0% min-rtt=840us avg-rtt=11ms255us \r\n   max-rtt=31ms871us ",
+    "disableEnableControl": "did not reach paired,connected within 30 seconds",
+    "cause": "unresolved"
+  },
+  "rawInputSha256": {
+    "quickchr-cmr-probes.log": "a8d19e83213ed4a660ca60d528b0016d88c6720ebed7f01f19ecd43b99a95c28",
+    "quickchr-cmr-backup.log": "7d4149a390d1e842f018e10098345c0d3a21f261211edc63ce6adee184d41647",
+    "quickchr-cmr-interface-repro.log": "74e56d9d0e79c73cbb6babd103f167720047f328f8857adcf5b4fad144d92800",
+    "quickchr-cmr-reconnect-watch.log": "6e64f51a8fd38de3b71df4ff2bc083b486b9b951e9332d5d9ddd9fdf5b0e4ec1",
+    "quickchr-cmr-reconnect-control.log": "f4e8b3d2f386b90e6e8a0dcfa7959d5855e60d4536d89be8fac4d1cf36ad5717"
+  }
+}
