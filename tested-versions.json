@@ -417,6 +417,13 @@
 			"run_id": "37114550152"
 		}
 	},
+	"7.25rc2": {
+		"linux-x86": {
+			"conclusion": "pass",
+			"date": "2026-10-13T12:19:57.523Z",
+			"run_id": "38392945027"
+		}
+	},
 	"7.26beta1": {
 		"linux-x86": {
 			"conclusion": "pass",
