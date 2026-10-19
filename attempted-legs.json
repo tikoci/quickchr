@@ -1676,5 +1676,52 @@
 		"planned": 5,
 		"sha": "a3a639b0352c8002569c260b750670b83852324e",
 		"ts": "2026-10-19T11:46:43.733Z"
+	},
+	"39278449139": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"linux-arm64|development": {
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.26beta3",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'in_progress' before the suite could instrument itself"
+			},
+			"linux-x86|development": {
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.26beta3",
+				"stalled_step": "Close leg checkpoint",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'in_progress' before the suite could instrument itself"
+			},
+			"macos-arm64|development": {
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.26beta3",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'in_progress' before the suite could instrument itself"
+			},
+			"windows-x86|development": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 654,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.26beta3",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'failure' before the suite could instrument itself"
+			}
+		},
+		"planned": 4,
+		"sha": "a3a639b0352c8002569c260b750670b83852324e",
+		"ts": "2026-10-19T16:12:03.481Z"
 	}
 }
