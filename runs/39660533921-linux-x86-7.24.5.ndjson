@@ -1,0 +1,3 @@
+{"kind":"boot","ts":"2026-10-21T19:21:13.153Z","run_id":"39660533921","sha":"d77707d4a1db0153f327173f1647d034fba96a43","platform":"linux-x86","host":"linux","name":"integration-v6","version":"6.49.23","arch":"x86","accel":"kvm","boot_ms":25796}
+{"kind":"test-file","ts":"2026-10-21T19:21:44.928Z","run_id":"39660533921","sha":"d77707d4a1db0153f327173f1647d034fba96a43","platform":"linux-x86","host":"linux","file":"readiness.test.ts","duration_s":139,"status":"pass","outcome":"pass"}
+{"kind":"suite","ts":"2026-10-21T19:21:44.928Z","run_id":"39660533921","sha":"d77707d4a1db0153f327173f1647d034fba96a43","platform":"linux-x86","host":"linux","scope":"filtered","conclusion":"pass","target":"7.24.5","files":1,"failed":0}
