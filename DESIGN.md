@@ -104,6 +104,7 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
     - **Not reentrant.** Two async operations in one process conflict as much as two processes do, so a lock held by this pid counts as held. Code inside a locked operation calls `stopUnderLock()`/`removeUnderLock()`/`cleanUnderLock()`, never the public `ChrInstance` methods.
     - **State is re-read under the lock.** A handle's snapshot predates whatever the previous holder did, and a stale `state.pid` is a process that has exited or one the OS has reused.
     - **The file is published whole.** The record is written to a temp file and `link()`ed into place, so it never exists empty, and release only deletes a lock whose token is the holder's. The old `open(wx)` + `write()` had an empty window that a concurrent reader took for stale.
+    - **Reapers take turns.** A dead holder's lock is deleted only under a `<lock>.reap` guard, and only if it still holds the record that was judged stale. A path cannot be compared and deleted in one step, and a reaper that renamed the lock aside to compare it could displace a successor that an earlier reaper had already installed, letting a third contender in (Codex review of #190, reproduced). A legacy `.start-lock` that is unreadable, or too new to be sure its pid has been written, blocks rather than counting as absent.
 
 ## Port Layout
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { acquireLock, acquireLockNow, listReservations, machineLockPath } from "../../src/lib/lock.ts";
+import { _observeLockMutations, acquireLock, acquireLockNow, type HeldLock, listReservations, machineLockPath, reap } from "../../src/lib/lock.ts";
 
 /**
  * The lock primitive behind the per-machine lifecycle lock (#181) and the allocation
@@ -134,6 +134,69 @@ describe("acquireLockNow", () => {
 	});
 });
 
+describe("stale-lock recovery keeps exclusion", () => {
+	// Two reapers judge the same dead record stale. B reaps it and takes the lock;
+	// A, holding its old judgement, reaps next. Whatever A does to the path, a third
+	// contender C must never get in while B still holds the lock.
+	test("a reaper with an old judgement never lets a third contender past a live successor", () => {
+		const path = machineLockPath(MACHINE_DIR);
+		const dead = JSON.stringify({ pid: DEAD_PID, op: "start", at: new Date().toISOString(), token: "dead" });
+		writeFileSync(path, dead);
+
+		const b = acquireLockNow(path, "start");
+		const intruders: HeldLock[] = [];
+		let inHook = false;
+		_observeLockMutations(() => {
+			if (inHook) return;
+			inHook = true;
+			try { intruders.push(acquireLockNow(path, "clean")); } catch { /* refused: correct */ } finally { inHook = false; }
+		});
+		try {
+			reap(path, dead);
+		} finally {
+			_observeLockMutations(undefined);
+		}
+		for (const lock of intruders) lock.release();
+		expect(intruders).toHaveLength(0);
+		expect(JSON.parse(readFileSync(path, "utf-8")).op).toBe("start");
+		b.release();
+	});
+
+	test("while another reaper is at work, a dead lock reads as held rather than spinning", () => {
+		const path = machineLockPath(MACHINE_DIR);
+		const dead = JSON.stringify({ pid: DEAD_PID, op: "start", at: new Date().toISOString(), token: "dead" });
+		writeFileSync(path, dead);
+		writeFileSync(`${path}.reap`, String(process.pid));
+		expect(reap(path, dead)).toBe(false);
+		expect(readFileSync(path, "utf-8")).toBe(dead);
+		try {
+			acquireLockNow(path, "start");
+			expect.unreachable("should have thrown");
+		} catch (e) {
+			expectErrorCode(e, "MACHINE_LOCKED");
+		}
+	});
+
+	test("a reap guard abandoned by a killed reaper is cleared by age", () => {
+		const path = machineLockPath(MACHINE_DIR);
+		writeFileSync(path, JSON.stringify({ pid: DEAD_PID, op: "start", at: new Date().toISOString(), token: "dead" }));
+		writeFileSync(`${path}.reap`, String(DEAD_PID));
+		backdate(`${path}.reap`);
+		acquireLockNow(path, "start").release();
+		expect(existsSync(`${path}.reap`)).toBe(false);
+	});
+
+	test("a reaper with an old judgement leaves a live successor in place", () => {
+		const path = machineLockPath(MACHINE_DIR);
+		const dead = JSON.stringify({ pid: DEAD_PID, op: "start", at: new Date().toISOString(), token: "dead" });
+		writeFileSync(path, dead);
+		const b = acquireLockNow(path, "start");
+		reap(path, dead);
+		expect(() => acquireLockNow(path, "clean")).toThrow();
+		b.release();
+	});
+});
+
 describe("legacy .start-lock", () => {
 	test("a live holder under the old name still holds the machine", async () => {
 		const live = spawnIdle();
@@ -152,6 +215,29 @@ describe("legacy .start-lock", () => {
 			live.kill();
 			await live.exited;
 		}
+	});
+
+	test("a legacy lock still being written blocks, and is reaped once it is old", () => {
+		// An older quickchr creates `.start-lock` empty and writes its pid in a second
+		// syscall. Taking the machine in that window would run alongside it.
+		const legacy = join(MACHINE_DIR, ".start-lock");
+		writeFileSync(legacy, "");
+		expect(() => acquireLockNow(machineLockPath(MACHINE_DIR), "clean")).toThrow();
+		expect(existsSync(machineLockPath(MACHINE_DIR))).toBe(false);
+		backdate(legacy);
+		acquireLockNow(machineLockPath(MACHINE_DIR), "clean").release();
+		expect(existsSync(legacy)).toBe(false);
+	});
+
+	test("an unreadable legacy lock blocks", () => {
+		mkdirSync(join(MACHINE_DIR, ".start-lock"));
+		try {
+			acquireLockNow(machineLockPath(MACHINE_DIR), "clean");
+			expect.unreachable("should have thrown");
+		} catch (e) {
+			expectErrorCode(e, "MACHINE_LOCKED");
+		}
+		expect(existsSync(machineLockPath(MACHINE_DIR))).toBe(false);
 	});
 
 	test("a dead holder under the old name is reaped", () => {

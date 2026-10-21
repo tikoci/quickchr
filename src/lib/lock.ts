@@ -20,7 +20,7 @@
  * helpers in quickchr.ts rather than the public methods.
  */
 
-import { existsSync, linkSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { getDataDir, getMachinesDir } from "./state.ts";
@@ -114,6 +114,13 @@ type Inspection =
 	| { state: "stale"; raw: string }
 	| { state: "settling" };
 
+/** Test seam: called after each change this module makes to a lock path, so a test
+ *  can interleave another contender at exactly that point. */
+let mutationObserver: ((op: "link" | "unlink", path: string) => void) | undefined;
+export function _observeLockMutations(fn: typeof mutationObserver): void {
+	mutationObserver = fn;
+}
+
 function isAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
@@ -144,43 +151,80 @@ function inspect(path: string): Inspection {
 	return isAlive(record.pid) ? { state: "live", record, raw } : { state: "stale", raw };
 }
 
-/** Remove a lock judged stale, without removing a fresh one that replaced it in the
- *  meantime. The lock is moved aside first and its contents compared with what was
- *  judged: if another reaper got there and a new holder already took the lock, the
- *  move caught the new holder's file, and it is put back. */
-function reap(path: string, judgedRaw: string): void {
-	const aside = `${path}.reap.${process.pid}.${crypto.randomUUID()}`;
+/** Publish `content` at `path` only if nothing is there. Written to a temp file and
+ *  `link()`ed into place, so the file never exists empty. */
+function linkNew(path: string, content: string): boolean {
+	const tmp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
+	writeFileSync(tmp, content);
 	try {
-		renameSync(path, aside);
-	} catch {
-		return; // already gone
+		linkSync(tmp, path);
+		mutationObserver?.("link", path);
+		return true;
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+		throw e;
+	} finally {
+		try { unlinkSync(tmp); } catch { /* ignore */ }
 	}
-	let movedRaw: string | undefined;
-	try { movedRaw = readFileSync(aside, "utf-8"); } catch { /* unreadable */ }
-	if (movedRaw !== undefined && movedRaw !== judgedRaw) {
-		try { linkSync(aside, path); } catch { /* someone holds it again; theirs stands */ }
+}
+
+/** How old a reap guard must be before it counts as abandoned. A reaper holds it for
+ *  one read and one unlink, so only a reaper killed inside that window leaves one. */
+const REAP_GUARD_STALE_MS = 5_000;
+
+/** Delete a lock judged stale, unless it has been replaced since. Returns false when
+ *  another reaper is at work, and the caller should treat the lock as held.
+ *
+ *  There is no compare-and-delete on a path, so reapers take turns through a guard
+ *  file. While a reaper holds the guard, nothing else can change the lock: other
+ *  reapers are kept out, a creator's `link()` fails while the file exists, and the
+ *  dead holder will never release it. So if the lock still holds the record that was
+ *  judged stale, deleting it deletes that record and nothing newer.
+ *
+ *  A rename-aside-and-compare used to stand here. It took the path away from whatever
+ *  was there, which could be a successor installed by an earlier reaper, and a third
+ *  contender could `link()` into the gap before the successor was put back. Then two
+ *  holders both believed they held the lock.
+ *
+ *  Clearing an abandoned guard by age is the one remaining gap. Two reapers can both
+ *  judge the same guard abandoned, and that only arises after a reaper was killed
+ *  mid-reap. */
+export function reap(path: string, judgedRaw: string): boolean {
+	const guard = `${path}.reap`;
+	if (!linkNew(guard, `${process.pid}\n`)) {
+		let abandoned = false;
+		try {
+			abandoned = Date.now() - statSync(guard).mtimeMs > REAP_GUARD_STALE_MS;
+			if (abandoned) unlinkSync(guard);
+		} catch { /* the other reaper finished */ }
+		if (!abandoned || !linkNew(guard, `${process.pid}\n`)) return false;
 	}
-	try { unlinkSync(aside); } catch { /* ignore */ }
+	try {
+		let current: string;
+		try {
+			current = readFileSync(path, "utf-8");
+		} catch {
+			return true; // already gone
+		}
+		if (current === judgedRaw) {
+			unlinkSync(path);
+			mutationObserver?.("unlink", path);
+		}
+		return true;
+	} finally {
+		try { unlinkSync(guard); } catch { /* ignore */ }
+	}
 }
 
 function tryCreate(path: string, record: LockRecord): boolean {
 	const dir = dirname(path);
-	if (!existsSync(dir)) {
-		throw new QuickCHRError("MACHINE_NOT_FOUND", `${dir} no longer exists — the machine was removed.`);
-	}
-	const tmp = `${path}.${process.pid}.${record.token}.tmp`;
-	writeFileSync(tmp, `${JSON.stringify(record)}\n`);
+	const missing = () => new QuickCHRError("MACHINE_NOT_FOUND", `${dir} no longer exists — the machine was removed.`);
+	if (!existsSync(dir)) throw missing();
 	try {
-		linkSync(tmp, path);
-		return true;
+		return linkNew(path, `${JSON.stringify(record)}\n`);
 	} catch (e) {
-		if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
-		if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-			throw new QuickCHRError("MACHINE_NOT_FOUND", `${dir} no longer exists — the machine was removed.`);
-		}
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") throw missing();
 		throw e;
-	} finally {
-		try { unlinkSync(tmp); } catch { /* ignore */ }
 	}
 }
 
@@ -201,7 +245,7 @@ function heldLock(path: string, token: string): HeldLock {
 }
 
 function describeHolder(holder: LockRecord | undefined): string {
-	if (!holder) return "another operation (holder still writing its lock)";
+	if (!holder) return "another operation (its lock record is unreadable or still being written)";
 	const age = holder.at ? Math.max(0, Math.round((Date.now() - Date.parse(holder.at)) / 1000)) : undefined;
 	return `\`${holder.op}\` (pid ${holder.pid}${age !== undefined && !Number.isNaN(age) ? `) since ${age}s` : ")"}`;
 }
@@ -214,18 +258,23 @@ function lockedError(subject: string, holder: LockRecord | undefined, waitedMs: 
 	return new QuickCHRError("MACHINE_LOCKED", `${subject} is locked by ${describeHolder(holder)}${waited}.${hint}`);
 }
 
-/** A live holder under the legacy name, or undefined. A stale one is reaped. */
-function legacyHolder(lockPath: string): LockRecord | undefined {
+/** Whether a legacy `.start-lock` stands in the way, and its holder when that can be
+ *  read. A stale one is reaped. One that is unreadable, or so new its holder may still
+ *  be writing it, blocks: an older quickchr creates the file empty and fills it with a
+ *  second syscall, and going ahead in that window would run alongside it. */
+function legacyBlocker(lockPath: string): { holder: LockRecord | undefined } | undefined {
 	if (basename(lockPath) !== MACHINE_LOCK_FILE) return undefined;
 	const legacy = join(dirname(lockPath), LEGACY_MACHINE_LOCK_FILE);
 	const seen = inspect(legacy);
-	if (seen.state === "live") return seen.record;
-	if (seen.state === "stale") reap(legacy, seen.raw);
+	if (seen.state === "live") return { holder: seen.record };
+	if (seen.state === "settling") return { holder: undefined };
+	if (seen.state === "stale" && !reap(legacy, seen.raw)) return { holder: undefined };
 	return undefined;
 }
 
-/** One attempt: the lock, or the live holder in the way (undefined while a holder is
- *  still writing an unreadable record). Stale and vanished locks are retried here. */
+/** One attempt: the lock, or the holder in the way (undefined when it cannot be read:
+ *  a record still being written, an unreadable file, or another reaper mid-reap).
+ *  Stale and vanished locks are retried here. */
 function attempt(lockPath: string, op: LockOperation, reserve: ResourceReservation | undefined): { lock: HeldLock } | { holder: LockRecord | undefined } {
 	for (;;) {
 		const record: LockRecord = {
@@ -237,15 +286,15 @@ function attempt(lockPath: string, op: LockOperation, reserve: ResourceReservati
 		};
 		if (tryCreate(lockPath, record)) {
 			const lock = heldLock(lockPath, record.token);
-			const legacy = legacyHolder(lockPath);
+			const legacy = legacyBlocker(lockPath);
 			if (!legacy) return { lock };
 			lock.release();
-			return { holder: legacy };
+			return legacy;
 		}
 		const seen = inspect(lockPath);
 		if (seen.state === "stale") {
-			reap(lockPath, seen.raw);
-			continue;
+			if (reap(lockPath, seen.raw)) continue;
+			return { holder: undefined };
 		}
 		if (seen.state === "absent") continue;
 		return { holder: seen.state === "live" ? seen.record : undefined };
