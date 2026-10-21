@@ -38,15 +38,15 @@ export function allocatePortBlock(
 		return requestedBase;
 	}
 
-	let base = DEFAULT_PORT_BASE;
-	const sorted = [...usedBases].sort((a, b) => a - b);
+	return nextUnusedBase(DEFAULT_PORT_BASE, usedBases);
+}
 
-	for (const used of sorted) {
-		if (base >= used && base < used + PORTS_PER_BLOCK) {
-			base = used + PORTS_PER_BLOCK;
-		}
+/** The lowest base at or above `from` whose block overlaps no used block. */
+function nextUnusedBase(from: number, usedBases: number[]): number {
+	let base = from;
+	for (const used of [...usedBases].sort((a, b) => a - b)) {
+		if (Math.abs(base - used) < PORTS_PER_BLOCK) base = used + PORTS_PER_BLOCK;
 	}
-
 	return base;
 }
 
@@ -219,7 +219,10 @@ export async function findAvailablePortBlock(
 		if (conflicts.length === 0) {
 			return base;
 		}
-		base += PORTS_PER_BLOCK;
+		// Step past the probed conflict without stepping onto a used block: a block
+		// that is free on the wire can still belong to a stopped machine or to a
+		// creation that has not bound its ports yet (#140).
+		base = nextUnusedBase(base + PORTS_PER_BLOCK, usedBases);
 	}
 
 	throw new QuickCHRError(
@@ -439,14 +442,11 @@ export function deriveMac(name: string, index: number, salt = 0): string {
  * the guarantee structural rather than probabilistic — a duplicate here is the exact
  * silent-L2 failure this exists to prevent, so it is worth not leaving to odds.
  *
- * `taken` is a snapshot, so two concurrent creations can each miss the other. That
- * only changes an outcome when the two would otherwise have collided — i.e. on top
- * of that 2^-40 event — but the window is real. It is the same read-then-write
- * window the port allocator has on the adjacent line (`getUsedPortBases()` →
- * `findAvailablePortBlock()` → `saveMachine()`), where it fires routinely and
- * breaks starts outright: #140. Both allocators want one lock around
- * read-allocate-persist; adding a second, MAC-only lock here would leave the
- * frequent half of the race unfixed while implying it was handled.
+ * `taken` is a snapshot, so it is only complete if no other creation is choosing at
+ * the same moment. Callers that create machines go through `claimNewMachine()` in
+ * quickchr.ts, which holds the allocation lock across this call and the port choice
+ * and adds in-flight creations' MACs to `taken` (#140). A new creation path must do
+ * the same rather than call this with a bare `getUsedMacs()`.
  */
 export function assignMacs(
 	name: string,

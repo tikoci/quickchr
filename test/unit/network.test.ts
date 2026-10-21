@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import {
 	allocatePortBlock,
 	buildPortMappings,
+	findAvailablePortBlock,
 	buildHostfwdString,
 	toChrPorts,
 	validateExplicitExtraPorts,
@@ -42,6 +43,25 @@ describe("allocatePortBlock", () => {
 	test("skips over allocated blocks", () => {
 		expect(allocatePortBlock([9100])).toBe(9100 + PORTS_PER_BLOCK);
 		expect(allocatePortBlock([9100, 9110])).toBe(9120);
+	});
+
+	test("skips a block that overlaps an unaligned used base", () => {
+		expect(allocatePortBlock([9105])).toBe(9115);
+	});
+});
+
+describe("findAvailablePortBlock", () => {
+	// #140: stepping past a port something else is listening on used to land on the
+	// next block unconditionally — which can be a stopped machine's, or one a
+	// concurrent creation has reserved but not yet bound.
+	test("stepping past a busy block does not land on a used one", async () => {
+		const base = 47100;
+		const busy = Bun.listen({ hostname: "127.0.0.1", port: base, socket: { data() {} } });
+		try {
+			expect(await findAvailablePortBlock([base + PORTS_PER_BLOCK], [], [], base)).toBe(base + 2 * PORTS_PER_BLOCK);
+		} finally {
+			busy.stop(true);
+		}
 	});
 });
 

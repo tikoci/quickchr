@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { QuickCHR, acquireLock, captureRunningFailure, credentialShareMs } from "../../src/lib/quickchr.ts";
+import { QuickCHR, captureRunningFailure, credentialShareMs } from "../../src/lib/quickchr.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 import { CONSOLE_LOGIN_COST_MS } from "../../src/lib/console.ts";
 import { GUEST_LOGIN_ALLOWANCE_MS, GUEST_QUERY_TIMEOUT_MS } from "../../src/lib/guest-snapshot.ts";
@@ -96,41 +96,6 @@ describe("QuickCHR.start name validation", () => {
 			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
 			throw e;
 		}
-	});
-});
-
-describe("acquireLock", () => {
-	test("succeeds when no lock file exists", () => {
-		const lockPath = join(TEST_DIR, ".start-lock");
-		// Should not throw
-		expect(() => acquireLock(lockPath)).not.toThrow();
-	});
-
-	test("throws MACHINE_LOCKED when lock held by live process", () => {
-		const lockPath = join(TEST_DIR, ".start-lock");
-		// Write our own PID — guaranteed alive
-		writeFileSync(lockPath, String(process.pid));
-		try {
-			acquireLock(lockPath);
-			expect.unreachable("should have thrown");
-		} catch (e) {
-			expectErrorCode(e, "MACHINE_LOCKED");
-		}
-	});
-
-	test("recovers silently from stale lock (dead pid)", () => {
-		const lockPath = join(TEST_DIR, ".start-lock");
-		// Use an absurdly high PID — guaranteed not running on any OS
-		writeFileSync(lockPath, "99999999");
-		// Should succeed by overwriting the stale lock
-		expect(() => acquireLock(lockPath)).not.toThrow();
-	});
-
-	test("recovers from malformed lock file content", () => {
-		const lockPath = join(TEST_DIR, ".start-lock");
-		writeFileSync(lockPath, "not-a-pid");
-		// Unreadable PID → treated as stale → overwrites
-		expect(() => acquireLock(lockPath)).not.toThrow();
 	});
 });
 

@@ -142,8 +142,8 @@ const LOCK_TIMEOUT_MS = 5_000;
  *  A two-process repro lost an endpoint on 12 of 12 rounds.
  *
  *  `quickchr start a & quickchr start b &` is the shape that hits this, and it is
- *  exactly how the field report drove its multi-CHR lab. The per-machine
- *  `.start-lock` cannot help: the two contenders are different machines. */
+ *  exactly how the field report drove its multi-CHR lab. The per-machine lock
+ *  cannot help: the two contenders are different machines. */
 const _heldLocks = new Set<string>();
 
 /** How long a lock file may be unreadable before it counts as abandoned.

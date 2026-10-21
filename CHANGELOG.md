@@ -10,6 +10,27 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- Machines started concurrently get distinct port blocks. Two auto-allocated starts,
+  from one `Promise.all` or from two `quickchr start` processes, both probed the same
+  free ports and picked the same block, and one QEMU then failed with `SPAWN_FAILED`
+  (`Could not set up host forwarding rule`). Creation now picks its block and NIC MACs
+  under a data-dir-wide lock and reserves them until `machine.json` is written. A
+  crashed creator's reservation is dropped with its pid. The allocator also no longer
+  steps from a busy block onto one a stopped machine owns: it skipped a port that
+  something was listening on by moving to the next block without checking it. (#140)
+
+- `stop()`, `clean()` and `remove()` take the machine lock that starts take, so they no
+  longer race a start or relaunch in progress. Before, a `stop` landing mid-relaunch
+  could leave a live QEMU recorded as stopped, a `clean` could replace the disk under a
+  booting guest, and a `remove` could delete the directory a spawn was writing to. They
+  now wait for the operation in progress, up to the machine's boot timeout, then act on
+  the state it left. (#181)
+
+- A relaunch re-reads `machine.json` once it holds the lock, instead of acting on the
+  state read before it, so `state.pid` cannot be stale. If another start got the machine
+  running in between, `start()` returns that machine instead of booting a second QEMU
+  on the same disk. (#180)
+
 - `quickchr add --install-all-packages` (or `--disable-admin`) followed by a plain
   `quickchr start <name>` now provisions what `add` recorded. The CLI sent `false` for
   every boolean flag that was absent, and `false` overrode the stored intent, so the
@@ -101,6 +122,18 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   including machine names. Neither verb was in the completion tables at all.
 
 ### Changed
+
+- An explicit `portBase` that overlaps another machine's 10-port block, whether that
+  machine is persisted or still being created, is refused with `PORT_CONFLICT`. Before,
+  it was accepted and the overlap surfaced later as a QEMU bind failure, or never if the
+  two machines did not run together. It is still never remapped. (#140)
+
+- The per-machine lock is now `machines/<name>/.lock`, not `.start-lock`, and
+  `MACHINE_LOCKED` names the operation holding it, its pid and how long it has held the
+  lock ("locked by `start` (pid 4242) since 12s"), not "already being started". For
+  this release a live `.start-lock` written by an older quickchr is still respected,
+  and a stale one is cleared. A machine started in the foreground holds the lock until
+  its VM exits, and nothing waits for it. (#181)
 
 - `quickchr set <name> --device-mode…` and `setDeviceMode()` print every setting that
   will move — `mode: advanced -> rose`, `container: no -> yes` — before spending the

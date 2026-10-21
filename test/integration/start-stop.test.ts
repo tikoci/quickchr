@@ -67,6 +67,36 @@ describe.skipIf(SKIP)("start-stop lifecycle", () => {
 	}, bootTestTimeout({ boots: 2 })); // start() may respawn a wedged boot once
 });
 
+describe.skipIf(SKIP)("concurrent starts", () => {
+	const names = ["integration-race-a", "integration-race-b"];
+
+	beforeAll(async () => {
+		for (const name of names) await cleanupMachine(name);
+	});
+
+	// #140: both used to pick the same block, and the second QEMU failed its hostfwd
+	// bind with SPAWN_FAILED. The deterministic coverage is
+	// test/unit/machine-lock-concurrency.test.ts; this proves two QEMUs actually bind.
+	test("two auto-allocated starts in one Promise.all get distinct blocks and both boot", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const results = await Promise.allSettled(
+			names.map((name) => QuickCHR.start({ ...imageTarget(), background: true, name })),
+		);
+		try {
+			const failures = results.flatMap((r) => (r.status === "rejected" ? [String(r.reason)] : []));
+			expect(failures).toEqual([]);
+			const instances = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+			expect(new Set(instances.map((i) => i.state.portBase)).size).toBe(2);
+			for (const instance of instances) {
+				const resource = await instance.rest("/system/resource") as Record<string, unknown>;
+				expect(String(resource["board-name"])).toContain("CHR");
+			}
+		} finally {
+			for (const name of names) await cleanupMachine(name);
+		}
+	}, bootTestTimeout({ boots: 2 }));
+});
+
 describe.skipIf(SKIP)("package installation", () => {
 	// Clean up in case a previous run failed mid-test (e.g. provisioning error)
 	beforeAll(async () => {

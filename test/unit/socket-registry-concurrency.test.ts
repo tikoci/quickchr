@@ -9,7 +9,7 @@
  *
  * `quickchr start a & quickchr start b &` is the shape that hits it, and it is exactly
  * how the field report behind #157/#158 drove its multi-CHR lab. The per-machine
- * `.start-lock` cannot help: the contenders are different machines.
+ * lock cannot help: the contenders are different machines.
  *
  * Before the fix this lost an endpoint on 12 of 12 rounds. These run real subprocesses
  * because the defect only exists between processes — the in-memory cache hides it

@@ -596,8 +596,23 @@ QuickCHR.resolveVersion(channel: Channel): Promise<string>
 `start()` creates the machine if needed, downloads the image, allocates
 a port block, spawns QEMU, waits for REST readiness, and runs all
 provisioning steps before returning. It auto-cleans the machine if boot
-times out (calls `stop()` then `remove()`). It acquires `start-lock` to
-serialize concurrent starts of the same machine.
+times out (calls `stop()` then `remove()`).
+
+**Concurrency.** Machines may be created and started in parallel, from one
+`Promise.all` or from separate processes. Each creation chooses its port
+block and NIC MACs under a data-dir-wide allocation lock and reserves them
+until `machine.json` is written, so concurrent auto-allocated machines never
+share a block. An explicit `portBase` is never moved: one that overlaps
+another machine's block fails with `PORT_CONFLICT`. Per machine, every
+lifecycle operation takes the machine lock (`machines/<name>/.lock`):
+
+- `stop()`, `clean()` and `remove()` **wait** for an operation already in
+  progress (up to the machine's boot timeout), then act on the state it left.
+- A second `start()` of the same machine, `setDeviceMode()` and removing a
+  leftover directory **fail at once** with `MACHINE_LOCKED`, naming the
+  operation, pid and age of the holder.
+- A machine running in the **foreground** holds the lock until its VM exits.
+  Nothing waits for it. Quit it from its console.
 
 `add()` is the same minus the QEMU spawn — useful when you want to
 materialize a machine and start it later (or hand the config to another
@@ -1086,6 +1101,7 @@ restrictions, half-open SLiRP under TCG), see `docs/networking.md`.
 
 ```text
 $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
+├── .allocate.lock               held while a new machine picks its ports/MACs
 ├── cache/                       Downloaded RouterOS images
 │   ├── chr-7.22.1.img.zip
 │   ├── chr-7.22.1.img
@@ -1101,7 +1117,7 @@ $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
 │       ├── qga.sock             QGA (x86 only)
 │       ├── qemu.pid
 │       ├── qemu.log
-│       ├── start-lock           start serialization
+│       ├── .lock                lifecycle lock + in-flight port/MAC reservation
 │       └── ssh/id_ed25519[.pub] SSH key (if managed user provisioned)
 └── networks/                     Named L2 socket reservations
     └── <name>.json
@@ -1170,8 +1186,10 @@ If an extra mapping reuses a built-in service name such as `winbox`, it
 pins/replaces that service's host port rather than creating a second
 `ports.winbox` entry.
 
-If port `9100` is in use, the next instance gets `9110`, etc. Manual
-override via `--port-base`.
+If port `9100` is in use, the next instance gets `9110`, etc. Concurrent
+creations get distinct blocks (see **Concurrency** under [Static methods on `QuickCHR`](#static-methods-on-quickchr)).
+Manual override via `--port-base`, which is never remapped: a base that
+overlaps another machine's block is a `PORT_CONFLICT`.
 
 ---
 
@@ -1497,7 +1515,7 @@ present, then exits `1`.
 | `MACHINE_EXISTS` | name already in `machines/` | choose another name or `QuickCHR.get(name)` |
 | `MACHINE_NOT_FOUND` | name not in `machines/` | `quickchr list` |
 | `MACHINE_RUNNING` / `MACHINE_STOPPED` | wrong lifecycle state | `start` or `stop` first |
-| `MACHINE_LOCKED` | another `start` in progress | wait or pick another name |
+| `MACHINE_LOCKED` | another operation holds the machine (the message names it, its pid and age) | wait for it; a `foreground` holder must be quit from its console |
 | `EXEC_FAILED` | RouterOS rejected the command (auth, syntax) | check creds, command syntax |
 | `PROCESS_FAILED` | QEMU spawn / reboot / verify failed | check `qemu.log`, host resources |
 | `SPAWN_FAILED` | exec/spawn of host binary failed | check binary exists + executable |

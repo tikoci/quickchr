@@ -204,7 +204,8 @@ describe("an orphan directory is recoverable (#155)", () => {
 	test("a create still in flight is not deleted as an orphan", async () => {
 		// add()/start() write machine.json last, so between ensureDir() and saveMachine()
 		// an active create is indistinguishable from an orphan by directory contents.
-		// The start-lock is what separates them.
+		// The machine lock is what separates them. Written under the pre-0.5 name,
+		// `.start-lock`, which is still honoured for one release.
 		const live = Bun.spawn(["sleep", "60"], { stdout: "ignore", stderr: "ignore" });
 		try {
 			const dir = join(TEST_DIR, "machines", "inflight");
