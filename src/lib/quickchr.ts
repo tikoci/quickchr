@@ -2000,7 +2000,6 @@ export class QuickCHR {
 
 		// Resolve architecture
 		const arch: Arch = resolveArch(opts.arch);
-		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 		// Host prerequisites are checked just before each launch below, after every
 		// refusal: a request that cannot succeed says why before asking for QEMU.
 		const requireHostFor = (target: Arch) => {
@@ -2085,6 +2084,7 @@ export class QuickCHR {
 		}
 
 		assertRouterOs6Arch(version, arch);
+		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 		if (!opts.dryRun) requireHostFor(arch);
 
 		// Allocate port block

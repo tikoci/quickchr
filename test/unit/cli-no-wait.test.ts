@@ -13,14 +13,15 @@ import { START_FLAGS, VALUE_FLAGS } from "../../src/cli/flags.ts";
 const TEST_DIR = join(import.meta.dir, ".tmp-cli-no-wait");
 const CLI = join(import.meta.dir, "../../src/cli/index.ts");
 
-async function runQuickchr(args: string[]) {
-	const proc = Bun.spawn(["bun", CLI, ...args], {
+async function runQuickchr(args: string[], env: Record<string, string> = {}) {
+	const proc = Bun.spawn([process.execPath, CLI, ...args], {
 		env: {
 			...process.env,
 			QUICKCHR_DATA_DIR: TEST_DIR,
 			HOME: join(TEST_DIR, "home"),
 			NO_COLOR: "1",
 			QUICKCHR_NO_PROMPT: "1",
+			...env,
 		},
 		stdout: "pipe",
 		stderr: "pipe",
@@ -107,7 +108,7 @@ describe("RouterOS 6 on the CLI (#182)", () => {
 	});
 
 	test("start refuses arm64 for 6.x before downloading", async () => {
-		const result = await runQuickchr(["start", "--name", "lab6", "--version", "6.49.23", "--arch", "arm64"]);
+		const result = await runQuickchr(["start", "--name", "lab6", "--version", "6.49.23", "--arch", "arm64"], { PATH: "" });
 		expect(result.exitCode).toBe(1);
 		expect(result.stderr).toContain("Error [INVALID_ARCH]");
 		expect(result.stderr).toContain("x86 only");
