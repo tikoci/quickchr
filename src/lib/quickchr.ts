@@ -1389,7 +1389,7 @@ export async function rollbackFailedProvisioning(
 /** Append the rollback outcome to a provisioning error and hand it back for rethrow.
  *  The error keeps its own type, code and stack: the rollback is context, not the
  *  failure. */
-async function failProvisioning(
+export async function failProvisioning(
 	err: unknown,
 	instance: ChrInstance,
 	restore: MachineState | undefined,

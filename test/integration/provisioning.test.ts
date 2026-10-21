@@ -395,6 +395,71 @@ describe.skipIf(SKIP)("provisioning corner cases", () => {
 		}
 	}, bootTestTimeout());
 
+	// #176: a first boot whose provisioning throws is rolled back by start()'s own
+	// catch, not left running half-provisioned. `-2` is a user name RouterOS rejects
+	// with HTTP 400 ("invalid user name"), so the user step throws after a real boot.
+	// The direct rollback cases are in test/unit/provisioning-rollback.test.ts; these
+	// two prove each start() path actually reaches it.
+	test("a start()-created machine whose provisioning fails is removed", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const machineName = "integration-prov-corner-rollback-start";
+		try {
+			const failure = await QuickCHR.start({
+				...imageTarget(),
+				arch: process.arch === "arm64" ? "arm64" : "x86",
+				background: true,
+				name: machineName,
+				user: { name: "-2", password: "x" },
+			}).then(() => undefined, (err: unknown) => err);
+
+			expect(failure).toMatchObject({ code: "PROCESS_FAILED" });
+			// The provisioning error stays primary; the rollback is appended to it.
+			expect((failure as Error).message).toContain("invalid user name");
+			expect((failure as Error).message).toContain("has been removed");
+			expect(QuickCHR.get(machineName)).toBeNull();
+		} finally {
+			await cleanupMachine(machineName);
+		}
+	}, bootTestTimeout());
+
+	test("an add()-created machine whose first-boot provisioning fails is reset, intent kept", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { isProvisioningWindowOpen } = await import("../../src/lib/provisioning-window.ts");
+		const { isMachineRunning } = await import("../../src/lib/state.ts");
+		const machineName = "integration-prov-corner-rollback-add";
+		try {
+			await QuickCHR.add({
+				...imageTarget(),
+				arch: process.arch === "arm64" ? "arm64" : "x86",
+				name: machineName,
+				user: { name: "-2", password: "x" },
+				disableAdmin: true,
+			});
+			const failure = await QuickCHR.start({ name: machineName, background: true })
+				.then(() => undefined, (err: unknown) => err);
+
+			expect(failure).toMatchObject({ code: "PROCESS_FAILED" });
+			expect((failure as Error).message).toContain("invalid user name");
+			expect((failure as Error).message).toContain("never-booted state");
+
+			const after = QuickCHR.get(machineName);
+			expect(after).not.toBeNull();
+			const state = (after as NonNullable<typeof after>).state;
+			expect(isMachineRunning(state)).toBe(false);
+			expect(isProvisioningWindowOpen(state)).toBe(true);
+			expect(state.user?.name).toBe("-2");
+			expect(state.disableAdmin).toBe(true);
+
+			// The retry is the same command: it provisions again rather than being
+			// refused with PROVISIONING_WINDOW_CLOSED.
+			const retry = await QuickCHR.start({ name: machineName, background: true })
+				.then(() => undefined, (err: unknown) => err);
+			expect(retry).toMatchObject({ code: "PROCESS_FAILED" });
+		} finally {
+			await cleanupMachine(machineName);
+		}
+	}, bootTestTimeout({ boots: 2 }));
+
 	test("createUser sets the user group to 'full' by default", async () => {
 		// RouterOS has a concept of user groups. The library must place the new user
 		// in the "full" group, not the default read-only group.

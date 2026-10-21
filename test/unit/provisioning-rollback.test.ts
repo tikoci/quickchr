@@ -1,11 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { QuickCHR, rollbackFailedProvisioning } from "../../src/lib/quickchr.ts";
+import { failProvisioning, QuickCHR, rollbackFailedProvisioning } from "../../src/lib/quickchr.ts";
 import { loadMachine, saveMachine } from "../../src/lib/state.ts";
 import { getInstanceCredentials, saveInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "../../src/lib/credentials.ts";
 import { isProvisioningWindowOpen } from "../../src/lib/provisioning-window.ts";
-import type { ChrInstance, MachineState } from "../../src/lib/types.ts";
+import { QuickCHRError, type ChrInstance, type MachineState } from "../../src/lib/types.ts";
 
 /**
  * A first boot whose provisioning throws is rolled back, so the retry is the same
@@ -178,5 +178,32 @@ describe("rollbackFailedProvisioning — a rollback that itself fails", () => {
 		expect(message).toContain("Rolling back machine");
 		expect(message).toContain("also failed");
 		expect(message).toContain("Cached image not found");
+	});
+});
+
+describe("failProvisioning — what start() and _launchExisting() rethrow", () => {
+	// Both wrappers are `catch (err) { throw await failProvisioning(err, …) }`. Those
+	// paths need a real boot, so test/integration/provisioning.test.ts drives them;
+	// this pins the error they rethrow.
+	test("keeps the provisioning error's type, code and stack, with the rollback on its own line", async () => {
+		const { instance, restore } = seedHalfProvisioned();
+		const original = new QuickCHRError("PROCESS_FAILED", 'Failed to create user "-2": HTTP 400 — {"detail":"failure: invalid user name"}');
+		const stack = original.stack;
+
+		const rethrown = await failProvisioning(original, instance, restore);
+
+		expect(rethrown).toBe(original);
+		expect((rethrown as QuickCHRError).code).toBe("PROCESS_FAILED");
+		expect((rethrown as QuickCHRError).stack).toBe(stack);
+		expect((rethrown as Error).message).toMatch(/invalid user name"\}\nMachine "rollback-test" was reset/);
+	});
+
+	test("wraps a non-Error throw rather than losing it", async () => {
+		const { instance } = seedHalfProvisioned();
+		const rethrown = await failProvisioning("socket hang up", instance, undefined);
+		expect(rethrown).toBeInstanceOf(QuickCHRError);
+		expect((rethrown as QuickCHRError).code).toBe("PROCESS_FAILED");
+		expect((rethrown as Error).message).toContain("Provisioning failed: socket hang up");
+		expect((rethrown as Error).message).toContain("has been removed");
 	});
 });
