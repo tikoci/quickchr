@@ -92,6 +92,21 @@ describe("acquireLockNow", () => {
 		acquireLockNow(path, "start").release();
 	});
 
+	test("a lock that exists but cannot be read is a holder, not an absence", () => {
+		// EEXIST on create, then EISDIR on read — the shape of another user's lock
+		// under a restrictive umask (EACCES), without depending on permissions that
+		// root ignores. Reading that as "absent" retried the create forever.
+		const path = machineLockPath(MACHINE_DIR);
+		mkdirSync(path);
+		try {
+			acquireLockNow(path, "start");
+			expect.unreachable("should have thrown");
+		} catch (e) {
+			expectErrorCode(e, "MACHINE_LOCKED");
+		}
+		expect(existsSync(path)).toBe(true);
+	});
+
 	test("release never deletes a successor's lock", () => {
 		const path = machineLockPath(MACHINE_DIR);
 		const first = acquireLockNow(path, "start");

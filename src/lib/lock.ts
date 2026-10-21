@@ -128,8 +128,12 @@ function inspect(path: string): Inspection {
 	let raw: string;
 	try {
 		raw = readFileSync(path, "utf-8");
-	} catch {
-		return { state: "absent" };
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return { state: "absent" };
+		// Present but unreadable (EACCES from another user's lock, EISDIR, I/O): its
+		// holder cannot be checked, so it is never reaped and never retried as gone —
+		// treating it as absent spun `attempt()` forever.
+		return { state: "settling" };
 	}
 	const record = parseRecord(raw);
 	if (!record) {

@@ -88,7 +88,7 @@ describe("concurrent creation claims (#140)", () => {
 		const names = ["proc-a", "proc-b", "proc-c"];
 		const startAt = Date.now() + 500;
 		const outputs = await Promise.all(names.map(async (name) => {
-			const proc = Bun.spawn(["bun", WORKER, name, String(startAt), "1500"], {
+			const proc = Bun.spawn([process.execPath, WORKER, name, String(startAt), "1500"], {
 				env: { ...process.env, QUICKCHR_DATA_DIR: TEST_DIR },
 				stdout: "pipe",
 				stderr: "pipe",
