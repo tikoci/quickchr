@@ -2,16 +2,29 @@
  * Cross-process file locks: the per-machine lifecycle lock and the data-dir-wide
  * allocation lock.
  *
- * One primitive for both. A lock is a file created with `link()`, which is atomic and
- * fails with EEXIST when the file is already there, and which publishes the file with
- * its whole record in place — there is no instant where the lock exists and is empty.
- * The old `open(wx)` + `write()` pair had that instant, and a concurrent reader that
- * treated an empty file as stale took the lock away from a live holder.
+ * One primitive for both. A lock is a directory holding an append-only log of
+ * numbered records, and the **highest number is the lock's state**: a live holder's
+ * record means held; a released marker, a dead holder's record, or no record at all
+ * means free. Taking the lock is creating record top+1, published with `link()` so only
+ * one contender can create it and it never exists half-written. Releasing appends a
+ * released marker. Superseded records below the top are garbage-collected.
  *
- * A holder records `{ pid, op, at, token }`. The pid decides staleness (a dead holder's
- * lock is reaped), the op and age go into `MACHINE_LOCKED` so the refusal can say what
- * is holding the machine, and the token makes release ownership-checked: a holder only
- * ever deletes its own lock, never a successor's.
+ * Nothing ever deletes a record another process may still hold. That is the point:
+ * a path has no compare-and-delete, so any recovery that deletes a dead holder's lock
+ * by path has a window between judging it dead and deleting it, and a successor can be
+ * installed in that window and then deleted. Rename-aside-and-compare had that window,
+ * and so did a reap guard recovered by age (Codex review of #190, both reproduced).
+ * Here, recovering from a dead holder is just claiming the next number.
+ *
+ * A claim stands only if, once created, nothing higher exists and its predecessor is
+ * still there. A contender paused across other claims, or across a remove and
+ * re-create of the machine, can wake and create a number that is free again. That
+ * check is what turns it away, since the top record is never deleted while the lock
+ * directory exists.
+ *
+ * A holder records `{ pid, op, at, token }`. The pid decides liveness, the op and age
+ * go into `MACHINE_LOCKED` so the refusal can say what is holding the machine, and a
+ * creation carries its port/MAC reservation (#140).
  *
  * The lock is deliberately not reentrant. Two async operations in one process are as
  * much in conflict as two processes are — a `stop()` and a `start()` in one
@@ -20,7 +33,7 @@
  * helpers in quickchr.ts rather than the public methods.
  */
 
-import { existsSync, linkSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { getDataDir, getMachinesDir } from "./state.ts";
@@ -53,12 +66,15 @@ export interface LockRecord {
 	at: string;
 	token: string;
 	reserve?: ResourceReservation;
+	/** A released marker: the holder before it let go. */
+	released?: true;
 }
 
 export interface HeldLock {
 	readonly path: string;
-	/** Delete the lock if it is still this holder's. Idempotent, and tolerant of the
-	 *  directory having gone — `remove()` deletes the lock along with the machine. */
+	/** Append a released marker if this holder's record is still the top. Idempotent,
+	 *  and tolerant of the directory having gone — `remove()` deletes the lock along
+	 *  with the machine. */
 	release(): void;
 }
 
@@ -72,18 +88,20 @@ export interface AcquireLockOptions {
 	subject?: string;
 }
 
-const MACHINE_LOCK_FILE = ".lock";
-/** The pre-0.5 name. Honoured, and reaped when stale, for one release so a machine
- *  locked by an older quickchr is not taken from under it. */
+const MACHINE_LOCK_DIR = ".lock";
+/** The pre-0.5 lock file. For one release a live holder is honoured, so a machine
+ *  locked by an older quickchr is not taken from under it. A dead one is ignored, not
+ *  deleted: deleting by path is the race this module exists to avoid, and the older
+ *  quickchr recovers its own stale file. */
 const LEGACY_MACHINE_LOCK_FILE = ".start-lock";
 const POLL_MS = 100;
-/** A record that does not parse is only treated as abandoned once it is this old:
- *  `.start-lock`, written by an older quickchr, is created empty and filled by a second
- *  syscall. */
+/** A record that does not parse only counts as abandoned once it is this old. An older
+ *  quickchr creates `.start-lock` empty and fills it in with a second syscall. */
 const UNREADABLE_GRACE_MS = 500;
 
+/** The machine's lock directory. */
 export function machineLockPath(machineDir: string): string {
-	return join(machineDir, MACHINE_LOCK_FILE);
+	return join(machineDir, MACHINE_LOCK_DIR);
 }
 
 /** Held across the read → probe → claim window of a machine creation, so two creates
@@ -91,6 +109,13 @@ export function machineLockPath(machineDir: string): string {
  *  `machines/`, where it would be listed as a machine. */
 export function allocationLockPath(): string {
 	return join(getDataDir(), ".allocate.lock");
+}
+
+/** Test seam: called after each change this module makes inside a lock directory, so
+ *  a test can interleave another contender at exactly that point. */
+let mutationObserver: ((op: "link" | "unlink", path: string) => void) | undefined;
+export function _observeLockMutations(fn: typeof mutationObserver): void {
+	mutationObserver = fn;
 }
 
 function parseRecord(text: string): LockRecord | undefined {
@@ -110,16 +135,9 @@ function parseRecord(text: string): LockRecord | undefined {
 
 type Inspection =
 	| { state: "absent" }
-	| { state: "live"; record: LockRecord; raw: string }
-	| { state: "stale"; raw: string }
-	| { state: "settling" };
-
-/** Test seam: called after each change this module makes to a lock path, so a test
- *  can interleave another contender at exactly that point. */
-let mutationObserver: ((op: "link" | "unlink", path: string) => void) | undefined;
-export function _observeLockMutations(fn: typeof mutationObserver): void {
-	mutationObserver = fn;
-}
+	| { state: "live"; record: LockRecord }
+	| { state: "free" }
+	| { state: "unknown" };
 
 function isAlive(pid: number): boolean {
 	try {
@@ -131,28 +149,32 @@ function isAlive(pid: number): boolean {
 	}
 }
 
+/** One record file. `unknown` is a file whose holder cannot be checked: unreadable
+ *  (EACCES from another user's lock, EISDIR, I/O), or unparseable and new enough that
+ *  its writer may not have finished. */
 function inspect(path: string): Inspection {
 	let raw: string;
 	try {
 		raw = readFileSync(path, "utf-8");
 	} catch (e) {
-		if ((e as NodeJS.ErrnoException).code === "ENOENT") return { state: "absent" };
-		// Present but unreadable (EACCES from another user's lock, EISDIR, I/O): its
-		// holder cannot be checked, so it is never reaped and never retried as gone —
-		// treating it as absent spun `attempt()` forever.
-		return { state: "settling" };
+		return (e as NodeJS.ErrnoException).code === "ENOENT" ? { state: "absent" } : { state: "unknown" };
 	}
 	const record = parseRecord(raw);
 	if (!record) {
 		let ageMs = Number.POSITIVE_INFINITY;
 		try { ageMs = Date.now() - statSync(path).mtimeMs; } catch { /* gone */ }
-		return ageMs > UNREADABLE_GRACE_MS ? { state: "stale", raw } : { state: "settling" };
+		return ageMs > UNREADABLE_GRACE_MS ? { state: "free" } : { state: "unknown" };
 	}
-	return isAlive(record.pid) ? { state: "live", record, raw } : { state: "stale", raw };
+	if (record.released) return { state: "free" };
+	return isAlive(record.pid) ? { state: "live", record } : { state: "free" };
+}
+
+function generations(lockDir: string): number[] {
+	return readdirSync(lockDir).filter((f) => /^\d+$/.test(f)).map(Number);
 }
 
 /** Publish `content` at `path` only if nothing is there. Written to a temp file and
- *  `link()`ed into place, so the file never exists empty. */
+ *  `link()`ed into place, so the file never exists half-written. */
 function linkNew(path: string, content: string): boolean {
 	const tmp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
 	writeFileSync(tmp, content);
@@ -168,78 +190,102 @@ function linkNew(path: string, content: string): boolean {
 	}
 }
 
-/** How old a reap guard must be before it counts as abandoned. A reaper holds it for
- *  one read and one unlink, so only a reaper killed inside that window leaves one. */
-const REAP_GUARD_STALE_MS = 5_000;
-
-/** Delete a lock judged stale, unless it has been replaced since. Returns false when
- *  another reaper is at work, and the caller should treat the lock as held.
- *
- *  There is no compare-and-delete on a path, so reapers take turns through a guard
- *  file. While a reaper holds the guard, nothing else can change the lock: other
- *  reapers are kept out, a creator's `link()` fails while the file exists, and the
- *  dead holder will never release it. So if the lock still holds the record that was
- *  judged stale, deleting it deletes that record and nothing newer.
- *
- *  A rename-aside-and-compare used to stand here. It took the path away from whatever
- *  was there, which could be a successor installed by an earlier reaper, and a third
- *  contender could `link()` into the gap before the successor was put back. Then two
- *  holders both believed they held the lock.
- *
- *  Clearing an abandoned guard by age is the one remaining gap. Two reapers can both
- *  judge the same guard abandoned, and that only arises after a reaper was killed
- *  mid-reap. */
-export function reap(path: string, judgedRaw: string): boolean {
-	const guard = `${path}.reap`;
-	if (!linkNew(guard, `${process.pid}\n`)) {
-		let abandoned = false;
+/** Delete superseded records below `keepFrom`. Never the top: every caller has just
+ *  created a record at or above `keepFrom`. */
+function collect(lockDir: string, keepFrom: number): void {
+	let gens: number[];
+	try { gens = generations(lockDir); } catch { return; }
+	for (const gen of gens) {
+		if (gen >= keepFrom) continue;
 		try {
-			abandoned = Date.now() - statSync(guard).mtimeMs > REAP_GUARD_STALE_MS;
-			if (abandoned) unlinkSync(guard);
-		} catch { /* the other reaper finished */ }
-		if (!abandoned || !linkNew(guard, `${process.pid}\n`)) return false;
-	}
-	try {
-		let current: string;
-		try {
-			current = readFileSync(path, "utf-8");
-		} catch {
-			return true; // already gone
-		}
-		if (current === judgedRaw) {
-			unlinkSync(path);
-			mutationObserver?.("unlink", path);
-		}
-		return true;
-	} finally {
-		try { unlinkSync(guard); } catch { /* ignore */ }
+			unlinkSync(join(lockDir, String(gen)));
+			mutationObserver?.("unlink", join(lockDir, String(gen)));
+		} catch { /* another collector got it */ }
 	}
 }
 
-function tryCreate(path: string, record: LockRecord): boolean {
-	const dir = dirname(path);
-	const missing = () => new QuickCHRError("MACHINE_NOT_FOUND", `${dir} no longer exists — the machine was removed.`);
-	if (!existsSync(dir)) throw missing();
+function missingMachine(lockDir: string): QuickCHRError {
+	return new QuickCHRError("MACHINE_NOT_FOUND", `${dirname(lockDir)} no longer exists — the machine was removed.`);
+}
+
+/** The lock directory, created if its parent exists. */
+function ensureLockDir(lockDir: string): void {
 	try {
-		return linkNew(path, `${JSON.stringify(record)}\n`);
+		mkdirSync(lockDir);
 	} catch (e) {
-		if ((e as NodeJS.ErrnoException).code === "ENOENT") throw missing();
+		const code = (e as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") throw missingMachine(lockDir);
+		if (code !== "EEXIST") throw e;
+	}
+}
+
+type Top = { gen: number; seen: Inspection } | undefined;
+
+/** The top record, or `"vanished"` when it went between listing and reading — a
+ *  release collected it — and the caller should look again. */
+function readTop(lockDir: string): Top | "vanished" {
+	let gens: number[];
+	try {
+		gens = generations(lockDir);
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") throw missingMachine(lockDir);
 		throw e;
 	}
+	if (gens.length === 0) return undefined;
+	const gen = Math.max(...gens);
+	const seen = inspect(join(lockDir, String(gen)));
+	return seen.state === "absent" ? "vanished" : { gen, seen };
 }
 
-function heldLock(path: string, token: string): HeldLock {
+/** Try to take the lock as record `gen`, having judged record `gen - 1` free (or the
+ *  directory empty, for `gen` 1). Returns the lock, or undefined when another contender
+ *  got there first or the judgement turned out to be stale. */
+export function claim(lockDir: string, gen: number, op: LockOperation, reserve?: ResourceReservation): HeldLock | undefined {
+	const record: LockRecord = {
+		pid: process.pid,
+		op,
+		at: new Date().toISOString(),
+		token: crypto.randomUUID(),
+		...(reserve ? { reserve } : {}),
+	};
+	const path = join(lockDir, String(gen));
+	let created: boolean;
+	try {
+		created = linkNew(path, `${JSON.stringify(record)}\n`);
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") throw missingMachine(lockDir);
+		throw e;
+	}
+	if (!created) return undefined;
+
+	// The number may be free again only because the log moved on past it, or because
+	// the directory was removed and re-created. Either way it is not the top.
+	const gens = generations(lockDir);
+	const isTop = !gens.some((g) => g > gen);
+	const followsPredecessor = gen === 1 ? gens.length === 1 : gens.includes(gen - 1);
+	if (!isTop || !followsPredecessor) {
+		try { unlinkSync(path); } catch { /* collected already */ }
+		mutationObserver?.("unlink", path);
+		return undefined;
+	}
+	collect(lockDir, gen);
+	return heldLock(lockDir, gen, record);
+}
+
+function heldLock(lockDir: string, gen: number, record: LockRecord): HeldLock {
 	let released = false;
 	return {
-		path,
+		path: lockDir,
 		release() {
 			if (released) return;
 			released = true;
-			const current = (() => {
-				try { return parseRecord(readFileSync(path, "utf-8")); } catch { return undefined; }
-			})();
-			if (current?.token !== token) return;
-			try { unlinkSync(path); } catch { /* removed with its directory */ }
+			const marker: LockRecord = { ...record, released: true, at: new Date().toISOString() };
+			delete marker.reserve;
+			try {
+				// EEXIST means someone judged this holder dead and took over — nothing of
+				// ours is left to release.
+				if (linkNew(join(lockDir, String(gen + 1)), `${JSON.stringify(marker)}\n`)) collect(lockDir, gen + 1);
+			} catch { /* removed with its directory */ }
 		},
 	};
 }
@@ -259,50 +305,36 @@ function lockedError(subject: string, holder: LockRecord | undefined, waitedMs: 
 }
 
 /** Whether a legacy `.start-lock` stands in the way, and its holder when that can be
- *  read. A stale one is reaped. One that is unreadable, or so new its holder may still
- *  be writing it, blocks: an older quickchr creates the file empty and fills it with a
- *  second syscall, and going ahead in that window would run alongside it. */
-function legacyBlocker(lockPath: string): { holder: LockRecord | undefined } | undefined {
-	if (basename(lockPath) !== MACHINE_LOCK_FILE) return undefined;
-	const legacy = join(dirname(lockPath), LEGACY_MACHINE_LOCK_FILE);
-	const seen = inspect(legacy);
+ *  read. One that is unreadable, or so new its holder may still be writing it, blocks:
+ *  going ahead in that window would run alongside an older quickchr. */
+function legacyBlocker(lockDir: string): { holder: LockRecord | undefined } | undefined {
+	if (basename(lockDir) !== MACHINE_LOCK_DIR) return undefined;
+	const seen = inspect(join(dirname(lockDir), LEGACY_MACHINE_LOCK_FILE));
 	if (seen.state === "live") return { holder: seen.record };
-	if (seen.state === "settling") return { holder: undefined };
-	if (seen.state === "stale" && !reap(legacy, seen.raw)) return { holder: undefined };
+	if (seen.state === "unknown") return { holder: undefined };
 	return undefined;
 }
 
-/** One attempt: the lock, or the holder in the way (undefined when it cannot be read:
- *  a record still being written, an unreadable file, or another reaper mid-reap).
- *  Stale and vanished locks are retried here. */
-function attempt(lockPath: string, op: LockOperation, reserve: ResourceReservation | undefined): { lock: HeldLock } | { holder: LockRecord | undefined } {
+/** One attempt: the lock, or the holder in the way (undefined when its record cannot
+ *  be read). */
+function attempt(lockDir: string, op: LockOperation, reserve: ResourceReservation | undefined): { lock: HeldLock } | { holder: LockRecord | undefined } {
+	ensureLockDir(lockDir);
 	for (;;) {
-		const record: LockRecord = {
-			pid: process.pid,
-			op,
-			at: new Date().toISOString(),
-			token: crypto.randomUUID(),
-			...(reserve ? { reserve } : {}),
-		};
-		if (tryCreate(lockPath, record)) {
-			const lock = heldLock(lockPath, record.token);
-			const legacy = legacyBlocker(lockPath);
-			if (!legacy) return { lock };
-			lock.release();
-			return legacy;
-		}
-		const seen = inspect(lockPath);
-		if (seen.state === "stale") {
-			if (reap(lockPath, seen.raw)) continue;
-			return { holder: undefined };
-		}
-		if (seen.state === "absent") continue;
-		return { holder: seen.state === "live" ? seen.record : undefined };
+		const top = readTop(lockDir);
+		if (top === "vanished") continue;
+		if (top?.seen.state === "live") return { holder: top.seen.record };
+		if (top?.seen.state === "unknown") return { holder: undefined };
+		const lock = claim(lockDir, (top?.gen ?? 0) + 1, op, reserve);
+		if (!lock) continue;
+		const legacy = legacyBlocker(lockDir);
+		if (!legacy) return { lock };
+		lock.release();
+		return legacy;
 	}
 }
 
-/** Take a lock or fail now with `MACHINE_LOCKED`. A dead holder's lock is reaped on
- *  sight. Synchronous, for callers whose answer to a live holder is always "no" — a
+/** Take a lock or fail now with `MACHINE_LOCKED`. A dead holder's lock is taken over
+ *  on sight. Synchronous, for callers whose answer to a live holder is always "no" — a
  *  second `start` of one machine would only boot it twice. */
 export function acquireLockNow(lockPath: string, op: LockOperation, opts: Omit<AcquireLockOptions, "waitMs" | "onWait"> = {}): HeldLock {
 	const result = attempt(lockPath, op, opts.reserve);
@@ -311,8 +343,8 @@ export function acquireLockNow(lockPath: string, op: LockOperation, opts: Omit<A
 }
 
 /** Take a lock, waiting up to `waitMs` for a live holder to release it. A dead holder's
- *  lock is reaped on sight; a `foreground` holder is never waited for, since it keeps
- *  the lock until its VM exits.
+ *  lock is taken over on sight; a `foreground` holder is never waited for, since it
+ *  keeps the lock until its VM exits.
  *
  *  Throws `MACHINE_LOCKED` naming the holder's operation, pid and age when the wait
  *  runs out, and `MACHINE_NOT_FOUND` if the lock's directory disappears — a machine
@@ -337,6 +369,16 @@ export async function acquireLock(lockPath: string, op: LockOperation, opts: Acq
 	}
 }
 
+/** The live holder of a lock, if any. */
+export function currentHolder(lockPath: string): LockRecord | undefined {
+	if (!existsSync(lockPath)) return undefined;
+	for (;;) {
+		const top = readTop(lockPath);
+		if (top === "vanished") continue;
+		return top?.seen.state === "live" ? top.seen.record : undefined;
+	}
+}
+
 /** Machines whose creation is in flight, with the port block and MACs each has
  *  claimed. Read from the creators' live machine locks; a crashed creator's
  *  reservation disappears with its pid. */
@@ -351,10 +393,9 @@ export function listReservations(exceptName?: string): Array<{ name: string } & 
 	const out: Array<{ name: string } & ResourceReservation> = [];
 	for (const name of names) {
 		if (name === exceptName) continue;
-		const seen = inspect(machineLockPath(join(machinesDir, name)));
-		if (seen.state === "live" && seen.record.reserve) {
-			out.push({ name, ...seen.record.reserve });
-		}
+		let holder: LockRecord | undefined;
+		try { holder = currentHolder(machineLockPath(join(machinesDir, name))); } catch { continue; }
+		if (holder?.reserve) out.push({ name, ...holder.reserve });
 	}
 	return out;
 }

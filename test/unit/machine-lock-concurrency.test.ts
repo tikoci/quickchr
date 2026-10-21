@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { QuickCHR, claimNewMachine } from "../../src/lib/quickchr.ts";
-import { acquireLockNow, listReservations, machineLockPath } from "../../src/lib/lock.ts";
+import { acquireLockNow, currentHolder, listReservations, machineLockPath } from "../../src/lib/lock.ts";
 import { getMachineDir, loadMachine, saveMachine } from "../../src/lib/state.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
@@ -155,7 +155,7 @@ describe("concurrent creation claims (#140)", () => {
 		} catch (e) {
 			expectErrorCode(e, "MACHINE_EXISTS");
 		}
-		expect(existsSync(machineLockPath(getMachineDir("done")))).toBe(false);
+		expect(currentHolder(machineLockPath(getMachineDir("done")))).toBeUndefined();
 	});
 });
 
@@ -233,7 +233,7 @@ describe("_launchExisting() re-reads state under the lock (#180)", () => {
 			// machine returns before anything would spawn.
 			const instance = await QuickCHR._launchExisting(stale, true);
 			expect(instance.state.pid).toBe(qemu.pid);
-			expect(existsSync(machineLockPath(stale.machineDir))).toBe(false);
+			expect(currentHolder(machineLockPath(stale.machineDir))).toBeUndefined();
 		} finally {
 			qemu.kill();
 			await qemu.exited;

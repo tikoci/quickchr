@@ -1117,7 +1117,7 @@ restrictions, half-open SLiRP under TCG), see `docs/networking.md`.
 
 ```text
 $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
-├── .allocate.lock               held while a new machine picks its ports/MACs
+├── .allocate.lock/              held while a new machine picks its ports/MACs
 ├── cache/                       Downloaded RouterOS images
 │   ├── chr-7.22.1.img.zip
 │   ├── chr-7.22.1.img
@@ -1133,7 +1133,7 @@ $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
 │       ├── qga.sock             QGA (x86 only)
 │       ├── qemu.pid
 │       ├── qemu.log
-│       ├── .lock                lifecycle lock + in-flight port/MAC reservation
+│       ├── .lock/               lifecycle lock + in-flight port/MAC reservation
 │       └── ssh/id_ed25519[.pub] SSH key (if managed user provisioned)
 └── networks/                     Named L2 socket reservations
     └── <name>.json
