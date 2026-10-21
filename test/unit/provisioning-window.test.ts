@@ -5,6 +5,7 @@ import {
 	classifyProvisioningRequest,
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
+	pendingProvisioningFor,
 } from "../../src/lib/provisioning-window.ts";
 import { resolveDeviceModeOptions } from "../../src/lib/device-mode.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
@@ -357,5 +358,45 @@ describe("appliedDeviceModeRecord", () => {
 	test("no prior record at all is simply the applied selection", () => {
 		expect(appliedDeviceModeRecord(machine(), applied))
 			.toEqual({ mode: "rose", enable: ["container"], disable: undefined });
+	});
+});
+
+describe("pendingProvisioningFor — first boot of an add()-created machine (#185)", () => {
+	const added = machine({
+		installAllPackages: true,
+		packages: ["container"],
+		deviceMode: { enable: ["container"] },
+		user: { name: "ops", password: "OpsPass1" },
+		disableAdmin: true,
+		secureLogin: true,
+	});
+
+	test("an option the caller did not give falls through to what add() recorded", () => {
+		expect(pendingProvisioningFor(added, {})).toEqual({
+			installAllPackages: true,
+			packages: ["container"],
+			deviceMode: { enable: ["container"] },
+			user: { name: "ops", password: "OpsPass1" },
+			disableAdmin: true,
+			license: undefined,
+			secureLogin: true,
+		});
+	});
+
+	test("an explicit false overrides the recorded intent — it is an instruction, not silence", () => {
+		const pending = pendingProvisioningFor(added, { installAllPackages: false, disableAdmin: false, secureLogin: false });
+		expect(pending.installAllPackages).toBe(false);
+		expect(pending.disableAdmin).toBe(false);
+		expect(pending.secureLogin).toBe(false);
+	});
+
+	test("an empty package list is not a request, so the recorded packages apply", () => {
+		expect(pendingProvisioningFor(added, { packages: [] }).packages).toEqual(["container"]);
+		expect(pendingProvisioningFor(added, { packages: ["zerotier"] }).packages).toEqual(["zerotier"]);
+	});
+
+	test("license is never merged — quickchr does not persist license credentials", () => {
+		expect(pendingProvisioningFor(added, {}).license).toBeUndefined();
+		expect(pendingProvisioningFor(added, { license: "p1" }).license).toBe("p1");
 	});
 });

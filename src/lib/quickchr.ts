@@ -65,7 +65,7 @@ import { resolveSetting } from "./settings.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath } from "./channels.ts";
-import { captureBootFailure, newBootProbeStats, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
+import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
@@ -93,6 +93,7 @@ import {
 	appliedDeviceModeRecord,
 	assertProvisioningWindow,
 	isProvisioningWindowOpen,
+	pendingProvisioningFor,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
@@ -146,6 +147,16 @@ function normalizeStartOptions(opts: StartOptions): StartOptions {
 		return { ...opts, secureLogin: false };
 	}
 	return opts;
+}
+
+/** `version` and `channel` both name the release, so a caller passing both has asked
+ *  for two things and gets one: `version` wins. Say so rather than drop `channel` in
+ *  silence — the TSDoc used to call them "mutually exclusive" while nothing enforced
+ *  it (#178). A warning, not a throw, matching the channel-name-as-version case. */
+function warnVersionWithChannel(opts: StartOptions, logger: ProgressLogger): void {
+	if (opts.version && opts.channel) {
+		logger.warn(`Both version "${opts.version}" and channel "${opts.channel}" were given — using version ${opts.version}; channel is ignored.`);
+	}
 }
 
 function listProvisioningMutations(opts: {
@@ -322,6 +333,45 @@ async function resolveLicenseInput(input: LicenseInput): Promise<LicenseOptions 
 		"Set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or run 'quickchr login'.",
 	);
 	return null;
+}
+
+/** Put a machine's disks back to the factory image and drop the credential material
+ *  that authenticated to the erased guest. Machine state is the caller's to update:
+ *  `clean()` clears the guest facts and keeps intent, a provisioning rollback restores
+ *  the record it had before the failed run. QEMU must already be stopped. */
+async function resetGuestToFactory(state: MachineState): Promise<void> {
+	// NOTE: this deliberately does NOT delete efi-vars.fd. On the arm64 `virt`
+	// machine that file stores UEFI boot order (Boot0000 -> first virtio-blk-pci
+	// disk), not OS state; wiping it forces a full device scan (~480s) on the next
+	// boot. The fresh disk re-copy below is a sufficient factory reset. Regression
+	// anchor: the "clean() resets disk to factory defaults" arm64 integration test
+	// (120s reboot wait would blow past 480s if the wipe were reintroduced).
+	// Re-copy fresh image from cache
+	const imgPath = join(getCacheDir(), `chr-${state.version}${state.arch === "arm64" ? "-arm64" : ""}.img`);
+	if (!existsSync(imgPath)) {
+		throw new QuickCHRError("MACHINE_NOT_FOUND", `Cached image not found: ${imgPath}`);
+	}
+	const destPath = join(state.machineDir, "disk.img");
+	copyFileSync(imgPath, destPath);
+
+	// Clean up disk files (boot.qcow2, extra disks)
+	cleanDiskFiles(state.machineDir);
+
+	// Re-prepare disks if the machine had disk customizations
+	await ensureConfiguredDisks(
+		state.machineDir,
+		state.bootSize,
+		state.extraDisks,
+		state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
+	);
+
+	deleteInstanceCredentials(state.name);
+	// The managed keypair authenticated to the account factory reset erased,
+	// so it is dead credential material sitting in the machine dir. Removing
+	// it also keeps a future re-provision viable: `ssh-keygen -f <path>` on an
+	// existing file exits 1 with "already exists" rather than overwriting
+	// (verified locally), so a leftover key would break `installSshKey()`.
+	rmSync(join(state.machineDir, "ssh"), { recursive: true, force: true });
 }
 
 /** Create a ChrInstance handle from persisted MachineState. */
@@ -564,36 +614,11 @@ function createInstance(state: MachineState): ChrInstance {
 			// endpoint. clean() stops QEMU directly rather than through stop(), so without
 			// this a cleaned machine keeps a pair link occupied and blocks its removal.
 			unregisterSocketMembers(state);
-			// NOTE: clean() deliberately does NOT delete efi-vars.fd. On the arm64 `virt`
-			// machine that file stores UEFI boot order (Boot0000 -> first virtio-blk-pci
-			// disk), not OS state; wiping it forces a full device scan (~480s) on the next
-			// boot. The fresh disk re-copy below is a sufficient factory reset. Regression
-			// anchor: the "clean() resets disk to factory defaults" arm64 integration test
-			// (120s reboot wait would blow past 480s if the wipe were reintroduced).
-			// Re-copy fresh image from cache
-			const imgPath = join(getCacheDir(), `chr-${state.version}${state.arch === "arm64" ? "-arm64" : ""}.img`);
-			if (!existsSync(imgPath)) {
-				throw new QuickCHRError("MACHINE_NOT_FOUND", `Cached image not found: ${imgPath}`);
-			}
-			const destPath = join(state.machineDir, "disk.img");
-			copyFileSync(imgPath, destPath);
-
-			// Clean up disk files (boot.qcow2, extra disks)
-			cleanDiskFiles(state.machineDir);
-
-			// Re-prepare disks if the machine had disk customizations
-			await ensureConfiguredDisks(
-				state.machineDir,
-				state.bootSize,
-				state.extraDisks,
-				state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
-			);
+			await resetGuestToFactory(state);
 
 			// Every guest-side credential went with the old disk, so the credential
 			// facts in machine.json now describe a machine that no longer exists.
-			// Nothing re-provisions them either: a post-clean() start() takes the
-			// `_launchExisting(…, undefined)` path (lastStartedAt is set), so the
-			// erased account is never recreated. Left in place, `resolveAuth()` /
+			// Left in place, `resolveAuth()` /
 			// `resolveCreds()` prefer `state.user` and authenticate every REST call,
 			// exec, and SCP as a deleted user — the confound #79 removes here.
 			// Clearing them restores the documented fallback: factory `admin` with an
@@ -608,13 +633,8 @@ function createInstance(state: MachineState): ChrInstance {
 			// *intent* — packages, deviceMode, secureLogin — is not guest state and
 			// survives, and is what the next `start()` re-applies now that the window
 			// reopens.
-			deleteInstanceCredentials(state.name);
-			// The managed keypair authenticated to the account factory reset erased,
-			// so it is dead credential material sitting in the machine dir. Removing
-			// it also keeps a future re-provision viable: `ssh-keygen -f <path>` on an
-			// existing file exits 1 with "already exists" rather than overwriting
-			// (verified locally), so a leftover key would break `installSshKey()`.
-			rmSync(join(state.machineDir, "ssh"), { recursive: true, force: true });
+			// (`resetGuestToFactory()` has already dropped the secret-store entry and the
+			// managed keypair, which describe the same erased account.)
 
 			// Update state. `provisioning` and `lastStartedAt` go with the credentials:
 			// both describe a guest that no longer exists, and together they are what
@@ -1319,6 +1339,70 @@ async function cleanupAfterBootFailure(
 	return ` Machine "${name}" has been cleaned up automatically.`;
 }
 
+/** Undo a first boot whose provisioning threw, so that retrying is re-running the same
+ *  command (#176).
+ *
+ *  Provisioning is transactional — you get the machine you asked for or you don't —
+ *  and the throw used to break that: the guest was left running and half-provisioned,
+ *  with `lastStartedAt` set, so the window was closed and the retry a user reaches for
+ *  was refused. Resuming from the steps that landed is not the fix. A step can throw
+ *  half-applied (the login group creates a user and then disables `admin` in one call),
+ *  and quickchr cannot tell how far it got without reading the guest. So the rollback
+ *  reverts the whole run, and the retry starts again from a factory disk:
+ *
+ *  - **`restore` given** — an `add()`-created machine on its first boot. The disk is
+ *    reset to the factory image and `machine.json` goes back to the record `add()`
+ *    wrote, window open and intent intact, so `quickchr start <name>` tries again.
+ *  - **no `restore`** — `start()` created the machine in this call, so it is removed,
+ *    exactly as a boot timeout removes it.
+ *
+ *  `QUICKCHR_PRESERVE_ON_FAILURE=1` keeps the half-provisioned machine for inspection,
+ *  as it does for a boot failure. QEMU is stopped either way.
+ *
+ *  Returns the sentence to append to the error. A rollback that fails is reported in
+ *  that sentence, never swallowed — the provisioning error stays the primary one. */
+export async function rollbackFailedProvisioning(
+	instance: ChrInstance,
+	restore: MachineState | undefined,
+): Promise<string> {
+	const name = instance.state.name;
+	const quoted = shellQuote(name);
+	try {
+		await instance.stop();
+		if (preserveOnFailure()) {
+			return ` Machine "${name}" was preserved half-provisioned for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — reset it with \`quickchr clean ${quoted}\` and repeat the start command, or remove it with \`quickchr remove ${quoted}\`.`;
+		}
+		if (!restore) {
+			await instance.remove();
+			return ` Machine "${name}" has been removed — re-run the same command to retry.`;
+		}
+		await resetGuestToFactory(restore);
+		saveMachine({ ...restore, status: "stopped", pid: undefined });
+		refreshMachineState(instance.state);
+		return ` Machine "${name}" was reset to its never-booted state, with the options \`add\` recorded — re-run the same start command to retry.`;
+	} catch (rollbackErr) {
+		const reason = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+		return ` Rolling back machine "${name}" also failed (${reason}) — reset it with \`quickchr clean ${quoted}\` or remove it with \`quickchr remove ${quoted}\`.`;
+	}
+}
+
+/** Append the rollback outcome to a provisioning error and hand it back for rethrow.
+ *  The error keeps its own type, code and stack: the rollback is context, not the
+ *  failure. */
+export async function failProvisioning(
+	err: unknown,
+	instance: ChrInstance,
+	restore: MachineState | undefined,
+): Promise<unknown> {
+	// Its own line: the provisioning error often ends in a RouterOS JSON body.
+	const outcome = (await rollbackFailedProvisioning(instance, restore)).trim();
+	if (err instanceof Error) {
+		err.message += `\n${outcome}`;
+		return err;
+	}
+	return new QuickCHRError("PROCESS_FAILED", `Provisioning failed: ${String(err)}\n${outcome}`);
+}
+
 /** Wait for CHR to boot with periodic progress status updates every 20s. */
 async function waitForBootWithProgress(
 	instance: ChrInstance,
@@ -1677,6 +1761,7 @@ export class QuickCHR {
 		// add() always creates, so the full name rules apply before any I/O.
 		if (opts.name !== undefined) assertValidResourceName(opts.name, "machine");
 
+		warnVersionWithChannel(opts, createLogger(opts.onProgress));
 		let version: string;
 		if (opts.version) {
 			if (!isValidVersion(opts.version)) {
@@ -1827,6 +1912,7 @@ export class QuickCHR {
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 
 		// Resolve version
+		warnVersionWithChannel(opts, logger);
 		let version: string;
 		if (opts.version) {
 			if ((CHANNELS as readonly string[]).includes(opts.version)) {
@@ -1906,15 +1992,15 @@ export class QuickCHR {
 			}
 			// First boot of add()-created machine: apply pending provisioning from stored state
 			if (isProvisioningWindowOpen(existing)) {
-				const pendingOpts = {
-					installAllPackages: opts.installAllPackages ?? existing.installAllPackages,
-					packages: opts.packages?.length ? opts.packages : (existing.packages.length > 0 ? existing.packages : undefined),
-					deviceMode: opts.deviceMode ?? existing.deviceMode,
-					user: opts.user ?? existing.user,
-					disableAdmin: opts.disableAdmin ?? existing.disableAdmin,
+				const pendingOpts = pendingProvisioningFor(existing, {
+					installAllPackages: opts.installAllPackages,
+					packages: opts.packages,
+					deviceMode: opts.deviceMode,
+					user: opts.user,
+					disableAdmin: opts.disableAdmin,
 					license: opts.license,
-					secureLogin: opts.secureLogin ?? existing.secureLogin,
-				};
+					secureLogin: opts.secureLogin,
+				});
 				const hasPending = !!(
 					pendingOpts.installAllPackages ||
 					(pendingOpts.packages?.length ?? 0) > 0 ||
@@ -1968,6 +2054,7 @@ export class QuickCHR {
 				networks: assignMacs(name, resolveStartNetworks(opts.networks, opts.network), getUsedMacs()),
 				ports,
 				packages: opts.packages ?? [],
+				installAllPackages: opts.installAllPackages,
 				deviceMode: requestedDeviceMode,
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
@@ -2050,6 +2137,7 @@ export class QuickCHR {
 			networks: networkConfigs,
 			ports,
 			packages: opts.packages ?? [],
+			installAllPackages: opts.installAllPackages,
 			deviceMode: requestedDeviceMode,
 			user: opts.user,
 			disableAdmin: opts.disableAdmin,
@@ -2192,15 +2280,20 @@ export class QuickCHR {
 		} catch { /* never propagate */ }
 
 		if (hasProvisioning) {
-			await QuickCHR._provisionInstance(instance, state, {
-				installAllPackages: opts.installAllPackages,
-				packages: opts.packages,
-				deviceMode: requestedDeviceMode,
-				user: opts.user,
-				disableAdmin: opts.disableAdmin,
-				license: opts.license,
-				secureLogin: opts.secureLogin,
-			}, launchConfig, logger);
+			try {
+				await QuickCHR._provisionInstance(instance, state, {
+					installAllPackages: opts.installAllPackages,
+					packages: opts.packages,
+					deviceMode: requestedDeviceMode,
+					user: opts.user,
+					disableAdmin: opts.disableAdmin,
+					license: opts.license,
+					secureLogin: opts.secureLogin,
+				}, launchConfig, logger);
+			} catch (err) {
+				// This call created the machine, so a failed run takes it away again.
+				throw await failProvisioning(err, instance, undefined);
+			}
 		}
 
 		// Foreground + provisioning: all provisioning is done in background mode.
@@ -2380,9 +2473,8 @@ export class QuickCHR {
 		}
 
 		// Stamped only here, after every requested step returned. A run that throws
-		// leaves the record absent, which is honest — the guest is half-provisioned and
-		// quickchr should not claim otherwise. (Making that case *retryable* is the
-		// remaining half of #176; the step list is what a retry will read.)
+		// leaves the record absent, and the caller rolls the whole run back
+		// (`rollbackFailedProvisioning()`), so the retry starts from a factory disk.
 		recordProvisioning(machineState, applied);
 	}
 
@@ -2435,6 +2527,9 @@ export class QuickCHR {
 		);
 		// Always boot in background when provisioning is needed
 		const spawnBackground = hasProvisioning ? true : background;
+		// The record a failed provisioning run rolls back to — taken before this launch
+		// writes pid, status or lastStartedAt into `state`.
+		const beforeLaunch = hasProvisioning ? structuredClone(state) : undefined;
 
 		const platform = await detectPlatform();
 		const accel = await detectAccel(state.arch);
@@ -2537,7 +2632,11 @@ export class QuickCHR {
 		} catch { /* never propagate */ }
 
 		if (hasProvisioning && provisioningOpts) {
-			await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig, logger);
+			try {
+				await QuickCHR._provisionInstance(instance, state, provisioningOpts, launchConfig, logger);
+			} catch (err) {
+				throw await failProvisioning(err, instance, beforeLaunch);
+			}
 		}
 
 		try {

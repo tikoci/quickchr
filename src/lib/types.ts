@@ -234,7 +234,8 @@ export interface MachineConfig {
 	deviceMode?: DeviceModeOptions;
 	user?: { name: string; password: string };
 	disableAdmin?: boolean;
-	/** Create a 'quickchr' managed account with a generated password.  Defaults to true. */
+	/** Managed-login intent, recorded at `add()`/`start()`. Same rule as
+	 *  {@link StartOptions.secureLogin}: only an explicit `true` creates the account. */
 	secureLogin?: boolean;
 	portBase: number;
 	excludePorts: ServiceName[];
@@ -333,7 +334,8 @@ export interface MachineState extends MachineConfig {
  * requires SCP upload + reboot cycle, typically 60–120s extra on native acceleration).
  */
 export interface StartOptions {
-	/** RouterOS version to use (e.g. "7.22.1"). Mutually exclusive with `channel`.
+	/** RouterOS version to use (e.g. "7.22.1"). Takes precedence over `channel`:
+	 *  passing both uses `version` and warns that `channel` was ignored.
 	 *  As a convenience, a channel name (e.g. "long-term") is also accepted here and
 	 *  resolves the same as `channel: "long-term"` — but this emits a warning, since
 	 *  `channel` is the self-documenting field for that case. */
@@ -356,6 +358,9 @@ export interface StartOptions {
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	packages?: string[];
 	/** Install all packages from the all_packages ZIP (overrides packages[]).
+	 *  On the first start of an `add()`-created machine, leaving this unset keeps what
+	 *  `add()` recorded; an explicit `false` overrides it. The same holds for
+	 *  `disableAdmin` and `secureLogin`.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	installAllPackages?: boolean;
 	/** Create a user after boot.
@@ -364,8 +369,12 @@ export interface StartOptions {
 	/** Disable the default admin account after boot.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	disableAdmin?: boolean;
-	/** Create a 'quickchr' managed account with a generated password.  Defaults to true.
-	 *  Set to false to keep admin with no password (exec still works).
+	/** Create a 'quickchr' managed account with a generated password. **Only an explicit
+	 *  `true` does this.** Unset and `false` are the same: the machine keeps the factory
+	 *  `admin` login with an empty password (exec still works). The CLI resolves the
+	 *  `secure-login` setting into this field, so it can be `true` without the flag.
+	 *  This is the one statement of the rule — `MachineState.secureLogin` and
+	 *  `provision()` point here.
 	 *  Enabling the managed login path is quickchr provisioning, so it is validated/tested
 	 *  on RouterOS 7.20.8+ only. */
 	secureLogin?: boolean;

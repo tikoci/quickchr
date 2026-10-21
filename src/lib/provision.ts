@@ -668,8 +668,9 @@ export async function installSshKey(
 /** Run all provisioning steps based on the config.
  *
  * When `user` is provided, creates that exact user. When `user` is omitted
- * but `secureLogin` is true (or unset — it defaults to true), a `quickchr`
- * managed account is created automatically with a generated password.
+ * and `secureLogin` is exactly `true`, a `quickchr` managed account is created
+ * automatically with a generated password; unset or `false` creates none — see
+ * `StartOptions.secureLogin`.
  *
  * When `machineDir` is provided and the REST API does not become available within
  * 30 seconds, provisioning falls back to the serial console transport.

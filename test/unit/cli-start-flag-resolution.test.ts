@@ -1,7 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseFlags, resolveTimeoutExtraMs, resolveSecureLoginFlag, applyTimeoutExtraShortFlag, applyAccelFlag } from "../../src/cli/index.ts";
+import { parseFlags, resolveTimeoutExtraMs, resolveSecureLoginFlag, applyTimeoutExtraShortFlag, applyAccelFlag, flagOptionalBool } from "../../src/cli/index.ts";
+import { pendingProvisioningFor } from "../../src/lib/provisioning-window.ts";
+import type { MachineState } from "../../src/lib/types.ts";
 import { settingsFilePath } from "../../src/lib/settings.ts";
 import { resolveAccelOverride, setAccelOverride } from "../../src/lib/platform.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
@@ -197,5 +199,36 @@ describe("resolveSecureLoginFlag", () => {
 	test("an explicit flag still wins when the setting is suppressed", async () => {
 		expect(await resolveSecureLoginFlag(parseFlags(["--secure-login"]).flags, false)).toBe(true);
 		expect(await resolveSecureLoginFlag(parseFlags(["--no-secure-login"]).flags, false)).toBe(false);
+	});
+});
+
+describe("flagOptionalBool — absent is not --no-<flag> (#185)", () => {
+	test("absent flag is undefined, so start() can fall back to what add recorded", () => {
+		expect(flagOptionalBool(parseFlags(["lab"]).flags, "install-all-packages")).toBeUndefined();
+	});
+
+	test("--flag is true and --no-flag is false", () => {
+		expect(flagOptionalBool(parseFlags(["--install-all-packages"]).flags, "install-all-packages")).toBe(true);
+		expect(flagOptionalBool(parseFlags(["--no-install-all-packages"]).flags, "install-all-packages")).toBe(false);
+	});
+
+	test("a flagless start keeps add-time boolean intent", () => {
+		// The regression itself: `add --install-all-packages --disable-admin` then a plain
+		// `start lab`. flagBool() sent `false` for both absent flags, and `false ?? true`
+		// is `false`, so the first boot ran without either.
+		const added = {
+			name: "lab",
+			packages: [],
+			installAllPackages: true,
+			disableAdmin: true,
+			user: { name: "ops", password: "OpsPass1" },
+		} as unknown as MachineState;
+		const { flags } = parseFlags(["lab"]);
+		const pending = pendingProvisioningFor(added, {
+			installAllPackages: flagOptionalBool(flags, "install-all-packages"),
+			disableAdmin: flagOptionalBool(flags, "disable-admin"),
+		});
+		expect(pending.installAllPackages).toBe(true);
+		expect(pending.disableAdmin).toBe(true);
 	});
 });
