@@ -24,7 +24,7 @@ const CREATE_FLAGS = [
 
 /** `start` also boots, so it owns the run-time flags on top of the create set. */
 const START_ONLY_FLAGS = [
-	"all", "dry-run", "background", "bg", "fg", "foreground",
+	"all", "dry-run", "wait", "background", "bg", "fg", "foreground",
 	"install-deps", "timeout-extra",
 	"license-level", "license-account", "license-password",
 ] as const;

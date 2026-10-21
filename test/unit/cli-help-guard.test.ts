@@ -166,8 +166,12 @@ describe("unknown flags on machine-creating commands (#156)", () => {
 		// thing; this is the check that keeps them from drifting apart.
 		for (const [command, known] of [["add", ADD_FLAGS], ["start", START_FLAGS]] as const) {
 			const help = await runQuickchr([command, "--help"]);
+			// A line that quotes a centrs command documents centrs' flags, not ours —
+			// `start --help` names `centrs retrieve … --wait 5m` as the way to own
+			// readiness after --no-wait (#159).
+			const ownLines = help.stdout.split("\n").filter((line) => !/^\s*centrs /.test(line)).join("\n");
 			const documented = new Set(
-				[...help.stdout.matchAll(/--([a-z][a-z0-9-]*)/g)].map((m) => m[1] as string),
+				[...ownLines.matchAll(/--([a-z][a-z0-9-]*)/g)].map((m) => m[1] as string),
 			);
 			for (const raw of documented) {
 				// `--no-x` documents the negation of `x`, which is the name parseFlags reports.

@@ -50,6 +50,16 @@ Resuming from the steps that landed was the alternative and is the wrong one: a 
 throw half-applied (the login group creates a user and then disables `admin` in one
 `provision()` call), and quickchr cannot tell how far it got without reading the guest.
 `QUICKCHR_PRESERVE_ON_FAILURE=1` skips the rollback, as it skips boot-failure cleanup.
+A **boot timeout** on that first boot resets the same way (#182): `_launchExisting()`
+snapshots the record whenever the window is open, not only when there is provisioning to
+run, so `add` + timeout no longer deletes what `add` recorded.
+
+**RouterOS 6 takes no provisioning at all** (#182, boot-only target). Every option is
+refused with `PROVISIONING_VERSION_UNSUPPORTED` before download where the version is
+known, and before the window check on an existing machine — the window refusal's
+`quickchr clean` route would only lead to a second refusal. `--no-wait` with any
+provisioning (typed, or recorded by `add`) is `INVALID_ARGUMENT`: provisioning needs a
+booted guest, and skipping it would be the silent drop #176 removed.
 
 **Absent is not `false`.** On an `add()`-created machine's first boot, `start()` merges
 the caller's options over stored intent with `??` (`pendingProvisioningFor()`), so only

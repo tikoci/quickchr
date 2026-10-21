@@ -41,6 +41,10 @@ by the user (or their AI agent) using `quickchr` as a building block.
 - ❌ Multi-router topology orchestration, test-matrix runners,
   configuration-as-code DSLs. Use `examples/` as references and compose
   yourself.
+- ⚠️ **RouterOS 6** is a best-effort, boot-only target (x86, CLI only): quickchr
+  downloads, boots and tracks a 6.x CHR, and does nothing else to it. It exists so
+  v6→v7 migration tooling has a disposable 6.x router to test against — it is not
+  RouterOS 6 support. See [RouterOS 6](#routeros-6-boot-only) below.
 
 **Two ways to use it:**
 
@@ -159,19 +163,31 @@ an error naming its replacement, not a silently ignored flag.
 #### `start [name]`
 
 Boot a stopped machine, or create-and-boot in one command. Blocks until
-REST is ready (background mode, default), or attaches QEMU stdio to your
-terminal (`--fg`). Accepts the same provisioning flags as `add`.
+RouterOS is ready (REST answers; on 6.x, a native-API login), or attaches QEMU
+stdio to your terminal (`--fg`). Accepts the same provisioning flags as `add`.
+QEMU runs detached in its own session either way, so it survives a signal to the
+shell that started it.
 
 Additional flags:
 
 | Flag | Notes |
 |---|---|
-| `--all` | Start every stopped machine in background |
-| `--bg` / `--background` | (default) detach QEMU; return after boot |
+| `--all` | Start every stopped machine in background; accepts readiness, acceleration, timeout and secure-login options only. Other options are refused rather than ignored |
+| `--no-wait` | Return as soon as QEMU is running (past the 1.5 s early-exit check), with state and ports persisted; do not wait for RouterOS. Refused with any provisioning flag, including first-boot options `add` recorded, and with `--fg` |
 | `--fg` / `--foreground` (alias `--no-bg`, `--no-background`) | Serial console on stdio |
+| `--bg` / `--background` | **Deprecated, does nothing.** Background is the default, and the flag never made `start` return early — it only ever chose where the serial console went. Prints a warning; use `--no-wait` |
 | `--install-deps` | Auto-install missing host deps (calls package manager) |
 | `--timeout-extra <s>` / `-T <s>` | Add extra seconds to computed boot timeout |
 | `--dry-run` | Print resolved options and QEMU command, exit |
+
+After `--no-wait`, readiness is yours. centrs (0.1.8+) waits for it in one command:
+
+```sh
+quickchr start lab --no-wait
+centrs retrieve --quickchr lab /system/resource --wait 5m
+# RouterOS 6: centrs validates against the 7.x command tree, so skip validation
+centrs retrieve --quickchr lab6 /system/resource --via native-api --no-validate --wait 5m
+```
 
 Foreground mode shortcuts (QEMU mux):
 
@@ -414,7 +430,7 @@ another machine, view status, or quit.
 | 9 | Extra blank disks (repeatable) | none | `--add-disk` |
 | 10 | Additional networks (macOS/Linux) | user-mode only | `--add-network` |
 | 11 | Provisioning (packages, device-mode, user, license) | optional | various |
-| 12 | Run mode: background / foreground | background | `--bg` / `--fg` |
+| 12 | Run mode: background / foreground | background | (default) / `--fg` |
 | 13 | Final confirmation | — | — |
 
 Steps 7–9 are skipped when `qemu-img` is absent (a warning is shown). Step 10
@@ -672,7 +688,6 @@ interface ChrInstance {
   portBase: number;           // start of this instance's reserved port block
   captureInterface: string;   // "lo0" on macOS, "any" on Linux — for TZSP capture
   hostGatewayIp: string;      // "10.0.2.2" — the host, as seen from inside the guest
-  tzspGatewayIp: string;      // deprecated alias for hostGatewayIp (#26)
 
   waitForBoot(timeoutMs?: number): Promise<boolean>;
   waitFor(condition: () => Promise<boolean>, timeoutMs?: number): Promise<boolean>;
@@ -744,7 +759,8 @@ redact before logging or attaching to bug reports.
 | `arch` | `"arm64" \| "x86"` | host | |
 | `cpu` | number | `1` | |
 | `mem` | number | `512` (1024 cross-arch TCG) | MiB |
-| `background` | boolean | `true` | |
+| `background` | boolean | `true` | Where the serial console goes — not whether `start()` waits |
+| `wait` | boolean | `true` | `false` resolves once QEMU is running and leaves readiness to the caller (`instance.waitForBoot()`); refused with provisioning or `background: false` (`INVALID_ARGUMENT`) |
 | `bootDiskFormat` | `"raw" \| "qcow2"` | `"raw"` (auto-`qcow2` if `bootSize`) | |
 | `bootSize` | string | — | e.g., `"512M"`, `"2G"`. Needs `qemu-img` |
 | `extraDisks` | string[] | `[]` | Each entry is a size string |
@@ -1229,8 +1245,11 @@ Native (HVF/KVM): factor ~1 → 120s base.
 Cross-arch TCG: factor ~15 → up to 1800s.
 Package install adds a 2× multiplier (extra reboot cycle).
 
-If boot times out, the machine is **automatically stopped + removed**.
-Use `--timeout-extra` to add a buffer if you know your host is slow, or
+If boot times out, QEMU is stopped and the machine is **removed** — or, for a
+machine `add` created, **reset** to its never-booted state with its `add`-time
+options kept, so the retry is `quickchr start <name>` again.
+`QUICKCHR_PRESERVE_ON_FAILURE=1` keeps it as it is instead; the `BOOT_TIMEOUT`
+message names that knob. Use `--timeout-extra` to add a buffer if you know your host is slow, or
 persist a default via `quickchr settings set timeout-extra <seconds>` so
 every `start` picks it up without repeating the flag.
 
@@ -1509,7 +1528,7 @@ present, then exits `1`.
 | `MISSING_FIRMWARE` | edk2 UEFI firmware not installed (arm64) | install `qemu-efi-aarch64` / `edk2-aarch64` |
 | `MISSING_UNZIP` | image extraction needs `unzip` | install OS package |
 | `PORT_CONFLICT` | no free 10-port block | stop a machine or set `--port-base` |
-| `BOOT_TIMEOUT` | CHR didn't respond within timeout | check `qemu.log`; under TCG, raise `--timeout-extra`; machine is **auto-removed** |
+| `BOOT_TIMEOUT` | CHR didn't respond within timeout | check `qemu.log`; under TCG, raise `--timeout-extra`; machine is **auto-removed** (or reset, if `add` created it) unless `QUICKCHR_PRESERVE_ON_FAILURE=1` |
 | `DOWNLOAD_FAILED` | image fetch failed | retry; check connectivity to MikroTik download server |
 | `INVALID_VERSION` / `INVALID_ARCH` / `INVALID_NAME` / `INVALID_DISK_SIZE` | argument parse | fix the value |
 | `MACHINE_EXISTS` | name already in `machines/` | choose another name or `QuickCHR.get(name)` |
@@ -1523,7 +1542,9 @@ present, then exits `1`.
 | `QGA_TIMEOUT` | QGA daemon unreachable | KVM-only; not on macOS HVF or TCG |
 | `NETWORK_UNAVAILABLE` | provisioning needs `user` NIC, none present | add `--add-network user` |
 | `INVALID_NETWORK` | unknown alias / unresolvable iface / dead socket daemon | `quickchr networks` |
-| `PROVISIONING_VERSION_UNSUPPORTED` | provisioning option on RouterOS < 7.20.8 | use `--channel long-term` or pin a `7.20.8+` version |
+| `PROVISIONING_VERSION_UNSUPPORTED` | provisioning option on RouterOS < 7.20.8 (including any 6.x) | use `--channel long-term` or pin a `7.20.8+` version |
+| `REST_UNAVAILABLE` | REST operation (`exec`, `get`, `rest()`) on a RouterOS 6 machine | use the native API — `centrs … --via native-api --no-validate` |
+| `INVALID_ARGUMENT` | a flag combination quickchr will not honour — e.g. `--no-wait` with provisioning | drop one of the two |
 | `INSUFFICIENT_DISK_SPACE` | host data dir full | free space or move via `QUICKCHR_DATA_DIR` |
 | `STATE_ERROR` | snapshot on raw boot disk | recreate with `--boot-disk-format=qcow2` |
 | `INVALID_SIZE_STRING` | invalid cache/settings size string | use size syntax like `512M`, `2G`, or `1.5G` |
@@ -1532,10 +1553,41 @@ present, then exits `1`.
 
 ### Auto-cleanup on boot timeout
 
-If `start()` hits `BOOT_TIMEOUT`, quickchr automatically calls
-`stop()` then `remove()` on the failing instance. You'll see a
-diagnostic and the machine will be gone from `quickchr list`. This
-prevents orphan disks accumulating across attempts.
+If `start()` hits `BOOT_TIMEOUT`, quickchr stops the failing instance and then:
+
+- **`start` created the machine in this call** → `remove()`. It is gone from
+  `quickchr list`; re-run the same command to retry.
+- **`add` created it and this was its first boot** → reset: the disk goes back to
+  the factory image and `machine.json` to the record `add` wrote, provisioning
+  window open. Retry with `quickchr start <name>` — the same reset a failed
+  first-boot provisioning run gets.
+
+`QUICKCHR_PRESERVE_ON_FAILURE=1` skips both and keeps the machine as it failed.
+Either way the diagnostic report is written outside the machine dir first.
+
+### RouterOS 6 (boot-only)
+
+A best-effort target for v6→v7 migration testing (tikoci/centrs#386), CLI only —
+the setup wizard does not offer it.
+
+```sh
+quickchr add --name lab6 --version 6.49.23 --arch x86
+quickchr start lab6
+centrs retrieve --quickchr lab6 /system/resource --via native-api --no-validate
+```
+
+- **x86 only.** MikroTik publishes no arm64 CHR for 6.x; `--arch arm64` is refused
+  before download (`INVALID_ARCH`).
+- **Readiness is a native-API `/login`** on guest port 8728 (two consecutive
+  answers), since 6.x has no REST. A 6.49.23 guest is ready in ~25 s under HVF.
+- **No provisioning.** Every provisioning flag, and the post-boot `set` routes, are
+  refused before download where possible (`PROVISIONING_VERSION_UNSUPPORTED`). The
+  `secure-login` setting is a default, not a request, so it does not apply to 6.x.
+- **No REST.** `exec` (REST/auto transport), `get`'s live groups and
+  `ChrInstance.rest()` fail with `REST_UNAVAILABLE` rather than time out.
+  `inspect` reports `rest-api` unavailable and `native-api` available.
+- `list`, `inspect`, `stop`, `remove` and `start --no-wait` work as for 7.x
+  (checked live on 6.49.23).
 
 ### Where to look
 

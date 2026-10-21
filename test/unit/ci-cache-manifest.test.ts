@@ -46,10 +46,16 @@ describe("integrationCacheManifest", () => {
 			{ kind: "image", version: "7.24.4", arch: "x86" },
 			{ kind: "image", version: "7.20.7", arch: "x86" },
 			{ kind: "image", version: "7.20.8", arch: "x86" },
+			{ kind: "image", version: "6.49.23", arch: "x86" },
 			{ kind: "packages", version: "7.24.4", arch: "x86" },
 			{ kind: "packages", version: "7.22.1", arch: "arm64" },
 			{ kind: "packages", version: "7.22.1", arch: "x86" },
 		]);
+	});
+
+	test("ARM legs prefetch the x86-only v6 readiness fixture without requesting an ARM image", () => {
+		const v6 = integrationCacheManifest("7.24.5", "arm64").filter((artifact) => artifact.version.startsWith("6."));
+		expect(v6).toEqual([{ kind: "image", version: "6.49.23", arch: "x86" }]);
 	});
 
 	test("deduplicates a target that is also a fixed package artifact", () => {
