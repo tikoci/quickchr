@@ -9,6 +9,7 @@ import {
 	currentHolder,
 	type HeldLock,
 	listReservations,
+	legacyMachineLockPath,
 	machineLockPath,
 } from "../../src/lib/lock.ts";
 
@@ -24,7 +25,8 @@ import {
 
 const TEST_DIR = join(import.meta.dir, ".tmp-lock");
 const MACHINE_DIR = join(TEST_DIR, "machines", "alpha");
-const LOCK = machineLockPath(MACHINE_DIR);
+const LOCK = join(TEST_DIR, "locks", "alpha");
+const LEGACY = { legacyPath: legacyMachineLockPath(MACHINE_DIR) };
 const DEAD_PID = 99999999;
 const origDataDir = process.env.QUICKCHR_DATA_DIR;
 
@@ -156,20 +158,13 @@ describe("acquireLockNow", () => {
 		expect(records()).toHaveLength(1);
 	});
 
-	test("release tolerates the directory having gone with remove()", () => {
+	test("a machine's lock lives outside its directory, so remove() cannot take it away", () => {
+		expect(machineLockPath("alpha")).toBe(LOCK);
 		const lock = acquireLockNow(LOCK, "remove");
 		rmSync(MACHINE_DIR, { recursive: true, force: true });
-		expect(() => lock.release()).not.toThrow();
-	});
-
-	test("a missing machine directory is MACHINE_NOT_FOUND", () => {
-		rmSync(MACHINE_DIR, { recursive: true, force: true });
-		try {
-			acquireLockNow(LOCK, "stop");
-			expect.unreachable("should have thrown");
-		} catch (e) {
-			expectErrorCode(e, "MACHINE_NOT_FOUND");
-		}
+		expect(currentHolder(LOCK)?.op).toBe("remove");
+		lock.release();
+		expect(currentHolder(LOCK)).toBeUndefined();
 	});
 });
 
@@ -178,14 +173,19 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 	// A wakes and acts on its old judgement; at every change A makes, C tries too.
 	// Neither may get in while B holds.
 	test("a paused contender cannot claim past a live holder that overtook it", () => {
+		// Record 2 must be free as a file name, or A's claim stops at EEXIST before it
+		// changes anything and the interleaved contender never runs.
 		writeRecord(1, deadRecord());
+		acquireLockNow(LOCK, "start").release();
 		const b = acquireLockNow(LOCK, "start");
 		const intruders: HeldLock[] = [];
 		let a: HeldLock | undefined;
+		let fired = 0;
 		interleaving(
-			() => { try { intruders.push(acquireLockNow(LOCK, "clean")); } catch { /* refused: correct */ } },
+			() => { fired++; try { intruders.push(acquireLockNow(LOCK, "clean")); } catch { /* refused: correct */ } },
 			() => { a = claim(LOCK, 2, "stop"); },
 		);
+		expect(fired).toBeGreaterThan(0);
 		expect(a).toBeUndefined();
 		expect(intruders).toHaveLength(0);
 		expect(currentHolder(LOCK)?.op).toBe("start");
@@ -205,15 +205,19 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 		c.release();
 	});
 
-	test("a contender paused across remove and re-create does not land in the new lock", () => {
+	test("a contender paused across remove and re-create cannot claim beside the new holder", () => {
+		// Codex's low-generation case: A judged dead record 1 free and paused; the
+		// machine was removed and created again; B took the lock. With the log inside
+		// the machine directory B held a fresh record 1, and A's claim of 2 matched it
+		// by number. The log now survives remove(), so B holds 2 and A meets EEXIST.
 		writeRecord(1, deadRecord());
-		writeRecord(5, deadRecord());
 		rmSync(MACHINE_DIR, { recursive: true, force: true });
 		mkdirSync(MACHINE_DIR, { recursive: true });
-		const x = acquireLockNow(LOCK, "start");
-		expect(claim(LOCK, 6, "stop")).toBeUndefined();
+		const b = acquireLockNow(LOCK, "start");
+		expect(claim(LOCK, 2, "stop")).toBeUndefined();
+		expect(() => acquireLockNow(LOCK, "clean")).toThrow();
 		expect(currentHolder(LOCK)?.op).toBe("start");
-		x.release();
+		b.release();
 	});
 
 	test("two contenders recovering the same dead holder: exactly one wins", () => {
@@ -243,7 +247,7 @@ describe("legacy .start-lock", () => {
 		try {
 			writeFileSync(join(MACHINE_DIR, ".start-lock"), String(live.pid));
 			try {
-				acquireLockNow(LOCK, "stop");
+				acquireLockNow(LOCK, "stop", LEGACY);
 				expect.unreachable("should have thrown");
 			} catch (e) {
 				expectErrorCode(e, "MACHINE_LOCKED");
@@ -262,16 +266,16 @@ describe("legacy .start-lock", () => {
 		// syscall. Taking the machine in that window would run alongside it.
 		const legacy = join(MACHINE_DIR, ".start-lock");
 		writeFileSync(legacy, "");
-		expect(() => acquireLockNow(LOCK, "clean")).toThrow();
+		expect(() => acquireLockNow(LOCK, "clean", LEGACY)).toThrow();
 		expect(currentHolder(LOCK)).toBeUndefined();
 		backdate(legacy);
-		acquireLockNow(LOCK, "clean").release();
+		acquireLockNow(LOCK, "clean", LEGACY).release();
 	});
 
 	test("an unreadable legacy lock blocks", () => {
 		mkdirSync(join(MACHINE_DIR, ".start-lock"));
 		try {
-			acquireLockNow(LOCK, "clean");
+			acquireLockNow(LOCK, "clean", LEGACY);
 			expect.unreachable("should have thrown");
 		} catch (e) {
 			expectErrorCode(e, "MACHINE_LOCKED");
@@ -282,7 +286,7 @@ describe("legacy .start-lock", () => {
 	test("a dead holder under the old name is ignored, not deleted", () => {
 		const legacy = join(MACHINE_DIR, ".start-lock");
 		writeFileSync(legacy, String(DEAD_PID));
-		acquireLockNow(LOCK, "start").release();
+		acquireLockNow(LOCK, "start", LEGACY).release();
 		expect(existsSync(legacy)).toBe(true);
 	});
 });
@@ -328,16 +332,6 @@ describe("acquireLock (bounded wait)", () => {
 		}
 	});
 
-	test("a machine removed while waiting is MACHINE_NOT_FOUND", async () => {
-		acquireLockNow(LOCK, "remove");
-		setTimeout(() => rmSync(MACHINE_DIR, { recursive: true, force: true }), 200);
-		try {
-			await acquireLock(LOCK, "stop", { waitMs: 5_000 });
-			expect.unreachable("should have thrown");
-		} catch (e) {
-			expectErrorCode(e, "MACHINE_NOT_FOUND");
-		}
-	});
 });
 
 describe("listReservations", () => {

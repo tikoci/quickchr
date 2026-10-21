@@ -620,7 +620,7 @@ block and NIC MACs under a data-dir-wide allocation lock and reserves them
 until `machine.json` is written, so concurrent auto-allocated machines never
 share a block. An explicit `portBase` is never moved: one that overlaps
 another machine's block fails with `PORT_CONFLICT`. Per machine, every
-lifecycle operation takes the machine lock (`machines/<name>/.lock`):
+lifecycle operation takes the machine lock (`locks/<name>/` in the data dir):
 
 - `stop()`, `clean()` and `remove()` **wait** for an operation already in
   progress (up to the machine's boot timeout), then act on the state it left.
@@ -1117,7 +1117,10 @@ restrictions, half-open SLiRP under TCG), see `docs/networking.md`.
 
 ```text
 $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
-├── .allocate.lock/              held while a new machine picks its ports/MACs
+├── locks/                       Cross-process locks (append-only record logs)
+│   ├── .allocate/               held while a new machine picks its ports/MACs
+│   └── <name>/                  lifecycle lock + in-flight port/MAC reservation;
+│                                kept after `remove` so a re-created machine continues it
 ├── cache/                       Downloaded RouterOS images
 │   ├── chr-7.22.1.img.zip
 │   ├── chr-7.22.1.img
@@ -1133,7 +1136,6 @@ $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
 │       ├── qga.sock             QGA (x86 only)
 │       ├── qemu.pid
 │       ├── qemu.log
-│       ├── .lock/               lifecycle lock + in-flight port/MAC reservation
 │       └── ssh/id_ed25519[.pub] SSH key (if managed user provisioned)
 └── networks/                     Named L2 socket reservations
     └── <name>.json

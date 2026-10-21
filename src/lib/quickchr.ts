@@ -104,7 +104,7 @@ import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
 import { assertSufficientQuickchrStorage, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
 import { existsSync, rmSync, copyFileSync } from "node:fs";
-import { acquireLock, acquireLockNow, allocationLockPath, listReservations, machineLockPath, type HeldLock, type LockOperation } from "./lock.ts";
+import { acquireLock, acquireLockNow, allocationLockPath, legacyMachineLockPath, listReservations, machineLockPath, type HeldLock, type LockOperation } from "./lock.ts";
 import { join } from "node:path";
 
 // --- Architecture-aware defaults ---
@@ -395,6 +395,26 @@ async function resetGuestToFactory(state: MachineState): Promise<void> {
 	rmSync(join(state.machineDir, "ssh"), { recursive: true, force: true });
 }
 
+/** Options every machine-lock acquisition passes: the pre-0.5 lock to honour, and the
+ *  noun for `MACHINE_LOCKED`. */
+function machineLockOptions(name: string, machineDir: string): { legacyPath: string; subject: string } {
+	return { legacyPath: legacyMachineLockPath(machineDir), subject: `Machine "${name}"` };
+}
+
+/** The machine lock outlives its machine (see lock.ts), so a caller that has just
+ *  taken it must check that the machine it was asked about is still there, and is not
+ *  another machine created under the same name while it waited. Acting on the old
+ *  snapshot would mean stopping a stale pid. */
+function assertSameMachine(state: MachineState): void {
+	const fresh = loadMachine(state.name);
+	if (!fresh || fresh.createdAt !== state.createdAt) {
+		throw new QuickCHRError(
+			"MACHINE_NOT_FOUND",
+			`Machine "${state.name}" was removed${fresh ? " and created again" : ""} while this operation waited for it.`,
+		);
+	}
+}
+
 /** How long `stop`/`clean`/`remove` wait for an operation already holding the machine
  *  lock. The holder is almost always a start or relaunch waiting for boot, so the wait
  *  is that boot budget: a `stop` issued during a `start` runs after it rather than
@@ -409,14 +429,15 @@ function lifecycleLockWaitMs(state: MachineState): number {
  *  holder just did, and `state.pid` read from it may name a process that has exited or
  *  one the OS has since reused (#180, #181). */
 async function withMachineLock<T>(state: MachineState, op: LockOperation, fn: () => Promise<T>): Promise<T> {
-	const lock = await acquireLock(machineLockPath(state.machineDir), op, {
+	const lock = await acquireLock(machineLockPath(state.name), op, {
+		...machineLockOptions(state.name, state.machineDir),
 		waitMs: lifecycleLockWaitMs(state),
-		subject: `Machine "${state.name}"`,
 		onWait: (holder) => createLogger().warn(
 			`Machine "${state.name}" is busy with \`${holder.op}\` (pid ${holder.pid}) — waiting for it to finish before \`${op}\`.`,
 		),
 	});
 	try {
+		assertSameMachine(state);
 		refreshMachineState(state);
 		return await fn();
 	} finally {
@@ -902,8 +923,9 @@ function createInstance(state: MachineState): ChrInstance {
 			// concurrent `start` would otherwise spawn a second QEMU into the power-cycle
 			// window and both would persist over each other. Fail-fast like a second
 			// `start`: waiting would only power-cycle the machine twice.
-			const lock = acquireLockNow(machineLockPath(state.machineDir), "device-mode", { subject: `Machine "${state.name}"` });
+			const lock = acquireLockNow(machineLockPath(state.name), "device-mode", machineLockOptions(state.name, state.machineDir));
 			try {
+				assertSameMachine(state);
 				// Re-read under the lock before anything reads `state`. This handle's
 				// snapshot is taken once, at `createInstance`, and a library consumer can
 				// hold it across another process's stop/start — after which `state.pid`
@@ -1875,8 +1897,8 @@ export async function claimNewMachine(
 		const picked = await pickNewMachineResources(name, opts);
 		const machineDir = getMachineDir(name);
 		ensureDir(machineDir);
-		const lock = acquireLockNow(machineLockPath(machineDir), op, {
-			subject: `Machine "${name}"`,
+		const lock = acquireLockNow(machineLockPath(name), op, {
+			...machineLockOptions(name, machineDir),
 			reserve: {
 				portBase: picked.portBase,
 				macs: picked.networks.flatMap((n) => (n.mac ? [n.mac] : [])),
@@ -2643,21 +2665,22 @@ export class QuickCHR {
 		logger?: ProgressLogger,
 		wait = true,
 	): Promise<ChrInstance> {
-		const hasProvisioning = !!(
-			provisioningOpts && (
-				provisioningOpts.installAllPackages ||
-				(provisioningOpts.packages?.length ?? 0) > 0 ||
-				provisioningOpts.deviceMode ||
-				provisioningOpts.user ||
-				provisioningOpts.disableAdmin ||
-				provisioningOpts.license ||
-				provisioningOpts.secureLogin === true
+		const wantsProvisioning = (opts: typeof provisioningOpts) => !!(
+			opts && (
+				opts.installAllPackages ||
+				(opts.packages?.length ?? 0) > 0 ||
+				opts.deviceMode ||
+				opts.user ||
+				opts.disableAdmin ||
+				opts.license ||
+				opts.secureLogin === true
 			)
 		);
+		let hasProvisioning = wantsProvisioning(provisioningOpts);
 		const lock = acquireLockNow(
-			machineLockPath(state.machineDir),
+			machineLockPath(state.name),
 			!background && !hasProvisioning ? "foreground" : "start",
-			{ subject: `Machine "${state.name}"` },
+			machineLockOptions(state.name, state.machineDir),
 		);
 		// Same pre-persistence window as start(): a relaunch that claims an endpoint and
 		// then fails to spawn would keep it, with no instance to release it.
@@ -2668,8 +2691,18 @@ export class QuickCHR {
 		// below acts on it, `state.pid` included (#180). Re-read it, and if another
 		// start got the machine running in between, hand back that one rather than
 		// booting a second QEMU on the same disk.
+		assertSameMachine(state);
 		refreshMachineState(state);
 		if (isMachineRunning(state)) return createInstance(state);
+		// `provisioningOpts` was worked out from that snapshot too. If another start
+		// booted the machine in between, the window is shut and running them would be
+		// a second first boot: check them against the machine as it is now, and drop
+		// whatever that start already applied.
+		if (provisioningOpts && !isProvisioningWindowOpen(state)) {
+			assertProvisioningWindow(state, provisioningOpts);
+			provisioningOpts = undefined;
+			hasProvisioning = false;
+		}
 
 		const diskPath = join(state.machineDir, "disk.img");
 		if (!existsSync(diskPath)) {
@@ -2876,7 +2909,7 @@ export class QuickCHR {
 		// while a live creator holds it, and reaps one whose owner is gone — which is the
 		// case this recovery exists for. No waiting: a live creator means this is not an
 		// orphan, and the answer is to let it finish.
-		const lock = acquireLockNow(machineLockPath(getMachineDir(name)), "remove-orphan", { subject: `Machine "${name}"` });
+		const lock = acquireLockNow(machineLockPath(name), "remove-orphan", machineLockOptions(name, getMachineDir(name)));
 
 		// The creator may have finished between the check above and the lock.
 		if (!isOrphanMachineDir(name)) {
