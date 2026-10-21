@@ -36,6 +36,9 @@ import {
 	isValidVersion,
 	generateMachineName,
 	assertProvisioningSupportedVersion,
+	assertRestAvailable,
+	assertRouterOs6Arch,
+	isRouterOs6,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
 import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport } from "./network.ts";
@@ -62,7 +65,7 @@ import {
 import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
@@ -92,6 +95,7 @@ import {
 import {
 	appliedDeviceModeRecord,
 	assertProvisioningWindow,
+	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 	pendingProvisioningFor,
 } from "./provisioning-window.ts";
@@ -202,6 +206,22 @@ function describeProvisioningOperation(opts: Parameters<typeof listProvisioningM
 	if (operations.length === 0) return `use ${PROVISIONING_FEATURE_LABEL}`;
 	if (operations.length === 1) return operations[0] ?? `use ${PROVISIONING_FEATURE_LABEL}`;
 	return `use ${PROVISIONING_FEATURE_LABEL} (${joinHumanList(operations)})`;
+}
+
+/** `wait: false` returns before the guest has booted, and provisioning needs a booted
+ *  guest — so the pair is refused by name rather than the provisioning silently
+ *  skipped (#159). `machine` is set when the provisioning is first-boot intent that
+ *  `add()` recorded, which the caller may not have typed on this command line. */
+function assertWaitAllowsProvisioning(opts: StartOptions, operation: string, machine?: string): void {
+	if (opts.wait !== false) return;
+	const source = machine
+		? `machine "${machine}" has first-boot provisioning recorded by 'add' (${operation})`
+		: `provisioning was requested (${operation})`;
+	throw new QuickCHRError(
+		"INVALID_ARGUMENT",
+		`--no-wait (wait: false) cannot be combined with provisioning: ${source}, and provisioning runs against the booted guest, so start has to wait for it. ` +
+		"Drop --no-wait for this first boot — later starts can use it.",
+	);
 }
 
 // --- Socket registry lifecycle helpers ---
@@ -462,14 +482,16 @@ function createInstance(state: MachineState): ChrInstance {
 		// keeps the excludePorts fix: excluding "http" while keeping "https" now
 		// resolves rest-api onto the surviving secure port instead of a port that
 		// doesn't exist.
-		const restApi = buildHttpService(
-			state.ports.https,
-			state.ports.http,
-			"rest-api",
-			{ secure: "https", plain: "http" },
-			{ username: creds.user, password: creds.password, basic, header: auth.header },
-			"/rest",
-		);
+		const restApi: ServiceEndpoint = isRouterOs6(state.version)
+			? { available: false, unavailableReason: `RouterOS ${state.version} has no REST API — use native-api` }
+			: buildHttpService(
+				state.ports.https,
+				state.ports.http,
+				"rest-api",
+				{ secure: "https", plain: "http" },
+				{ username: creds.user, password: creds.password, basic, header: auth.header },
+				"/rest",
+			);
 		const nativeApi = buildHttpService(
 			state.ports["api-ssl"],
 			state.ports.api,
@@ -556,11 +578,11 @@ function createInstance(state: MachineState): ChrInstance {
 		portBase: state.portBase,
 		captureInterface: process.platform === "darwin" ? "lo0" : "any",
 		hostGatewayIp: HOST_GATEWAY_IP,
-		// Deprecated alias for hostGatewayIp (#26) — same value, removed no earlier
-		// than the next minor.
-		tzspGatewayIp: HOST_GATEWAY_IP,
 
 		async waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean> {
+			if (readinessProbeFor(state.version) === "api") {
+				return waitForApiReady(ports.api, timeoutMs ?? 120_000, resolveCreds(state), stats);
+			}
 			// Use resolved credentials so waitForBoot can validate the response body
 			// on authenticated machines (post-provisioning, post-install reboots).
 			const auth = resolveAuth(state);
@@ -680,6 +702,7 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async rest(path: string, opts?: RequestInit): Promise<unknown> {
+			assertRestAvailable(state, "rest()");
 			const url = `${restUrl}/rest${path.startsWith("/") ? path : "/" + path}`;
 
 			// Retry on ECONNRESET — RouterOS can transiently reset connections in the
@@ -769,6 +792,9 @@ function createInstance(state: MachineState): ChrInstance {
 					`exec transport "${via}" is not yet implemented`,
 				);
 			}
+			// Before the auto→console fallback below: that fallback exists for an
+			// unreachable REST endpoint, not for one that cannot exist.
+			assertRestAvailable(state, "exec");
 			const auth = resolveAuth(state, opts?.user, opts?.password);
 			if (via === "rest") {
 				return restExecute(restUrl, auth, command, opts);
@@ -1318,7 +1344,10 @@ export async function captureRunningFailure(
 /** Tear down a machine that failed to boot, and describe what was done.
  *
  *  Default is full cleanup — a failed `start()` must not leave a half-dead
- *  machine behind for the next call to trip over. QUICKCHR_PRESERVE_ON_FAILURE=1
+ *  machine behind for the next call to trip over. The exception is `restore`: an
+ *  `add()`-created machine on its first boot is reset to the record `add()` wrote
+ *  rather than removed (#182). Every outcome names QUICKCHR_PRESERVE_ON_FAILURE,
+ *  because an auto-removed machine is what hid #182's report. QUICKCHR_PRESERVE_ON_FAILURE=1
  *  inverts that for **local** debugging: the QEMU process is still stopped (it is
  *  wedged, and its port block must be released), but the machine directory
  *  survives so it can be inspected by hand.
@@ -1326,17 +1355,38 @@ export async function captureRunningFailure(
  *  Evidence does not depend on that flag, and CI deliberately does not set it —
  *  `captureBootFailure()` has already written its report outside the machine dir
  *  with qemu.log and serial.log embedded, so cleanup cannot destroy it (#79). */
-async function cleanupAfterBootFailure(
+export async function cleanupAfterBootFailure(
 	instance: ChrInstance,
 	name: string,
 	failure: BootFailureReport,
+	restore?: MachineState,
 ): Promise<string> {
+	const quoted = shellQuote(name);
 	try { await instance.stop(); } catch { /* ignore */ }
 	if (failure.preserved) {
-		return ` Machine "${name}" was preserved for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — remove it with \`quickchr remove ${name}\`.`;
+		return ` Machine "${name}" was preserved for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — ` +
+			(restore ? `reset it with \`quickchr clean ${quoted}\` and start it again, or ` : "") +
+			`remove it with \`quickchr remove ${quoted}\`.`;
+	}
+	// An add()-created machine on its first boot: the same reset a failed provisioning
+	// run gets (#187), so the retry is `start` again rather than `add` + `start`. The
+	// guest may have written to its disk before stalling, so the disk goes back to the
+	// factory image along with the record — the window is open again, and an open
+	// window promises a factory disk.
+	if (restore) {
+		try {
+			await resetGuestToFactory(restore);
+			saveMachine({ ...restore, status: "stopped", pid: undefined });
+			refreshMachineState(instance.state);
+			return ` Machine "${name}" was reset to its never-booted state, with the options \`add\` recorded — ` +
+				`retry with \`quickchr start ${quoted}\`. Set QUICKCHR_PRESERVE_ON_FAILURE=1 to keep a failed machine as it is for diagnosis.`;
+		} catch (resetErr) {
+			const reason = resetErr instanceof Error ? resetErr.message : String(resetErr);
+			return ` Resetting machine "${name}" also failed (${reason}) — reset it with \`quickchr clean ${quoted}\` or remove it with \`quickchr remove ${quoted}\`.`;
+		}
 	}
 	try { await instance.remove(); } catch { /* ignore */ }
-	return ` Machine "${name}" has been cleaned up automatically.`;
+	return ` Machine "${name}" has been cleaned up automatically — set QUICKCHR_PRESERVE_ON_FAILURE=1 to keep a failed machine for diagnosis.`;
 }
 
 /** Undo a first boot whose provisioning threw, so that retrying is re-running the same
@@ -1774,13 +1824,10 @@ export class QuickCHR {
 		}
 
 		const arch: Arch = resolveArch(opts.arch);
-		requireQemu(arch);
-		if (arch === "arm64") requireFirmware();
-		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
+		assertRouterOs6Arch(version, arch);
 		const resolvedDeviceMode = resolveDeviceModeOptions(opts.deviceMode);
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
-
-		if (hasProvisioningMutations({
+		const mutations = {
 			installAllPackages: opts.installAllPackages,
 			packages: opts.packages,
 			hasDeviceModeProvisioning,
@@ -1788,17 +1835,15 @@ export class QuickCHR {
 			disableAdmin: opts.disableAdmin,
 			license: opts.license,
 			secureLogin: opts.secureLogin,
-		})) {
-			assertProvisioningSupportedVersion(version, describeProvisioningOperation({
-				installAllPackages: opts.installAllPackages,
-				packages: opts.packages,
-				hasDeviceModeProvisioning,
-				user: opts.user,
-				disableAdmin: opts.disableAdmin,
-				license: opts.license,
-				secureLogin: opts.secureLogin,
-			}));
+		};
+		// Version refusals before host checks: a request that can never succeed should
+		// say why, not first ask for QEMU to be installed.
+		if (hasProvisioningMutations(mutations)) {
+			assertProvisioningSupportedVersion(version, describeProvisioningOperation(mutations));
 		}
+		requireQemu(arch);
+		if (arch === "arm64") requireFirmware();
+		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -1883,7 +1928,9 @@ export class QuickCHR {
 	 * Start a new or existing CHR instance.
 	 *
 	 * The returned {@link ChrInstance} is REST-ready: all provisioning (packages, license,
-	 * device-mode, user) has completed before this promise resolves.
+	 * device-mode, user) has completed before this promise resolves. Two exceptions:
+	 * `wait: false` resolves once QEMU is running and leaves readiness to the caller, and
+	 * a RouterOS 6 guest (boot-only, no REST) is ready when its native API answers a login.
 	 * Callers do not need to call {@link ChrInstance.waitForBoot} again unless they have
 	 * stopped and restarted the instance manually. Disk options (`bootSize`, `extraDisks`)
 	 * apply when creating a new machine and require `qemu-img` on the host.
@@ -1930,7 +1977,7 @@ export class QuickCHR {
 			version = await resolveVersion(channel);
 		}
 
-		if (hasProvisioningMutations({
+		const mutations = {
 			installAllPackages: opts.installAllPackages,
 			packages: opts.packages,
 			hasDeviceModeProvisioning,
@@ -1938,29 +1985,28 @@ export class QuickCHR {
 			disableAdmin: opts.disableAdmin,
 			license: opts.license,
 			secureLogin: opts.secureLogin,
-		})) {
-			assertProvisioningSupportedVersion(version, describeProvisioningOperation({
-				installAllPackages: opts.installAllPackages,
-				packages: opts.packages,
-				hasDeviceModeProvisioning,
-				user: opts.user,
-				disableAdmin: opts.disableAdmin,
-				license: opts.license,
-				secureLogin: opts.secureLogin,
-			}));
+		};
+		if (hasProvisioningMutations(mutations)) {
+			assertProvisioningSupportedVersion(version, describeProvisioningOperation(mutations));
+			assertWaitAllowsProvisioning(opts, describeProvisioningOperation(mutations));
+		}
+		if (opts.wait === false && opts.background === false) {
+			throw new QuickCHRError(
+				"INVALID_ARGUMENT",
+				"--no-wait (wait: false) cannot be combined with --fg (background: false): a foreground start holds the serial console until QEMU exits, so there is nothing to return early from.",
+			);
 		}
 
 		// Resolve architecture
 		const arch: Arch = resolveArch(opts.arch);
+		assertRouterOs6Arch(version, arch);
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
-
-		// Check prerequisites (skip for dry-run — no QEMU needed)
-		if (!opts.dryRun) {
-			requireQemu(arch);
-			if (arch === "arm64") {
-				requireFirmware();
-			}
-		}
+		// Host prerequisites are checked just before each launch below, after every
+		// refusal: a request that cannot succeed says why before asking for QEMU.
+		const requireHostFor = (target: Arch) => {
+			requireQemu(target);
+			if (target === "arm64") requireFirmware();
+		};
 
 		// Resolve name
 		const existingNames = listMachineNames();
@@ -1975,7 +2021,7 @@ export class QuickCHR {
 			// can run provisioning. Refuse before either of them: dropping the options in
 			// silence is what #176 removes, and the running-machine path is the quieter of
 			// the two — it returns a handle without so much as a boot.
-			const satisfied = assertProvisioningWindow(existing, {
+			const request = {
 				installAllPackages: opts.installAllPackages,
 				packages: opts.packages,
 				deviceMode: opts.deviceMode,
@@ -1983,7 +2029,16 @@ export class QuickCHR {
 				disableAdmin: opts.disableAdmin,
 				license: opts.license,
 				secureLogin: opts.secureLogin,
-			});
+			};
+			// Version before window: on a version that can never be provisioned, the
+			// window refusal's `quickchr clean` route leads to a second refusal (#182).
+			if (hasProvisioningRequest(request)) {
+				assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation({
+					...request,
+					hasDeviceModeProvisioning: shouldApplyDeviceMode(resolveDeviceModeOptions(request.deviceMode)),
+				}));
+			}
+			const satisfied = assertProvisioningWindow(existing, request);
 			for (const ask of satisfied) {
 				(logger ?? createLogger()).status(`${ask.description} is already applied — nothing to do.`);
 			}
@@ -2011,12 +2066,25 @@ export class QuickCHR {
 					pendingOpts.secureLogin === true
 				);
 				if (hasPending) {
+					// Before the boot, not after it: `_provisionInstance()` re-checks the
+					// version, but only once the guest is up — on RouterOS 6 that is a
+					// download-free boot spent on a refusal known in advance.
+					const pendingMutations = {
+						...pendingOpts,
+						hasDeviceModeProvisioning: shouldApplyDeviceMode(resolveDeviceModeOptions(pendingOpts.deviceMode)),
+					};
+					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
+					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
+					requireHostFor(existing.arch);
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger);
 				}
 			}
 			// Exists but stopped — restart it
-			return QuickCHR._launchExisting(existing, opts.background ?? true, undefined, logger);
+			requireHostFor(existing.arch);
+			return QuickCHR._launchExisting(existing, opts.background ?? true, undefined, logger, opts.wait ?? true);
 		}
+
+		if (!opts.dryRun) requireHostFor(arch);
 
 		// Allocate port block
 		const usedBases = getUsedPortBases();
@@ -2207,6 +2275,7 @@ export class QuickCHR {
 		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);
+		if (opts.wait === false) return instance;
 
 		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages, accel) + (opts.timeoutExtra ?? 0);
 
@@ -2492,6 +2561,7 @@ export class QuickCHR {
 			secureLogin?: boolean;
 		},
 		logger?: ProgressLogger,
+		wait = true,
 	): Promise<ChrInstance> {
 		const lockPath = join(state.machineDir, ".start-lock");
 		acquireLock(lockPath);
@@ -2527,9 +2597,12 @@ export class QuickCHR {
 		);
 		// Always boot in background when provisioning is needed
 		const spawnBackground = hasProvisioning ? true : background;
-		// The record a failed provisioning run rolls back to — taken before this launch
-		// writes pid, status or lastStartedAt into `state`.
-		const beforeLaunch = hasProvisioning ? structuredClone(state) : undefined;
+		// The record a failed first boot rolls back to — taken before this launch writes
+		// pid, status or lastStartedAt into `state`. Whenever the window is open, not only
+		// when there is provisioning to run: a boot timeout on an add()-created machine is
+		// the same failed first boot as a provisioning error, and resets the same way
+		// instead of deleting what `add` recorded (#182).
+		const beforeLaunch = isProvisioningWindowOpen(state) ? structuredClone(state) : undefined;
 
 		const platform = await detectPlatform();
 		const accel = await detectAccel(state.arch);
@@ -2581,6 +2654,7 @@ export class QuickCHR {
 		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);
+		if (!wait) return instance;
 
 		// Always wait for boot in background mode — start() promises "REST-ready".
 		const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts?.installAllPackages, accel);
@@ -2610,7 +2684,7 @@ export class QuickCHR {
 				"BOOT_TIMEOUT",
 				`CHR did not respond within ${bootTimeout / 1000}s (accel=${accel})` +
 				(hasProvisioning ? " — provisioning could not run." : ".") +
-				await cleanupAfterBootFailure(instance, state.name, failure) +
+				await cleanupAfterBootFailure(instance, state.name, failure, beforeLaunch) +
 				`\n${failure.summary}`,
 			);
 		}

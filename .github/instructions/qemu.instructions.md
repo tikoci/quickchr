@@ -213,6 +213,15 @@ So a timeout/cancel path must reap explicitly and then **re-count to verify**, r
 assume the kill cascaded. `scripts/ci-file-watchdog.ts` and the workflow's own reap step both do
 this; see `ci.instructions.md` "Per-file watchdog" for the CI side.
 
+### Returning before the guest is ready — `--no-wait` (#159)
+
+Detachment and waiting are separate. Every background start detaches QEMU; `start`
+then **waits** for readiness by default. `start --no-wait` / `wait: false` returns
+right after `spawnQemu()`'s 1.5 s early-exit check, with `pid`, `status: "running"`
+and ports persisted, and leaves readiness to the caller. Measured on CHR 7.24.5 under
+HVF: the CLI returns in ~2 s and REST answers ~17 s later on its own. `--bg` is a
+deprecated no-op: it only ever chose where the serial console went.
+
 ## Channels (background mode)
 
 - Monitor: Unix socket, readline protocol. Wait for `(qemu)` prompt before sending commands.
@@ -220,6 +229,24 @@ this; see `ci.instructions.md` "Per-file watchdog" for the CI side.
 - QGA: Unix socket, JSON protocol. Send `guest-sync-delimited` first, then commands.
 
 ## Boot Detection
+
+`readinessProbeFor(version)` picks the probe: REST (`waitForBoot()`) everywhere it
+exists, and a native-API `/login` (`waitForApiReady()`, `src/lib/api-login.ts`) on
+RouterOS 6, which has no REST (#182). The API probe is general — nothing in it is
+v6-specific — so a 7.x guest without REST can use it too.
+
+Grounded on CHR 6.49.23 x86 under HVF (2026-10-21), post-6.43 plain login on guest 8728:
+
+| state | reply |
+|---|---|
+| RouterOS not up yet | slirp accepts, nothing answers — `probe-timeout` for ~20 s |
+| `admin`, empty password | `!done` (7 bytes: `05 21 64 6f 6e 65 00`) |
+| bad user or password | `!trap =message=invalid user name or password (6)`, then `!done`, same read |
+| `/rest/system/resource` on 6.x | HTTP 404 forever — why the REST probe can never pass |
+
+Ready is two consecutive answers; a `!trap` counts (the service is up), as a REST 401
+does. Never use a bare TCP connect as readiness under user-mode networking: slirp
+accepts on the host side whatever the guest is doing.
 
 Poll `http://127.0.0.1:{http_port}/` with timeout. RouterOS REST API responds once booted.
 Boot time varies significantly by acceleration mode and host hardware — do not hard-code estimates.

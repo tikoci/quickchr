@@ -108,8 +108,9 @@ QUICKCHR_PRESERVE_ON_FAILURE=1 QUICKCHR_SERIAL_LOG=1 \
   the serial socket keeps no history, so attaching *after* the failure shows nothing.
   **It records the generated provisioning password in cleartext** — fine for
   throwaway CI/lab machines, do not enable it against anything you care about.
-- `QUICKCHR_PRESERVE_ON_FAILURE=1` skips the `remove()` on a boot timeout (QEMU is
-  still stopped) so the machine dir survives. Note the tests' own
+- `QUICKCHR_PRESERVE_ON_FAILURE=1` skips the `remove()` on a boot timeout — or, for an
+  `add()`-created machine's first boot, the reset to its `add` record (#182) — so the
+  machine dir survives as it failed (QEMU is still stopped). Note the tests' own
   `finally { cleanupMachine(name) }` still deletes it — which is exactly why the
   report itself is written to `<dataDir>/failures/boot-failure-<machine>-<ts>.json`,
   outside the machine dir, with the log contents embedded. **Read that file first**;
@@ -127,7 +128,9 @@ All three are plain `process.env` checks (like `QUICKCHR_DEBUG`), not managed
 
 Two prefixes land in `<dataDir>/failures/`, and they answer different questions:
 
-- `boot-failure-*` — the machine never became REST-ready. Start at `restProbe`.
+- `boot-failure-*` — the machine never became ready. Start at `restProbe`; its
+  `kind: "api"` means the readiness probe was the native-API login (RouterOS 6), so
+  "first API reply" replaces "first HTTP response" in its summary.
 - `post-readiness-failure-*` — the machine booted fine and a later request died.
   `restProbe` is `null` here (there was no readiness probe to fail); start at
   `trigger`, which names the failed operation, the error with its `code`/`errno`,

@@ -10,11 +10,13 @@ import { ADD_FLAGS, REMOVED_FLAGS, SET_FLAGS, START_FLAGS, VALUE_FLAGS, unknownF
 import { QuickCHRError } from "../lib/types.ts";
 import { CENTRS_EXEC_TIP, CENTRS_SEE_ALSO, tip, tipsForError } from "./tips.ts";
 import {
+	isRouterOs6,
 	MIN_PROVISION_VERSION,
 	PROVISIONING_BOOT_ONLY_SUMMARY,
 	PROVISIONING_FEATURE_SUMMARY,
 	provisioningSupportHint,
 	provisioningSupportSummary,
+	ROUTEROS6_BOOT_ONLY,
 } from "../lib/versions.ts";
 
 const args = process.argv.slice(2);
@@ -434,7 +436,9 @@ async function main() {
 				console.error(`  Hint: ${err.installHint}`);
 			}
 			for (const line of tipsForError(err.code, command)) tip(line);
-			if (err.code === "PROVISIONING_VERSION_UNSUPPORTED") {
+			// The 7.x baseline explanation; a RouterOS 6 refusal already says why, and
+			// "for older 7.x" would point a 6.x user at the wrong fix.
+			if (err.code === "PROVISIONING_VERSION_UNSUPPORTED" && !err.message.includes(ROUTEROS6_BOOT_ONLY)) {
 				console.error(`  Why this happened: ${provisioningSupportSummary(MIN_PROVISION_VERSION)}`);
 				console.error(`  ${PROVISIONING_BOOT_ONLY_SUMMARY}`);
 				console.error("  Try this:");
@@ -448,6 +452,12 @@ async function main() {
 }
 
 // --- Commands ---
+
+/** RouterOS 6 in `add`/`start --help` (#182): what it is for, and what it is not. */
+const ROUTEROS6_HELP = `RouterOS 6.x is a best-effort boot-only target (x86 only): quickchr downloads,
+boots and tracks it, and reports its ports and login. It is there for testing v6→v7
+migration tooling, not as supported RouterOS. Readiness is a native-API login, every
+provisioning flag is refused, and REST-based commands (exec, get, set) say so.`;
 
 /** Print QEMU keyboard shortcuts before foreground launch. Screen clears after QEMU starts. */
 function printForegroundTips(hasProvisioning = false) {
@@ -730,7 +740,9 @@ async function cmdAdd(argv: string[]) {
 	}
 	opts.disableAdmin = flagOptionalBool(flags, "disable-admin");
 	// `add` always creates a machine, so its provisioning window is open by definition.
-	opts.secureLogin = await resolveSecureLoginFlag(flags, true);
+	// A RouterOS 6 machine takes no provisioning at all, so the setting — a default, not
+	// a request — stays out of it; only an explicit --secure-login is refused.
+	opts.secureLogin = await resolveSecureLoginFlag(flags, !isRouterOs6(opts.version ?? ""));
 
 	const state = await QuickCHR.add(opts);
 
@@ -741,7 +753,11 @@ async function cmdAdd(argv: string[]) {
 	console.log(`  CPU/Mem: ${state.cpu} vCPU${state.cpu > 1 ? "s" : ""}, ${state.mem} MB`);
 	console.log(`  Network: ${formatNetworks(state.networks ?? [])}`);
 	console.log(`  Ports:   ${formatPorts(state.ports)}`);
-	console.log(`  REST:    http://127.0.0.1:${ports.http}  ${dim("(after start)")}`);
+	if (isRouterOs6(state.version)) {
+		console.log(`  API:     127.0.0.1:${ports.api}  ${dim("(after start; RouterOS 6 is boot-only and has no REST)")}`);
+	} else {
+		console.log(`  REST:    http://127.0.0.1:${ports.http}  ${dim("(after start)")}`);
+	}
 	console.log(`  Dir:     ${dim(state.machineDir)}`);
 	if (state.installAllPackages) console.log(`  Packages: all extra packages  ${dim("(applied on first start)")}`);
 	else if (state.packages.length > 0) console.log(`  Packages: ${state.packages.join(", ")}  ${dim("(applied on first start)")}`);
@@ -1341,12 +1357,44 @@ async function cmdSetup() {
 	}
 }
 
+/** Whether the `secure-login` *setting* reaches this start. The setting is a default,
+ *  not a request, so it stays out of every start that cannot provision: a closed
+ *  window, a `--no-wait` start (#159), and a RouterOS 6 machine (#182). Otherwise a
+ *  user with `secure-login=true` configured could never use either. An explicit
+ *  `--secure-login` is still passed through, and refused by name. */
+export function secureLoginSettingApplies(
+	flags: Record<string, string | boolean | string[]>,
+	windowOpen: boolean,
+	version: string | undefined,
+): boolean {
+	return windowOpen && flags.wait !== false && !isRouterOs6(version ?? "");
+}
+
+/** `--bg` never did what it reads as (#159): background is the default, and the flag
+ *  only ever chose where the serial console went. It stays accepted so existing
+ *  scripts keep working, and says once that it does nothing. */
+function warnDeprecatedBackgroundFlag(flags: Record<string, string | boolean | string[]>): void {
+	const given = flags.bg === true ? "--bg" : flags.background === true ? "--background" : undefined;
+	if (!given) return;
+	console.error(`Warning: ${given} is deprecated and does nothing — background is already the default, and it never made start return early. Use --no-wait to return as soon as QEMU is running.`);
+}
+
+/** After a `--no-wait` start the caller owns readiness; name the command that does it. */
+function printReadinessTip(name: string, version: string): void {
+	// 6.x: native API, and no validation — centrs checks paths against the 7.x tree
+	// and rejects /system/resource on 6.49 (checked 2026-10-21).
+	const via = isRouterOs6(version) ? " --via native-api --no-validate" : "";
+	tip(`wait for readiness with: centrs retrieve --quickchr ${name} /system/resource${via} --wait 5m`);
+}
+
 async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	applyTimeoutExtraShortFlag(argv, flags, positional);
 	rejectUnknownFlags(flags, START_FLAGS, "start");
 	// Before the --all branch: both start paths must see the same override.
 	await applyAccelFlag(flags);
+	warnDeprecatedBackgroundFlag(flags);
+	const wait = flags.wait === false ? false : undefined;
 
 	// --all: start every stopped machine in background
 	if (flagBool(flags, "all")) {
@@ -1363,10 +1411,14 @@ async function cmdStart(argv: string[]) {
 			console.log(`Starting ${bold(m.name)}...`);
 			// Per machine, not per invocation: a never-started machine in this batch is
 			// still entitled to the secure-login setting on its first boot.
-			const secureLogin = await resolveSecureLoginFlag(flags, isProvisioningWindowOpen(m));
-			const instance = await QuickCHR.start({ name: m.name, background: true, timeoutExtra, secureLogin });
+			const secureLogin = await resolveSecureLoginFlag(flags, secureLoginSettingApplies(flags, isProvisioningWindowOpen(m), m.version));
+			const instance = await QuickCHR.start({ name: m.name, background: true, wait, timeoutExtra, secureLogin });
 			const creds = await resolveDisplayCredentials(instance.state);
-			console.log(`${statusIcon("running")} ${bold(instance.name)}  REST: ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}  SSH: ${formatSshCommand(creds.user, instance.sshPort)}`);
+			const endpoint = isRouterOs6(instance.state.version)
+				? `API: 127.0.0.1:${instance.ports.api}`
+				: `REST: ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`;
+			console.log(`${statusIcon("running")} ${bold(instance.name)}  ${endpoint}  SSH: ${formatSshCommand(creds.user, instance.sshPort)}${wait === false ? "  (not waited for)" : ""}`);
+			if (wait === false) printReadinessTip(instance.name, instance.state.version);
 		}
 		return;
 	}
@@ -1451,10 +1503,16 @@ async function cmdStart(argv: string[]) {
 		// so the setting applies. Only a closed window suppresses it — otherwise a
 		// plain `quickchr start <booted-name>` would ask to provision a booted guest
 		// and be refused.
-		opts.secureLogin = await resolveSecureLoginFlag(flags, !target || isProvisioningWindowOpen(target.state));
+		opts.secureLogin = await resolveSecureLoginFlag(flags, secureLoginSettingApplies(
+			flags,
+			!target || isProvisioningWindowOpen(target.state),
+			target?.state.version ?? opts.version,
+		));
 	}
+	opts.wait = wait;
 
 	// Background default: true. Explicitly foreground only with --fg / --foreground / --no-background / --no-bg.
+	// `--bg` / `--background` are accepted and change nothing (see warnDeprecatedBackgroundFlag).
 	const wantFg =
 		flagBool(flags, "fg") ||
 		flagBool(flags, "foreground") ||
@@ -1467,8 +1525,9 @@ async function cmdStart(argv: string[]) {
 		return;
 	}
 
-	// --fg on already-running machine: attach to its serial console
-	if (!opts.background && opts.name) {
+	// --fg on already-running machine: attach to its serial console.
+	// `--fg --no-wait` skips both foreground blocks so start() refuses the pair before any I/O.
+	if (!opts.background && opts.wait !== false && opts.name) {
 		const runningMachine = QuickCHR.list().find((m) => m.name === opts.name && m.status === "running");
 		if (runningMachine) {
 			await attachSerial(runningMachine.name, runningMachine.machineDir);
@@ -1476,7 +1535,7 @@ async function cmdStart(argv: string[]) {
 		}
 	}
 
-	if (!opts.background) {
+	if (!opts.background && opts.wait !== false) {
 		const wantsDeviceMode = !!opts.deviceMode && !["skip", "none", "off", "disabled"].includes((opts.deviceMode.mode ?? "auto").toLowerCase());
 		const hasProv = !!(
 			opts.installAllPackages ||
@@ -1503,13 +1562,19 @@ async function cmdStart(argv: string[]) {
 		console.log(`  ${dim("Tip: run background")}   quickchr start ${instance.name}`);
 	} else {
 		const creds = await resolveDisplayCredentials(instance.state);
-		console.log(`${statusIcon("running")} ${bold(instance.name)} started`);
-		console.log(`  Version: ${instance.state.version} (${instance.state.arch})`);
+		const v6 = isRouterOs6(instance.state.version);
+		console.log(`${statusIcon("running")} ${bold(instance.name)} ${opts.wait === false ? "launched — not waiting for RouterOS (--no-wait)" : "started"}`);
+		console.log(`  Version: ${instance.state.version} (${instance.state.arch})${v6 ? `  ${dim("boot-only: no REST, no provisioning")}` : ""}`);
 		console.log(`  Network: ${formatNetworks(instance.state.networks ?? [])}`);
 		console.log(`  Ports:   ${formatPorts(instance.state.ports)}`);
-		console.log(`  REST:    ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`);
+		if (v6) {
+			console.log(`  API:     127.0.0.1:${instance.ports.api}  ${dim(`(native API, user ${creds.user})`)}`);
+		} else {
+			console.log(`  REST:    ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`);
+		}
 		console.log(`  SSH:     ${formatSshCommand(creds.user, instance.sshPort)}`);
 		console.log(`  WinBox:  127.0.0.1:${instance.ports.winbox}`);
+		if (opts.wait === false) printReadinessTip(instance.name, instance.state.version);
 		if (creds.user !== "admin") {
 			console.log(`  Login:   ${creds.user} / ${creds.password || "(no password)"}`);
 			console.log(`  Run:     quickchr exec ${instance.name} /system/resource/print`);
@@ -1780,6 +1845,11 @@ async function cmdGet(argv: string[]) {
 		return;
 	}
 
+	// Every live group is a REST read. Refused here rather than left to fetchGroup(),
+	// which swallows errors and would print an empty report for a v6 machine (#182).
+	const { assertRestAvailable } = await import("../lib/versions.ts");
+	assertRestAvailable(s, "'quickchr get' (live properties)");
+
 	const { resolveAuth } = await import("../lib/auth.ts");
 	const auth = resolveAuth(s);
 	const base = `http://127.0.0.1:${instance.ports.http}/rest`;
@@ -1969,6 +2039,10 @@ async function applyLicense(argv: string[]) {
 		console.error(`Machine "${name}" is not running.`);
 		process.exit(1);
 	}
+	// Before any credential prompt: instance.license() refuses RouterOS 6 too, but only
+	// after the user has typed a MikroTik password for nothing.
+	const { assertProvisioningSupportedVersion } = await import("../lib/versions.ts");
+	assertProvisioningSupportedVersion(instance.state.version, "apply a license");
 
 	let account = flag(flags, "account") ?? process.env.MIKROTIK_WEB_ACCOUNT;
 	let password = flag(flags, "password") ?? process.env.MIKROTIK_WEB_PASSWORD;
@@ -2089,6 +2163,10 @@ async function applyDeviceModeChange(name: string, deviceMode: DeviceModeOptions
 		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
+
+	// Before announcing a change that cannot happen (setDeviceMode() refuses it as well).
+	const { assertProvisioningSupportedVersion } = await import("../lib/versions.ts");
+	assertProvisioningSupportedVersion(instance.state.version, "set device-mode");
 
 	const selection = formatDeviceModeSelection(resolveDeviceModeOptions(deviceMode));
 	console.log(`Setting device-mode on ${bold(name)}: ${selection}`);
@@ -3100,6 +3178,8 @@ Post-boot provisioning flags in this command (--add-package, --install-all-packa
 RouterOS ${MIN_PROVISION_VERSION}+ only. Older 7.x remains boot-only. Disk and network
 options still work on older versions when the required host tools are installed.
 
+${ROUTEROS6_HELP}
+
 Options:
   --name <name>         Instance name (required)
   --version <ver>       RouterOS version (e.g., 7.22.1)
@@ -3189,10 +3269,19 @@ validated on RouterOS ${MIN_PROVISION_VERSION}+ only. Older 7.x remains boot-onl
 Disk and network options still work on older versions when the required host tools
 are installed.
 
+${ROUTEROS6_HELP}
+
+By default 'start' returns once RouterOS is ready (REST answers; on 6.x, a native-API
+login). --no-wait returns as soon as QEMU is running and leaves readiness to you:
+    centrs retrieve --quickchr <name> /system/resource --wait 5m
+QEMU runs detached either way. --no-wait is refused with provisioning flags, including
+ones 'add' recorded for the first boot — provisioning needs a booted guest.
+
 Options:
   --all                 Start all stopped machines
-  --bg / --background   Run in background (default)
+  --no-wait             Return once QEMU is running; do not wait for RouterOS
   --fg / --foreground   Run in foreground — serial console on stdio
+  --bg / --background   Deprecated, does nothing: background is already the default
   --version <ver>       RouterOS version (e.g., 7.22.1)
   --channel <ch>        Channel: stable, long-term, testing, development
   --arch <arch>         Architecture: arm64, x86, auto (default: host native)

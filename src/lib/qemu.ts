@@ -13,6 +13,8 @@ import { detectAccel, requireQemu, requireFirmware, requireQemuImg } from "./pla
 import { buildHostfwdString, deviceArgs } from "./network.ts";
 import { ensureDir } from "./state.ts";
 import { restGet } from "./rest.ts";
+import { apiLogin } from "./api-login.ts";
+import { isRouterOs6 } from "./versions.ts";
 import { classifyProbeError, recordBootProbe, serialLogEnabled, type BootProbeStats } from "./diagnostics.ts";
 
 export interface QemuLaunchConfig {
@@ -591,6 +593,56 @@ export async function waitForBoot(
 			// ECONNRESET, connection refused, timeout — not ready yet. Which one it
 			// was is the whole diagnosis when a boot never completes (#79), so it is
 			// classified rather than swallowed.
+			consecutiveReady = 0;
+			const { outcome, detail } = classifyProbeError(e);
+			recordBootProbe(stats, Date.now() - start, outcome, detail);
+		}
+		await Bun.sleep(2000);
+	}
+
+	return false;
+}
+
+/** Which readiness signal a guest can give. REST everywhere it exists; the native-API
+ *  login on RouterOS 6, which has no REST and would otherwise run the REST probe to its
+ *  timeout against a guest that booted in seconds (#182). The one place the choice is
+ *  made — `waitForApiReady()` itself is not version-specific. */
+export function readinessProbeFor(version: string): "rest" | "api" {
+	return isRouterOs6(version) ? "api" : "rest";
+}
+
+/**
+ * Wait for the native API (guest 8728) to answer a `/login` — the readiness probe for a
+ * guest without REST. Same contract as {@link waitForBoot}: two consecutive answers,
+ * a credential refusal (`!trap`) counts as an answer, and every probe is classified into
+ * `stats` so a timeout explains itself.
+ */
+export async function waitForApiReady(
+	apiPort: number,
+	timeoutMs: number,
+	creds: { user: string; password: string },
+	stats?: BootProbeStats,
+): Promise<boolean> {
+	if (stats) stats.kind = "api";
+	const start = Date.now();
+	const deadline = start + timeoutMs;
+	let consecutiveReady = 0;
+
+	while (Date.now() < deadline) {
+		try {
+			const result = await apiLogin(apiPort, creds.user, creds.password, 3000);
+			if (result.outcome === "done") {
+				consecutiveReady++;
+				recordBootProbe(stats, Date.now() - start, "ready");
+			} else if (result.outcome === "trap") {
+				consecutiveReady++;
+				recordBootProbe(stats, Date.now() - start, "unauthorized", result.message);
+			} else {
+				consecutiveReady = 0;
+				recordBootProbe(stats, Date.now() - start, "other", `!fatal ${result.message}`);
+			}
+			if (consecutiveReady >= 2) return true;
+		} catch (e) {
 			consecutiveReady = 0;
 			const { outcome, detail } = classifyProbeError(e);
 			recordBootProbe(stats, Date.now() - start, outcome, detail);
