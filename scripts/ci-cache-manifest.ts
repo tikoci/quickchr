@@ -29,6 +29,8 @@ export function integrationCacheManifest(targetVersion: string, targetArch: Arch
 	const artifacts: CacheArtifact[] = [
 		{ kind: "image", version: targetVersion, arch: targetArch },
 		...PINNED_IMAGE_VERSIONS.map((version) => ({ kind: "image" as const, version, arch: targetArch })),
+		// readiness.test.ts boots RouterOS 6 on x86 even on an ARM runner.
+		{ kind: "image", version: "6.49.23", arch: "x86" },
 		{ kind: "packages", version: targetVersion, arch: targetArch },
 		...ARCHES.map((arch) => ({ kind: "packages" as const, version: PINNED_PACKAGE_VERSION, arch })),
 	];

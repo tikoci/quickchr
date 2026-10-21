@@ -669,7 +669,7 @@ export interface ChrInstance {
 	 *  After `QuickCHR.start()` the returned instance is already ready, so this returns
 	 *  immediately. Call it after `start({ wait: false })`, or as a safety check after a
 	 *  manual stop/restart. */
-	/** @param stats Optional out-param; each REST readiness probe is classified
+	/** @param stats Optional out-param; each REST or native-API readiness probe is classified
 	 *  into it (see diagnostics.ts BootProbeStats) so a failed wait can explain
 	 *  whether the forwarded port ever answered. */
 	waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean>;

@@ -172,7 +172,7 @@ Additional flags:
 
 | Flag | Notes |
 |---|---|
-| `--all` | Start every stopped machine in background |
+| `--all` | Start every stopped machine in background; accepts readiness, acceleration, timeout and secure-login options only. Other options are refused rather than ignored |
 | `--no-wait` | Return as soon as QEMU is running (past the 1.5 s early-exit check), with state and ports persisted; do not wait for RouterOS. Refused with any provisioning flag, including first-boot options `add` recorded, and with `--fg` |
 | `--fg` / `--foreground` (alias `--no-bg`, `--no-background`) | Serial console on stdio |
 | `--bg` / `--background` | **Deprecated, does nothing.** Background is the default, and the flag never made `start` return early — it only ever chose where the serial console went. Prints a warning; use `--no-wait` |

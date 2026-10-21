@@ -1944,6 +1944,13 @@ export class QuickCHR {
 			throw new QuickCHRError("INVALID_NAME", `Invalid machine name "${opts.name}" — names cannot start with "-" (it would be read as a flag)`);
 		}
 
+		if (opts.wait === false && opts.background === false) {
+			throw new QuickCHRError(
+				"INVALID_ARGUMENT",
+				"--no-wait (wait: false) cannot be combined with --fg (background: false): a foreground start holds the serial console until QEMU exits, so there is nothing to return early from.",
+			);
+		}
+
 		const logger = createLogger(opts.onProgress);
 
 		// Before any download or disk work: a named socket whose two ends are already
@@ -1990,16 +1997,9 @@ export class QuickCHR {
 			assertProvisioningSupportedVersion(version, describeProvisioningOperation(mutations));
 			assertWaitAllowsProvisioning(opts, describeProvisioningOperation(mutations));
 		}
-		if (opts.wait === false && opts.background === false) {
-			throw new QuickCHRError(
-				"INVALID_ARGUMENT",
-				"--no-wait (wait: false) cannot be combined with --fg (background: false): a foreground start holds the serial console until QEMU exits, so there is nothing to return early from.",
-			);
-		}
 
 		// Resolve architecture
 		const arch: Arch = resolveArch(opts.arch);
-		assertRouterOs6Arch(version, arch);
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 		// Host prerequisites are checked just before each launch below, after every
 		// refusal: a request that cannot succeed says why before asking for QEMU.
@@ -2084,6 +2084,7 @@ export class QuickCHR {
 			return QuickCHR._launchExisting(existing, opts.background ?? true, undefined, logger, opts.wait ?? true);
 		}
 
+		assertRouterOs6Arch(version, arch);
 		if (!opts.dryRun) requireHostFor(arch);
 
 		// Allocate port block

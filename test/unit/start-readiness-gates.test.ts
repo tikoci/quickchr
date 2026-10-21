@@ -164,6 +164,12 @@ describe("RouterOS 6 refusals happen before download (#182)", () => {
 		expect(nothingCreated()).toBe(true);
 	});
 
+	test("existing machines use their recorded architecture rather than creation defaults", async () => {
+		seed(addedRecord("lab6", "6.49.23", { status: "running", pid: process.pid }));
+		const instance = await QuickCHR.start({ name: "lab6", version: "6.49.23", arch: "arm64" });
+		expect(instance.state.arch).toBe("x86");
+	});
+
 	test("an existing 6.x machine given provisioning options is refused before it boots", async () => {
 		seed(addedRecord("lab6", "6.49.23"));
 		const result = await codeOf(QuickCHR.start({ name: "lab6", packages: ["container"] }));
@@ -208,6 +214,15 @@ describe("wait: false (#159)", () => {
 		expect(result.code).toBe("INVALID_ARGUMENT");
 		expect(result.message).toContain("--no-wait");
 		expect(result.message).toContain("install extra packages");
+		expect(nothingCreated()).toBe(true);
+	});
+
+	test("foreground/no-wait is refused before version validation or channel resolution", async () => {
+		for (const version of [undefined, "not-a-version"]) {
+			const result = await codeOf(QuickCHR.start({ version, name: "nw", wait: false, background: false }));
+			expect(result.code).toBe("INVALID_ARGUMENT");
+			expect(result.message).toContain("--fg");
+		}
 		expect(nothingCreated()).toBe(true);
 	});
 

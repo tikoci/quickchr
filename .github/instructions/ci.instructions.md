@@ -955,8 +955,8 @@ The key is built by `scripts/ci-cache-key.ts`, not written inline in the
 workflow:
 
 ```text
-key           chr-images-v5-{platform-id}-{resolved-version}
-restore-keys  chr-images-v5-{platform-id}-
+key           chr-images-v6-{platform-id}-{resolved-version}
+restore-keys  chr-images-v6-{platform-id}-
 path          getCacheDir()          # not a literal — the workflow cannot drift
 ```
 
@@ -995,8 +995,8 @@ immutable: a partial exact hit cannot be repaired under the same key.
 A cache entry is only trustworthy while its required content is a **function of
 its key**, which is why exactly one configuration writes. The checked-in
 manifest names the resolved target image and package archive, the 7.20.7 and
-7.20.8 compatibility images, and both 7.22.1 package archives used by the
-license tests. After a restore-key fallback, the prefetch step removes
+7.20.8 compatibility images, the x86-only 6.49.23 readiness fixture (including
+on ARM legs), and both 7.22.1 package archives used by the license tests. After a restore-key fallback, the prefetch step removes
 recognized prior-target image/package paths outside that manifest; otherwise
 old targets would accumulate until auto-prune evicted the fixed fixtures back
 into test-time downloads. If a filtered run owned the key, its thinner content would hit
@@ -1014,7 +1014,7 @@ Two consequences worth knowing:
   immutable entry remains a complete cache for the version its key names, and
   the next dispatch resolves and populates the newer key.
 
-Bump `CACHE_KEY_GENERATION` in `scripts/ci-cache-key.ts` (currently `v5`) when
+Bump `CACHE_KEY_GENERATION` in `scripts/ci-cache-key.ts` (currently `v6`) when
 `integrationCacheManifest()` changes or an immutable generation must be
 invalidated. Old generations age out under the repo LRU cap.
 
@@ -1055,7 +1055,7 @@ Two consequences:
 2. Install the right apt/brew packages directly in the job's `Install QEMU + tools` step.
    Required Linux apt packages by platform:
    - **x86_64**: `qemu-system-x86 qemu-utils ipxe-qemu sshpass`
-   - **aarch64**: `qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu sshpass`
+   - **aarch64**: `qemu-system-arm qemu-system-x86 qemu-utils qemu-efi-aarch64 ipxe-qemu sshpass`
    - **`ipxe-qemu` is mandatory** on every Linux runner — it provides `efi-virtio.rom`
      which `virtio-net-pci` needs. Missing it produces:
      `qemu-system-aarch64: -device virtio-net-pci,netdev=net0: failed to find romfile "efi-virtio.rom"`

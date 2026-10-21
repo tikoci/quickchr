@@ -54,6 +54,15 @@ describe("flag resolution", () => {
 });
 
 describe("start --no-wait", () => {
+	for (const extra of [["--add-package", "container"], ["--fg"], ["--no-bg"], ["--device-mode", "rose"], ["--add-user", "ops:pw"]]) {
+		test(`--all refuses ignored options: ${extra.join(" ")}`, async () => {
+			const result = await runQuickchr(["start", "--all", "--no-wait", ...extra]);
+			expect(result.exitCode).toBe(1);
+			expect(result.stderr).toContain("Error [INVALID_ARGUMENT]");
+			expect(result.stdout).not.toContain("No stopped instances");
+		});
+	}
+
 	test("with a provisioning flag is a clear error, before anything is created", async () => {
 		const result = await runQuickchr(["start", "--name", "nw", "--version", "7.24.5", "--arch", "x86", "--no-wait", "--add-package", "container"]);
 		expect(result.exitCode).toBe(1);

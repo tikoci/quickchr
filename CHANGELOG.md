@@ -27,6 +27,11 @@ provisioning quirks agents work around get fixed.
 
 ### Fixed
 
+- `start --all` refuses options it cannot apply, including provisioning flags and
+  foreground mode, instead of silently dropping them on a `--no-wait` start.
+- Restarting an existing machine uses its recorded architecture for the RouterOS 6
+  image restriction, so creation defaults cannot reject an existing x86 guest.
+
 - Every `BOOT_TIMEOUT` message names `QUICKCHR_PRESERVE_ON_FAILURE=1`. The auto-removal
   that hid #182's report gave no hint that it could be turned off. (#182)
 

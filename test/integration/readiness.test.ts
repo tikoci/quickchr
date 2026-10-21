@@ -87,8 +87,16 @@ describe.skipIf(SKIP)("start readiness paths", () => {
 			const descriptor = await instance.descriptor();
 			expect(descriptor.services["rest-api"]?.available).toBe(false);
 			expect(descriptor.services["native-api"]?.available).toBe(true);
+
+			await instance.stop();
+			// Creation-only arch options must not override the recorded x86 guest.
+			const restarted = await QuickCHR.start({ name: instance.name, version: V6_VERSION, arch: "arm64", wait: false });
+			expect(restarted.state.arch).toBe("x86");
+			const restartStats = newBootProbeStats();
+			expect(await restarted.waitForBoot(undefined, restartStats)).toBe(true);
+			expect(restartStats.kind).toBe("api");
 		} finally {
 			await cleanupMachine("integration-v6");
 		}
-	}, bootTestTimeoutFor("x86", V6_ACCEL));
+	}, bootTestTimeoutFor("x86", V6_ACCEL, { boots: 2 }));
 });

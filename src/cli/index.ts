@@ -1398,6 +1398,13 @@ async function cmdStart(argv: string[]) {
 
 	// --all: start every stopped machine in background
 	if (flagBool(flags, "all")) {
+		// Batch starts only accept options this branch actually forwards. In particular,
+		// a provisioning flag must never disappear on a --no-wait start.
+		const batchFlags = new Set(["all", "wait", "bg", "background", "accel", "timeout-extra", "secure-login"]);
+		const unsupported = Object.keys(flags).filter((key) => !batchFlags.has(key));
+		if (unsupported.length > 0 || flags.bg === false || flags.background === false) {
+			throw new QuickCHRError("INVALID_ARGUMENT", "start --all runs in background and accepts only --no-wait, --bg, --background, --accel, --timeout-extra, --secure-login and --no-secure-login. Start an individual machine to use other options.");
+		}
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const { statusIcon, link, bold, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 		const timeoutExtra = await resolveTimeoutExtraMs(flags);
