@@ -231,6 +231,35 @@ export function appliedDeviceModeRecord(
 	return mergeDeviceModeOptions(priorRan ? state.deviceMode : undefined, applied);
 }
 
+/**
+ * What the first boot of an `add()`-created machine should provision: the caller's
+ * options where given, the intent `add()` recorded where not.
+ *
+ * **`undefined` means "not given", and only `undefined` falls through.** An explicit
+ * `false` is an instruction — `--no-install-all-packages` on `start` overrides the
+ * `add`-time intent, as `--no-device-mode` does. The CLI used to send `false` for every
+ * absent boolean flag, so `false ?? existing.installAllPackages` discarded what `add`
+ * stored and a plain `quickchr start <name>` booted without it (#185). The CLI now
+ * sends `undefined` for an absent flag; this function is where the rule is enforced.
+ *
+ * `license` is not merged: quickchr never persists license credentials, so there is
+ * no stored intent to fall back to.
+ */
+export function pendingProvisioningFor(
+	existing: MachineState,
+	request: ProvisioningRequest,
+): ProvisioningRequest {
+	return {
+		installAllPackages: request.installAllPackages ?? existing.installAllPackages,
+		packages: request.packages?.length ? request.packages : (existing.packages.length > 0 ? existing.packages : undefined),
+		deviceMode: request.deviceMode ?? existing.deviceMode,
+		user: request.user ?? existing.user,
+		disableAdmin: request.disableAdmin ?? existing.disableAdmin,
+		license: request.license,
+		secureLogin: request.secureLogin ?? existing.secureLogin,
+	};
+}
+
 /** True when any step in this request would change something. */
 export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
 	return !!(

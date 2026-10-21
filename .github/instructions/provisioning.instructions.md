@@ -42,6 +42,22 @@ Two rules, both load-bearing (#176):
   An option that state already records is a no-op instead, so a script passing the
   same flags on every start is not punished for asking for what it already has.
 
+**A run that throws is rolled back, not resumed.** `rollbackFailedProvisioning()`
+removes a machine `start()` created in that call and, for an `add()`-created machine,
+resets the disk to the factory image and restores the `machine.json` record from before
+the launch, window open and intent intact — so the retry is the same command again.
+Resuming from the steps that landed was the alternative and is the wrong one: a step can
+throw half-applied (the login group creates a user and then disables `admin` in one
+`provision()` call), and quickchr cannot tell how far it got without reading the guest.
+`QUICKCHR_PRESERVE_ON_FAILURE=1` skips the rollback, as it skips boot-failure cleanup.
+
+**Absent is not `false`.** On an `add()`-created machine's first boot, `start()` merges
+the caller's options over stored intent with `??` (`pendingProvisioningFor()`), so only
+`undefined` may fall through. A CLI boolean read with `flagBool()` is `false` when the
+flag is absent, which turned `add --install-all-packages` + plain `start` into a boot
+without the packages (#185). Provisioning booleans use `flagOptionalBool()`, which keeps
+absent apart from `--no-<flag>`. Same rule as `--no-device-mode` below.
+
 Note what the record does **not** claim: `provisioning.steps` lists what quickchr
 applied, not what is in the guest. A step absent from it was not applied *by
 quickchr* — weaker than "not present", and deliberately so, since quickchr cannot read

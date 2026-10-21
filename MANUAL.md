@@ -539,7 +539,7 @@ mutate any machine's `machine.json`.
 | `QUICKCHR_NO_PROMPT` | Force non-interactive mode (skips all wizards) |
 | `QUICKCHR_DEBUG` | Emit `[debug]` lines from the progress logger |
 | `QUICKCHR_INTEGRATION` | Required to run `test/integration/` |
-| `QUICKCHR_PRESERVE_ON_FAILURE` | `=1` keeps the machine directory after a boot timeout instead of removing it (QEMU is still stopped) |
+| `QUICKCHR_PRESERVE_ON_FAILURE` | `=1` keeps the machine after a boot timeout or a failed first-boot provisioning run, instead of removing or resetting it (QEMU is still stopped) |
 | `QUICKCHR_SERIAL_LOG` | `=1` tees the guest serial console to `<machineDir>/serial.log`. **Secret-bearing** — serial provisioning types the generated password in cleartext |
 | `QUICKCHR_DEEP_BOOT_DIAGNOSTICS` | `=1` lets a boot-timeout capture write to the guest (a mangle counting rule + host probes) to localize a silent packet drop. Skipped when `QUICKCHR_PRESERVE_ON_FAILURE=1` |
 | `MIKROTIK_WEB_ACCOUNT`, `MIKROTIK_WEB_PASSWORD` | License credentials fallback |
@@ -885,9 +885,18 @@ port mappings work on any 7.x.
    Disabling admin **does not** lock the REST API — RouterOS's `expired`
    flag only gates CLI/SSH/Winbox login, not REST.
 
-Each step is independent. A failure in step N stops further steps but
-does not roll back N–1, and the machine is left without a provisioning
-record — quickchr does not claim a half-provisioned guest was provisioned.
+A failure in any step fails the whole first boot, and quickchr rolls it back
+rather than leave a half-provisioned guest: a machine `start` created in that
+call is removed (as a boot timeout removes it), and a machine created by `add`
+has its disk reset to the factory image and `machine.json` restored to what
+`add` recorded. Either way the retry is **the same command again**. With
+`QUICKCHR_PRESERVE_ON_FAILURE=1` the half-provisioned machine is kept, stopped,
+for inspection — `quickchr clean <name>` then resets it.
+
+On the first `start` of a machine created by `add`, a provisioning option you
+leave out keeps what `add` recorded, and an explicit negation
+(`--no-install-all-packages`, `--no-disable-admin`, `--no-secure-login`,
+`--no-device-mode`) overrides it.
 
 **The provisioning window closes at the machine's first boot** — not at
 `add`. A machine created with no provisioning options can still take them
@@ -1262,7 +1271,7 @@ the 6 managed keys are all structural preferences, not secrets.
 | `QUICKCHR_NO_PROMPT` | CLI dispatcher — forces non-interactive mode |
 | `QUICKCHR_DEBUG` | progress logger — emits `[debug]` lines |
 | `QUICKCHR_INTEGRATION` | `bun:test` gate for `test/integration/` |
-| `QUICKCHR_PRESERVE_ON_FAILURE` | `quickchr.ts` — skip `remove()` on `BOOT_TIMEOUT` so the machine dir survives for diagnosis |
+| `QUICKCHR_PRESERVE_ON_FAILURE` | `quickchr.ts` — skip `remove()` on `BOOT_TIMEOUT`, and the rollback of a failed provisioning run, so the machine dir survives for diagnosis |
 | `QUICKCHR_SERIAL_LOG` | `qemu.ts` — adds `logfile=` to the serial chardev (writes cleartext provisioning passwords) |
 | `QUICKCHR_DEEP_BOOT_DIAGNOSTICS` | `guest-snapshot.ts` — allows the guest-mutating counting-rule probe during boot-failure capture |
 | `QUICKCHR_DEFAULT_CHANNEL` | `settings.ts` — env tier for the `default-channel` setting |

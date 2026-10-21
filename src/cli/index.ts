@@ -103,6 +103,20 @@ function flagBool(flags: Record<string, string | boolean | string[]>, key: strin
 	return flags[key] === true || flags[key] === "true";
 }
 
+/** A boolean flag that keeps "not given" apart from `--no-<key>`: `true`, `false`, or
+ *  `undefined` when the flag is absent.
+ *
+ *  `flagBool()` collapses absent into `false`, and that is the wrong answer for any
+ *  option `start()` merges with stored intent (`opts.x ?? existing.x`): `false ?? true`
+ *  is `false`, so `quickchr add --install-all-packages` followed by a plain
+ *  `quickchr start <name>` booted without the packages and said nothing (#185). Same
+ *  rule as `--no-device-mode`: silence and refusal are different instructions, and only
+ *  silence may fall through to what `add` recorded. */
+export function flagOptionalBool(flags: Record<string, string | boolean | string[]>, key: string): boolean | undefined {
+	if (flags[key] === undefined) return undefined;
+	return flags[key] !== false && flags[key] !== "false";
+}
+
 function flagList(flags: Record<string, string | boolean | string[]>, key: string): string[] {
 	const val = flags[key];
 	if (Array.isArray(val)) return val;
@@ -686,13 +700,15 @@ async function cmdAdd(argv: string[]) {
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
-		channel: (flag(flags, "channel") as Channel | undefined) ?? (resolveSetting("default-channel").value as Channel | undefined),
+		// The default channel only stands in for a missing --version; applied alongside
+		// one, it reads to start()/add() as a caller passing both (#178).
+		channel: (flag(flags, "channel") as Channel | undefined) ?? (flag(flags, "version") ? undefined : resolveSetting("default-channel").value as Channel | undefined),
 		arch: (flag(flags, "arch") as Arch | "auto" | undefined) ?? (resolveSetting("default-arch").value as Arch | "auto" | undefined),
 		name: flag(flags, "name") ?? positional[0],
 		cpu: flag(flags, "cpu") ? Number(flag(flags, "cpu")) : undefined,
 		mem: flag(flags, "mem") ? Number(flag(flags, "mem")) : undefined,
 		packages: csvList(flagList(flags, "add-package")),
-		installAllPackages: flagBool(flags, "install-all-packages"),
+		installAllPackages: flagOptionalBool(flags, "install-all-packages"),
 		portBase: flag(flags, "port-base") ? Number(flag(flags, "port-base")) : undefined,
 		excludePorts: [
 			...(flags.winbox === false ? ["winbox" as ServiceName] : []),
@@ -712,7 +728,7 @@ async function cmdAdd(argv: string[]) {
 		const [uname = "", password] = userStr.split(":");
 		opts.user = { name: uname, password: password ?? "" };
 	}
-	opts.disableAdmin = flagBool(flags, "disable-admin");
+	opts.disableAdmin = flagOptionalBool(flags, "disable-admin");
 	// `add` always creates a machine, so its provisioning window is open by definition.
 	opts.secureLogin = await resolveSecureLoginFlag(flags, true);
 
@@ -727,7 +743,14 @@ async function cmdAdd(argv: string[]) {
 	console.log(`  Ports:   ${formatPorts(state.ports)}`);
 	console.log(`  REST:    http://127.0.0.1:${ports.http}  ${dim("(after start)")}`);
 	console.log(`  Dir:     ${dim(state.machineDir)}`);
-	if (state.packages.length > 0) console.log(`  Packages: ${state.packages.join(", ")}  ${dim("(applied on first start)")}`);
+	if (state.installAllPackages) console.log(`  Packages: all extra packages  ${dim("(applied on first start)")}`);
+	else if (state.packages.length > 0) console.log(`  Packages: ${state.packages.join(", ")}  ${dim("(applied on first start)")}`);
+	const login = [
+		...(state.user ? [`add user "${state.user.name}"`] : []),
+		...(state.secureLogin === true ? ["managed quickchr account"] : []),
+		...(state.disableAdmin ? ["disable admin"] : []),
+	];
+	if (login.length > 0) console.log(`  Login:   ${login.join(", ")}  ${dim("(applied on first start)")}`);
 	if (state.deviceMode) {
 		const { shouldApplyDeviceMode: willApplyDm, resolveDeviceModeOptions: resolveDm } = await import("../lib/device-mode.ts");
 		console.log(willApplyDm(resolveDm(state.deviceMode))
@@ -1370,13 +1393,15 @@ async function cmdStart(argv: string[]) {
 
 	const opts: StartOptions = {
 		version: flag(flags, "version"),
-		channel: (flag(flags, "channel") as Channel | undefined) ?? (resolveSetting("default-channel").value as Channel | undefined),
+		// The default channel only stands in for a missing --version; applied alongside
+		// one, it reads to start()/add() as a caller passing both (#178).
+		channel: (flag(flags, "channel") as Channel | undefined) ?? (flag(flags, "version") ? undefined : resolveSetting("default-channel").value as Channel | undefined),
 		arch: (flag(flags, "arch") as Arch | "auto" | undefined) ?? (resolveSetting("default-arch").value as Arch | "auto" | undefined),
 		name: flag(flags, "name") ?? positional[0],
 		cpu: flag(flags, "cpu") ? Number(flag(flags, "cpu")) : undefined,
 		mem: flag(flags, "mem") ? Number(flag(flags, "mem")) : undefined,
-		packages: flagList(flags, "add-package"),
-		installAllPackages: flagBool(flags, "install-all-packages"),
+		packages: csvList(flagList(flags, "add-package")),
+		installAllPackages: flagOptionalBool(flags, "install-all-packages"),
 		portBase: flag(flags, "port-base") ? Number(flag(flags, "port-base")) : undefined,
 		excludePorts: [
 			...(flags.winbox === false ? ["winbox" as ServiceName] : []),
@@ -1417,7 +1442,7 @@ async function cmdStart(argv: string[]) {
 		opts.user = { name, password: password ?? "" };
 	}
 
-	opts.disableAdmin = flagBool(flags, "disable-admin");
+	opts.disableAdmin = flagOptionalBool(flags, "disable-admin");
 	{
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const { isProvisioningWindowOpen } = await import("../lib/provisioning-window.ts");

@@ -566,8 +566,10 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 
 	// 11. Confirm
 	const opts: StartOptions = {
+		// The channel has already been resolved into `version` above; passing both reads
+		// to start() as a caller asking for two releases.
 		version,
-		channel,
+		channel: version ? undefined : channel,
 		arch,
 		name: name || undefined,
 		cpu: Number(cpu),

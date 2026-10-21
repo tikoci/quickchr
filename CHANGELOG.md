@@ -10,6 +10,38 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- `quickchr add --install-all-packages` (or `--disable-admin`) followed by a plain
+  `quickchr start <name>` now provisions what `add` recorded. The CLI sent `false` for
+  every boolean flag that was absent, and `false` overrode the stored intent, so the
+  first boot ran without it, at normal speed and with no warning. An absent flag now
+  leaves the `add`-time value in place; `--no-install-all-packages` / `--no-disable-admin`
+  still override it. `add` also prints `--install-all-packages` and the login options in
+  its summary, which previously showed only `--add-package`. (#185)
+
+- `quickchr start --add-package a,b` splits on commas, as `add` always has. It passed
+  the single package name `a,b`.
+
+- A `start` whose first-boot provisioning fails is rolled back, so the retry is the same
+  command again. The failure used to leave a running, half-provisioned machine whose
+  next `start` was refused with `PROVISIONING_WINDOW_CLOSED`. A machine `start` created
+  is now removed, as a boot timeout removes it. A machine created by `add` has its disk
+  reset to the factory image and its `add`-time options kept. `QUICKCHR_PRESERVE_ON_FAILURE=1`
+  keeps the half-provisioned machine for inspection instead. (#176)
+
+- Repeating `quickchr start --name <n> --install-all-packages` on a machine that
+  `start` created and provisioned is reported as already applied. `start` never recorded
+  the install-all intent, so the repeat was refused with `PROVISIONING_WINDOW_CLOSED`.
+
+- Passing both `version` and `channel` to `start()`/`add()` now warns that `channel`
+  was ignored, instead of dropping it silently. The CLI and the wizard no longer pass
+  the default channel alongside an explicit version. The `StartOptions.version` TSDoc
+  claimed the two were "mutually exclusive"; it now documents that `version` wins. (#178)
+
+- The `secureLogin` TSDoc said it "defaults to true". It does not: only an explicit
+  `true` creates the managed `quickchr` account, and unset means the factory `admin`
+  login with an empty password. `MANUAL.md` was already right; the hover text a library
+  consumer reads was not. (#178)
+
 - `quickchr get <name> device-mode` lists the enabled and disabled features. RouterOS
   reports them as strings (`"container": "true"`), and the check was `value === true`,
   so no feature line ever printed however many were on — the read-back for a
