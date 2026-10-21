@@ -54,18 +54,22 @@ export type BootProbeOutcome =
 	| "reset"
 	/** Connect or response exceeded the per-probe budget — socket hung. */
 	| "probe-timeout"
-	/** 401/403 — REST answered; auth layer is up. */
+	/** 401/403 from REST, or a login `!trap` from the native API — the service
+	 *  answered and refused the credentials; its auth layer is up. */
 	| "unauthorized"
 	/** 2xx but not the expected `board-name` singleton — REST still initializing. */
 	| "wrong-body"
 	/** Any other HTTP status. */
 	| "http-error"
-	/** 2xx with the expected body. */
+	/** 2xx with the expected body, or a native-API login `!done`. */
 	| "ready"
 	/** Anything unclassified — `detail` carries the raw text. */
 	| "other";
 
 export interface BootProbeStats {
+	/** Which readiness probe ran — REST by default, the native-API login for a guest
+	 *  without REST (#182). Absent means REST. */
+	kind?: "rest" | "api";
 	/** Total probe attempts made. */
 	attempts: number;
 	/** Attempt count per outcome. */
@@ -90,9 +94,11 @@ export function classifyProbeError(err: unknown): { outcome: BootProbeOutcome; d
 	const message = err instanceof Error ? err.message : String(err);
 	if (code === "ECONNREFUSED") return { outcome: "refused", detail: code };
 	if (code === "ECONNRESET" || code === "EPIPE") return { outcome: "reset", detail: code };
-	if (code === "ETIMEDOUT" || message.includes("restGet timeout")) {
+	if (code === "ETIMEDOUT" || message.includes("restGet timeout") || message.includes("apiLogin timeout")) {
 		return { outcome: "probe-timeout", detail: code ?? "probe deadline" };
 	}
+	// apiLogin(): slirp accepted, then the guest side closed before any reply.
+	if (message === "closed before reply") return { outcome: "reset", detail: message };
 	return { outcome: "other", detail: code ? `${code}: ${message}` : message };
 }
 
@@ -123,9 +129,10 @@ export function summarizeBootProbe(stats: BootProbeStats): string {
 		.sort((a, b) => b[1] - a[1])
 		.map(([k, v]) => `${k}=${v}`)
 		.join(" ");
+	const answer = stats.kind === "api" ? "API reply" : "HTTP response";
 	const reachedHttp = stats.firstHttpAtMs === null
-		? "forwarded port never produced an HTTP response"
-		: `first HTTP response at ${Math.round(stats.firstHttpAtMs / 1000)}s`;
+		? `forwarded port never produced an ${answer}`
+		: `first ${answer} at ${Math.round(stats.firstHttpAtMs / 1000)}s`;
 	const last = stats.last
 		? `last: ${stats.last.outcome}${stats.last.detail ? ` (${stats.last.detail})` : ""} at ${Math.round(stats.last.atMs / 1000)}s`
 		: "";
@@ -673,7 +680,7 @@ export async function captureBootFailure(ctx: BootFailureContext): Promise<BootF
 			lines.push(`Preceding credential transition: ${ctx.trigger.credentialTransition}`);
 		}
 	}
-	if (ctx.probe) lines.push(`REST probe: ${summarizeBootProbe(ctx.probe)}`);
+	if (ctx.probe) lines.push(`${ctx.probe.kind === "api" ? "API login" : "REST"} probe: ${summarizeBootProbe(ctx.probe)}`);
 	lines.push(`QEMU process: ${record.host.qemuProcess}`);
 	if (record.hostfwd) lines.push(`hostfwd 127.0.0.1:${record.hostfwd.port}: ${record.hostfwd.tcpConnect}`);
 	if (forwardProbe) lines.push(`slirp per-port: ${forwardProbe.summary}`);

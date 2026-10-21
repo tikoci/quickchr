@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { assertValidResourceName, isValidResourceName, shellQuote } from "../../src/lib/names.ts";
 import { _resetSocketCache, createNamedSocket } from "../../src/lib/socket-registry.ts";
 import { parseNetworkSpecifier } from "../../src/lib/network.ts";
 
-const TEST_DIR = join(import.meta.dir, ".tmp-resource-names");
+let TEST_DIR: string;
+const originalDataDir = process.env.QUICKCHR_DATA_DIR;
 const CLI = join(import.meta.dir, "../../src/cli/index.ts");
 
 async function runQuickchr(args: string[]) {
@@ -24,8 +26,7 @@ async function runQuickchr(args: string[]) {
 }
 
 beforeEach(() => {
-	rmSync(TEST_DIR, { recursive: true, force: true });
-	mkdirSync(TEST_DIR, { recursive: true });
+	TEST_DIR = mkdtempSync(join(tmpdir(), "qchr-names-"));
 	process.env.QUICKCHR_DATA_DIR = TEST_DIR;
 	_resetSocketCache();
 });
@@ -33,7 +34,8 @@ beforeEach(() => {
 afterEach(() => {
 	_resetSocketCache();
 	rmSync(TEST_DIR, { recursive: true, force: true });
-	process.env.QUICKCHR_DATA_DIR = undefined;
+	if (originalDataDir === undefined) delete process.env.QUICKCHR_DATA_DIR;
+	else process.env.QUICKCHR_DATA_DIR = originalDataDir;
 });
 
 describe("resource name rules", () => {

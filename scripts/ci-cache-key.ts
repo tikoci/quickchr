@@ -46,10 +46,11 @@ import { CHANNELS, type Channel } from "../src/lib/types.ts";
 import { isValidVersion, resolveVersion } from "../src/lib/versions.ts";
 
 /** Bump when the CONTENT CONTRACT of an entry changes (not when a key input
- *  does — the inputs are in the key). `v5` = structurally verified images and
+ *  does — the inputs are in the key). `v6` adds the x86 RouterOS 6 readiness fixture;
+ *  `v5` = structurally verified images and
  *  atomic package extraction manifests; `v4` = pre-test manifests; `v3`
  *  populated opportunistically after a full suite. */
-export const CACHE_KEY_GENERATION = "v5";
+export const CACHE_KEY_GENERATION = "v6";
 
 export interface CacheIdentity {
 	key: string;

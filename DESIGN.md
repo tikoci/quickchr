@@ -990,12 +990,65 @@ Detaching does not weaken cleanup, because nothing that sweeps QEMU sweeps by gr
 is worth stating rather than assuming: "the child outlives its parent's signal" and "a
 wedged run leaks VMs" would otherwise look like the same change.
 
-The naming half is not fixed and should not be fixed quietly. `--bg` is already the
-default and only ever meant "serial console goes to a log file instead of stdio" — it does
-not make `start` return early, because `start` waits for REST readiness by contract. Both
-an external agent and the maintainer believed it bought them something. The honest repair
-is a separate `--no-wait` that opts out of the wait, not a redefinition of `--bg` that
-would change what existing scripts get; #159 holds that half.
+The naming half was not fixed quietly. `--bg` is already the default and only ever meant
+"serial console goes to a log file instead of stdio" — it does not make `start` return
+early, because `start` waits for readiness by contract. Both an external agent and the
+maintainer believed it bought them something. The repair (#159, 0.5.0) is a separate flag
+rather than a redefinition of `--bg` that would change what existing scripts get:
+
+- **`start --no-wait`** (`StartOptions.wait: false`) returns once QEMU is confirmed
+  running — past `spawnQemu()`'s 1.5 s early-exit check, with state and ports persisted —
+  and leaves readiness to the caller. Measured on CHR 7.24.5 under HVF: the CLI returns in
+  ~2 s, REST answers ~17 s later on its own.
+- **Spelled `--no-wait`, not `--detach`.** QEMU *is* detached (above), so `--detach` would
+  name something every start already does. What changes is whether the CLI waits, and
+  `--no-wait` is the other half of centrs' `--wait <deadline>`:
+  `centrs retrieve --quickchr <name> /system/resource --wait 5m` is the documented way to
+  own readiness afterwards, and the CLI prints it as a tip.
+- **Provisioning is refused with `--no-wait`, never skipped.** Provisioning runs against
+  the booted guest, so the pair cannot both be honoured. That includes first-boot intent
+  `add` recorded, which the caller did not retype — the case where skipping would be
+  silent. `--fg` is refused too: a foreground start holds the console until QEMU exits.
+- **`--bg` stays accepted as a deprecated no-op** that warns on stderr, so existing scripts
+  keep working and learn the flag was never doing what they thought. The library default
+  is unchanged: `start()` resolves ready.
+
+### RouterOS 6 is a boot-only target, not supported RouterOS (#182)
+
+A 6.x CHR downloads and boots under quickchr, but the REST readiness probe can never
+succeed against it (6.x has no `/rest`), so `start` ran to its 180 s timeout and then
+deleted a guest that had answered www, ssh and api from 15 s in. The decision is a narrow
+**"track and boot"** contract, for one consumer: centrs needs a disposable 6.x router to
+test the operations an agent needs for a v6→v7 migration (tikoci/centrs#386).
+
+- **Readiness is a native-API `/login`** on guest 8728, built as a general alternative
+  probe (`waitForApiReady()`, chosen by `readinessProbeFor(version)`) rather than a v6
+  special case — a 7.x guest with REST disabled has the same problem. Two consecutive
+  answers; a credential `!trap` counts as an answer, as a REST 401 does. Grounded on CHR
+  6.49.23 under HVF (2026-10-21): empty `admin` gets `!done`; a bad password gets
+  `!trap =message=invalid user name or password (6)` then `!done`; before RouterOS is up,
+  slirp accepts and the probe times out (~20 s), then ready at ~22–25 s.
+- **Not a bare TCP accept.** Under user-mode networking slirp accepts on the host side
+  whatever the guest is doing (see `probeTcpPort()`), so a connect proves nothing.
+- **Everything else is refused loudly, before download where possible**: every
+  provisioning option and the post-boot `set` routes (`PROVISIONING_VERSION_UNSUPPORTED`,
+  checked before the provisioning-window refusal, whose `clean` route would only lead to a
+  second refusal), `arm64` (MikroTik publishes no arm64 CHR for 6.x), and every REST
+  operation (`REST_UNAVAILABLE`, instead of a request that times out). The `secure-login`
+  setting is a default, not a request, so it is not applied to 6.x.
+- **CLI only.** The wizard refuses 6.x — every step it offers is provisioning.
+
+### A failed first boot resets an `add()`-created machine, whatever failed (#182)
+
+#187 made a first boot whose *provisioning* threw reset the machine instead of removing
+it: disk back to the factory image, `machine.json` back to the record `add()` wrote. A
+*boot timeout* on the same first boot still called `remove()`, so the two failure modes of
+one boot disagreed, and the timeout threw away the options `add` recorded. Now
+`_launchExisting()` snapshots the record whenever the provisioning window is open — not
+only when there are provisioning options — and a timeout resets from it. A machine
+`start()` created in the same call is still removed, and one that has booted before is
+unchanged. Every `BOOT_TIMEOUT` message names `QUICKCHR_PRESERVE_ON_FAILURE=1`, because an
+auto-removed machine is what hid #182's report.
 
 ### Out of Scope (decided)
 

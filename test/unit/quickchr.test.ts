@@ -268,14 +268,13 @@ describe("ChrInstance API surface (dryRun)", () => {
 		expect(instance.hostGatewayIp).toBe("10.0.2.2");
 	});
 
-	// #26: tzspGatewayIp is the old name for the same value. A caller on 0.4.x must
-	// keep working across the rename, so the alias is asserted to be the identical
-	// value rather than merely present — a drift between the two would hand one
-	// caller a stale address with no error anywhere.
-	test("deprecated tzspGatewayIp still carries the identical value", async () => {
+	// #186: the 0.4.8 alias for hostGatewayIp was removed in 0.5.0. Asserted absent,
+	// not just untyped — a leftover property would keep old callers compiling against
+	// a stale .d.ts and reading a value the docs no longer promise.
+	test("tzspGatewayIp alias is gone", async () => {
 		const instance = await makeDryRun();
 		if (!instance) return;
-		expect(instance.tzspGatewayIp).toBe(instance.hostGatewayIp);
+		expect("tzspGatewayIp" in instance).toBe(false);
 	});
 
 	test("waitFor resolves true when condition passes immediately", async () => {

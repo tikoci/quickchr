@@ -352,8 +352,20 @@ export interface StartOptions {
 	cpu?: number;
 	/** Memory in MiB. Default: 512 (1024 for cross-arch TCG emulation). */
 	mem?: number;
-	/** Run QEMU in background (true, default) or foreground with serial console on stdio (false). */
+	/** Run QEMU in background (true, default) or foreground with serial console on stdio (false).
+	 *  This only decides where the serial console goes — it never made `start()` return
+	 *  sooner. That is {@link StartOptions.wait}. */
 	background?: boolean;
+	/** Wait for the guest to become ready before resolving (true, default). `false`
+	 *  resolves as soon as QEMU is confirmed running — past `spawnQemu`'s early-exit
+	 *  check, with state and ports persisted — and leaves readiness to the caller, e.g.
+	 *  `centrs retrieve --quickchr <name> /system/resource --wait 5m` (#159).
+	 *
+	 *  Provisioning runs against the booted guest, so it cannot be combined with
+	 *  `wait: false` — including first-boot options `add()` recorded. Both are refused
+	 *  (`INVALID_ARGUMENT`) rather than silently skipped, as is `background: false`,
+	 *  which blocks on the serial console regardless. */
+	wait?: boolean;
 	/** Extra packages to install after boot.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	packages?: string[];
@@ -612,7 +624,9 @@ export interface ChrLoadSample {
  * snapshots, licensing, and lifecycle management.
  *
  * After `QuickCHR.start()` resolves, the instance is REST-ready — all requested
- * provisioning (packages, license, device-mode, user creation) has completed.
+ * provisioning (packages, license, device-mode, user creation) has completed —
+ * unless it was started with `wait: false`, or is a RouterOS 6 guest (no REST:
+ * `rest()` and REST `exec()` throw `REST_UNAVAILABLE`).
  */
 export interface ChrInstance {
 	name: string;
@@ -650,20 +664,12 @@ export interface ChrInstance {
 	 *  await instance.exec(`/tool/sniffer/set streaming-server=${instance.hostGatewayIp}:37008`);
 	 */
 	hostGatewayIp: string;
-	/** @deprecated Renamed to {@link ChrInstance.hostGatewayIp} — the value was never
-	 *  TZSP-specific, it is the host as seen from inside the guest and carries any
-	 *  guest→host UDP (remote syslog, NetFlow, a plain socket). The old name led
-	 *  readers to assume a sniffer-only primitive.
-	 *
-	 *  Still populated with the identical value, and will be removed no earlier than
-	 *  the next minor. Migration is a rename at the call site — nothing else changes. */
-	tzspGatewayIp: string;
 
-	/** Check or wait for REST API readiness.
-	 *  After `QuickCHR.start()` with provisioning options (installAllPackages, license, etc.),
-	 *  the returned instance is already REST-reachable — this returns immediately.
-	 *  Call this only when starting without provisioning, or as a safety check after a manual stop/restart. */
-	/** @param stats Optional out-param; each REST readiness probe is classified
+	/** Check or wait for readiness — REST, or a native-API login on RouterOS 6 (#182).
+	 *  After `QuickCHR.start()` the returned instance is already ready, so this returns
+	 *  immediately. Call it after `start({ wait: false })`, or as a safety check after a
+	 *  manual stop/restart. */
+	/** @param stats Optional out-param; each REST or native-API readiness probe is classified
 	 *  into it (see diagnostics.ts BootProbeStats) so a failed wait can explain
 	 *  whether the forwarded port ever answered. */
 	waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean>;
@@ -886,6 +892,9 @@ export type ErrorCode =
 	// the guest has booted, so quickchr cannot assume it still holds the default
 	// configuration provisioning expects. Never silently dropped (#176).
 	| "PROVISIONING_WINDOW_CLOSED"
+	// An operation that needs the REST API, on a guest that has none — RouterOS 6, a
+	// boot-only target (#182). Thrown up front instead of letting the request time out.
+	| "REST_UNAVAILABLE"
 	| "INSUFFICIENT_DISK_SPACE"
 	| "STATE_ERROR"
 	| "INVALID_SIZE_STRING"

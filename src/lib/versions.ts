@@ -36,6 +36,11 @@ export const ROUTEROS_COMPATIBILITY_MATRIX: RouterOsCompatibilityRow[] = [
 		notes: "QEMU networking setup before or during boot.",
 	},
 	{
+		feature: "Boot / start / stop on RouterOS 6",
+		minimumVersion: "6.x (x86 only)",
+		notes: "Best-effort boot-only target for v6→v7 migration testing (#182). CLI only; readiness is a native-API login; no provisioning, no REST operations.",
+	},
+	{
 		feature: "Managed login, custom user, disable-admin",
 		minimumVersion: MIN_PROVISION_VERSION,
 		notes: "Mutates RouterOS after boot; handled as quickchr provisioning.",
@@ -242,12 +247,61 @@ export function isProvisioningSupportedVersion(
 	return compareRouterOsVersion(version, minimumVersion) >= 0;
 }
 
+/**
+ * RouterOS 6 is a best-effort **boot-only** target (#182): quickchr downloads, boots and
+ * tracks a 6.x CHR, and does nothing else to it. It exists so a tool driving a v6→v7
+ * migration (tikoci/centrs#386) has a disposable 6.x router to test against — it is not
+ * RouterOS 6 support. CLI only: the wizard does not offer it.
+ *
+ * 6.x has no REST API, so readiness is a native-API `/login` (see `readinessProbeFor()`
+ * in qemu.ts), every provisioning step is refused, and anything that reads or writes
+ * through REST fails with `REST_UNAVAILABLE` rather than timing out.
+ */
+export function isRouterOs6(version: string): boolean {
+	return /^6\./.test(version);
+}
+
+export const ROUTEROS6_BOOT_ONLY =
+	"RouterOS 6 is a best-effort boot-only target: quickchr downloads, boots and tracks it, and runs no provisioning or REST operations on it.";
+
+/** MikroTik publishes RouterOS 6 CHR images for x86 only — `chr-6.49.23-arm64.img.zip`
+ *  is a 404 (checked 2026-10-21). Refused before the download that would say so less
+ *  clearly. */
+export function assertRouterOs6Arch(version: string, arch: Arch): void {
+	if (!isRouterOs6(version) || arch === "x86") return;
+	throw new QuickCHRError(
+		"INVALID_ARCH",
+		`RouterOS ${version} has no ${arch} CHR image — MikroTik publishes RouterOS 6 CHR for x86 only. Pass --arch x86 (arch: "x86").`,
+	);
+}
+
+/** Refuse an operation that needs REST on a guest that cannot have it. The message
+ *  leads with "RouterOS 6: not available" so a caller scanning for the reason finds it
+ *  first, and names the transport that does work. */
+export function assertRestAvailable(machine: { name: string; version: string }, operation: string): void {
+	if (!isRouterOs6(machine.version)) return;
+	throw new QuickCHRError(
+		"REST_UNAVAILABLE",
+		`RouterOS 6: not available — ${operation} uses the REST API, which RouterOS ${machine.version} does not have. ` +
+		`${ROUTEROS6_BOOT_ONLY} Reach it over the native API instead, e.g. ` +
+		`centrs retrieve --quickchr ${machine.name} /system/resource --via native-api --no-validate ` +
+		"(centrs validates against the 7.x command tree, so a 6.x read skips it)",
+	);
+}
+
 /** Guard provisioning operations to reduce version-dependent failure modes. */
 export function assertProvisioningSupportedVersion(
 	version: string,
 	operation: string,
 	minimumVersion = MIN_PROVISION_VERSION,
 ): void {
+	if (isRouterOs6(version)) {
+		throw new QuickCHRError(
+			"PROVISIONING_VERSION_UNSUPPORTED",
+			`Cannot ${operation} on RouterOS ${version}. ${ROUTEROS6_BOOT_ONLY}`,
+			`Drop the provisioning options to boot ${version} as it ships, or use RouterOS ${minimumVersion}+ for ${PROVISIONING_FEATURE_SUMMARY}.`,
+		);
+	}
 	if (isProvisioningSupportedVersion(version, minimumVersion)) return;
 
 	throw new QuickCHRError(

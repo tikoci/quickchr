@@ -8,7 +8,41 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Breaking (0.5.0)
+
+0.5.0 is a pre-release line (odd minor), and the clean break where the CHR and
+provisioning quirks agents work around get fixed.
+
+- **Removed `ChrInstance.tzspGatewayIp`**, the alias deprecated in 0.4.8. Use
+  `hostGatewayIp` — the same value, `"10.0.2.2"`. Migration is a rename at the call site.
+  A unit test now asserts the property is gone. (#186)
+- **`start --bg` / `--background` are deprecated and do nothing.** Background was
+  already the default, and the flag never made `start` return early — it only chose where
+  the serial console went. It is still accepted, and warns on stderr. Use `--no-wait`.
+  `--fg` and its `--no-bg` / `--no-background` spellings are unchanged. (#159)
+- **A first-boot `BOOT_TIMEOUT` on a machine `add` created resets it instead of removing
+  it**: disk back to the factory image, `machine.json` back to the record `add` wrote, so
+  the retry is `quickchr start <name>` again. A machine `start` created in the same call is
+  still removed. (#182)
+
 ### Fixed
+
+- `start --all` refuses options it cannot apply, including provisioning flags and
+  foreground mode, instead of silently dropping them on a `--no-wait` start.
+- Restarting an existing machine uses its recorded architecture for the RouterOS 6
+  image restriction, so creation defaults cannot reject an existing x86 guest.
+
+- Every `BOOT_TIMEOUT` message names `QUICKCHR_PRESERVE_ON_FAILURE=1`. The auto-removal
+  that hid #182's report gave no hint that it could be turned off. (#182)
+
+- `start` refuses a provisioning option on an unsupported RouterOS version before
+  booting an existing machine, and before the provisioning-window check. It used to boot
+  first and refuse afterwards, or point at a `quickchr clean` that only led to a second
+  refusal. `start` also checks for QEMU only once nothing else refuses, so a request that
+  cannot succeed says why first. (#182)
+
+- The setup wizard's "Background — returns immediately" hint was false: a background
+  start waits for RouterOS. It now says so. (#159)
 
 - `quickchr add --install-all-packages` (or `--disable-admin`) followed by a plain
   `quickchr start <name>` now provisions what `add` recorded. The CLI sent `false` for
@@ -67,6 +101,25 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   intent. Budget for it: that start costs what a first boot costs. (#176)
 
 ### Added
+
+- `quickchr start --no-wait` (`StartOptions.wait: false`) returns as soon as QEMU is
+  running (past the existing early-exit check, with state and ports persisted) and
+  leaves readiness to the caller — a tip names
+  `centrs retrieve --quickchr <name> /system/resource --wait 5m`. Combining it with any
+  provisioning flag, including first-boot options `add` recorded, is an
+  `INVALID_ARGUMENT` error rather than a silent skip, as is `--no-wait --fg`. The library
+  default is unchanged: `start()` resolves ready. (#159)
+
+- RouterOS 6 as a best-effort, boot-only target (CLI only, x86 only), so v6→v7
+  migration tooling has a disposable 6.x router (tikoci/centrs#386). Readiness is a
+  native-API `/login` on 8728 — a new, general probe (`waitForApiReady()`) — so a 6.49
+  CHR is ready in ~25 s under HVF instead of timing out against a REST API it does not
+  have. Every provisioning option and post-boot `set` route is refused
+  (`PROVISIONING_VERSION_UNSUPPORTED`, before download where possible), as is
+  `--arch arm64`. REST operations (`exec`, `get`'s live groups, `ChrInstance.rest()`) fail
+  with the new `REST_UNAVAILABLE` code and say "RouterOS 6: not available" instead of
+  timing out; `inspect` reports `rest-api` unavailable. The wizard keeps refusing 6.x —
+  before, it accepted a 6.x version and failed later. (#182)
 
 - `examples/cmr/` (beta lab, work in progress): four socket-linked RouterOS
   7.26beta1 CHRs with OSPF, CMR pairing, topology, fleet scripts, alerts and HTTP

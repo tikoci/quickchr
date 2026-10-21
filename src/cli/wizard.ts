@@ -81,6 +81,11 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 				if (!/^\d+\.\d+(\.\d+)?(beta\d+|rc\d+)?$/.test(v)) {
 					return "Invalid version format";
 				}
+				// RouterOS 6 is a CLI-only boot target (#182) — the wizard offers
+				// provisioning at every step, none of which 6.x can take.
+				if (/^6\./.test(v)) {
+					return "RouterOS 6 is boot-only and not offered here — use: quickchr add --version <6.x> --arch x86";
+				}
 			},
 		});
 		if (clack.isCancel(ver)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -557,7 +562,8 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	const background = await clack.select({
 		message: "Run mode:",
 		options: [
-			{ value: true, label: "Background", hint: "returns immediately" },
+			// Not "returns immediately": a background start waits for RouterOS to be ready (#159).
+			{ value: true, label: "Background", hint: "console logged; returns when RouterOS is ready" },
 			{ value: false, label: "Foreground", hint: "serial console on stdio" },
 		],
 		initialValue: true,
