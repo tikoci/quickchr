@@ -1749,5 +1749,35 @@
 		"planned": 2,
 		"sha": "03b584c98206e67e5efc57d156f6a82883a35a72",
 		"ts": "2026-10-21T18:48:18.969Z"
+	},
+	"39659774117": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"linux-arm64|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 371,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.24.5",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-x86|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 166,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.24.5",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			}
+		},
+		"planned": 2,
+		"sha": "2eaf99640ea8b012f1c210dfe99b080173962fd8",
+		"ts": "2026-10-21T19:20:25.385Z"
 	}
 }
