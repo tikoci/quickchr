@@ -11,7 +11,7 @@
  * now wait, bounded, for a holder — and act on state re-read under the lock (#180).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { QuickCHR, claimNewMachine } from "../../src/lib/quickchr.ts";
 import { acquireLockNow, currentHolder, listReservations, machineLockPath } from "../../src/lib/lock.ts";
@@ -155,7 +155,7 @@ describe("concurrent creation claims (#140)", () => {
 		} catch (e) {
 			expectErrorCode(e, "MACHINE_EXISTS");
 		}
-		expect(currentHolder(machineLockPath("done"))).toBeUndefined();
+		expect(currentHolder(machineLockPath(getMachineDir("done")))).toBeUndefined();
 	});
 });
 
@@ -168,7 +168,7 @@ describe("lifecycle operations take the machine lock (#181)", () => {
 
 		// A start holds the lock and, mid-flight, records the QEMU it spawned. The
 		// handle's snapshot still says stopped with no pid.
-		const holder = acquireLockNow(machineLockPath(state.name), "start");
+		const holder = acquireLockNow(machineLockPath(state.machineDir), "start");
 		const qemu = spawnIdle();
 		try {
 			saveMachine({ ...state, status: "running", pid: qemu.pid });
@@ -196,7 +196,7 @@ describe("lifecycle operations take the machine lock (#181)", () => {
 		const instance = QuickCHR.get("doomed");
 		if (!instance) throw new Error("seeded machine did not load");
 
-		const holder = acquireLockNow(machineLockPath(state.name), "start");
+		const holder = acquireLockNow(machineLockPath(state.machineDir), "start");
 		const removing = instance.remove();
 		await Bun.sleep(300);
 		expect(existsSync(state.machineDir)).toBe(true);
@@ -210,7 +210,7 @@ describe("lifecycle operations take the machine lock (#181)", () => {
 		seed(state);
 		const instance = QuickCHR.get("attached");
 		if (!instance) throw new Error("seeded machine did not load");
-		const holder = acquireLockNow(machineLockPath(state.name), "foreground");
+		const holder = acquireLockNow(machineLockPath(state.machineDir), "foreground");
 		try {
 			await instance.stop();
 			expect.unreachable("should have thrown");
@@ -222,12 +222,12 @@ describe("lifecycle operations take the machine lock (#181)", () => {
 	});
 });
 
-describe("the machine lock outlives the machine (Codex review of #190)", () => {
+describe("remove() and a same-named create (Codex review of #190)", () => {
 	// Codex's public-API repro: remove() deletes the machine directory before it
-	// releases. When the lock log lived in that directory, a create in the re-created
-	// directory took a fresh record 1, the old remove's release appended into the new
-	// log and collected it, and a third caller got in beside the new holder. Each
-	// interleaving point from 0 to 6 microtasks into the remove is tried.
+	// releases, and a create in a re-created directory takes a fresh record 1. The old
+	// remove's release then appended into the new log and collected it, and a third
+	// caller got in beside the new holder. Each interleaving point from 0 to 6
+	// microtasks into the remove is tried.
 	for (let ticks = 0; ticks <= 6; ticks++) {
 		test(`a create racing a remove never shares the lock (after ${ticks} microtasks)`, async () => {
 			const state = machine("same");
@@ -237,24 +237,57 @@ describe("the machine lock outlives the machine (Codex review of #190)", () => {
 
 			const removing = instance.remove();
 			for (let i = 0; i < ticks; i++) await Promise.resolve();
+			const lockPath = machineLockPath(state.machineDir);
 			mkdirSync(state.machineDir, { recursive: true });
 			let creator: ReturnType<typeof acquireLockNow> | undefined;
-			try { creator = acquireLockNow(machineLockPath("same"), "start"); } catch { /* the remove still holds it */ }
+			try { creator = acquireLockNow(lockPath, "start"); } catch { /* the remove still holds it, or took the directory */ }
 			await removing;
-			creator ??= acquireLockNow(machineLockPath("same"), "start");
+			mkdirSync(state.machineDir, { recursive: true });
+			creator ??= acquireLockNow(lockPath, "start");
 
-			expect(() => acquireLockNow(machineLockPath("same"), "clean")).toThrow();
-			expect(currentHolder(machineLockPath("same"))?.op).toBe("start");
+			expect(() => acquireLockNow(lockPath, "clean")).toThrow();
+			expect(currentHolder(lockPath)?.op).toBe("start");
 			creator.release();
 		});
 	}
+
+	test("a create refused by a remove in progress leaves no orphan, and a retry succeeds", async () => {
+		// Codex's P2: a create that made the directory and was then refused the lock
+		// left it behind, and every retry said MACHINE_EXISTS. The lock lives in the
+		// directory now, so a refusal means a live holder owns the directory.
+		const state = machine("again");
+		seed(state);
+		const instance = QuickCHR.get("again");
+		if (!instance) throw new Error("seeded machine did not load");
+		const remover = acquireLockNow(machineLockPath(state.machineDir), "remove");
+		const removing = instance.remove();
+		try {
+			await claimNewMachine("again", "add", {});
+			expect.unreachable("should have thrown");
+		} catch (e) {
+			expectErrorCode(e, "MACHINE_LOCKED");
+		}
+		remover.release();
+		await removing;
+		expect(QuickCHR.listOrphans()).toEqual([]);
+		const retry = await claimNewMachine("again", "add", {});
+		retry.lock.release();
+	});
+
+	test("remove() leaves nothing behind: no machine directory and no lock", async () => {
+		const state = machine("tidy");
+		seed(state);
+		await QuickCHR.get("tidy")?.remove();
+		expect(existsSync(state.machineDir)).toBe(false);
+		expect(readdirSync(join(TEST_DIR, ".removing"))).toEqual([]);
+	});
 
 	test("a stop that waited out a remove is MACHINE_NOT_FOUND, not a stop of a stale pid", async () => {
 		const state = machine("gone");
 		seed(state);
 		const instance = QuickCHR.get("gone");
 		if (!instance) throw new Error("seeded machine did not load");
-		const holder = acquireLockNow(machineLockPath("gone"), "remove");
+		const holder = acquireLockNow(machineLockPath(state.machineDir), "remove");
 		const stopping = instance.stop();
 		await Bun.sleep(200);
 		rmSync(state.machineDir, { recursive: true, force: true });
@@ -272,7 +305,7 @@ describe("the machine lock outlives the machine (Codex review of #190)", () => {
 		seed(state);
 		const instance = QuickCHR.get("reborn");
 		if (!instance) throw new Error("seeded machine did not load");
-		const holder = acquireLockNow(machineLockPath("reborn"), "remove");
+		const holder = acquireLockNow(machineLockPath(state.machineDir), "remove");
 		const stopping = instance.stop();
 		await Bun.sleep(200);
 		saveMachine({ ...state, createdAt: "2026-10-22T00:00:00.000Z" });
@@ -301,7 +334,7 @@ describe("_launchExisting() re-reads state under the lock (#180)", () => {
 		} catch (e) {
 			expectErrorCode(e, "PROVISIONING_WINDOW_CLOSED");
 		}
-		expect(currentHolder(machineLockPath("provisioned"))).toBeUndefined();
+		expect(currentHolder(machineLockPath(getMachineDir("provisioned")))).toBeUndefined();
 	});
 
 	test("a machine another start got running is handed back, not booted twice", async () => {
@@ -314,7 +347,7 @@ describe("_launchExisting() re-reads state under the lock (#180)", () => {
 			// machine returns before anything would spawn.
 			const instance = await QuickCHR._launchExisting(stale, true);
 			expect(instance.state.pid).toBe(qemu.pid);
-			expect(currentHolder(machineLockPath(stale.name))).toBeUndefined();
+			expect(currentHolder(machineLockPath(stale.machineDir))).toBeUndefined();
 		} finally {
 			qemu.kill();
 			await qemu.exited;

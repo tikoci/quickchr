@@ -2,7 +2,7 @@
  * Machine state persistence — JSON files in ~/.local/share/quickchr/machines/.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join, } from "node:path";
 import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -285,7 +285,21 @@ export function removeMachine(name: string): void {
 	if (!existsSync(dir)) {
 		throw new QuickCHRError("MACHINE_NOT_FOUND", `Machine "${name}" not found`);
 	}
-	rmSync(dir, { recursive: true, force: true });
+	// Out of `machines/` in one step, then deleted. A recursive delete in place removes
+	// entries one by one, so there is a window where the machine lock (`.lock/`, inside
+	// the directory) is gone while the directory is not, and a waiter or a same-named
+	// create could take a fresh lock in a directory that is being deleted. After the
+	// rename the name is simply free.
+	const trash = join(getDataDir(), ".removing", `${name}.${process.pid}.${crypto.randomUUID()}`);
+	try {
+		ensureDir(join(getDataDir(), ".removing"));
+		renameSync(dir, trash);
+	} catch {
+		// Windows refuses to rename a directory with an open handle in it; delete in place.
+		rmSync(dir, { recursive: true, force: true });
+		return;
+	}
+	rmSync(trash, { recursive: true, force: true });
 }
 
 /** Update the status of a machine. */

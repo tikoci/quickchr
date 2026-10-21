@@ -25,7 +25,7 @@ import {
 
 const TEST_DIR = join(import.meta.dir, ".tmp-lock");
 const MACHINE_DIR = join(TEST_DIR, "machines", "alpha");
-const LOCK = join(TEST_DIR, "locks", "alpha");
+const LOCK = machineLockPath(MACHINE_DIR);
 const LEGACY = { legacyPath: legacyMachineLockPath(MACHINE_DIR) };
 const DEAD_PID = 99999999;
 const origDataDir = process.env.QUICKCHR_DATA_DIR;
@@ -158,13 +158,38 @@ describe("acquireLockNow", () => {
 		expect(records()).toHaveLength(1);
 	});
 
-	test("a machine's lock lives outside its directory, so remove() cannot take it away", () => {
-		expect(machineLockPath("alpha")).toBe(LOCK);
+	test("a machine's lock lives in its directory and goes with it", () => {
+		expect(LOCK).toBe(join(MACHINE_DIR, ".lock"));
 		const lock = acquireLockNow(LOCK, "remove");
 		rmSync(MACHINE_DIR, { recursive: true, force: true });
-		expect(currentHolder(LOCK)?.op).toBe("remove");
-		lock.release();
-		expect(currentHolder(LOCK)).toBeUndefined();
+		expect(() => lock.release()).not.toThrow();
+		expect(existsSync(MACHINE_DIR)).toBe(false);
+	});
+
+	test("a missing machine directory is MACHINE_NOT_FOUND, and is not brought back", () => {
+		rmSync(MACHINE_DIR, { recursive: true, force: true });
+		try {
+			acquireLockNow(LOCK, "stop");
+			expect.unreachable("should have thrown");
+		} catch (e) {
+			expectErrorCode(e, "MACHINE_NOT_FOUND");
+		}
+		expect(existsSync(MACHINE_DIR)).toBe(false);
+	});
+
+	test("a holder that deleted its directory releases nothing into a same-named successor's log", () => {
+		// Codex's release-side case: remove() deletes the directory, a new machine of
+		// the same name takes a fresh record 1, then the remover releases. Appending
+		// its marker there would collect the new holder's record.
+		const remover = acquireLockNow(LOCK, "remove");
+		rmSync(MACHINE_DIR, { recursive: true, force: true });
+		mkdirSync(MACHINE_DIR, { recursive: true });
+		const creator = acquireLockNow(LOCK, "start");
+		remover.release();
+		expect(records()).toEqual([1]);
+		expect(currentHolder(LOCK)?.op).toBe("start");
+		expect(() => acquireLockNow(LOCK, "clean")).toThrow();
+		creator.release();
 	});
 });
 
@@ -175,7 +200,8 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 	test("a paused contender cannot claim past a live holder that overtook it", () => {
 		// Record 2 must be free as a file name, or A's claim stops at EEXIST before it
 		// changes anything and the interleaved contender never runs.
-		writeRecord(1, deadRecord());
+		const dead = deadRecord();
+		writeRecord(1, dead);
 		acquireLockNow(LOCK, "start").release();
 		const b = acquireLockNow(LOCK, "start");
 		const intruders: HeldLock[] = [];
@@ -183,7 +209,7 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 		let fired = 0;
 		interleaving(
 			() => { fired++; try { intruders.push(acquireLockNow(LOCK, "clean")); } catch { /* refused: correct */ } },
-			() => { a = claim(LOCK, 2, "stop"); },
+			() => { a = claim(LOCK, 2, "stop", dead); },
 		);
 		expect(fired).toBeGreaterThan(0);
 		expect(a).toBeUndefined();
@@ -196,10 +222,11 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 		// B claims 2 and releases (marker 3, records below collected); C claims 4.
 		// Record 2 is free again as a file name, and A's create of it succeeds — the
 		// top check is what turns it away.
-		writeRecord(1, deadRecord());
+		const dead = deadRecord();
+		writeRecord(1, dead);
 		acquireLockNow(LOCK, "start").release();
 		const c = acquireLockNow(LOCK, "clean");
-		expect(claim(LOCK, 2, "stop")).toBeUndefined();
+		expect(claim(LOCK, 2, "stop", dead)).toBeUndefined();
 		expect(currentHolder(LOCK)?.op).toBe("clean");
 		expect(records()).toEqual([4]);
 		c.release();
@@ -207,22 +234,25 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 
 	test("a contender paused across remove and re-create cannot claim beside the new holder", () => {
 		// Codex's low-generation case: A judged dead record 1 free and paused; the
-		// machine was removed and created again; B took the lock. With the log inside
-		// the machine directory B held a fresh record 1, and A's claim of 2 matched it
-		// by number. The log now survives remove(), so B holds 2 and A meets EEXIST.
-		writeRecord(1, deadRecord());
+		// machine was removed and created again; B took a fresh record 1. A's claim of
+		// 2 lands, and a predecessor check by number would pass. The check is against
+		// the record A judged, and B's record 1 is not it.
+		const dead = deadRecord();
+		writeRecord(1, dead);
 		rmSync(MACHINE_DIR, { recursive: true, force: true });
 		mkdirSync(MACHINE_DIR, { recursive: true });
 		const b = acquireLockNow(LOCK, "start");
-		expect(claim(LOCK, 2, "stop")).toBeUndefined();
+		expect(records()).toEqual([1]);
+		expect(claim(LOCK, 2, "stop", dead)).toBeUndefined();
 		expect(() => acquireLockNow(LOCK, "clean")).toThrow();
 		expect(currentHolder(LOCK)?.op).toBe("start");
 		b.release();
 	});
 
 	test("two contenders recovering the same dead holder: exactly one wins", () => {
-		writeRecord(1, deadRecord());
-		const results = [claim(LOCK, 2, "start"), claim(LOCK, 2, "clean")];
+		const dead = deadRecord();
+		writeRecord(1, dead);
+		const results = [claim(LOCK, 2, "start", dead), claim(LOCK, 2, "clean", dead)];
 		expect(results.filter(Boolean)).toHaveLength(1);
 		for (const r of results) r?.release();
 	});

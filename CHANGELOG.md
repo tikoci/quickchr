@@ -181,13 +181,12 @@ provisioning quirks agents work around get fixed.
   it was accepted and the overlap surfaced later as a QEMU bind failure, or never if the
   two machines did not run together. It is still never remapped. (#140)
 
-- The per-machine lock is now `<dataDir>/locks/<name>/`, not `machines/<name>/.start-lock`, and
+- The per-machine lock is now `machines/<name>/.lock/`, not `.start-lock`, and
   `MACHINE_LOCKED` names the operation holding it, its pid and how long it has held the
   lock ("locked by `start` (pid 4242) since 12s"), not "already being started". For
   this release a live `.start-lock` written by an older quickchr is still respected,
-  and a stale one is ignored. The lock is kept after `remove`, so a machine created
-  again under the same name continues it. An operation that waited out a `remove` fails
-  with `MACHINE_NOT_FOUND`. A machine started in the foreground holds the lock until its
+  and a stale one is ignored. An operation that waited out a `remove` fails with
+  `MACHINE_NOT_FOUND`. A machine started in the foreground holds the lock until its
   VM exits, and nothing waits for it. (#181)
 
 - `quickchr set <name> --device-mode…` and `setDeviceMode()` print every setting that

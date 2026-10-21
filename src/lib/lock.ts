@@ -7,25 +7,30 @@
  * record means held; a released marker, a dead holder's record, or no record at all
  * means free. Taking the lock is creating record top+1, published with `link()` so only
  * one contender can create it and it never exists half-written. Releasing appends a
- * released marker. Superseded records below the top are garbage-collected.
+ * released marker. Superseded records below the top are collected.
  *
- * Nothing ever deletes a record another process may still hold. That is the point:
- * a path has no compare-and-delete, so any recovery that deletes a dead holder's lock
- * by path has a window between judging it dead and deleting it, and a successor can be
- * installed in that window and then deleted. Rename-aside-and-compare had that window,
- * and so did a reap guard recovered by age (Codex review of #190, both reproduced).
- * Here, recovering from a dead holder is just claiming the next number.
+ * No recovery deletes a record another process may hold. A path has no
+ * compare-and-delete, so deleting a dead holder's lock by path leaves a window between
+ * judging it dead and deleting it, and a successor installed in that window is
+ * deleted too. Rename-aside-and-compare had that window, and so did a reap guard
+ * recovered by age (Codex review of #190, both reproduced). Here, recovering from a
+ * dead holder is just claiming the next number.
  *
- * A claim stands only if, once created, nothing higher exists and its predecessor is
- * still there. A contender paused across other claims can wake and create a number
- * that collection made free again, and that check is what turns it away.
+ * **A claim is checked against the exact record it judged free**, not just that
+ * record's number. Every record carries a unique token, so once created, a claim
+ * stands only if nothing higher exists and its predecessor is still byte-for-byte
+ * what was judged. That turns away a contender that slept through other claims, or
+ * through the log being deleted and started again. A number can recur; a record
+ * cannot.
  *
- * **A log is never deleted**, so a machine's log lives in `<dataDir>/locks/<name>/`,
- * not in the machine directory `remove()` deletes. If the log went with the machine, a
- * re-created machine would start a new log at record 1, and anyone holding a number
- * from the old log would land in the new one: a release would append into it and
- * collect the new holder's record, and a claim would match by number alone (Codex
- * review of #190). The cost is one small directory per machine name ever used.
+ * **Only a holder deletes a lock directory**: `remove()` takes the machine's
+ * directory with its lock inside, and a failed create discards what it made. So a
+ * machine's lock lives and dies with `machines/<name>/`, and nothing is kept after a
+ * machine is gone. Release appends only after the holder's own record. A holder that
+ * deleted its directory finds that record gone, and its release does nothing, rather
+ * than appending into whatever log a new machine of the same name has started. That
+ * check and the append cannot race a deletion, because the only process that could
+ * delete the log is the holder itself.
  *
  * A holder records `{ pid, op, at, token }`. The pid decides liveness, the op and age
  * go into `MACHINE_LOCKED` so the refusal can say what is holding the machine, and a
@@ -38,8 +43,8 @@
  * helpers in quickchr.ts rather than the public methods.
  */
 
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { linkSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { getDataDir, getMachinesDir } from "./state.ts";
 
@@ -77,7 +82,8 @@ export interface LockRecord {
 
 export interface HeldLock {
 	readonly path: string;
-	/** Append a released marker. Idempotent. */
+	/** Append a released marker after this holder's record. Idempotent, and a no-op
+	 *  once the holder has deleted the lock's directory. */
 	release(): void;
 }
 
@@ -93,24 +99,18 @@ export interface AcquireLockOptions {
 	subject?: string;
 }
 
-/** The pre-0.5 lock file, in the machine directory. For one release a live holder is honoured, so a machine
- *  locked by an older quickchr is not taken from under it. A dead one is ignored, not
- *  deleted: deleting by path is the race this module exists to avoid, and the older
- *  quickchr recovers its own stale file. */
+/** The pre-0.5 lock file, in the machine directory. For one release a live holder is
+ *  honoured, so a machine locked by an older quickchr is not taken from under it. A
+ *  dead one is ignored, not deleted: the older quickchr recovers its own stale file. */
 const LEGACY_MACHINE_LOCK_FILE = ".start-lock";
 const POLL_MS = 100;
 /** A record that does not parse only counts as abandoned once it is this old. An older
  *  quickchr creates `.start-lock` empty and fills it in with a second syscall. */
 const UNREADABLE_GRACE_MS = 500;
 
-function locksDir(): string {
-	return join(getDataDir(), "locks");
-}
-
-/** A machine's lock log, by name. Outside `machines/<name>/` so it outlives the
- *  machine: see the module comment. */
-export function machineLockPath(name: string): string {
-	return join(locksDir(), name);
+/** A machine's lock, inside its directory so it goes when the machine does. */
+export function machineLockPath(machineDir: string): string {
+	return join(machineDir, ".lock");
 }
 
 /** Where an older quickchr locks a machine. */
@@ -119,10 +119,11 @@ export function legacyMachineLockPath(machineDir: string): string {
 }
 
 /** Held across the read → probe → claim window of a machine creation, so two creates
- *  cannot pick the same port block or MAC (#140). The leading dot keeps it from
- *  colliding with a machine name. */
+ *  cannot pick the same port block or MAC (#140). Lives in the data dir root, not in
+ *  `machines/`, where it would be listed as a machine. One fixed directory: its log
+ *  collects down to a single record. */
 export function allocationLockPath(): string {
-	return join(locksDir(), ".allocate");
+	return join(getDataDir(), ".allocate.lock");
 }
 
 /** Test seam: called after each change this module makes inside a lock directory, so
@@ -150,7 +151,7 @@ function parseRecord(text: string): LockRecord | undefined {
 type Inspection =
 	| { state: "absent" }
 	| { state: "live"; record: LockRecord }
-	| { state: "free" }
+	| { state: "free"; raw: string }
 	| { state: "unknown" };
 
 function isAlive(pid: number): boolean {
@@ -160,6 +161,14 @@ function isAlive(pid: number): boolean {
 	} catch (e) {
 		// EPERM: the process exists but belongs to someone else.
 		return (e as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+function readRaw(path: string): string | undefined {
+	try {
+		return readFileSync(path, "utf-8");
+	} catch {
+		return undefined;
 	}
 }
 
@@ -177,27 +186,57 @@ function inspect(path: string): Inspection {
 	if (!record) {
 		let ageMs = Number.POSITIVE_INFINITY;
 		try { ageMs = Date.now() - statSync(path).mtimeMs; } catch { /* gone */ }
-		return ageMs > UNREADABLE_GRACE_MS ? { state: "free" } : { state: "unknown" };
+		return ageMs > UNREADABLE_GRACE_MS ? { state: "free", raw } : { state: "unknown" };
 	}
-	if (record.released) return { state: "free" };
-	return isAlive(record.pid) ? { state: "live", record } : { state: "free" };
+	if (record.released) return { state: "free", raw };
+	return isAlive(record.pid) ? { state: "live", record } : { state: "free", raw };
 }
 
+function missing(lockDir: string): QuickCHRError {
+	return new QuickCHRError("MACHINE_NOT_FOUND", `${dirname(lockDir)} no longer exists — the machine was removed.`);
+}
+
+/** The record numbers in a lock. A lock whose parent directory has gone belongs to a
+ *  machine that was removed. */
 function generations(lockDir: string): number[] {
-	return readdirSync(lockDir).filter((f) => /^\d+$/.test(f)).map(Number);
+	try {
+		return readdirSync(lockDir).filter((f) => /^\d+$/.test(f)).map(Number);
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") throw missing(lockDir);
+		throw e;
+	}
+}
+
+/** The lock directory, created if its parent exists. Never the parent: a waiter must
+ *  not bring a removed machine's directory back as an empty orphan. */
+function ensureLockDir(lockDir: string): void {
+	try {
+		mkdirSync(lockDir);
+	} catch (e) {
+		const code = (e as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") throw missing(lockDir);
+		if (code !== "EEXIST") throw e;
+	}
 }
 
 /** Publish `content` at `path` only if nothing is there. Written to a temp file and
  *  `link()`ed into place, so the file never exists half-written. */
 function linkNew(path: string, content: string): boolean {
 	const tmp = `${path}.${process.pid}.${crypto.randomUUID()}.tmp`;
-	writeFileSync(tmp, content);
+	try {
+		writeFileSync(tmp, content);
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") throw missing(dirname(path));
+		throw e;
+	}
 	try {
 		linkSync(tmp, path);
 		mutationObserver?.("link", path);
 		return true;
 	} catch (e) {
-		if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+		const code = (e as NodeJS.ErrnoException).code;
+		if (code === "EEXIST") return false;
+		if (code === "ENOENT") throw missing(dirname(path));
 		throw e;
 	} finally {
 		try { unlinkSync(tmp); } catch { /* ignore */ }
@@ -211,15 +250,12 @@ function collect(lockDir: string, keepFrom: number): void {
 	try { gens = generations(lockDir); } catch { return; }
 	for (const gen of gens) {
 		if (gen >= keepFrom) continue;
+		const path = join(lockDir, String(gen));
 		try {
-			unlinkSync(join(lockDir, String(gen)));
-			mutationObserver?.("unlink", join(lockDir, String(gen)));
+			unlinkSync(path);
+			mutationObserver?.("unlink", path);
 		} catch { /* another collector got it */ }
 	}
-}
-
-function ensureLockDir(lockDir: string): void {
-	mkdirSync(lockDir, { recursive: true });
 }
 
 type Top = { gen: number; seen: Inspection } | undefined;
@@ -234,10 +270,17 @@ function readTop(lockDir: string): Top | "vanished" {
 	return seen.state === "absent" ? "vanished" : { gen, seen };
 }
 
-/** Try to take the lock as record `gen`, having judged record `gen - 1` free (or the
- *  directory empty, for `gen` 1). Returns the lock, or undefined when another contender
- *  got there first or the judgement turned out to be stale. */
-export function claim(lockDir: string, gen: number, op: LockOperation, reserve?: ResourceReservation): HeldLock | undefined {
+/** Try to take the lock as record `gen`, having judged record `gen - 1` free with
+ *  contents `judgedRaw` (or the lock empty, for `gen` 1 with no `judgedRaw`). Returns
+ *  the lock, or undefined when another contender got there first or the judgement
+ *  turned out to be stale. */
+export function claim(
+	lockDir: string,
+	gen: number,
+	op: LockOperation,
+	judgedRaw?: string,
+	reserve?: ResourceReservation,
+): HeldLock | undefined {
 	const record: LockRecord = {
 		pid: process.pid,
 		op,
@@ -245,35 +288,42 @@ export function claim(lockDir: string, gen: number, op: LockOperation, reserve?:
 		token: crypto.randomUUID(),
 		...(reserve ? { reserve } : {}),
 	};
+	const raw = `${JSON.stringify(record)}\n`;
 	const path = join(lockDir, String(gen));
-	if (!linkNew(path, `${JSON.stringify(record)}\n`)) return undefined;
+	if (!linkNew(path, raw)) return undefined;
 
-	// The number may be free again only because collection removed it after the log
-	// moved on. Then it is not the top.
 	const gens = generations(lockDir);
 	const isTop = !gens.some((g) => g > gen);
-	const followsPredecessor = gen === 1 ? gens.length === 1 : gens.includes(gen - 1);
-	if (!isTop || !followsPredecessor) {
+	const followsJudged = judgedRaw === undefined
+		? gen === 1 && gens.length === 1
+		: readRaw(join(lockDir, String(gen - 1))) === judgedRaw;
+	if (!isTop || !followsJudged) {
 		try { unlinkSync(path); } catch { /* collected already */ }
 		mutationObserver?.("unlink", path);
 		return undefined;
 	}
 	collect(lockDir, gen);
-	return heldLock(lockDir, gen, record);
+	return heldLock(lockDir, gen, record, raw);
 }
 
-function heldLock(lockDir: string, gen: number, record: LockRecord): HeldLock {
+function heldLock(lockDir: string, gen: number, record: LockRecord, raw: string): HeldLock {
 	let released = false;
 	return {
 		path: lockDir,
 		release() {
 			if (released) return;
 			released = true;
+			// Gone means this holder deleted the directory — remove(), or a failed create
+			// discarding what it made. A same-named machine may have started a new log
+			// there since, and a marker would land in it.
+			if (readRaw(join(lockDir, String(gen))) !== raw) return;
 			const marker: LockRecord = { ...record, released: true, at: new Date().toISOString() };
 			delete marker.reserve;
-			// EEXIST means someone judged this holder dead and took over — nothing of ours
-			// is left to release.
-			if (linkNew(join(lockDir, String(gen + 1)), `${JSON.stringify(marker)}\n`)) collect(lockDir, gen + 1);
+			try {
+				// EEXIST means someone judged this holder dead and took over — nothing of
+				// ours is left to release.
+				if (linkNew(join(lockDir, String(gen + 1)), `${JSON.stringify(marker)}\n`)) collect(lockDir, gen + 1);
+			} catch { /* deleted after all */ }
 		},
 	};
 }
@@ -312,7 +362,8 @@ function attempt(lockDir: string, op: LockOperation, opts: AcquireLockOptions): 
 		if (top === "vanished") continue;
 		if (top?.seen.state === "live") return { holder: top.seen.record };
 		if (top?.seen.state === "unknown") return { holder: undefined };
-		const lock = claim(lockDir, (top?.gen ?? 0) + 1, op, opts.reserve);
+		const judged = top?.seen.state === "free" ? top.seen.raw : undefined;
+		const lock = claim(lockDir, (top?.gen ?? 0) + 1, op, judged, opts.reserve);
 		if (!lock) continue;
 		const legacy = legacyBlocker(opts.legacyPath);
 		if (!legacy) return { lock };
@@ -323,7 +374,8 @@ function attempt(lockDir: string, op: LockOperation, opts: AcquireLockOptions): 
 
 /** Take a lock or fail now with `MACHINE_LOCKED`. A dead holder's lock is taken over
  *  on sight. Synchronous, for callers whose answer to a live holder is always "no" — a
- *  second `start` of one machine would only boot it twice. */
+ *  second `start` of one machine would only boot it twice. Throws `MACHINE_NOT_FOUND`
+ *  if the lock's machine directory does not exist. */
 export function acquireLockNow(lockPath: string, op: LockOperation, opts: Omit<AcquireLockOptions, "waitMs" | "onWait"> = {}): HeldLock {
 	const result = attempt(lockPath, op, opts);
 	if ("lock" in result) return result.lock;
@@ -335,8 +387,8 @@ export function acquireLockNow(lockPath: string, op: LockOperation, opts: Omit<A
  *  keeps the lock until its VM exits.
  *
  *  Throws `MACHINE_LOCKED` naming the holder's operation, pid and age when the wait
- *  runs out. The lock outlives its machine, so a caller that waited must check the
- *  machine is still the one it meant. */
+ *  runs out, and `MACHINE_NOT_FOUND` if the machine is removed while this caller
+ *  waits. */
 export async function acquireLock(lockPath: string, op: LockOperation, opts: AcquireLockOptions = {}): Promise<HeldLock> {
 	const waitMs = opts.waitMs ?? 0;
 	const started = Date.now();
@@ -359,9 +411,13 @@ export async function acquireLock(lockPath: string, op: LockOperation, opts: Acq
 
 /** The live holder of a lock, if any. */
 export function currentHolder(lockPath: string): LockRecord | undefined {
-	if (!existsSync(lockPath)) return undefined;
 	for (;;) {
-		const top = readTop(lockPath);
+		let top: Top | "vanished";
+		try {
+			top = readTop(lockPath);
+		} catch {
+			return undefined; // no lock directory, so no holder
+		}
 		if (top === "vanished") continue;
 		return top?.seen.state === "live" ? top.seen.record : undefined;
 	}
@@ -381,8 +437,7 @@ export function listReservations(exceptName?: string): Array<{ name: string } & 
 	const out: Array<{ name: string } & ResourceReservation> = [];
 	for (const name of names) {
 		if (name === exceptName) continue;
-		let holder: LockRecord | undefined;
-		try { holder = currentHolder(machineLockPath(name)); } catch { continue; }
+		const holder = currentHolder(machineLockPath(join(machinesDir, name)));
 		if (holder?.reserve) out.push({ name, ...holder.reserve });
 	}
 	return out;

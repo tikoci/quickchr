@@ -429,7 +429,7 @@ function lifecycleLockWaitMs(state: MachineState): number {
  *  holder just did, and `state.pid` read from it may name a process that has exited or
  *  one the OS has since reused (#180, #181). */
 async function withMachineLock<T>(state: MachineState, op: LockOperation, fn: () => Promise<T>): Promise<T> {
-	const lock = await acquireLock(machineLockPath(state.name), op, {
+	const lock = await acquireLock(machineLockPath(state.machineDir), op, {
 		...machineLockOptions(state.name, state.machineDir),
 		waitMs: lifecycleLockWaitMs(state),
 		onWait: (holder) => createLogger().warn(
@@ -923,7 +923,7 @@ function createInstance(state: MachineState): ChrInstance {
 			// concurrent `start` would otherwise spawn a second QEMU into the power-cycle
 			// window and both would persist over each other. Fail-fast like a second
 			// `start`: waiting would only power-cycle the machine twice.
-			const lock = acquireLockNow(machineLockPath(state.name), "device-mode", machineLockOptions(state.name, state.machineDir));
+			const lock = acquireLockNow(machineLockPath(state.machineDir), "device-mode", machineLockOptions(state.name, state.machineDir));
 			try {
 				assertSameMachine(state);
 				// Re-read under the lock before anything reads `state`. This handle's
@@ -1896,14 +1896,26 @@ export async function claimNewMachine(
 	try {
 		const picked = await pickNewMachineResources(name, opts);
 		const machineDir = getMachineDir(name);
-		ensureDir(machineDir);
-		const lock = acquireLockNow(machineLockPath(name), op, {
+		const lockOpts = {
 			...machineLockOptions(name, machineDir),
 			reserve: {
 				portBase: picked.portBase,
 				macs: picked.networks.flatMap((n) => (n.mac ? [n.mac] : [])),
 			},
-		});
+		};
+		// The lock lives in the directory, so the directory comes first. A refusal here
+		// means a live holder owns the directory — a create of the same name, or a
+		// remove — and it, not this call, cleans it up. A remove renames the directory
+		// away in one step; if that lands between the two lines, make a fresh one.
+		let lock: HeldLock | undefined;
+		for (let tries = 0; !lock; tries++) {
+			ensureDir(machineDir);
+			try {
+				lock = acquireLockNow(machineLockPath(machineDir), op, lockOpts);
+			} catch (e) {
+				if (!(e instanceof QuickCHRError && e.code === "MACHINE_NOT_FOUND") || tries >= 2) throw e;
+			}
+		}
 		// Another create of this name may have finished between the caller's existence
 		// check and this lock.
 		if (existsSync(join(machineDir, "machine.json"))) {
@@ -2039,7 +2051,7 @@ export class QuickCHR {
 			// directory it was supposed to clean up. Nothing runs after saveMachine()
 			// but `return state`, so a readable file here means the create succeeded.
 			if (isOrphanMachineDir(name)) {
-				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
+				try { removeState(name); } catch { /* best effort */ }
 			}
 			throw err;
 		} finally {
@@ -2495,7 +2507,7 @@ export class QuickCHR {
 			// that already exist, and a directory this call did not create is never ours
 			// to delete, whatever state it is in.
 			if (dirCreatedHere && isOrphanMachineDir(name)) {
-				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
+				try { removeState(name); } catch { /* best effort */ }
 			}
 			throw err;
 		} finally {
@@ -2678,7 +2690,7 @@ export class QuickCHR {
 		);
 		let hasProvisioning = wantsProvisioning(provisioningOpts);
 		const lock = acquireLockNow(
-			machineLockPath(state.name),
+			machineLockPath(state.machineDir),
 			!background && !hasProvisioning ? "foreground" : "start",
 			machineLockOptions(state.name, state.machineDir),
 		);
@@ -2909,7 +2921,7 @@ export class QuickCHR {
 		// while a live creator holds it, and reaps one whose owner is gone — which is the
 		// case this recovery exists for. No waiting: a live creator means this is not an
 		// orphan, and the answer is to let it finish.
-		const lock = acquireLockNow(machineLockPath(name), "remove-orphan", machineLockOptions(name, getMachineDir(name)));
+		const lock = acquireLockNow(machineLockPath(getMachineDir(name)), "remove-orphan", machineLockOptions(name, getMachineDir(name)));
 
 		// The creator may have finished between the check above and the lock.
 		if (!isOrphanMachineDir(name)) {
