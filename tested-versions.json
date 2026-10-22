@@ -441,8 +441,8 @@
 	"7.26beta3": {
 		"linux-arm64": {
 			"conclusion": "pass",
-			"date": "2026-10-19T16:11:46.151Z",
-			"run_id": "39278449139"
+			"date": "2026-10-22T19:10:11.594Z",
+			"run_id": "39830965935"
 		},
 		"linux-x86": {
 			"conclusion": "pass",
@@ -453,6 +453,11 @@
 			"conclusion": "pass",
 			"date": "2026-10-19T16:09:20.034Z",
 			"run_id": "39278449139"
+		},
+		"windows-x86": {
+			"conclusion": "fail",
+			"date": "2026-10-22T19:16:39.396Z",
+			"run_id": "39830965935"
 		}
 	}
 }

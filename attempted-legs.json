@@ -1945,5 +1945,35 @@
 		"planned": 2,
 		"sha": "6728ee235c351be81a8bc0d00455b99338f3d82b",
 		"ts": "2026-10-22T18:41:13.039Z"
+	},
+	"39830965935": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"linux-arm64|development": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2772,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.26beta3",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"windows-x86|development": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 3164,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.26beta3",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'failure' before the suite could instrument itself"
+			}
+		},
+		"planned": 2,
+		"sha": "6728ee235c351be81a8bc0d00455b99338f3d82b",
+		"ts": "2026-10-22T19:16:54.043Z"
 	}
 }
