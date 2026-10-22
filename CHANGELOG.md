@@ -8,6 +8,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-22
+
 ### Breaking (0.5.0)
 
 0.5.0 is a pre-release line (odd minor), and the clean break where the CHR and
@@ -24,14 +26,6 @@ provisioning quirks agents work around get fixed.
   it**: disk back to the factory image, `machine.json` back to the record `add` wrote, so
   the retry is `quickchr start <name>` again. A machine `start` created in the same call is
   still removed. (#182)
-
-### Added
-
-- `quickchr shutdown <name>` / `ChrInstance.shutdown()` requests guest shutdown
-  over REST, waits up to 10 seconds by default, and reports a forced power cut if
-  needed. CLI `--timeout` / `QUICKCHR_SHUTDOWN_TIMEOUT` use seconds; library
-  `timeoutMs` uses milliseconds. Disks, credentials and restart configuration
-  survive. `stop()` remains the normal power-cut teardown primitive. (#143)
 
 ### Fixed
 
@@ -138,6 +132,12 @@ provisioning quirks agents work around get fixed.
   intent. Budget for it: that start costs what a first boot costs. (#176)
 
 ### Added
+
+- `quickchr shutdown <name>` / `ChrInstance.shutdown()` requests guest shutdown
+  over REST, waits up to 10 seconds by default, and reports a forced power cut if
+  needed. CLI `--timeout` / `QUICKCHR_SHUTDOWN_TIMEOUT` use seconds; library
+  `timeoutMs` uses milliseconds. Disks, credentials and restart configuration
+  survive. `stop()` remains the normal power-cut teardown primitive. (#143)
 
 - `quickchr start --no-wait` (`StartOptions.wait: false`) returns as soon as QEMU is
   running (past the existing early-exit check, with state and ports persisted) and
