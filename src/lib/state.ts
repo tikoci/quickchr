@@ -298,6 +298,7 @@ export function removeMachine(name: string): void {
 	const trashDir = join(getDataDir(), ".removing");
 	const trash = join(trashDir, `${name}.${process.pid}.${crypto.randomUUID()}`);
 	ensureDir(trashDir);
+	sweepAbandonedRemovals(trashDir);
 	for (let attempt = 1; ; attempt++) {
 		try {
 			renameSync(dir, trash);
@@ -313,7 +314,35 @@ export function removeMachine(name: string): void {
 			Bun.sleepSync(REMOVE_RENAME_RETRY_MS);
 		}
 	}
-	rmSync(trash, { recursive: true, force: true });
+	// The name is already free, so a failed delete does not fail the removal. The
+	// files stay under `.removing/` and the next removal sweeps them.
+	try {
+		rmSync(trash, { recursive: true, force: true });
+	} catch (e) {
+		console.warn(`Warning: machine "${name}" is removed, but deleting its files at ${trash} failed (${(e as Error).message}). The next 'quickchr remove' retries it, or delete that directory by hand.`);
+	}
+}
+
+/** Delete what earlier removals moved aside and did not finish deleting: a delete that
+ *  failed, or a process that stopped after its rename. Each entry is
+ *  `<name>.<pid>.<uuid>`. One whose pid is alive in another process is still being
+ *  deleted, so it is left alone. Best effort: a failure here never fails a removal. */
+function sweepAbandonedRemovals(trashDir: string): void {
+	let entries: string[];
+	try { entries = readdirSync(trashDir); } catch { return; }
+	for (const entry of entries) {
+		const pid = Number(entry.split(".").at(-2));
+		if (!Number.isInteger(pid) || pid <= 0) continue;
+		if (pid !== process.pid) {
+			try {
+				process.kill(pid, 0);
+				continue; // still being deleted by that process
+			} catch (e) {
+				if ((e as NodeJS.ErrnoException).code === "EPERM") continue;
+			}
+		}
+		try { rmSync(join(trashDir, entry), { recursive: true, force: true }); } catch { /* next time */ }
+	}
 }
 
 /** How long `removeMachine()` keeps trying to move a directory aside: about 2 s in

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	_observeLockMutations,
@@ -164,6 +164,25 @@ describe("acquireLockNow", () => {
 		second.release();
 		expect(currentHolder(LOCK)).toBeUndefined();
 	});
+
+	// CodeRabbit: release() swallowed every error writing its marker, so a disk-full
+	// or permission failure left the record as the live top for good — and it had
+	// already marked itself released, so it could not try again.
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"a release that cannot write its marker says so, keeps the lock, and can retry",
+		() => {
+			const lock = acquireLockNow(LOCK, "start");
+			chmodSync(LOCK, 0o500);
+			try {
+				expect(() => lock.release()).toThrow();
+				expect(currentHolder(LOCK)?.op).toBe("start");
+			} finally {
+				chmodSync(LOCK, 0o700);
+			}
+			lock.release();
+			expect(currentHolder(LOCK)).toBeUndefined();
+		},
+	);
 
 	test("superseded records are collected; a released lock keeps two", () => {
 		// The last holder's record and its released marker. Release collects before it

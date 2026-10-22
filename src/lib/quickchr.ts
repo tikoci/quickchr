@@ -2918,19 +2918,19 @@ export class QuickCHR {
 		// contents alone — add()/start() write machine.json last, so the window between
 		// ensureDir() and saveMachine() looks exactly like a half-made machine. The
 		// machine lock is what tells them apart, so take it: it throws MACHINE_LOCKED
-		// while a live creator holds it, and reaps one whose owner is gone — which is the
-		// case this recovery exists for. No waiting: a live creator means this is not an
-		// orphan, and the answer is to let it finish.
+		// while a live creator holds it, and takes over one whose owner is gone — which
+		// is the case this recovery exists for. No waiting: a live creator means this is
+		// not an orphan, and the answer is to let it finish.
 		const lock = acquireLockNow(machineLockPath(getMachineDir(name)), "remove-orphan", machineLockOptions(name, getMachineDir(name)));
-
-		// The creator may have finished between the check above and the lock.
-		if (!isOrphanMachineDir(name)) {
+		try {
+			// The creator may have finished between the check above and the lock.
+			if (!isOrphanMachineDir(name)) return false;
+			removeState(name);
+			return true;
+		} finally {
+			// A no-op once the directory has gone; releases it if removal threw.
 			lock.release();
-			return false;
 		}
-
-		removeState(name);
-		return true;
 	}
 
 	/** Run doctor checks for prerequisites. */

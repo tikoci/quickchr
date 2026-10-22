@@ -303,6 +303,53 @@ describe("remove() and a same-named create (Codex review of #190)", () => {
 		10_000,
 	);
 
+	// CodeRabbit: removeOrphan() released its lock only on the "not an orphan after
+	// all" branch, so a removal that threw kept the leftover directory locked by this
+	// process until it exited.
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"a leftover-directory removal that fails releases its lock, and a retry succeeds",
+		() => {
+			const dir = getMachineDir("leftover");
+			mkdirSync(dir, { recursive: true });
+			const trashDir = join(TEST_DIR, ".removing");
+			mkdirSync(trashDir, { recursive: true });
+			chmodSync(trashDir, 0o500);
+			try {
+				QuickCHR.removeOrphan("leftover");
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expectErrorCode(e, "STATE_ERROR");
+			} finally {
+				chmodSync(trashDir, 0o700);
+			}
+			expect(currentHolder(machineLockPath(dir))).toBeUndefined();
+			expect(QuickCHR.removeOrphan("leftover")).toBe(true);
+			expect(existsSync(dir)).toBe(false);
+		},
+		10_000,
+	);
+
+	// CodeRabbit: a removal that stopped after its rename left the machine under
+	// `.removing/`, where nothing would ever find it again.
+	test("a later remove sweeps up an abandoned removal, and leaves one still in progress", async () => {
+		const trashDir = join(TEST_DIR, ".removing");
+		const abandoned = join(trashDir, `crashed.99999999.${crypto.randomUUID()}`);
+		mkdirSync(abandoned, { recursive: true });
+		const busy = spawnIdle();
+		const inProgress = join(trashDir, `busy.${busy.pid}.${crypto.randomUUID()}`);
+		mkdirSync(inProgress, { recursive: true });
+		try {
+			const state = machine("sweeper");
+			seed(state);
+			await QuickCHR.get("sweeper")?.remove();
+			expect(existsSync(abandoned)).toBe(false);
+			expect(existsSync(inProgress)).toBe(true);
+		} finally {
+			busy.kill();
+			await busy.exited;
+		}
+	});
+
 	test("remove() leaves nothing behind: no machine directory and no lock", async () => {
 		const state = machine("tidy");
 		seed(state);

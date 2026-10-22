@@ -362,9 +362,17 @@ function heldLock(lockDir: string, id: string, gen: number, record: LockRecord, 
 			collect(lockDir, id, gen);
 			const marker: LockRecord = { ...record, released: true, at: new Date().toISOString() };
 			delete marker.reserve;
-			// EEXIST means someone judged this holder dead and took over — nothing of ours
-			// is left to release.
-			try { linkNew(recordPath(lockDir, id, gen + 1), `${JSON.stringify(marker)}\n`); } catch { /* deleted after all */ }
+			// EEXIST (a false return) means someone judged this holder dead and took over:
+			// nothing of ours is left to release. A missing directory means the same. Any
+			// other failure (ENOSPC, EACCES) means the marker was not written and the lock
+			// is still held, so it is thrown, and a later release() may try again.
+			try {
+				linkNew(recordPath(lockDir, id, gen + 1), `${JSON.stringify(marker)}\n`);
+			} catch (e) {
+				if (e instanceof QuickCHRError && e.code === "MACHINE_NOT_FOUND") return;
+				released = false;
+				throw e;
+			}
 		},
 	};
 }
