@@ -42,8 +42,10 @@ provisioning quirks agents work around get fixed.
 - Restarting an existing machine uses its recorded architecture for the RouterOS 6
   image restriction, so creation defaults cannot reject an existing x86 guest.
 
-- Every `BOOT_TIMEOUT` message names `QUICKCHR_PRESERVE_ON_FAILURE=1`. The auto-removal
-  that hid #182's report gave no hint that it could be turned off. (#182)
+- A `BOOT_TIMEOUT` that removes a new machine or resets an existing first boot names
+  `QUICKCHR_PRESERVE_ON_FAILURE=1`. The auto-removal that hid #182's report gave no hint
+  that it could be turned off. A previously booted machine is preserved without the
+  flag (#189). (#182)
 
 - `start` refuses a provisioning option on an unsupported RouterOS version before
   booting an existing machine, and before the provisioning-window check. It used to boot
