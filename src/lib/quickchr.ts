@@ -27,7 +27,7 @@ import type {
 	SshServiceEndpoint,
 	StartOptions,
 } from "./types.ts";
-import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION, HOST_GATEWAY_IP } from "./types.ts";
+import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION, HOST_GATEWAY_IP, PORTS_PER_BLOCK } from "./types.ts";
 import { assertValidResourceName, assertPathSafeName, shellQuote } from "./names.ts";
 import packageJson from "../../package.json";
 import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
@@ -103,7 +103,8 @@ import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
 import { assertSufficientQuickchrStorage, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
-import { existsSync, rmSync, copyFileSync, writeFileSync, unlinkSync, openSync, writeSync, closeSync, readFileSync } from "node:fs";
+import { existsSync, rmSync, copyFileSync } from "node:fs";
+import { acquireLock, acquireLockNow, allocationLockPath, legacyMachineLockPath, listReservations, machineLockPath, type HeldLock, type LockOperation } from "./lock.ts";
 import { join } from "node:path";
 
 // --- Architecture-aware defaults ---
@@ -394,6 +395,149 @@ async function resetGuestToFactory(state: MachineState): Promise<void> {
 	rmSync(join(state.machineDir, "ssh"), { recursive: true, force: true });
 }
 
+/** Options every machine-lock acquisition passes: the pre-0.5 lock to honour, and the
+ *  noun for `MACHINE_LOCKED`. */
+function machineLockOptions(name: string, machineDir: string): { legacyPath: string; subject: string } {
+	return { legacyPath: legacyMachineLockPath(machineDir), subject: `Machine "${name}"` };
+}
+
+/** The machine lock outlives its machine (see lock.ts), so a caller that has just
+ *  taken it must check that the machine it was asked about is still there, and is not
+ *  another machine created under the same name while it waited. Acting on the old
+ *  snapshot would mean stopping a stale pid. */
+function assertSameMachine(state: MachineState): void {
+	const fresh = loadMachine(state.name);
+	if (!fresh || fresh.createdAt !== state.createdAt) {
+		throw new QuickCHRError(
+			"MACHINE_NOT_FOUND",
+			`Machine "${state.name}" was removed${fresh ? " and created again" : ""} while this operation waited for it.`,
+		);
+	}
+}
+
+/** How long `stop`/`clean`/`remove` wait for an operation already holding the machine
+ *  lock. The holder is almost always a start or relaunch waiting for boot, so the wait
+ *  is that boot budget: a `stop` issued during a `start` runs after it rather than
+ *  failing, and a holder that never finishes still cannot block it forever (#181). */
+function lifecycleLockWaitMs(state: MachineState): number {
+	const withPackages = !!state.installAllPackages || (state.packages?.length ?? 0) > 0;
+	return defaultBootTimeout(state.arch, withPackages, state.lastAccel);
+}
+
+/** Run a lifecycle operation under the machine's lock, waiting for a current holder.
+ *  State is re-read once the lock is held: a handle's snapshot predates whatever the
+ *  holder just did, and `state.pid` read from it may name a process that has exited or
+ *  one the OS has since reused (#180, #181). */
+async function withMachineLock<T>(state: MachineState, op: LockOperation, fn: () => Promise<T>): Promise<T> {
+	const lock = await acquireLock(machineLockPath(state.machineDir), op, {
+		...machineLockOptions(state.name, state.machineDir),
+		waitMs: lifecycleLockWaitMs(state),
+		onWait: (holder) => createLogger().warn(
+			`Machine "${state.name}" is busy with \`${holder.op}\` (pid ${holder.pid}) — waiting for it to finish before \`${op}\`.`,
+		),
+	});
+	try {
+		assertSameMachine(state);
+		refreshMachineState(state);
+		return await fn();
+	} finally {
+		lock.release();
+	}
+}
+
+/** The body of `stop()`, for a caller that already holds the machine lock. The lock is
+ *  not reentrant, so code inside a locked start or relaunch calls this, never
+ *  `instance.stop()`. */
+async function stopUnderLock(state: MachineState): Promise<void> {
+	if (state.pid) {
+		await stopQemu(state.pid);
+	}
+	unregisterSocketMembers(state);
+	// Update persisted state
+	const current = loadMachine(state.name);
+	if (current) {
+		current.status = "stopped";
+		current.pid = undefined;
+		saveMachine(current);
+	}
+	state.status = "stopped";
+	state.pid = undefined;
+}
+
+/** The body of `remove()`, for a caller that already holds the machine lock. The lock
+ *  file goes with the directory. */
+async function removeUnderLock(state: MachineState): Promise<void> {
+	if (state.pid && isMachineRunning(state)) {
+		await stopQemu(state.pid);
+	}
+	unregisterSocketMembers(state);
+	// Clean up stored instance credentials
+	deleteInstanceCredentials(state.name);
+	removeState(state.name);
+}
+
+/** The body of `clean()`, for a caller that already holds the machine lock. */
+async function cleanUnderLock(state: MachineState): Promise<void> {
+	if (state.pid && isMachineRunning(state)) {
+		await stopQemu(state.pid);
+	}
+	// Same invariant as stop()/remove(): a machine that is not running holds no
+	// endpoint. clean() stops QEMU directly rather than through stop(), so without
+	// this a cleaned machine keeps a pair link occupied and blocks its removal.
+	unregisterSocketMembers(state);
+	await resetGuestToFactory(state);
+
+	// Every guest-side credential went with the old disk, so the credential
+	// facts in machine.json now describe a machine that no longer exists.
+	// Left in place, `resolveAuth()` /
+	// `resolveCreds()` prefer `state.user` and authenticate every REST call,
+	// exec, and SCP as a deleted user — the confound #79 removes here.
+	// Clearing them restores the documented fallback: factory `admin` with an
+	// empty password, which is what a fresh CHR image actually answers to
+	// (anchored by the "clean() resets disk to factory defaults" integration
+	// test). `disableAdmin` goes with them because it is read as a live fact
+	// about the guest (buildDescriptor's `disableAdminLockout`) and a fresh
+	// image has admin enabled again. `licenseLevel` goes with them for the same
+	// reason: it is a read-back of the license the erased disk held, not an
+	// intent — quickchr never persists the license *input* — so leaving it
+	// behind would report a level the fresh image does not have. Provisioning
+	// *intent* — packages, deviceMode, secureLogin — is not guest state and
+	// survives, and is what the next `start()` re-applies now that the window
+	// reopens.
+	// (`resetGuestToFactory()` has already dropped the secret-store entry and the
+	// managed keypair, which describe the same erased account.)
+
+	// Update state. `provisioning` and `lastStartedAt` go with the credentials:
+	// both describe a guest that no longer exists, and together they are what
+	// closes the provisioning window. Leaving them behind is what stopped a cleaned
+	// machine from ever being provisioned again — the disk was factory-fresh and
+	// `start()` still refused to provision it (#176). `cleanedAt` keeps the
+	// forensic clue that the timestamp carried.
+	const cleanedAt = new Date().toISOString();
+	const current = loadMachine(state.name);
+	if (current) {
+		current.status = "stopped";
+		current.pid = undefined;
+		current.user = undefined;
+		current.managedSshKey = undefined;
+		current.disableAdmin = undefined;
+		current.provisioning = undefined;
+		current.lastStartedAt = undefined;
+		current.licenseLevel = undefined;
+		current.cleanedAt = cleanedAt;
+		saveMachine(current);
+	}
+	state.status = "stopped";
+	state.pid = undefined;
+	state.user = undefined;
+	state.managedSshKey = undefined;
+	state.disableAdmin = undefined;
+	state.provisioning = undefined;
+	state.lastStartedAt = undefined;
+	state.licenseLevel = undefined;
+	state.cleanedAt = cleanedAt;
+}
+
 /** Create a ChrInstance handle from persisted MachineState. */
 function createInstance(state: MachineState): ChrInstance {
 	const ports = toChrPorts(state.ports);
@@ -603,90 +747,15 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async stop(): Promise<void> {
-			if (state.pid) {
-				await stopQemu(state.pid);
-			}
-			unregisterSocketMembers(state);
-			// Update persisted state
-			const current = loadMachine(state.name);
-			if (current) {
-				current.status = "stopped";
-				current.pid = undefined;
-				saveMachine(current);
-			}
-			state.status = "stopped";
-			state.pid = undefined;
+			await withMachineLock(state, "stop", () => stopUnderLock(state));
 		},
 
 		async remove(): Promise<void> {
-			if (state.pid && isMachineRunning(state)) {
-				await stopQemu(state.pid);
-			}
-			unregisterSocketMembers(state);
-			// Clean up stored instance credentials
-			deleteInstanceCredentials(state.name);
-			removeState(state.name);
+			await withMachineLock(state, "remove", () => removeUnderLock(state));
 		},
 
 		async clean(): Promise<void> {
-			if (state.pid && isMachineRunning(state)) {
-				await stopQemu(state.pid);
-			}
-			// Same invariant as stop()/remove(): a machine that is not running holds no
-			// endpoint. clean() stops QEMU directly rather than through stop(), so without
-			// this a cleaned machine keeps a pair link occupied and blocks its removal.
-			unregisterSocketMembers(state);
-			await resetGuestToFactory(state);
-
-			// Every guest-side credential went with the old disk, so the credential
-			// facts in machine.json now describe a machine that no longer exists.
-			// Left in place, `resolveAuth()` /
-			// `resolveCreds()` prefer `state.user` and authenticate every REST call,
-			// exec, and SCP as a deleted user — the confound #79 removes here.
-			// Clearing them restores the documented fallback: factory `admin` with an
-			// empty password, which is what a fresh CHR image actually answers to
-			// (anchored by the "clean() resets disk to factory defaults" integration
-			// test). `disableAdmin` goes with them because it is read as a live fact
-			// about the guest (buildDescriptor's `disableAdminLockout`) and a fresh
-			// image has admin enabled again. `licenseLevel` goes with them for the same
-			// reason: it is a read-back of the license the erased disk held, not an
-			// intent — quickchr never persists the license *input* — so leaving it
-			// behind would report a level the fresh image does not have. Provisioning
-			// *intent* — packages, deviceMode, secureLogin — is not guest state and
-			// survives, and is what the next `start()` re-applies now that the window
-			// reopens.
-			// (`resetGuestToFactory()` has already dropped the secret-store entry and the
-			// managed keypair, which describe the same erased account.)
-
-			// Update state. `provisioning` and `lastStartedAt` go with the credentials:
-			// both describe a guest that no longer exists, and together they are what
-			// closes the provisioning window. Leaving them behind is what stopped a cleaned
-			// machine from ever being provisioned again — the disk was factory-fresh and
-			// `start()` still refused to provision it (#176). `cleanedAt` keeps the
-			// forensic clue that the timestamp carried.
-			const cleanedAt = new Date().toISOString();
-			const current = loadMachine(state.name);
-			if (current) {
-				current.status = "stopped";
-				current.pid = undefined;
-				current.user = undefined;
-				current.managedSshKey = undefined;
-				current.disableAdmin = undefined;
-				current.provisioning = undefined;
-				current.lastStartedAt = undefined;
-				current.licenseLevel = undefined;
-				current.cleanedAt = cleanedAt;
-				saveMachine(current);
-			}
-			state.status = "stopped";
-			state.pid = undefined;
-			state.user = undefined;
-			state.managedSshKey = undefined;
-			state.disableAdmin = undefined;
-			state.provisioning = undefined;
-			state.lastStartedAt = undefined;
-			state.licenseLevel = undefined;
-			state.cleanedAt = cleanedAt;
+			await withMachineLock(state, "clean", () => cleanUnderLock(state));
 		},
 
 		async monitor(command: string): Promise<string> {
@@ -849,13 +918,14 @@ function createInstance(state: MachineState): ChrInstance {
 					"(mode=skip disables device-mode entirely; pass a mode or a feature to enable/disable).",
 				);
 			}
-			// The same `.start-lock` every other relaunch takes. This one is a relaunch:
+			// The same machine lock every other relaunch takes. This one is a relaunch:
 			// it terminates QEMU, spawns a replacement and rewrites `machine.json`, so a
 			// concurrent `start` would otherwise spawn a second QEMU into the power-cycle
-			// window and both would persist over each other.
-			const lockPath = join(state.machineDir, ".start-lock");
-			acquireLock(lockPath);
+			// window and both would persist over each other. Fail-fast like a second
+			// `start`: waiting would only power-cycle the machine twice.
+			const lock = acquireLockNow(machineLockPath(state.machineDir), "device-mode", machineLockOptions(state.name, state.machineDir));
 			try {
+				assertSameMachine(state);
 				// Re-read under the lock before anything reads `state`. This handle's
 				// snapshot is taken once, at `createInstance`, and a library consumer can
 				// hold it across another process's stop/start — after which `state.pid`
@@ -895,7 +965,7 @@ function createInstance(state: MachineState): ChrInstance {
 				// device-mode is recognised as already applied instead of refused.
 				recordProvisioningStep(state, "deviceMode");
 			} finally {
-				try { unlinkSync(lockPath); } catch { /* ignore */ }
+				lock.release();
 			}
 		},
 
@@ -983,8 +1053,10 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async destroy(): Promise<void> {
-			await this.stop();
-			await this.remove();
+			await withMachineLock(state, "remove", async () => {
+				await stopUnderLock(state);
+				await removeUnderLock(state);
+			});
 		},
 
 		async subprocessEnv(): Promise<Record<string, string>> {
@@ -1122,44 +1194,6 @@ function createInstance(state: MachineState): ChrInstance {
 			},
 		},
 	};
-}
-
-/**
- * Atomically acquire an exclusive start lock for a machine directory.
- * Uses O_CREAT|O_EXCL so concurrent attempts are rejected by the OS — no TOCTOU race.
- * If the lock is stale (owning process is dead) it is silently replaced.
- * Throws MACHINE_LOCKED if the lock is held by a live process.
- */
-export function acquireLock(lockPath: string): void {
-	let fd: number;
-	try {
-		fd = openSync(lockPath, "wx"); // O_WRONLY | O_CREAT | O_EXCL — atomic
-		writeSync(fd, String(process.pid));
-		closeSync(fd);
-		return;
-	} catch {
-		// File already exists — check whether owner is still alive
-	}
-
-	let ownerPid: number | undefined;
-	try {
-		ownerPid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
-	} catch { /* unreadable — treat as stale */ }
-
-	if (ownerPid && !Number.isNaN(ownerPid)) {
-		try {
-			process.kill(ownerPid, 0); // probes liveness; throws ESRCH if process not found
-			throw new QuickCHRError("MACHINE_LOCKED", `Machine is already being started (pid ${ownerPid})`);
-		} catch (e) {
-			if (e instanceof QuickCHRError) throw e;
-			// Process is dead — stale lock, overwrite
-			writeFileSync(lockPath, String(process.pid));
-			return;
-		}
-	}
-
-	// Owner unreadable or zero — treat as stale, overwrite
-	writeFileSync(lockPath, String(process.pid));
 }
 
 /** Resolve the host architecture to a CHR architecture. */
@@ -1362,7 +1396,8 @@ export async function cleanupAfterBootFailure(
 	restore?: MachineState,
 ): Promise<string> {
 	const quoted = shellQuote(name);
-	try { await instance.stop(); } catch { /* ignore */ }
+	// Called from inside a start or relaunch that holds the machine lock.
+	try { await stopUnderLock(instance.state); } catch { /* ignore */ }
 	if (failure.preserved) {
 		return ` Machine "${name}" was preserved for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — ` +
 			(restore ? `reset it with \`quickchr clean ${quoted}\` and start it again, or ` : "") +
@@ -1385,7 +1420,7 @@ export async function cleanupAfterBootFailure(
 			return ` Resetting machine "${name}" also failed (${reason}) — reset it with \`quickchr clean ${quoted}\` or remove it with \`quickchr remove ${quoted}\`.`;
 		}
 	}
-	try { await instance.remove(); } catch { /* ignore */ }
+	try { await removeUnderLock(instance.state); } catch { /* ignore */ }
 	return ` Machine "${name}" has been cleaned up automatically — set QUICKCHR_PRESERVE_ON_FAILURE=1 to keep a failed machine for diagnosis.`;
 }
 
@@ -1417,13 +1452,14 @@ export async function rollbackFailedProvisioning(
 ): Promise<string> {
 	const name = instance.state.name;
 	const quoted = shellQuote(name);
+	// Called from inside a start or relaunch that holds the machine lock.
 	try {
-		await instance.stop();
+		await stopUnderLock(instance.state);
 		if (preserveOnFailure()) {
 			return ` Machine "${name}" was preserved half-provisioned for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — reset it with \`quickchr clean ${quoted}\` and repeat the start command, or remove it with \`quickchr remove ${quoted}\`.`;
 		}
 		if (!restore) {
-			await instance.remove();
+			await removeUnderLock(instance.state);
 			return ` Machine "${name}" has been removed — re-run the same command to retry.`;
 		}
 		await resetGuestToFactory(restore);
@@ -1786,6 +1822,112 @@ async function applyDeviceMode(
 	log.status(`  Device-mode verified: ${formatDeviceModeSelection(resolvedDeviceMode)}`);
 }
 
+/** How long a creation waits for another to finish choosing its port block. The
+ *  critical section is a handful of loopback connect probes, so this is headroom for a
+ *  busy host, not an expected wait. */
+const ALLOCATION_LOCK_WAIT_MS = 60_000;
+
+/** An explicit `portBase` is the caller's choice and is never moved: one that overlaps
+ *  another machine's block — persisted or still being created — is a `PORT_CONFLICT`
+ *  here rather than a `SPAWN_FAILED` from QEMU's bind later. */
+function assertPortBaseFree(
+	portBase: number,
+	name: string,
+	machines: MachineState[],
+	reserved: Array<{ name: string; portBase: number }>,
+): void {
+	const others = [
+		...machines.filter((m) => m.name !== name).map((m) => ({ name: m.name, portBase: m.portBase })),
+		...reserved,
+	];
+	const clash = others.find((o) => Math.abs(o.portBase - portBase) < PORTS_PER_BLOCK);
+	if (clash) {
+		throw new QuickCHRError(
+			"PORT_CONFLICT",
+			`portBase ${portBase} overlaps machine "${clash.name}" (portBase ${clash.portBase}) — each machine takes a block of ${PORTS_PER_BLOCK} ports. Pick a base at least ${PORTS_PER_BLOCK} away, or omit portBase to have one allocated.`,
+		);
+	}
+}
+
+/** Choose a new machine's port block and NIC MACs, avoiding every persisted machine
+ *  and every creation still in flight. Choosing is not claiming: only
+ *  `claimNewMachine()` makes the result safe from a concurrent creation. */
+async function pickNewMachineResources(
+	name: string,
+	opts: StartOptions,
+): Promise<{ portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[] }> {
+	const machines = loadAllMachines();
+	const reserved = listReservations(name);
+	if (opts.portBase) assertPortBaseFree(opts.portBase, name, machines, reserved);
+	const usedBases = [...getUsedPortBases(), ...reserved.map((r) => r.portBase)];
+	const portBase = opts.portBase || await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts);
+	validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, machines, name);
+	const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
+
+	const usedMacs = getUsedMacs();
+	for (const r of reserved) for (const mac of r.macs) usedMacs.add(mac);
+	const networks = assignMacs(name, resolveStartNetworks(opts.networks, opts.network), usedMacs);
+	return { portBase, ports, networks };
+}
+
+/** Choose a new machine's resources and take its machine lock with them recorded in
+ *  it, all while holding the data-dir allocation lock (#140).
+ *
+ *  Without this, two concurrent creations both read the same machine list, both probe
+ *  the same free ports, and both pick the same block; one QEMU then fails its
+ *  `hostfwd` bind. Nothing persists the choice until `saveMachine()`, which for
+ *  `start()` is after the download and the spawn, so the choice itself has to be
+ *  visible: the machine lock carries it as a reservation, `listReservations()` reads
+ *  it, and it ends when the lock is released — by which time `machine.json` holds it,
+ *  or the creation failed and there is nothing left to hold. A crashed creator's
+ *  reservation dies with its pid.
+ *
+ *  The machine lock is fail-fast. A live holder is another create of the same name. */
+export async function claimNewMachine(
+	name: string,
+	op: Extract<LockOperation, "add" | "start" | "foreground">,
+	opts: StartOptions,
+): Promise<{ lock: HeldLock; portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[] }> {
+	ensureDir(getDataDir());
+	const allocation = await acquireLock(allocationLockPath(), "allocate", {
+		waitMs: ALLOCATION_LOCK_WAIT_MS,
+		subject: "The port allocator",
+	});
+	try {
+		const picked = await pickNewMachineResources(name, opts);
+		const machineDir = getMachineDir(name);
+		const lockOpts = {
+			...machineLockOptions(name, machineDir),
+			reserve: {
+				portBase: picked.portBase,
+				macs: picked.networks.flatMap((n) => (n.mac ? [n.mac] : [])),
+			},
+		};
+		// The lock lives in the directory, so the directory comes first. A refusal here
+		// means a live holder owns the directory — a create of the same name, or a
+		// remove — and it, not this call, cleans it up. A remove renames the directory
+		// away in one step; if that lands between the two lines, make a fresh one.
+		let lock: HeldLock | undefined;
+		for (let tries = 0; !lock; tries++) {
+			ensureDir(machineDir);
+			try {
+				lock = acquireLockNow(machineLockPath(machineDir), op, lockOpts);
+			} catch (e) {
+				if (!(e instanceof QuickCHRError && e.code === "MACHINE_NOT_FOUND") || tries >= 2) throw e;
+			}
+		}
+		// Another create of this name may have finished between the caller's existence
+		// check and this lock.
+		if (existsSync(join(machineDir, "machine.json"))) {
+			lock.release();
+			throw new QuickCHRError("MACHINE_EXISTS", `Machine "${name}" was created by another process while this one was starting.`);
+		}
+		return { lock, ...picked };
+	} finally {
+		allocation.release();
+	}
+}
+
 /**
  * Main entry point for managing MikroTik CHR virtual machines via QEMU.
  *
@@ -1859,16 +2001,9 @@ export class QuickCHR {
 				: new QuickCHRError("MACHINE_EXISTS", `Machine "${name}" already exists. Use 'quickchr start ${name}' to start it.`);
 		}
 
-		const usedBases = getUsedPortBases();
-		const portBase = opts.portBase ?? await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts);
-		validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, loadAllMachines(), name);
-		const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
-
 		const machineDir = getMachineDir(name);
 		assertSufficientQuickchrStorage(`prepare CHR ${name}`);
-		ensureDir(machineDir);
-		const lockPath = join(machineDir, ".start-lock");
-		acquireLock(lockPath);
+		const { lock, portBase, ports, networks } = await claimNewMachine(name, "add", opts);
 		try {
 			const cachedImg = await ensureCachedImage(version, arch);
 			copyImageToMachine(cachedImg, machineDir);
@@ -1885,7 +2020,7 @@ export class QuickCHR {
 				arch,
 				cpu: opts.cpu ?? 1,
 				mem: defaultMem(arch, opts.mem),
-				networks: assignMacs(name, resolveStartNetworks(opts.networks, opts.network), getUsedMacs()),
+				networks,
 				ports,
 				packages: opts.packages ?? [],
 				installAllPackages: opts.installAllPackages,
@@ -1916,11 +2051,11 @@ export class QuickCHR {
 			// directory it was supposed to clean up. Nothing runs after saveMachine()
 			// but `return state`, so a readable file here means the create succeeded.
 			if (isOrphanMachineDir(name)) {
-				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
+				try { removeState(name); } catch { /* best effort */ }
 			}
 			throw err;
 		} finally {
-			try { unlinkSync(lockPath); } catch { /* ignore */ }
+			lock.release();
 		}
 	}
 
@@ -2087,40 +2222,18 @@ export class QuickCHR {
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 		if (!opts.dryRun) requireHostFor(arch);
 
-		// Allocate port block
-		const usedBases = getUsedPortBases();
-		const portBase = opts.portBase
-			? opts.portBase
-			: await findAvailablePortBlock(
-				usedBases,
-				opts.excludePorts,
-				opts.extraPorts,
-			);
-
-		validateExplicitExtraPorts(
-			opts.extraPorts,
-			portBase,
-			opts.excludePorts,
-			loadAllMachines(),
-			name,
-		);
-
-		const ports = buildPortMappings(
-			portBase,
-			opts.excludePorts,
-			opts.extraPorts,
-		);
-
-		// Dry run — return instance handle without actually spawning
+		// Dry run — return instance handle without actually spawning. Nothing is
+		// claimed: a dry run persists nothing for another create to collide with.
 		if (opts.dryRun) {
 			const machineDir = getMachineDir(name);
+			const { portBase, ports, networks } = await pickNewMachineResources(name, opts);
 			const state: MachineState = {
 				name,
 				version,
 				arch,
 				cpu: opts.cpu ?? 1,
 				mem: defaultMem(arch, opts.mem),
-				networks: assignMacs(name, resolveStartNetworks(opts.networks, opts.network), getUsedMacs()),
+				networks,
 				ports,
 				packages: opts.packages ?? [],
 				installAllPackages: opts.installAllPackages,
@@ -2141,13 +2254,31 @@ export class QuickCHR {
 			return createInstance(state);
 		}
 
-		// Acquire a lock to prevent concurrent starts of the same machine
 		const machineDir = getMachineDir(name);
 		assertSufficientQuickchrStorage(`start CHR ${name}`);
 		const dirCreatedHere = !existsSync(machineDir);
-		ensureDir(machineDir);
-		const lockPath = join(machineDir, ".start-lock");
-		acquireLock(lockPath);
+
+		const background = opts.background ?? true;
+
+		// Provisioning includes any work that requires the machine to have booted first.
+		// When foreground mode is requested WITH provisioning, we must boot in background,
+		// provision (packages/user/license), then attach the serial socket to stdio.
+		// Without provisioning, foreground mode runs QEMU with stdio directly (classic path).
+		const hasProvisioning = !!(
+			opts.installAllPackages ||
+			(opts.packages && opts.packages.length > 0) ||
+			opts.user ||
+			opts.disableAdmin ||
+			opts.license ||
+			hasDeviceModeProvisioning ||
+			opts.secureLogin === true
+		);
+
+		const { lock, portBase, ports, networks: networkConfigs } = await claimNewMachine(
+			name,
+			!background && !hasProvisioning ? "foreground" : "start",
+			opts,
+		);
 		// Endpoints are claimed before QEMU is spawned, because resolution needs to know
 		// which end this machine holds. A launch that fails before its state is persisted
 		// has no instance lifecycle to release them later, so a failed start would leave a
@@ -2170,24 +2301,6 @@ export class QuickCHR {
 		const bootDisk = diskArtifacts.bootDisk;
 		const extraDiskConfigs = diskArtifacts.extraDisks;
 
-		// Build machine config
-		const background = opts.background ?? true;
-
-		// Provisioning includes any work that requires the machine to have booted first.
-		// When foreground mode is requested WITH provisioning, we must boot in background,
-		// provision (packages/user/license), then attach the serial socket to stdio.
-		// Without provisioning, foreground mode runs QEMU with stdio directly (classic path).
-		const hasProvisioning = !!(
-			opts.installAllPackages ||
-			(opts.packages && opts.packages.length > 0) ||
-			opts.user ||
-			opts.disableAdmin ||
-			opts.license ||
-			hasDeviceModeProvisioning ||
-			opts.secureLogin === true
-		);
-
-		const networkConfigs = assignMacs(name, resolveStartNetworks(opts.networks, opts.network), getUsedMacs());
 		if (hasProvisioning && !hasUserModeNetwork(networkConfigs)) {
 			throw new QuickCHRError(
 				"NETWORK_UNAVAILABLE",
@@ -2371,12 +2484,12 @@ export class QuickCHR {
 		// QEMU mux console (Ctrl-A X to quit, Ctrl-A C for monitor — standard QEMU
 		// shortcuts that are well-documented and googleable).
 		if (!background && hasProvisioning) {
-			await instance.stop();
+			await stopUnderLock(state);
 			// Brief pause for QEMU to flush and release the disk image
 			await Bun.sleep(1000);
-			// Release lock before re-launching — _launchExisting acquires its own.
-			// The outer finally block will attempt a second unlink; that is harmless.
-			try { unlinkSync(lockPath); } catch { /* ignore */ }
+			// Release the lock before re-launching — _launchExisting acquires its own.
+			// The outer finally releases again, which is a no-op.
+			lock.release();
 			return QuickCHR._launchExisting(state, false, undefined, logger);
 		}
 
@@ -2394,11 +2507,11 @@ export class QuickCHR {
 			// that already exist, and a directory this call did not create is never ours
 			// to delete, whatever state it is in.
 			if (dirCreatedHere && isOrphanMachineDir(name)) {
-				try { rmSync(machineDir, { recursive: true, force: true }); } catch { /* best effort */ }
+				try { removeState(name); } catch { /* best effort */ }
 			}
 			throw err;
 		} finally {
-			try { unlinkSync(lockPath); } catch { /* ignore */ }
+			lock.release();
 		}
 	}
 
@@ -2564,12 +2677,44 @@ export class QuickCHR {
 		logger?: ProgressLogger,
 		wait = true,
 	): Promise<ChrInstance> {
-		const lockPath = join(state.machineDir, ".start-lock");
-		acquireLock(lockPath);
+		const wantsProvisioning = (opts: typeof provisioningOpts) => !!(
+			opts && (
+				opts.installAllPackages ||
+				(opts.packages?.length ?? 0) > 0 ||
+				opts.deviceMode ||
+				opts.user ||
+				opts.disableAdmin ||
+				opts.license ||
+				opts.secureLogin === true
+			)
+		);
+		let hasProvisioning = wantsProvisioning(provisioningOpts);
+		const lock = acquireLockNow(
+			machineLockPath(state.machineDir),
+			!background && !hasProvisioning ? "foreground" : "start",
+			machineLockOptions(state.name, state.machineDir),
+		);
 		// Same pre-persistence window as start(): a relaunch that claims an endpoint and
 		// then fails to spawn would keep it, with no instance to release it.
 		let unpersistedSocketClaim: MachineState | undefined;
 		try {
+
+		// `state` is the caller's snapshot, read before the lock was taken; everything
+		// below acts on it, `state.pid` included (#180). Re-read it, and if another
+		// start got the machine running in between, hand back that one rather than
+		// booting a second QEMU on the same disk.
+		assertSameMachine(state);
+		refreshMachineState(state);
+		if (isMachineRunning(state)) return createInstance(state);
+		// `provisioningOpts` was worked out from that snapshot too. If another start
+		// booted the machine in between, the window is shut and running them would be
+		// a second first boot: check them against the machine as it is now, and drop
+		// whatever that start already applied.
+		if (provisioningOpts && !isProvisioningWindowOpen(state)) {
+			assertProvisioningWindow(state, provisioningOpts);
+			provisioningOpts = undefined;
+			hasProvisioning = false;
+		}
 
 		const diskPath = join(state.machineDir, "disk.img");
 		if (!existsSync(diskPath)) {
@@ -2585,17 +2730,6 @@ export class QuickCHR {
 		const bootDisk = diskArtifacts.bootDisk;
 		const extraDiskConfigs = diskArtifacts.extraDisks;
 
-		const hasProvisioning = !!(
-			provisioningOpts && (
-				provisioningOpts.installAllPackages ||
-				(provisioningOpts.packages?.length ?? 0) > 0 ||
-				provisioningOpts.deviceMode ||
-				provisioningOpts.user ||
-				provisioningOpts.disableAdmin ||
-				provisioningOpts.license ||
-				provisioningOpts.secureLogin === true
-			)
-		);
 		// Always boot in background when provisioning is needed
 		const spawnBackground = hasProvisioning ? true : background;
 		// The record a failed first boot rolls back to — taken before this launch writes
@@ -2727,7 +2861,7 @@ export class QuickCHR {
 			if (unpersistedSocketClaim) unregisterSocketMembers(unpersistedSocketClaim);
 			throw err;
 		} finally {
-			try { unlinkSync(lockPath); } catch { /* ignore */ }
+			lock.release();
 		}
 	}
 
@@ -2783,20 +2917,20 @@ export class QuickCHR {
 		// A create still in flight is indistinguishable from an orphan by directory
 		// contents alone — add()/start() write machine.json last, so the window between
 		// ensureDir() and saveMachine() looks exactly like a half-made machine. The
-		// start-lock is what tells them apart, so take it: acquireLock() throws
-		// MACHINE_LOCKED while a live creator holds it, and replaces one whose owner is
-		// gone — which is the case this recovery exists for.
-		const lockPath = join(getMachineDir(name), ".start-lock");
-		acquireLock(lockPath);
-
-		// The creator may have finished between the check above and the lock.
-		if (!isOrphanMachineDir(name)) {
-			try { unlinkSync(lockPath); } catch { /* ignore */ }
-			return false;
+		// machine lock is what tells them apart, so take it: it throws MACHINE_LOCKED
+		// while a live creator holds it, and takes over one whose owner is gone — which
+		// is the case this recovery exists for. No waiting: a live creator means this is
+		// not an orphan, and the answer is to let it finish.
+		const lock = acquireLockNow(machineLockPath(getMachineDir(name)), "remove-orphan", machineLockOptions(name, getMachineDir(name)));
+		try {
+			// The creator may have finished between the check above and the lock.
+			if (!isOrphanMachineDir(name)) return false;
+			removeState(name);
+			return true;
+		} finally {
+			// A no-op once the directory has gone; releases it if removal threw.
+			lock.release();
 		}
-
-		removeState(name);
-		return true;
 	}
 
 	/** Run doctor checks for prerequisites. */

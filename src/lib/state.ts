@@ -2,7 +2,7 @@
  * Machine state persistence — JSON files in ~/.local/share/quickchr/machines/.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join, } from "node:path";
 import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -285,8 +285,70 @@ export function removeMachine(name: string): void {
 	if (!existsSync(dir)) {
 		throw new QuickCHRError("MACHINE_NOT_FOUND", `Machine "${name}" not found`);
 	}
-	rmSync(dir, { recursive: true, force: true });
+	// Out of `machines/` in one step, then deleted. A recursive delete in place removes
+	// entries one by one, so there is a window where the machine lock (`.lock/`, inside
+	// the directory) is gone while the directory is not, and a waiter or a same-named
+	// create could take a fresh lock in a directory that is being deleted. After the
+	// rename the name is simply free.
+	//
+	// There is no in-place fallback, because it would reopen exactly that window. A
+	// rename can fail briefly while a scanner or indexer holds a handle (Windows refuses
+	// to rename a directory with one open), so it is retried. If it still fails, the
+	// directory is left alone and the failure is reported.
+	const trashDir = join(getDataDir(), ".removing");
+	const trash = join(trashDir, `${name}.${process.pid}.${crypto.randomUUID()}`);
+	ensureDir(trashDir);
+	sweepAbandonedRemovals(trashDir);
+	for (let attempt = 1; ; attempt++) {
+		try {
+			renameSync(dir, trash);
+			break;
+		} catch (e) {
+			if (attempt >= REMOVE_RENAME_ATTEMPTS) {
+				throw new QuickCHRError(
+					"STATE_ERROR",
+					`Could not remove machine "${name}": moving ${dir} aside failed (${(e as Error).message}). ` +
+					`The directory was left in place — close anything using it and run 'quickchr remove ${name}' again.`,
+				);
+			}
+			Bun.sleepSync(REMOVE_RENAME_RETRY_MS);
+		}
+	}
+	// The name is already free, so a failed delete does not fail the removal. The
+	// files stay under `.removing/` and the next removal sweeps them.
+	try {
+		rmSync(trash, { recursive: true, force: true });
+	} catch (e) {
+		console.warn(`Warning: machine "${name}" is removed, but deleting its files at ${trash} failed (${(e as Error).message}). The next 'quickchr remove' retries it, or delete that directory by hand.`);
+	}
 }
+
+/** Delete what earlier removals moved aside and did not finish deleting: a delete that
+ *  failed, or a process that stopped after its rename. Each entry is
+ *  `<name>.<pid>.<uuid>`. One whose pid is alive in another process is still being
+ *  deleted, so it is left alone. Best effort: a failure here never fails a removal. */
+function sweepAbandonedRemovals(trashDir: string): void {
+	let entries: string[];
+	try { entries = readdirSync(trashDir); } catch { return; }
+	for (const entry of entries) {
+		const pid = Number(entry.split(".").at(-2));
+		if (!Number.isInteger(pid) || pid <= 0) continue;
+		if (pid !== process.pid) {
+			try {
+				process.kill(pid, 0);
+				continue; // still being deleted by that process
+			} catch (e) {
+				if ((e as NodeJS.ErrnoException).code === "EPERM") continue;
+			}
+		}
+		try { rmSync(join(trashDir, entry), { recursive: true, force: true }); } catch { /* next time */ }
+	}
+}
+
+/** How long `removeMachine()` keeps trying to move a directory aside: about 2 s in
+ *  all, enough for a scanner to let go of a handle. */
+const REMOVE_RENAME_ATTEMPTS = 10;
+const REMOVE_RENAME_RETRY_MS = 200;
 
 /** Update the status of a machine. */
 export function updateMachineStatus(

@@ -146,7 +146,7 @@ fail on exactly the machines the route was written for (reproduced on CHR 7.24.4
 `resolveAuth(state).header`. Any new post-boot provisioning path inherits the same
 question — and `state.user` is not the answer to it until the user step has run.
 
-**A post-boot apply takes `.start-lock`, and re-reads state under it.** `setDeviceMode()` terminates QEMU, spawns a
+**A post-boot apply takes the machine lock (`.lock`), and re-reads state under it.** `setDeviceMode()` terminates QEMU, spawns a
 replacement and rewrites `machine.json` — that is a relaunch, and it holds the same
 lock every other relaunch does. Without it a concurrent `start` spawns a second QEMU
 into the power-cycle window and both persist over each other. The applicability check
