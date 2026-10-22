@@ -34,12 +34,15 @@ afterEach(() => {
 
 const STORAGE_MODULE = join(import.meta.dir, "../../src/lib/storage.ts");
 
-/** Free space as a child process sees it with a stub `df` first on its PATH, plus
- *  statfsSync's answer for the same path, read in the same child. A child because Bun
- *  resolves a spawned command against the PATH the process started with — setting
- *  process.env.PATH here would not reach freeBytesForPath()'s `df`. `availableKb: null`
- *  makes the stub exit 1, forcing the statfsSync fallback. */
-async function freeSpaceWithStubDf(availableKb: number | null): Promise<{ freeBytes: number; statfsFree: number }> {
+/** Free space as a child process reports it, with a stub `df` first on its PATH and,
+ *  optionally, `statfsSync` replaced. A child because Bun resolves a spawned command
+ *  against the PATH the process started with — setting process.env.PATH here would not
+ *  reach freeBytesForPath()'s `df`. `availableKb: null` makes the stub exit 1, forcing
+ *  the statfsSync fallback. Returns the report and every path statfsSync was asked about. */
+async function freeSpaceInChild(
+	availableKb: number | null,
+	statfs?: { bavail: number; bsize: number },
+): Promise<{ freeBytes: number; statPath: string; statfsPaths: string[] }> {
 	const bin = join(TEST_DIR, "stub-bin");
 	mkdirSync(bin, { recursive: true });
 	// The failing variant still prints a parseable 1 KiB line: only the exit status says
@@ -51,11 +54,14 @@ async function freeSpaceWithStubDf(availableKb: number | null): Promise<{ freeBy
 	writeFileSync(join(bin, "df"), script);
 	chmodSync(join(bin, "df"), 0o755);
 	const code = `
-		import { statfsSync } from "node:fs";
-		import { getQuickchrStorageReport } from ${JSON.stringify(STORAGE_MODULE)};
+		import { spyOn } from "bun:test";
+		import * as fs from "node:fs";
+		const statfs = ${JSON.stringify(statfs ?? null)};
+		const statfsPaths = [];
+		if (statfs) spyOn(fs, "statfsSync").mockImplementation((path) => { statfsPaths.push(String(path)); return statfs; });
+		const { getQuickchrStorageReport } = await import(${JSON.stringify(STORAGE_MODULE)});
 		const report = getQuickchrStorageReport();
-		const fs = statfsSync(report.statPath);
-		console.log(JSON.stringify({ freeBytes: report.freeBytes, statfsFree: fs.bavail * (fs.bsize || 4096) }));
+		console.log(JSON.stringify({ freeBytes: report.freeBytes, statPath: report.statPath, statfsPaths }));
 	`;
 	const proc = Bun.spawn([process.execPath, "-e", code], {
 		env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` },
@@ -118,18 +124,32 @@ describe("storage helpers", () => {
 	});
 
 	test.skipIf(process.platform === "win32")("reads free space from df's Available column (POSIX)", async () => {
-		const { freeBytes } = await freeSpaceWithStubDf(7_000_000);
+		// statfs is stubbed to a different answer, so a match proves df was the source.
+		const { freeBytes, statfsPaths } = await freeSpaceInChild(7_000_000, { bavail: 3, bsize: 4096 });
 		expect(freeBytes).toBe(7_000_000 * 1024);
+		expect(statfsPaths).toEqual([]);
 	});
 
-	test("falls back to statfsSync when df fails — the only path Windows takes (#193)", async () => {
+	describe("statfsSync fallback — the only path Windows takes (#193)", () => {
 		// On POSIX the failing df forces the fallback; on Windows df is never consulted, so
 		// this is the native path either way. The stub prints 1 KiB before exiting 1, so a
-		// fallback that read df's output anyway would report 1024. Free space moves between
-		// the two reads on a busy disk, so compare to statfs within a margin.
-		const { freeBytes, statfsFree } = await freeSpaceWithStubDf(null);
-		expect(freeBytes).toBeGreaterThan(1024);
-		expect(Math.abs(freeBytes - statfsFree)).toBeLessThan(64 * 1024 ** 2);
+		// fallback that read df's output anyway would report 1024. statfs is stubbed too,
+		// so the expected value is exact rather than a live disk reading.
+		test("returns bavail × bsize for the measured path", async () => {
+			const { freeBytes, statPath, statfsPaths } = await freeSpaceInChild(null, { bavail: 123_457, bsize: 8192 });
+			expect(freeBytes).toBe(123_457 * 8192);
+			expect(statfsPaths).toEqual([statPath]);
+		});
+
+		test("reports zero when the filesystem is full", async () => {
+			const { freeBytes } = await freeSpaceInChild(null, { bavail: 0, bsize: 4096 });
+			expect(freeBytes).toBe(0);
+		});
+
+		test("treats a zero block size as 4096", async () => {
+			const { freeBytes } = await freeSpaceInChild(null, { bavail: 10, bsize: 0 });
+			expect(freeBytes).toBe(10 * 4096);
+		});
 	});
 
 	test("throws INSUFFICIENT_DISK_SPACE when below the requested threshold", () => {

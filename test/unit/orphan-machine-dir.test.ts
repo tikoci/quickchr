@@ -5,6 +5,11 @@ import { delimiter, join } from "node:path";
 const TEST_DIR = join(import.meta.dir, ".tmp-orphan-machine-dir");
 const STUB_BIN = join(TEST_DIR, "stub-bin");
 const CLI = join(import.meta.dir, "../../src/cli/index.ts");
+/** add() checks free space before it creates anything. These tests are about what a
+ *  failed add leaves behind, so the CLI child runs with the gate stubbed: on a checkout
+ *  with under 10 GiB free the real gate refused first, and "survives a failed second
+ *  add" failed while "a throw after ensureDir" passed without reaching cleanup (#193). */
+const AMPLE_STORAGE = join(import.meta.dir, "helpers/ample-storage.ts");
 
 /** `add()` calls `requireQemu(arch)` before it creates anything, and that only checks
  *  the binary is findable on PATH (`findQemuBinary`). These stubs satisfy that check on
@@ -18,14 +23,6 @@ function installQemuStubs() {
 		writeFileSync(path, `#!/bin/sh\necho "stub ${bin} was executed — this test must not reach QEMU" >&2\nexit 1\n`);
 		chmodSync(path, 0o755);
 	}
-	// add() checks free space before it creates anything. These tests are about what a
-	// failed add leaves behind, not about the host's disk, so report ample space: on a
-	// checkout with under 10 GiB free the real gate refused first, and "survives a failed
-	// second add" failed while "a throw after ensureDir" passed without reaching cleanup
-	// (#193). POSIX only — Windows reads statfsSync, not df.
-	const df = join(STUB_BIN, "df");
-	writeFileSync(df, "#!/bin/sh\necho 'Filesystem 1024-blocks Used Available Capacity Mounted on'\necho 'stub 2147483648 0 2147483648 0% /'\n");
-	chmodSync(df, 0o755);
 }
 
 /** A minimal image that passes `isUsableCachedImage()` — an MBR signature plus a
@@ -45,7 +42,7 @@ function cachedImageName(version: string, arch: string): string {
 }
 
 async function runQuickchr(args: string[]) {
-	const proc = Bun.spawn(["bun", CLI, ...args], {
+	const proc = Bun.spawn(["bun", "--preload", AMPLE_STORAGE, CLI, ...args], {
 		env: {
 			...process.env,
 			PATH: `${STUB_BIN}${delimiter}${process.env.PATH ?? ""}`,
