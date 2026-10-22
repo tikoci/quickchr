@@ -244,9 +244,9 @@
 	},
 	"7.24.5": {
 		"linux-arm64": {
-			"conclusion": "fail",
-			"date": "2026-10-22T21:01:15.348Z",
-			"run_id": "39826703794"
+			"conclusion": "pass",
+			"date": "2026-10-22T22:11:23.074Z",
+			"run_id": "39857054586"
 		},
 		"linux-x86": {
 			"conclusion": "pass",
