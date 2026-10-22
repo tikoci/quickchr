@@ -210,10 +210,12 @@ describe("root help lists every dispatched command (#193)", () => {
 		expect(commands.filter((c) => !listed.has(c))).toEqual([]);
 	});
 
-	test("qga --help works with no machine and touches no state", async () => {
+	test("qga --help works with no machine and does not create the data dir", async () => {
+		// beforeEach creates TEST_DIR; remove it so creating the data dir is detectable.
+		rmSync(TEST_DIR, { recursive: true, force: true });
 		const result = await runQuickchr(["qga", "--help"]);
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout).toContain("QEMU Guest Agent");
-		expect(dataDirContents()).toEqual([]);
+		expect(existsSync(TEST_DIR)).toBe(false);
 	});
 });
