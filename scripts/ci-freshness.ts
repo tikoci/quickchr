@@ -17,7 +17,7 @@
  *   - no runs at all             → FAIL with a bootstrap hint
  *
  * Env: GH_REPO (owner/name), GH_TOKEN. Optional: MAIN_WORKFLOW (default
- * main.yml), MAIN_BRANCH (default main), GH_API (override for tests),
+ * main.yml), MAIN_BRANCH (default main), GH_API and GH_RETRY_BASE_MS (overrides for tests),
  * GITHUB_STEP_SUMMARY (markdown verdict appended when set).
  */
 
@@ -26,6 +26,9 @@ const TOKEN = process.env.GH_TOKEN ?? "";
 const WORKFLOW = process.env.MAIN_WORKFLOW ?? "main.yml";
 const BRANCH = process.env.MAIN_BRANCH ?? "main";
 const API = process.env.GH_API ?? "https://api.github.com";
+const GH_ATTEMPTS = 3;
+/** Overridable only so the retry test does not sleep for seconds. */
+const GH_RETRY_BASE_MS = Number(process.env.GH_RETRY_BASE_MS ?? 2000);
 
 interface WorkflowRun {
 	id: number;
@@ -37,18 +40,29 @@ interface WorkflowRun {
 
 /** GET a GitHub API path. A 404 returns null — for the workflow-runs lookup it
  *  means the workflow has never been registered on the default branch, which is
- *  the same signal as "no runs yet" (the bootstrap verdict, not a crash). */
+ *  the same signal as "no runs yet" (the bootstrap verdict, not a crash).
+ *
+ *  A 5xx is retried, a bounded few times: a 502 is GitHub failing to answer, not
+ *  an answer, and one used to fail this required check on every open PR (#151).
+ *  Every other status, including a red `main`, stays exactly as decisive. */
 async function gh(path: string): Promise<unknown> {
-	const res = await fetch(`${API}${path}`, {
-		headers: {
-			Authorization: `Bearer ${TOKEN}`,
-			Accept: "application/vnd.github+json",
-			"X-GitHub-Api-Version": "2022-11-28",
-		},
-	});
-	if (res.status === 404) return null;
-	if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`);
-	return res.json();
+	for (let attempt = 1; ; attempt++) {
+		const res = await fetch(`${API}${path}`, {
+			headers: {
+				Authorization: `Bearer ${TOKEN}`,
+				Accept: "application/vnd.github+json",
+				"X-GitHub-Api-Version": "2022-11-28",
+			},
+		});
+		if (res.status >= 500 && attempt < GH_ATTEMPTS) {
+			console.error(`ci-freshness: GET ${path} → HTTP ${res.status}, retrying (${attempt}/${GH_ATTEMPTS})`);
+			await Bun.sleep(attempt * GH_RETRY_BASE_MS);
+			continue;
+		}
+		if (res.status === 404) return null;
+		if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}`);
+		return res.json();
+	}
 }
 
 export interface Verdict {

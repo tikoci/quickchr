@@ -21,3 +21,5 @@ ignores:
   - "skills/**"
   # .venv/ is a Python virtualenv — never lint vendored dependencies
   - ".venv/**"
+  # .scratch/ is the git-ignored agent scratch directory — drafts, never published
+  - ".scratch/**"

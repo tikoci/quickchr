@@ -4,8 +4,8 @@ name: Main Integration
 # here, not on PRs — see ci.yml "integration-freshness" and ci.instructions.md).
 #
 #   push to main      → full suite + examples smoke (+ PowerShell lint) on the
-#                       gating platforms: linux/x86_64 + linux/aarch64 (KVM
-#                       when available; hosted arm64 may fall back to TCG) —
+#                       gating platforms: linux/x86_64 (KVM) + linux/aarch64
+#                       (TCG in practice — hosted arm64 has no usable KVM) —
 #                       the same bar releases require, kept continuously green.
 #                       Examples are part of the flow, not an optional extra.
 #   workflow_dispatch → same (manual freshness refresh)

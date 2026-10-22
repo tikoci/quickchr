@@ -1,9 +1,10 @@
+import { join } from "node:path";
 import { QuickCHR, type ChrInstance, type NetworkSpecifier } from "../../../src/index.ts";
 import { check, exampleMachineName } from "../../lib.ts";
 
 const cliMode = process.argv.includes("--cli");
 async function cli(args: string[], inherit = false): Promise<string> {
-	const invocation = process.env.QUICKCHR?.trim().split(/\s+/) ?? ["bun", "run", new URL("../../../src/cli/index.ts", import.meta.url).pathname];
+	const invocation = process.env.QUICKCHR?.trim().split(/\s+/) ?? ["bun", "run", join(import.meta.dir, "../../../src/cli/index.ts")];
 	const child = Bun.spawn([...invocation, ...args], { stdout: inherit ? "inherit" : "pipe", stderr: "inherit" });
 	const output = inherit ? "" : await new Response(child.stdout).text();
 	check(await child.exited === 0, `quickchr ${args[0]} failed`);

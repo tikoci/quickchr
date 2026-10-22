@@ -25,7 +25,7 @@
     "lint": "biome check . && tsc --noEmit",
     "lint:biome": "biome check .",
     "lint:typecheck": "tsc --noEmit",
-    "lint:markdown": "bunx markdownlint-cli2 '**/*.md'",
+    "lint:markdown": "markdownlint-cli2 '**/*.md'",
     "lint:cspell": "cspell lint . --no-progress",
     "lint:examples": "bun run scripts/validate-examples.ts",
     "lint:specifiers": "bun run scripts/validate-network-specifiers.ts",

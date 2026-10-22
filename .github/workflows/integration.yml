@@ -21,7 +21,7 @@ name: Integration
 #
 # Platform ids (comma-separate to combine, or use a group alias):
 #   linux-x86    ubuntu-latest      x86 CHR    KVM   standard budget
-#   linux-arm64  ubuntu-24.04-arm   arm64 CHR  KVM   standard budget (may fall back to TCG)
+#   linux-arm64  ubuntu-24.04-arm   arm64 CHR  TCG   long budget (no usable /dev/kvm in practice)
 #   macos-arm64  macos-15           arm64 CHR  TCG   standard budget (see note below)
 #   macos-x86    macos-15-intel     x86 CHR    HVF   extended budget
 #   windows-x86  windows-latest     x86 CHR    TCG   extended budget (no hw accel — slow)
@@ -260,12 +260,22 @@ jobs:
           # the job/step timeouts and tcg-smoke eligibility.
           #
           # accel grounding:
-          #   linux-x86/linux-arm64  kvm  — /dev/kvm on hosted runners; either
-          #                                 may fall back to tcg when the runner
-          #                                 ships without a writable /dev/kvm.
-          #                                 That fallback is reported as a
-          #                                 ::notice::, not drift — it is a
-          #                                 runner condition, not a stale table.
+          #   linux-x86              kvm  — /dev/kvm on hosted runners; may fall
+          #                                 back to tcg when the runner ships
+          #                                 without a writable /dev/kvm. That
+          #                                 fallback is reported as a ::notice::,
+          #                                 not drift — it is a runner condition,
+          #                                 not a stale table.
+          #   linux-arm64            tcg  — read `kvm` until 2026-10-22, but every
+          #                                 main.yml run from 2026-09-20 on detected
+          #                                 tcg (12 of 12; "-accel kvm: failed to
+          #                                 initialize kvm"). Its budget is `long`
+          #                                 because the full suite on TCG outgrew the
+          #                                 50 min standard step once #189 added
+          #                                 restart-timeout.test.ts (~226 s): the last
+          #                                 file, start-stop (~488 s), was cut to a
+          #                                 457 s cap (#151). If KVM comes back, the
+          #                                 drift warning below fires — retune then.
           #   macos-arm64            tcg  — hosted macos-15 is itself a VM
           #                                 ("Apple M1 (Virtual)"), kern.hv_support=0
           #                                 (run 29669706663), and quickchr forces
@@ -284,7 +294,7 @@ jobs:
           table() {
             case "$1" in
               linux-x86)   echo 'linux/x86_64|ubuntu-latest|kvm|standard' ;;
-              linux-arm64) echo 'linux/aarch64|ubuntu-24.04-arm|kvm|standard' ;;
+              linux-arm64) echo 'linux/aarch64|ubuntu-24.04-arm|tcg|long' ;;
               macos-arm64) echo 'macos/arm64|macos-15|tcg|standard' ;;
               macos-x86)   echo 'macos/x86_64|macos-15-intel|hvf|extended' ;;
               windows-x86) echo 'windows/x86_64|windows-latest|tcg|extended' ;;
@@ -388,6 +398,9 @@ jobs:
             # give it a generous cap. Smoke/filtered slow legs and fast legs stay
             # tight so a hang is caught quickly.
             timeout=60
+            # `long`: a full suite that runs on TCG every time but finishes well
+            # inside 60 min plus the most recent growth — sized, not open-ended.
+            [ "$budget" = "long" ] && timeout=75
             if [ "$budget" = "extended" ]; then
               if [ "$smoke" = "true" ] || [ -n "$FILTER" ]; then timeout=90; else timeout=300; fi
             fi
