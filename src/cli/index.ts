@@ -3319,8 +3319,9 @@ guest.
 
 Options:
   --all                 Start all stopped machines, in background. Accepts only
-                        --no-wait, --accel, --timeout-extra and --[no-]secure-login;
-                        any other option is refused rather than ignored
+                        --no-wait, --accel, --timeout-extra and --[no-]secure-login
+                        (plus the deprecated no-op --bg / --background); any other
+                        option is refused rather than ignored
   --no-wait             Return once QEMU is running; do not wait for RouterOS (not with --fg)
   --fg / --foreground   Run in foreground — serial console on stdio
   --bg / --background   Deprecated, does nothing: background is already the default
