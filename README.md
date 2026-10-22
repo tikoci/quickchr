@@ -365,7 +365,7 @@ console.log(result);
 
 // Stop (or remove)
 await chr.stop(); // power cut for normal teardown
-// To request guest shutdown first: await chr.shutdown({ timeoutMs: 10_000 });
+// Alternatively, replace stop() above with: await chr.shutdown({ timeoutMs: 10_000 });
 await chr.remove();
 
 console.log(chr.state.bootDiskFormat); // "qcow2"
