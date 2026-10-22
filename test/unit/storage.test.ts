@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import {
 	assertSufficientQuickchrStorage,
 	formatQuickchrUsage,
@@ -31,6 +31,41 @@ afterEach(() => {
 		process.env.QUICKCHR_DATA_DIR = originalDataDir;
 	}
 });
+
+const STORAGE_MODULE = join(import.meta.dir, "../../src/lib/storage.ts");
+
+/** Free space as a child process sees it with a stub `df` first on its PATH, plus
+ *  statfsSync's answer for the same path, read in the same child. A child because Bun
+ *  resolves a spawned command against the PATH the process started with — setting
+ *  process.env.PATH here would not reach freeBytesForPath()'s `df`. `availableKb: null`
+ *  makes the stub exit 1, forcing the statfsSync fallback. */
+async function freeSpaceWithStubDf(availableKb: number | null): Promise<{ freeBytes: number; statfsFree: number }> {
+	const bin = join(TEST_DIR, "stub-bin");
+	mkdirSync(bin, { recursive: true });
+	// The failing variant still prints a parseable 1 KiB line: only the exit status says
+	// "do not trust this", which is what freeBytesForPath() must honour.
+	const header = "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'";
+	const script = availableKb === null
+		? `#!/bin/sh\n${header}\necho 'stub 9999999 1 1 1% /'\nexit 1\n`
+		: `#!/bin/sh\n${header}\necho 'stub 9999999 1 ${availableKb} 1% /'\n`;
+	writeFileSync(join(bin, "df"), script);
+	chmodSync(join(bin, "df"), 0o755);
+	const code = `
+		import { statfsSync } from "node:fs";
+		import { getQuickchrStorageReport } from ${JSON.stringify(STORAGE_MODULE)};
+		const report = getQuickchrStorageReport();
+		const fs = statfsSync(report.statPath);
+		console.log(JSON.stringify({ freeBytes: report.freeBytes, statfsFree: fs.bavail * (fs.bsize || 4096) }));
+	`;
+	const proc = Bun.spawn([process.execPath, "-e", code], {
+		env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+	if (exitCode !== 0) throw new Error(`storage probe exited ${exitCode}: ${stderr}`);
+	return JSON.parse(stdout);
+}
 
 describe("storage helpers", () => {
 	test("reports .local as the default storage root", () => {
@@ -80,6 +115,21 @@ describe("storage helpers", () => {
 		expect(formatQuickchrUsage(report)).toContain("cache");
 		expect(formatQuickchrUsage(report)).toContain("machines");
 		expect(formatQuickchrUsage(report)).toContain("other");
+	});
+
+	test.skipIf(process.platform === "win32")("reads free space from df's Available column (POSIX)", async () => {
+		const { freeBytes } = await freeSpaceWithStubDf(7_000_000);
+		expect(freeBytes).toBe(7_000_000 * 1024);
+	});
+
+	test("falls back to statfsSync when df fails — the only path Windows takes (#193)", async () => {
+		// On POSIX the failing df forces the fallback; on Windows df is never consulted, so
+		// this is the native path either way. The stub prints 1 KiB before exiting 1, so a
+		// fallback that read df's output anyway would report 1024. Free space moves between
+		// the two reads on a busy disk, so compare to statfs within a margin.
+		const { freeBytes, statfsFree } = await freeSpaceWithStubDf(null);
+		expect(freeBytes).toBeGreaterThan(1024);
+		expect(Math.abs(freeBytes - statfsFree)).toBeLessThan(64 * 1024 ** 2);
 	});
 
 	test("throws INSUFFICIENT_DISK_SPACE when below the requested threshold", () => {

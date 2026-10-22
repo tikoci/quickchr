@@ -18,6 +18,14 @@ function installQemuStubs() {
 		writeFileSync(path, `#!/bin/sh\necho "stub ${bin} was executed — this test must not reach QEMU" >&2\nexit 1\n`);
 		chmodSync(path, 0o755);
 	}
+	// add() checks free space before it creates anything. These tests are about what a
+	// failed add leaves behind, not about the host's disk, so report ample space: on a
+	// checkout with under 10 GiB free the real gate refused first, and "survives a failed
+	// second add" failed while "a throw after ensureDir" passed without reaching cleanup
+	// (#193). POSIX only — Windows reads statfsSync, not df.
+	const df = join(STUB_BIN, "df");
+	writeFileSync(df, "#!/bin/sh\necho 'Filesystem 1024-blocks Used Available Capacity Mounted on'\necho 'stub 2147483648 0 2147483648 0% /'\n");
+	chmodSync(df, 0o755);
 }
 
 /** A minimal image that passes `isUsableCachedImage()` — an MBR signature plus a
@@ -89,6 +97,10 @@ describe("a failed add leaves nothing behind (#155)", () => {
 		]);
 		expect(result.exitCode).toBe(1);
 		expect(result.stderr).not.toContain("stub");
+		// The fault this test plants, not an earlier refusal: anything that fails before
+		// ensureDir (a storage or version check) also leaves machines/ empty.
+		expect(result.stderr).toContain("unlink");
+		expect(result.stderr).toContain(cachedImageName("7.24.4", "x86"));
 		expect(machinesDirContents()).toEqual([]);
 	});
 

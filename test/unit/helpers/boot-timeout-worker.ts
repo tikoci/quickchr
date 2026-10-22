@@ -7,6 +7,7 @@ import * as qemu from "../../../src/lib/qemu.ts";
 import * as images from "../../../src/lib/images.ts";
 import * as diagnostics from "../../../src/lib/diagnostics.ts";
 import * as disks from "../../../src/lib/disk.ts";
+import * as storage from "../../../src/lib/storage.ts";
 import { getCacheDir, getMachineDir, loadMachine, saveMachine } from "../../../src/lib/state.ts";
 import { getInstanceCredentials, saveInstanceCredentials } from "../../../src/lib/credentials.ts";
 import { currentHolder, machineLockPath } from "../../../src/lib/lock.ts";
@@ -20,6 +21,9 @@ const machineDir = getMachineDir(name);
 mkdirSync(getCacheDir(), { recursive: true });
 const factory = join(getCacheDir(), "chr-7.24.5.img");
 writeFileSync(factory, "factory-disk");
+// Routing is under test, not the host's free space: with the real gate, a checkout on
+// a filesystem under 10 GiB refuses INSUFFICIENT_DISK_SPACE before any boot (#193).
+spyOn(storage, "assertSufficientQuickchrStorage").mockImplementation(() => storage.getQuickchrStorageReport(0, 0));
 spyOn(platform, "requireQemu").mockReturnValue("qemu");
 spyOn(platform, "detectPlatform").mockResolvedValue({ os: "linux", hostArch: "x64", packageManager: "apt", accelAvailable: ["tcg"] });
 spyOn(platform, "detectAccel").mockResolvedValue("tcg");
