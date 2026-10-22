@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	_observeLockMutations,
@@ -12,6 +12,7 @@ import {
 	legacyMachineLockPath,
 	machineLockPath,
 } from "../../src/lib/lock.ts";
+import { removeMachine } from "../../src/lib/state.ts";
 
 /**
  * The lock primitive behind the per-machine lifecycle lock (#181) and the allocation
@@ -49,16 +50,25 @@ function deadRecord(): string {
 	return JSON.stringify({ pid: DEAD_PID, op: "start", at: new Date().toISOString(), token: "dead" });
 }
 
-/** Stage record `gen` by hand. */
+/** The incarnation id hand-staged records are written under. */
+const STAGED = "staged";
+
+/** Stage record `gen` by hand, in incarnation `STAGED` unless the lock already has one. */
 function writeRecord(gen: number, content: string): string {
 	mkdirSync(LOCK, { recursive: true });
-	const path = join(LOCK, String(gen));
+	if (!existsSync(join(LOCK, "id"))) writeFileSync(join(LOCK, "id"), STAGED);
+	const path = join(LOCK, `${STAGED}.${gen}`);
 	writeFileSync(path, content);
 	return path;
 }
 
+/** Record numbers of the lock's current incarnation. */
 function records(): number[] {
-	return readdirSync(LOCK).filter((f) => /^\d+$/.test(f)).map(Number).sort((a, b) => a - b);
+	const id = readFileSync(join(LOCK, "id"), "utf-8").trim();
+	return readdirSync(LOCK)
+		.filter((f) => f.startsWith(`${id}.`) && /^\d+$/.test(f.slice(id.length + 1)))
+		.map((f) => Number(f.slice(id.length + 1)))
+		.sort((a, b) => a - b);
 }
 
 /** Interleave `contender` after every change the lock module makes while `fn` runs. */
@@ -134,7 +144,9 @@ describe("acquireLockNow", () => {
 	test("a record that exists but cannot be read is a holder, not an absence", () => {
 		// EISDIR on read: the shape of another user's record under a restrictive umask
 		// (EACCES), without depending on permissions that root ignores.
-		mkdirSync(join(LOCK, "1"), { recursive: true });
+		writeRecord(1, "");
+		rmSync(join(LOCK, `${STAGED}.1`));
+		mkdirSync(join(LOCK, `${STAGED}.1`));
 		try {
 			acquireLockNow(LOCK, "start");
 			expect.unreachable("should have thrown");
@@ -153,9 +165,11 @@ describe("acquireLockNow", () => {
 		expect(currentHolder(LOCK)).toBeUndefined();
 	});
 
-	test("superseded records are collected; the top always remains", () => {
+	test("superseded records are collected; a released lock keeps two", () => {
+		// The last holder's record and its released marker. Release collects before it
+		// publishes the marker, never after, so its own record waits for the next holder.
 		for (let i = 0; i < 5; i++) acquireLockNow(LOCK, "start").release();
-		expect(records()).toHaveLength(1);
+		expect(records()).toHaveLength(2);
 	});
 
 	test("a machine's lock lives in its directory and goes with it", () => {
@@ -193,6 +207,35 @@ describe("acquireLockNow", () => {
 	});
 });
 
+describe("a released holder cannot reach a replacement lock (Codex review of #190)", () => {
+	// A publishes its released marker and pauses. B takes the lock, removes the
+	// machine for real (rename, then delete), and C creates the same name and takes a
+	// fresh lock. Collection used to run after the marker, so when A resumed it
+	// listed the new directory and deleted C's record 1 (1 < 2), and D got in beside C.
+	test("nothing A does after its marker touches the same-named successor's lock", () => {
+		const a = acquireLockNow(LOCK, "start");
+		let c: HeldLock | undefined;
+		let paused = false;
+		_observeLockMutations((op, path) => {
+			if (paused || op !== "link" || !/[./]2$/.test(path)) return;
+			paused = true;
+			acquireLockNow(LOCK, "remove");
+			removeMachine("alpha");
+			mkdirSync(MACHINE_DIR, { recursive: true });
+			c = acquireLockNow(LOCK, "start");
+		});
+		try {
+			a.release();
+		} finally {
+			_observeLockMutations(undefined);
+		}
+		expect(paused).toBe(true);
+		expect(currentHolder(LOCK)?.op).toBe("start");
+		expect(() => acquireLockNow(LOCK, "clean")).toThrow();
+		c?.release();
+	});
+});
+
 describe("exclusion survives contenders whose judgement went stale (Codex review of #190)", () => {
 	// A judged record 1 dead and paused. B judged the same, claimed 2 and holds it.
 	// A wakes and acts on its old judgement; at every change A makes, C tries too.
@@ -209,7 +252,7 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 		let fired = 0;
 		interleaving(
 			() => { fired++; try { intruders.push(acquireLockNow(LOCK, "clean")); } catch { /* refused: correct */ } },
-			() => { a = claim(LOCK, 2, "stop", dead); },
+			() => { a = claim(LOCK, STAGED, 2, "stop", dead); },
 		);
 		expect(fired).toBeGreaterThan(0);
 		expect(a).toBeUndefined();
@@ -226,7 +269,7 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 		writeRecord(1, dead);
 		acquireLockNow(LOCK, "start").release();
 		const c = acquireLockNow(LOCK, "clean");
-		expect(claim(LOCK, 2, "stop", dead)).toBeUndefined();
+		expect(claim(LOCK, STAGED, 2, "stop", dead)).toBeUndefined();
 		expect(currentHolder(LOCK)?.op).toBe("clean");
 		expect(records()).toEqual([4]);
 		c.release();
@@ -234,16 +277,16 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 
 	test("a contender paused across remove and re-create cannot claim beside the new holder", () => {
 		// Codex's low-generation case: A judged dead record 1 free and paused; the
-		// machine was removed and created again; B took a fresh record 1. A's claim of
-		// 2 lands, and a predecessor check by number would pass. The check is against
-		// the record A judged, and B's record 1 is not it.
+		// machine was removed and created again; B took a fresh record 1. A's claim
+		// names the old incarnation, so it cannot land beside B's record at all, and it
+		// would fail the judged-record and current-incarnation checks if it did.
 		const dead = deadRecord();
 		writeRecord(1, dead);
 		rmSync(MACHINE_DIR, { recursive: true, force: true });
 		mkdirSync(MACHINE_DIR, { recursive: true });
 		const b = acquireLockNow(LOCK, "start");
 		expect(records()).toEqual([1]);
-		expect(claim(LOCK, 2, "stop", dead)).toBeUndefined();
+		expect(claim(LOCK, STAGED, 2, "stop", dead)).toBeUndefined();
 		expect(() => acquireLockNow(LOCK, "clean")).toThrow();
 		expect(currentHolder(LOCK)?.op).toBe("start");
 		b.release();
@@ -252,7 +295,7 @@ describe("exclusion survives contenders whose judgement went stale (Codex review
 	test("two contenders recovering the same dead holder: exactly one wins", () => {
 		const dead = deadRecord();
 		writeRecord(1, dead);
-		const results = [claim(LOCK, 2, "start", dead), claim(LOCK, 2, "clean", dead)];
+		const results = [claim(LOCK, STAGED, 2, "start", dead), claim(LOCK, STAGED, 2, "clean", dead)];
 		expect(results.filter(Boolean)).toHaveLength(1);
 		for (const r of results) r?.release();
 	});

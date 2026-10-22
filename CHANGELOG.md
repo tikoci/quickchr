@@ -186,7 +186,10 @@ provisioning quirks agents work around get fixed.
   lock ("locked by `start` (pid 4242) since 12s"), not "already being started". For
   this release a live `.start-lock` written by an older quickchr is still respected,
   and a stale one is ignored. An operation that waited out a `remove` fails with
-  `MACHINE_NOT_FOUND`. A machine started in the foreground holds the lock until its
+  `MACHINE_NOT_FOUND`. `remove` moves the machine directory aside in one step before
+  deleting it. If something holds the directory open past a short retry, `remove` fails
+  with `STATE_ERROR` and leaves it in place, instead of deleting it piece by piece. A
+  machine started in the foreground holds the lock until its
   VM exits, and nothing waits for it. (#181)
 
 - `quickchr set <name> --device-mode…` and `setDeviceMode()` print every setting that

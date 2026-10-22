@@ -11,11 +11,11 @@
  * now wait, bounded, for a holder — and act on state re-read under the lock (#180).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { QuickCHR, claimNewMachine } from "../../src/lib/quickchr.ts";
 import { acquireLockNow, currentHolder, listReservations, machineLockPath } from "../../src/lib/lock.ts";
-import { getMachineDir, loadMachine, saveMachine } from "../../src/lib/state.ts";
+import { getMachineDir, loadMachine, removeMachine, saveMachine } from "../../src/lib/state.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
 const TEST_DIR = join(import.meta.dir, ".tmp-machine-lock-concurrency");
@@ -273,6 +273,35 @@ describe("remove() and a same-named create (Codex review of #190)", () => {
 		const retry = await claimNewMachine("again", "add", {});
 		retry.lock.release();
 	});
+
+	// Codex P2: when the rename failed, removeMachine() fell back to deleting in
+	// place — the very window the rename exists to close. Now it retries, then refuses
+	// and leaves the directory, lock and all. Made to fail by denying writes on the
+	// rename target, which root ignores and Windows does not model, hence the skip.
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"a remove whose rename keeps failing leaves the machine, lock and all, and says so",
+		() => {
+			const state = machine("stuck");
+			seed(state);
+			const holder = acquireLockNow(machineLockPath(state.machineDir), "remove");
+			const trashDir = join(TEST_DIR, ".removing");
+			mkdirSync(trashDir, { recursive: true });
+			chmodSync(trashDir, 0o500);
+			try {
+				removeMachine("stuck");
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expectErrorCode(e, "STATE_ERROR");
+				expect((e as Error).message).toContain("left in place");
+			} finally {
+				chmodSync(trashDir, 0o700);
+			}
+			expect(existsSync(join(state.machineDir, "machine.json"))).toBe(true);
+			expect(currentHolder(machineLockPath(state.machineDir))?.op).toBe("remove");
+			holder.release();
+		},
+		10_000,
+	);
 
 	test("remove() leaves nothing behind: no machine directory and no lock", async () => {
 		const state = machine("tidy");

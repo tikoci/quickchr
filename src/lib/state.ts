@@ -290,17 +290,36 @@ export function removeMachine(name: string): void {
 	// the directory) is gone while the directory is not, and a waiter or a same-named
 	// create could take a fresh lock in a directory that is being deleted. After the
 	// rename the name is simply free.
-	const trash = join(getDataDir(), ".removing", `${name}.${process.pid}.${crypto.randomUUID()}`);
-	try {
-		ensureDir(join(getDataDir(), ".removing"));
-		renameSync(dir, trash);
-	} catch {
-		// Windows refuses to rename a directory with an open handle in it; delete in place.
-		rmSync(dir, { recursive: true, force: true });
-		return;
+	//
+	// There is no in-place fallback, because it would reopen exactly that window. A
+	// rename can fail briefly while a scanner or indexer holds a handle (Windows refuses
+	// to rename a directory with one open), so it is retried. If it still fails, the
+	// directory is left alone and the failure is reported.
+	const trashDir = join(getDataDir(), ".removing");
+	const trash = join(trashDir, `${name}.${process.pid}.${crypto.randomUUID()}`);
+	ensureDir(trashDir);
+	for (let attempt = 1; ; attempt++) {
+		try {
+			renameSync(dir, trash);
+			break;
+		} catch (e) {
+			if (attempt >= REMOVE_RENAME_ATTEMPTS) {
+				throw new QuickCHRError(
+					"STATE_ERROR",
+					`Could not remove machine "${name}": moving ${dir} aside failed (${(e as Error).message}). ` +
+					`The directory was left in place — close anything using it and run 'quickchr remove ${name}' again.`,
+				);
+			}
+			Bun.sleepSync(REMOVE_RENAME_RETRY_MS);
+		}
 	}
 	rmSync(trash, { recursive: true, force: true });
 }
+
+/** How long `removeMachine()` keeps trying to move a directory aside: about 2 s in
+ *  all, enough for a scanner to let go of a handle. */
+const REMOVE_RENAME_ATTEMPTS = 10;
+const REMOVE_RENAME_RETRY_MS = 200;
 
 /** Update the status of a machine. */
 export function updateMachineStatus(
