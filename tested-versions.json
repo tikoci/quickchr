@@ -244,14 +244,14 @@
 	},
 	"7.24.5": {
 		"linux-arm64": {
-			"conclusion": "pass",
-			"date": "2026-10-22T04:49:28.202Z",
-			"run_id": "39720464576"
+			"conclusion": "fail",
+			"date": "2026-10-22T18:40:53.063Z",
+			"run_id": "39826703794"
 		},
 		"linux-x86": {
 			"conclusion": "pass",
-			"date": "2026-10-22T04:34:23.054Z",
-			"run_id": "39720464576"
+			"date": "2026-10-22T18:36:40.930Z",
+			"run_id": "39826703794"
 		},
 		"macos-arm64": {
 			"conclusion": "pass",
