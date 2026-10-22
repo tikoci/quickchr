@@ -217,6 +217,33 @@ describe("lifecycle operations take the machine lock (#181)", () => {
 		}
 	});
 
+	test("shutdown leaves state running when QEMU termination is denied", async () => {
+		const qemu = spawnIdle();
+		const state = machine("shutdown-denied", { status: "running", pid: qemu.pid, version: "6.49.23" });
+		seed(state);
+		const instance = QuickCHR.get(state.name);
+		if (!instance) throw new Error("missing fixture");
+		const kill = process.kill;
+		try {
+			// Only deny signals to this disposable process; liveness checks still
+			// use the real OS and every other process retains normal behavior.
+			process.kill = (pid, signal) => {
+				if (pid === qemu.pid && signal !== 0) throw new Error("signal denied");
+				return kill(pid, signal);
+			};
+			await expect(instance.shutdown({ timeoutMs: 1 })).rejects.toMatchObject({ code: "STATE_ERROR" });
+			expect(instance.state.status).toBe("running");
+			expect(instance.state.pid).toBe(qemu.pid);
+			expect(loadMachine(state.name)?.status).toBe("running");
+			expect(loadMachine(state.name)?.pid).toBe(qemu.pid);
+			expect(currentHolder(machineLockPath(state.machineDir))).toBeUndefined();
+		} finally {
+			process.kill = kill;
+			qemu.kill();
+			await qemu.exited;
+		}
+	});
+
 	test("shutdown validates before acquiring a lock and rejects same-name recreation", async () => {
 		const state = machine("shutdown-replaced");
 		seed(state);
