@@ -484,10 +484,10 @@ export async function stopQemu(pid: number): Promise<boolean> {
 		return false; // Already dead
 	}
 
-	// Try graceful shutdown
+	// Terminate the host process (a guest power cut, not /system/shutdown)
 	process.kill(pid, "SIGTERM");
 
-	// Wait up to 5s for graceful exit
+	// Wait up to 5s for QEMU to exit before escalating
 	for (let i = 0; i < 50; i++) {
 		await Bun.sleep(100);
 		try {

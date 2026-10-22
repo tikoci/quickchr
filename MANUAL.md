@@ -204,9 +204,74 @@ machine state.
 
 #### `stop [name | --all]`
 
-Graceful shutdown via QEMU monitor. Updates `state.status = "stopped"`
-and unregisters socket-named networks. Listing-mode if no name and not
-`--all`.
+Power cut: sends SIGTERM to QEMU, waits up to 5 seconds, then SIGKILL if
+needed. This does not request a guest shutdown; pending RouterOS changes
+may be lost. Updates `state.status = "stopped"` and unregisters socket-named
+networks. Listing-mode if no name and not `--all`.
+
+Use `stop` for normal teardown and device-mode power-cycle confirmation.
+Use `shutdown` when the caller wants to request a guest shutdown first.
+
+#### `shutdown <name> [--timeout <seconds>]`
+
+Sends `/system/shutdown` once through REST, independently waits for QEMU to
+exit, then falls back to a power cut if it remains running. Default grace
+budget: **10 seconds**. `--timeout` takes positive integer seconds and
+overrides `QUICKCHR_SHUTDOWN_TIMEOUT`. Neither changes the boot timeout.
+The maximum is 2,147,483 seconds (the HTTP timer's limit).
+
+```bash
+quickchr shutdown lab
+quickchr shutdown lab --timeout 20
+QUICKCHR_SHUTDOWN_TIMEOUT=20 quickchr shutdown lab
+```
+
+The CLI reports `guest exited`, `already stopped`, or **forced power cut —
+guest shutdown not confirmed**. Forced fallback exits successfully if QEMU
+is confirmed gone; invalid input, lock failure, or inability to stop QEMU
+is an error. Disks, credentials and restart configuration survive.
+
+The guest request and exit observation share one grace budget. Lifecycle
+lock acquisition, the existing SIGTERM/SIGKILL escalation, and final exit
+verification have separate bounded waits. A 10-second grace budget does
+not bound the entire CLI invocation to 10 seconds.
+
+An HTTP error does not establish failure: on CHR 7.24.5, both x86/HVF and
+arm64/TCG returned HTTP 400 `interrupted`, then exited. Shutdown uses
+process exit as its completion signal. Observed exit does not guarantee
+application or storage durability. Unavailable REST (including RouterOS 6),
+failed authentication and a guest that does not halt all use the same
+explicit hard-stop fallback; no console/QGA/ACPI replay is attempted.
+
+```ts
+const result = await chr.shutdown({ timeoutMs: 20_000 });
+// outcome: "guest-exited" | "forced" | "already-stopped"
+// requestError can accompany guest-exited (e.g. HTTP 400 interrupted).
+console.log(result.outcome);
+```
+
+Library `timeoutMs` values are positive integer milliseconds, maximum
+2,147,483,647, with a 10,000 ms default. Library callers supply options
+explicitly; the CLI environment override is not read by `shutdown()`.
+
+For consumers of an older quickchr version, the manual workaround needs
+both request-error handling and independent exit observation:
+
+```ts
+const pid = chr.state.pid;
+if (pid) {
+  try { await chr.exec("/system/shutdown", { via: "rest", timeout: 10_000 }); }
+  catch { /* HTTP 400 interrupted may accompany successful guest shutdown. */ }
+  const exited = await chr.waitFor(async () => {
+    try { process.kill(pid, 0); return false; } catch { return true; }
+  }, 10_000);
+  if (!exited) console.warn("Guest shutdown not confirmed; forcing a power cut");
+}
+await chr.stop(); // reconcile state/network membership, or hard-stop if still alive
+```
+
+This older-version workaround has separate request and wait budgets;
+`shutdown()` provides one shared budget and structured fallback reporting.
 
 #### `remove [name | --all]` (alias `rm`)
 
@@ -1315,6 +1380,7 @@ the 6 managed keys are all structural preferences, not secrets.
 | `QUICKCHR_DEFAULT_ARCH` | `settings.ts` — env tier for the `default-arch` setting |
 | `QUICKCHR_ACCEL` | `settings.ts` / `platform.ts` — env tier for the `accel` setting; forces `-accel` and bypasses detection |
 | `QUICKCHR_CACHE_MAX_SIZE` | `settings.ts` — env tier for the `cache-max-size` setting |
+| `QUICKCHR_SHUTDOWN_TIMEOUT` | CLI `shutdown` grace budget in positive integer seconds; default 10, overridden by `--timeout` |
 | `QUICKCHR_TIMEOUT_EXTRA` | `settings.ts` — env tier for the `timeout-extra` setting |
 | `QUICKCHR_SECURE_LOGIN` | `settings.ts` — env tier for the `secure-login` setting |
 | `MIKROTIK_WEB_ACCOUNT` | license-renewal account (fallback) |

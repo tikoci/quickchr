@@ -616,6 +616,20 @@ export interface ChrLoadSample {
 	memUsedMb: number;
 }
 
+/** Options for an explicit guest shutdown. Library values do not read environment settings. */
+export interface ShutdownOptions {
+	/** Guest request + exit-wait budget in milliseconds (default 10,000).
+	 * Lock acquisition and hard-stop escalation have separate bounded waits. */
+	timeoutMs?: number;
+}
+
+export interface ShutdownResult {
+	/** Observed guest exit is not a guarantee of application/storage durability. */
+	outcome: "guest-exited" | "forced" | "already-stopped";
+	/** Request failure can accompany successful guest exit (HTTP 400 interrupted). */
+	requestError?: string;
+}
+
 /**
  * Runtime handle for a CHR virtual machine.
  *
@@ -691,7 +705,12 @@ export interface ChrInstance {
 	 *  }, 30_000);
 	 */
 	waitFor(condition: () => Promise<boolean>, timeoutMs?: number): Promise<boolean>;
+	/** Power cut: terminate QEMU with SIGTERM, then SIGKILL if needed.
+	 * Pending guest configuration may be lost. Use shutdown() to request guest shutdown. */
 	stop(): Promise<void>;
+	/** Request /system/shutdown once over REST, wait for QEMU exit, then hard-stop
+	 * if needed. Reports forced fallback explicitly; preserves disks and credentials. */
+	shutdown(options?: ShutdownOptions): Promise<ShutdownResult>;
 	remove(): Promise<void>;
 	clean(): Promise<void>;
 	/** Stop and permanently delete this instance (disk + state). Equivalent to stop() then remove(). */

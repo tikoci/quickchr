@@ -60,6 +60,7 @@ export type LockOperation =
 	| "start"
 	| "foreground"
 	| "stop"
+	| "shutdown"
 	| "clean"
 	| "remove"
 	| "device-mode"

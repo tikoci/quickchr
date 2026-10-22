@@ -190,6 +190,47 @@ describe("lifecycle operations take the machine lock (#181)", () => {
 		}
 	});
 
+	test("shutdown refreshes a stale handle under the lock and uses no nested stop lock", async () => {
+		const state = machine("shutdown-busy");
+		seed(state);
+		const instance = QuickCHR.get(state.name);
+		if (!instance) throw new Error("missing fixture");
+		const holder = acquireLockNow(machineLockPath(state.machineDir), "start");
+		const qemu = spawnIdle();
+		try {
+			saveMachine({ ...state, status: "running", pid: qemu.pid, version: "6.49.23" });
+			let settled = false;
+			const pending = instance.shutdown({ timeoutMs: 10 }).then((result) => { settled = true; return result; });
+			await Bun.sleep(100);
+			expect(settled).toBe(false);
+			holder.release();
+			const result = await pending;
+			expect(result.outcome).toBe("forced");
+			expect(result.requestError).toContain("REST");
+			expect(loadMachine(state.name)?.pid).toBeUndefined();
+			expect(loadMachine(state.name)?.status).toBe("stopped");
+			expect(await instance.shutdown()).toEqual({ outcome: "already-stopped" });
+		} finally {
+			holder.release();
+			qemu.kill();
+			await qemu.exited;
+		}
+	});
+
+	test("shutdown validates before acquiring a lock and rejects same-name recreation", async () => {
+		const state = machine("shutdown-replaced");
+		seed(state);
+		const instance = QuickCHR.get(state.name);
+		if (!instance) throw new Error("missing fixture");
+		const holder = acquireLockNow(machineLockPath(state.machineDir), "foreground");
+		try {
+			await expect(instance.shutdown({ timeoutMs: 0 })).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+		} finally { holder.release(); }
+		removeMachine(state.name);
+		seed({ ...state, createdAt: "2026-10-22T00:00:00.000Z" });
+		await expect(instance.shutdown()).rejects.toMatchObject({ code: "MACHINE_NOT_FOUND" });
+	});
+
 	test("remove() waits for the holder rather than deleting under it", async () => {
 		const state = machine("doomed");
 		seed(state);

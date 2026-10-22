@@ -1079,3 +1079,25 @@ Explicitly rejected, with rationale, so they aren't re-proposed:
 ### Document Maintenance
 
 DESIGN.md is the living home for design decisions and rationale. At the end of any significant work session, agents should review whether new implementation details, design decisions, or discovered constraints belong here. Open/close work in **GitHub Issues** — not BACKLOG.md (see CONTRIBUTING.md "Tracking work"); record grounded RouterOS/QEMU behaviour facts in the narrowest scoped doc (`.github/instructions/*.md`, `docs/`, or `test/lab/<topic>/REPORT.md`); add a CHANGELOG.md entry for user-facing changes. Treat this as a lightweight checklist, not a gate.
+
+## Explicit guest shutdown (#143)
+
+`stop()` remains a power cut (QEMU SIGTERM, then SIGKILL), the primary teardown
+primitive and the mechanism used for device-mode confirmation. `shutdown()` is a
+separate bounded operation: one `/system/shutdown` via REST and independent process
+exit observation share a 10-second default grace budget, followed by the existing
+hard-stop escalation if needed. CLI seconds and library milliseconds are explicit;
+the library does not resolve the CLI's environment override.
+
+The HTTP result is diagnostic evidence, not the completion signal. On CHR 7.24.5,
+x86/HVF and arm64/TCG returned HTTP 400 `interrupted` while successfully halting
+(see `test/lab/shutdown/REPORT.md`). No QGA/ACPI/console selection framework is
+needed. Request failure still waits out the grace budget and reports forced
+fallback if QEMU survives. `guest-exited` means no host stop signal was required;
+it does not promise ROSE, container or filesystem durability.
+
+The entire operation holds the existing per-machine lock, refreshes the machine
+before acting, and uses shared stopped-state cleanup without recursively taking
+the non-reentrant stop lock. It confirms QEMU exit before clearing the PID or
+releasing named-network membership. Lock wait, hard-stop escalation and final
+exit verification are separate bounded phases outside the guest grace budget.

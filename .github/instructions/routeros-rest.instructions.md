@@ -52,6 +52,16 @@ POST /rest/execute  { "script": ":put hello", "as-string": "" }    → { "ret": 
 
 Our `exec.ts` always sends `"as-string": ""` for synchronous execution.
 
+## Guest shutdown through exec
+
+On CHR 7.24.5, `/system/shutdown` through synchronous `/rest/execute` returned
+HTTP 400 `{"detail":"interrupted","error":400,"message":"Bad Request"}` while
+QEMU exited successfully, on both x86/HVF and arm64/TCG (Intel macOS).
+`test/lab/shutdown/REPORT.md` records the pins, timings and same-disk marker read-back.
+Do not infer shutdown failure from HTTP status, or completion from HTTP success.
+The explicit `shutdown()` operation observes QEMU exit independently and reports
+hard-stop fallback. It sends the REST command once, without transport replay.
+
 ## Async Commands (duration= / once=)
 
 Commands with `duration=` or `once` are "async" in RouterOS terms — results may be partial

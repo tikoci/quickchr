@@ -158,6 +158,11 @@ quickchr remove my-chr
 quickchr doctor
 ```
 
+`quickchr stop <name>` terminates QEMU (a power cut). For an explicit guest
+shutdown request, use `quickchr shutdown <name> [--timeout <seconds>]` (default
+10 seconds, or `QUICKCHR_SHUTDOWN_TIMEOUT`). It waits for QEMU to exit and clearly
+reports a forced power cut if the guest does not stop within the grace budget.
+
 ### Create / Start Options
 
 | Flag | Description | Default |
@@ -359,7 +364,8 @@ const result = await chr.exec("/system/resource/print");
 console.log(result);
 
 // Stop (or remove)
-await chr.stop();
+await chr.stop(); // power cut for normal teardown
+// To request guest shutdown first: await chr.shutdown({ timeoutMs: 10_000 });
 await chr.remove();
 
 console.log(chr.state.bootDiskFormat); // "qcow2"

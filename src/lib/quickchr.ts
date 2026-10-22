@@ -75,6 +75,7 @@ import { renewLicense, getLicenseInfo } from "./license.ts";
 import { resolveAuth, resolveCreds } from "./auth.ts";
 import { scpPush, scpPull } from "./scp.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownGuest, validateShutdownTimeout } from "./shutdown.ts";
 import { restExecute } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec, CONSOLE_LOGIN_COST_MS } from "./console.ts";
@@ -452,6 +453,11 @@ async function stopUnderLock(state: MachineState): Promise<void> {
 	if (state.pid) {
 		await stopQemu(state.pid);
 	}
+	finalizeStoppedState(state);
+}
+
+/** Persist stopped state and release endpoints. Caller holds the lifecycle lock. */
+function finalizeStoppedState(state: MachineState): void {
 	unregisterSocketMembers(state);
 	// Update persisted state
 	const current = loadMachine(state.name);
@@ -748,6 +754,23 @@ function createInstance(state: MachineState): ChrInstance {
 
 		async stop(): Promise<void> {
 			await withMachineLock(state, "stop", () => stopUnderLock(state));
+		},
+
+		async shutdown(options) {
+			const timeoutMs = validateShutdownTimeout(options?.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS);
+			return withMachineLock(state, "shutdown", async () => {
+				if (!state.pid || !isMachineRunning(state)) {
+					finalizeStoppedState(state);
+					return { outcome: "already-stopped" };
+				}
+				const pid = state.pid;
+				const result = await shutdownGuest(timeoutMs, async (requestTimeoutMs) => {
+					// Rebuild after the locked refresh: a waiting handle may predate a relaunch.
+					return createInstance(state).exec("/system/shutdown", { via: "rest", timeout: requestTimeoutMs });
+				}, () => isMachineRunning(state), () => stopQemu(pid));
+				finalizeStoppedState(state);
+				return result;
+			});
 		},
 
 		async remove(): Promise<void> {
