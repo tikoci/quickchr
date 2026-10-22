@@ -675,9 +675,13 @@ QuickCHR.resolveVersion(channel: Channel): Promise<string>
 ```
 
 `start()` creates the machine if needed, downloads the image, allocates
-a port block, spawns QEMU, waits for REST readiness, and runs all
-provisioning steps before returning. It auto-cleans the machine if boot
-times out (calls `stop()` then `remove()`).
+a port block, spawns QEMU, waits for readiness (REST on 7.x, a native-API
+`/login` on RouterOS 6), and runs all provisioning steps before returning.
+With `wait: false` (`--no-wait`) it returns once QEMU is running and leaves
+readiness to the caller; provisioning options are refused in that mode.
+On a boot timeout it stops QEMU, then removes a machine this call created,
+resets an existing never-booted machine to its factory disk, and preserves a
+previously booted one — see [Auto-cleanup on boot timeout](#auto-cleanup-on-boot-timeout).
 
 **Concurrency.** Machines may be created and started in parallel, from one
 `Promise.all` or from separate processes. Each creation chooses its port
@@ -736,7 +740,7 @@ throws `INVALID_NAME` for a name that is not a usable path segment.
 |---|---|---|
 | Identity | `name`, `state`, `ports`, `restUrl`, `sshPort`, `portBase` | Static metadata persisted in `machine.json` |
 | Capture | `captureInterface`, `hostGatewayIp` | Platform-correct values for TZSP capture (`tshark -i …`) and the guest→host address any UDP emitter targets |
-| Lifecycle | `waitForBoot()`, `waitFor(fn, ms?)`, `stop()`, `remove()`, `clean()`, `destroy()` | Boot readiness, custom polling, teardown |
+| Lifecycle | `waitForBoot()`, `waitFor(fn, ms?)`, `stop()`, `shutdown(opts?)`, `remove()`, `clean()`, `destroy()` | Boot readiness, custom polling, power-cut or guest-shutdown teardown |
 | Comms | `rest()`, `exec()`, `monitor()`, `serial()`, `qga()` | REST, RouterOS CLI, QEMU monitor, serial console, QGA (x86 only) |
 | Provisioning | `license()`, `setDeviceMode()`, `availablePackages()`, `installPackage()` | Post-boot configuration |
 | Files | `upload()`, `download()` | SCP transfer to/from the CHR |
@@ -756,7 +760,8 @@ interface ChrInstance {
 
   waitForBoot(timeoutMs?: number): Promise<boolean>;
   waitFor(condition: () => Promise<boolean>, timeoutMs?: number): Promise<boolean>;
-  stop(): Promise<void>;
+  stop(): Promise<void>;      // power cut: SIGTERM, then SIGKILL
+  shutdown(opts?: ShutdownOptions): Promise<ShutdownResult>; // /system/shutdown, bounded fallback
   remove(): Promise<void>;
   clean(): Promise<void>;
   destroy(): Promise<void>;   // stop + remove
