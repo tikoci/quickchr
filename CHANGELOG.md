@@ -8,6 +8,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-22
+
 ### Breaking (0.5.0)
 
 0.5.0 is a pre-release line (odd minor), and the clean break where the CHR and
@@ -25,15 +27,12 @@ provisioning quirks agents work around get fixed.
   the retry is `quickchr start <name>` again. A machine `start` created in the same call is
   still removed. (#182)
 
-### Added
-
-- `quickchr shutdown <name>` / `ChrInstance.shutdown()` requests guest shutdown
-  over REST, waits up to 10 seconds by default, and reports a forced power cut if
-  needed. CLI `--timeout` / `QUICKCHR_SHUTDOWN_TIMEOUT` use seconds; library
-  `timeoutMs` uses milliseconds. Disks, credentials and restart configuration
-  survive. `stop()` remains the normal power-cut teardown primitive. (#143)
-
 ### Fixed
+
+- A restart `BOOT_TIMEOUT` stops and preserves previously booted machines, including
+  configured boot/extra disks, stored credentials and diagnostics. Retry with `start`
+  or explicitly `remove`; preservation no longer requires an environment override.
+  New machines still clean up automatically and existing first boots still reset. (#189)
 
 - Stop help and API documentation now describe QEMU SIGTERM/SIGKILL accurately;
   the manual previously called it a graceful guest shutdown. (#143)
@@ -43,8 +42,10 @@ provisioning quirks agents work around get fixed.
 - Restarting an existing machine uses its recorded architecture for the RouterOS 6
   image restriction, so creation defaults cannot reject an existing x86 guest.
 
-- Every `BOOT_TIMEOUT` message names `QUICKCHR_PRESERVE_ON_FAILURE=1`. The auto-removal
-  that hid #182's report gave no hint that it could be turned off. (#182)
+- A `BOOT_TIMEOUT` that removes a new machine or resets an existing first boot names
+  `QUICKCHR_PRESERVE_ON_FAILURE=1`. The auto-removal that hid #182's report gave no hint
+  that it could be turned off. A previously booted machine is preserved without the
+  flag (#189). (#182)
 
 - `start` refuses a provisioning option on an unsupported RouterOS version before
   booting an existing machine, and before the provisioning-window check. It used to boot
@@ -133,6 +134,12 @@ provisioning quirks agents work around get fixed.
   intent. Budget for it: that start costs what a first boot costs. (#176)
 
 ### Added
+
+- `quickchr shutdown <name>` / `ChrInstance.shutdown()` requests guest shutdown
+  over REST, waits up to 10 seconds by default, and reports a forced power cut if
+  needed. CLI `--timeout` / `QUICKCHR_SHUTDOWN_TIMEOUT` use seconds; library
+  `timeoutMs` uses milliseconds. Disks, credentials and restart configuration
+  survive. `stop()` remains the normal power-cut teardown primitive. (#143)
 
 - `quickchr start --no-wait` (`StartOptions.wait: false`) returns as soon as QEMU is
   running (past the existing early-exit check, with state and ports persisted) and

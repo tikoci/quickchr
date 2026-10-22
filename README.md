@@ -2,9 +2,9 @@
 
 > **Experimental** — quickchr is under active development. Most testing has been on
 > macOS (Apple Silicon + Intel), with CI on Linux (x86_64 + aarch64). Windows support
-> is early-stage: unit tests pass on `windows-latest` CI, but integration tests
-> (running a real CHR via QEMU for Windows) are not yet automated. Expect rough edges
-> on Windows — bug reports welcome.
+> is early-stage: unit tests pass on `windows-latest` CI, and a weekly sweep boots a real
+> CHR on Windows (TCG, anchor smoke subset only). Expect rough edges on Windows — bug
+> reports welcome.
 
 CLI and library to download, launch, and manage MikroTik CHR virtual machines via QEMU.
 
@@ -177,8 +177,9 @@ reports a forced power cut if the guest does not stop within the grace budget.
 | `--boot-size <size>` | Resize boot disk (e.g., 512M, 2G). Requires `qemu-img`. | |
 | `--add-disk <size>` | Attach an extra blank qcow2 disk. Repeatable. Requires `qemu-img`. | |
 | `--forward <spec>` | Add or pin a QEMU SLiRP hostfwd mapping. Repeatable. | |
-| `--bg` / `--background` | Run in background (default) | true |
+| `--no-wait` | Return once QEMU is running; readiness is up to the caller. Not with provisioning flags or `--fg` | |
 | `--fg` / `--foreground` | Run in foreground — serial console on stdio | |
+| `--bg` / `--background` | **Deprecated, does nothing** — background is already the default. Warns; use `--no-wait` to return early | |
 | `--add-package <pkg>` | Extra package to install (repeatable) | |
 | `--install-all-packages` | Install all packages from `all_packages.zip` | |
 | `--add-user <user:pass>` | Create a user after boot | |
@@ -209,7 +210,7 @@ quickchr separates **boot-only** machine management from **post-boot provisionin
 
 | Feature | Minimum RouterOS | Notes |
 |---------|------------------|-------|
-| Boot / start / stop | Any RouterOS 7.x | Boot-only path; no post-boot RouterOS mutations |
+| Boot / start / stop | Any RouterOS 7.x; RouterOS 6 on x86 (best-effort) | Boot-only path; no post-boot RouterOS mutations. 6.x has no REST: readiness is a native-API login, and provisioning is refused — see MANUAL "RouterOS 6 (boot-only)" |
 | Disk resize / extra disks / disk inspection | Any RouterOS 7.x | Requires host `qemu-img`; QEMU-local only |
 | Network attachment / port mappings | Any RouterOS 7.x | QEMU networking setup; not provisioning |
 | Managed login / custom user / disable-admin | 7.20.8+ | Post-boot provisioning |

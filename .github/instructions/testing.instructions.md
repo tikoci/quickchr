@@ -108,8 +108,9 @@ QUICKCHR_PRESERVE_ON_FAILURE=1 QUICKCHR_SERIAL_LOG=1 \
   the serial socket keeps no history, so attaching *after* the failure shows nothing.
   **It records the generated provisioning password in cleartext** — fine for
   throwaway CI/lab machines, do not enable it against anything you care about.
-- `QUICKCHR_PRESERVE_ON_FAILURE=1` skips the `remove()` on a boot timeout — or, for an
-  `add()`-created machine's first boot, the reset to its `add` record (#182) — so the
+- `QUICKCHR_PRESERVE_ON_FAILURE=1` skips removal on a newly created machine's boot
+  timeout or reset on an existing machine's first boot (#182). Previously booted
+  machines always survive a restart timeout (#189). With the flag, the
   machine dir survives as it failed (QEMU is still stopped). Note the tests' own
   `finally { cleanupMachine(name) }` still deletes it — which is exactly why the
   report itself is written to `<dataDir>/failures/boot-failure-<machine>-<ts>.json`,

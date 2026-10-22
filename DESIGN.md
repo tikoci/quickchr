@@ -1060,8 +1060,31 @@ one boot disagreed, and the timeout threw away the options `add` recorded. Now
 `_launchExisting()` snapshots the record whenever the provisioning window is open — not
 only when there are provisioning options — and a timeout resets from it. A machine
 `start()` created in the same call is still removed, and one that has booted before is
-unchanged. Every `BOOT_TIMEOUT` message names `QUICKCHR_PRESERVE_ON_FAILURE=1`, because an
+unchanged. The first-boot cleanup messages name `QUICKCHR_PRESERVE_ON_FAILURE=1`, because an
 auto-removed machine is what hid #182's report.
+
+### A restart timeout preserves the configured guest (#189)
+
+Boot-timeout cleanup carries explicit intent: remove a machine created by this
+`start()`, factory-reset and restore an existing never-booted machine, or stop and
+preserve an existing machine whose provisioning window was closed. `_launchExisting()`
+classifies from the refreshed authoritative record under the lifecycle lock,
+before launch stamps `lastStartedAt`, PID or status. Supplying a restore record
+for every restart would be destructive too: that branch resets the disk.
+
+Preservation retains disks, credentials, provisioning history and persistent
+configuration, while the shared stop path clears PID/status and releases socket
+memberships. Older records with only `lastStartedAt` remain outside the provisioning
+window. Diagnostics survive; recovery is retry or explicit removal, never an
+implicit factory reset. The environment override still suppresses destructive
+first-boot cleanup. Provisioning rollback is unchanged.
+
+Synthetic launch tests cover all three cases, the override, stale snapshots in
+both directions, disk sentinels and credential retention. The focused live
+`restart-timeout.test.ts` injects a zero readiness-probe budget after a real
+configured boot, exercises real launch/diagnostics/cleanup, then restarts and
+reads back the guest identity with retained credentials. Whole-disk equality is
+only asserted using synthetic sentinels; a live guest can write during boot.
 
 ### Out of Scope (decided)
 

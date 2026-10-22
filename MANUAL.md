@@ -620,7 +620,7 @@ mutate any machine's `machine.json`.
 | `QUICKCHR_NO_PROMPT` | Force non-interactive mode (skips all wizards) |
 | `QUICKCHR_DEBUG` | Emit `[debug]` lines from the progress logger |
 | `QUICKCHR_INTEGRATION` | Required to run `test/integration/` |
-| `QUICKCHR_PRESERVE_ON_FAILURE` | `=1` keeps the machine after a boot timeout or a failed first-boot provisioning run, instead of removing or resetting it (QEMU is still stopped) |
+| `QUICKCHR_PRESERVE_ON_FAILURE` | `=1` skips removal/reset after a first-boot timeout or failed first-boot provisioning run (QEMU is still stopped). Previously booted machines always survive a restart timeout |
 | `QUICKCHR_SERIAL_LOG` | `=1` tees the guest serial console to `<machineDir>/serial.log`. **Secret-bearing** — serial provisioning types the generated password in cleartext |
 | `QUICKCHR_DEEP_BOOT_DIAGNOSTICS` | `=1` lets a boot-timeout capture write to the guest (a mangle counting rule + host probes) to localize a silent packet drop. Skipped when `QUICKCHR_PRESERVE_ON_FAILURE=1` |
 | `MIKROTIK_WEB_ACCOUNT`, `MIKROTIK_WEB_PASSWORD` | License credentials fallback |
@@ -675,9 +675,13 @@ QuickCHR.resolveVersion(channel: Channel): Promise<string>
 ```
 
 `start()` creates the machine if needed, downloads the image, allocates
-a port block, spawns QEMU, waits for REST readiness, and runs all
-provisioning steps before returning. It auto-cleans the machine if boot
-times out (calls `stop()` then `remove()`).
+a port block, spawns QEMU, waits for readiness (REST on 7.x, a native-API
+`/login` on RouterOS 6), and runs all provisioning steps before returning.
+With `wait: false` (`--no-wait`) it returns once QEMU is running and leaves
+readiness to the caller; provisioning options are refused in that mode.
+On a boot timeout it stops QEMU, then removes a machine this call created,
+resets an existing never-booted machine to its factory disk, and preserves a
+previously booted one — see [Auto-cleanup on boot timeout](#auto-cleanup-on-boot-timeout).
 
 **Concurrency.** Machines may be created and started in parallel, from one
 `Promise.all` or from separate processes. Each creation chooses its port
@@ -736,7 +740,7 @@ throws `INVALID_NAME` for a name that is not a usable path segment.
 |---|---|---|
 | Identity | `name`, `state`, `ports`, `restUrl`, `sshPort`, `portBase` | Static metadata persisted in `machine.json` |
 | Capture | `captureInterface`, `hostGatewayIp` | Platform-correct values for TZSP capture (`tshark -i …`) and the guest→host address any UDP emitter targets |
-| Lifecycle | `waitForBoot()`, `waitFor(fn, ms?)`, `stop()`, `remove()`, `clean()`, `destroy()` | Boot readiness, custom polling, teardown |
+| Lifecycle | `waitForBoot()`, `waitFor(fn, ms?)`, `stop()`, `shutdown(opts?)`, `remove()`, `clean()`, `destroy()` | Boot readiness, custom polling, power-cut or guest-shutdown teardown |
 | Comms | `rest()`, `exec()`, `monitor()`, `serial()`, `qga()` | REST, RouterOS CLI, QEMU monitor, serial console, QGA (x86 only) |
 | Provisioning | `license()`, `setDeviceMode()`, `availablePackages()`, `installPackage()` | Post-boot configuration |
 | Files | `upload()`, `download()` | SCP transfer to/from the CHR |
@@ -756,7 +760,8 @@ interface ChrInstance {
 
   waitForBoot(timeoutMs?: number): Promise<boolean>;
   waitFor(condition: () => Promise<boolean>, timeoutMs?: number): Promise<boolean>;
-  stop(): Promise<void>;
+  stop(): Promise<void>;      // power cut: SIGTERM, then SIGKILL
+  shutdown(opts?: ShutdownOptions): Promise<ShutdownResult>; // /system/shutdown, bounded fallback
   remove(): Promise<void>;
   clean(): Promise<void>;
   destroy(): Promise<void>;   // stop + remove
@@ -1231,11 +1236,11 @@ is unset.
 ### Credentials (separate from data dir)
 
 - **Per-instance CHR credentials**: file in the user config dir
-  (`~/.config/quickchr/secrets.json` on POSIX; not the OS keychain — a
+  (`~/.config/quickchr/com.quickchr.instance.json`; not the OS keychain — a
   Keychain dialog hangs in non-TTY contexts like tests and CI).
 - **MikroTik.com web account** (for license operations): tries
   `Bun.secrets` (OS keychain) when interactive, falls back to the same
-  config-file store otherwise.
+  config-file store otherwise (`~/.config/quickchr/com.quickchr.mikrotik-web.json`).
 
 Both honor explicit CLI flags / env vars first.
 
@@ -1310,11 +1315,12 @@ Native (HVF/KVM): factor ~1 → 120s base.
 Cross-arch TCG: factor ~15 → up to 1800s.
 Package install adds a 2× multiplier (extra reboot cycle).
 
-If boot times out, QEMU is stopped and the machine is **removed** — or, for a
-machine `add` created, **reset** to its never-booted state with its `add`-time
-options kept, so the retry is `quickchr start <name>` again.
-`QUICKCHR_PRESERVE_ON_FAILURE=1` keeps it as it is instead; the `BOOT_TIMEOUT`
-message names that knob. Use `--timeout-extra` to add a buffer if you know your host is slow, or
+If boot times out, QEMU is stopped. A previously booted machine is **preserved**
+with its disks, credentials and configuration; retry with `quickchr start <name>`
+or explicitly remove it. A machine created by this `start()` is removed, and an
+existing never-booted machine is reset to its factory disk and pre-launch record.
+`QUICKCHR_PRESERVE_ON_FAILURE=1` skips removal/reset for those first-boot cases.
+See the [cleanup table](#auto-cleanup-on-boot-timeout) for all three cases. Use `--timeout-extra` to add a buffer if you know your host is slow, or
 persist a default via `quickchr settings set timeout-extra <seconds>` so
 every `start` picks it up without repeating the flag.
 
@@ -1331,7 +1337,8 @@ against:
 - Accidental credential leakage in commits, CI logs, CLI output.
 
 We **don't** protect against same-user code reading
-`secrets.json`, `ps`-visible CLI args, or memory inspection.
+the `~/.config/quickchr/*.json` credential files, `ps`-visible CLI args, or memory
+inspection.
 
 ### Auth resolution (`resolveAuth`)
 
@@ -1594,7 +1601,7 @@ present, then exits `1`.
 | `MISSING_FIRMWARE` | edk2 UEFI firmware not installed (arm64) | install `qemu-efi-aarch64` / `edk2-aarch64` |
 | `MISSING_UNZIP` | image extraction needs `unzip` | install OS package |
 | `PORT_CONFLICT` | no free 10-port block | stop a machine or set `--port-base` |
-| `BOOT_TIMEOUT` | CHR didn't respond within timeout | check `qemu.log`; under TCG, raise `--timeout-extra`; machine is **auto-removed** (or reset, if `add` created it) unless `QUICKCHR_PRESERVE_ON_FAILURE=1` |
+| `BOOT_TIMEOUT` | CHR didn't respond within timeout | check `qemu.log`; under TCG, raise `--timeout-extra`; previously booted machines are **preserved**; new machines are removed, existing first boots reset, unless `QUICKCHR_PRESERVE_ON_FAILURE=1` |
 | `DOWNLOAD_FAILED` | image fetch failed | retry; check connectivity to MikroTik download server |
 | `INVALID_VERSION` / `INVALID_ARCH` / `INVALID_NAME` / `INVALID_DISK_SIZE` | argument parse | fix the value |
 | `MACHINE_EXISTS` | name already in `machines/` | choose another name or `QuickCHR.get(name)` |
@@ -1621,15 +1628,18 @@ present, then exits `1`.
 
 If `start()` hits `BOOT_TIMEOUT`, quickchr stops the failing instance and then:
 
-- **`start` created the machine in this call** → `remove()`. It is gone from
-  `quickchr list`; re-run the same command to retry.
-- **`add` created it and this was its first boot** → reset: the disk goes back to
-  the factory image and `machine.json` to the record `add` wrote, provisioning
-  window open. Retry with `quickchr start <name>` — the same reset a failed
-  first-boot provisioning run gets.
+| Machine at launch entry | Timeout cleanup | Recovery |
+| --- | --- | --- |
+| Created by this `start()` call | Remove automatically | Repeat the original command |
+| Existing, never booted, provisioning window open | Reset factory disk and restore the pre-launch record, window open | `quickchr start <name>` |
+| Existing, provisioning window already closed | Preserve disks, credentials and persistent configuration; clear PID and release socket memberships | `quickchr start <name>`, or explicit `quickchr remove <name>` |
 
-`QUICKCHR_PRESERVE_ON_FAILURE=1` skips both and keeps the machine as it failed.
-Either way the diagnostic report is written outside the machine dir first.
+`QUICKCHR_PRESERVE_ON_FAILURE=1` skips removal/reset for the first two cases and
+keeps the machine as it failed. Previously booted machines survive without the
+flag, including older records whose only boot-history marker is `lastStartedAt`.
+The diagnostic report is written outside the machine directory before cleanup;
+QEMU logs in a preserved machine also remain available. A configured guest does
+not need `clean` to retry: that command deliberately erases its configuration.
 
 ### RouterOS 6 (boot-only)
 

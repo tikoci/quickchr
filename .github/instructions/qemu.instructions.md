@@ -172,8 +172,8 @@ and `.github/instructions/provisioning.instructions.md`. Implementation:
 SLIRP's gateway `10.0.2.2` **is the host** from inside the guest. A datagram the
 guest sends to `10.0.2.2:<port>` is relayed to a host process bound on loopback
 `<port>` — **no `hostfwd`, no extra NIC**. This is the general form of the TZSP path
-(`ChrInstance.hostGatewayIp` / `captureInterface` — `tzspGatewayIp` is the
-deprecated alias, #26); it also covers remote syslog,
+(`ChrInstance.hostGatewayIp` / `captureInterface`; the old `tzspGatewayIp` alias
+was removed in 0.5.0, #186); it also covers remote syslog,
 NetFlow, and a guest server replying to the gateway.
 
 **The host socket must be left unconnected** (`recvfrom`, not `connect`): SLIRP

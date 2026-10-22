@@ -886,14 +886,16 @@ a new tracked issue.
 
 ## Integration Test Parallelism
 
-`bun test test/integration/` runs all 8 test files concurrently — each in a separate worker process, up to CPU count (4 on GitHub runners). This means up to 4 CHR instances may boot simultaneously.
+CI runs integration files **one at a time**: `integration.yml` loops over the file
+list and runs each through `scripts/ci-file-watchdog.ts` (per-file cap, reap, timing
+line). Locally, `bun test test/integration/` runs files in parallel worker processes,
+so several CHRs may boot at once.
 
-**Port allocation is safe** — `findAvailablePortBlock` probes TCP ports rather than just reading state files, preventing most bind conflicts. Low-probability race: two processes both probe a port before QEMU binds it, both succeed, one fails to start. If this shows up in CI, run sequentially:
-
-```bash
-# Sequential file execution (slower, no port races):
-for f in test/integration/*.test.ts; do QUICKCHR_INTEGRATION=1 bun test "$f" || break; done
-```
+**Port allocation is safe under parallelism** (#190). Machine creation chooses its
+port block and NIC MACs under the data-dir-wide allocation lock
+(`<dataDir>/.allocate.lock/`) and reserves them until `machine.json` is written, so
+concurrent creations never pick the same block. Sequential execution is not a
+workaround for port races; see DESIGN.md "Allocation lock".
 
 **Version-specific images**: `provisioning.test.ts` boots CHR 7.20.7 and 7.20.8
 in addition to the matrix target. Full cache-owner legs prefetch both fixtures

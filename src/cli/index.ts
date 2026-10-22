@@ -3227,9 +3227,9 @@ Options:
   --accel <mode>        Force QEMU accelerator: auto|tcg|hvf|kvm (default: auto).
                         Anything but 'auto' bypasses detection, including the
                         arm64-on-Apple-Silicon TCG fallback (tikoci/quickchr#97).
-	--boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
-	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
-	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
+  --boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
+  --boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
+  --add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install on first boot (repeatable)
   --forward <spec>      Add an extra hostfwd port (repeatable). Spec:
                         name[:host[:guest]][/proto], or a port range
@@ -3254,9 +3254,11 @@ Options:
                         socket::<name>, tap:<if>. Default: single user NIC.
   --no-network          Start with no NICs (headless)
 
-Provisioning flags apply on the machine's **first boot** — whether they are given
-here or on that first 'start'. After the guest has booted they are refused rather
-than ignored; 'quickchr clean <name>' resets the disk and reopens the window.`);
+Provisioning flags apply on the machine's first boot — whether they are given
+here or on that first 'start'. After the guest has booted, a flag the machine already
+has is accepted as a no-op; any other is refused rather than ignored, naming where the
+change can still be made (often 'quickchr set <name>'). 'quickchr clean <name>' also
+reopens the window, but resets the disk to factory and erases the guest's configuration.`);
 			break;
 		case "setup":
 			console.log(`quickchr setup
@@ -3311,12 +3313,16 @@ ${ROUTEROS6_HELP}
 By default 'start' returns once RouterOS is ready (REST answers; on 6.x, a native-API
 login). --no-wait returns as soon as QEMU is running and leaves readiness to you:
     centrs retrieve --quickchr <name> /system/resource --wait 5m
-QEMU runs detached either way. --no-wait is refused with provisioning flags, including
-ones 'add' recorded for the first boot — provisioning needs a booted guest.
+QEMU runs detached either way. --no-wait is refused with --fg, and with provisioning
+flags, including ones 'add' recorded for the first boot — provisioning needs a booted
+guest.
 
 Options:
-  --all                 Start all stopped machines
-  --no-wait             Return once QEMU is running; do not wait for RouterOS
+  --all                 Start all stopped machines, in background. Accepts only
+                        --no-wait, --accel, --timeout-extra and --[no-]secure-login
+                        (plus the deprecated no-op --bg / --background); any other
+                        option is refused rather than ignored
+  --no-wait             Return once QEMU is running; do not wait for RouterOS (not with --fg)
   --fg / --foreground   Run in foreground — serial console on stdio
   --bg / --background   Deprecated, does nothing: background is already the default
   --version <ver>       RouterOS version (e.g., 7.22.1)
@@ -3328,9 +3334,9 @@ Options:
   --accel <mode>        Force QEMU accelerator: auto|tcg|hvf|kvm (default: auto).
                         Anything but 'auto' bypasses detection, including the
                         arm64-on-Apple-Silicon TCG fallback (tikoci/quickchr#97).
-	--boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
-	--boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
-	--add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
+  --boot-disk-format <f> Boot disk format: qcow2|raw (default: qcow2)
+  --boot-size <size>    Resize boot disk (e.g., 512M, 2G) — qcow2 only, requires qemu-img
+  --add-disk <size>     Add an extra blank qcow2 disk (repeatable, requires qemu-img)
   --add-package <pkg>   Extra package to install (repeatable)
   --forward <spec>      Add an extra hostfwd port (repeatable). Spec:
                         name[:host[:guest]][/proto], or a range
@@ -3354,13 +3360,15 @@ Options:
   --device-mode-enable <f>  Set one or more device-mode flags to yes
   --device-mode-disable <f> Set one or more device-mode flags to no
   --no-device-mode      Skip device-mode provisioning entirely
+  --timeout-extra <s>, -T <s>  Add extra seconds to the auto-computed boot timeout
+  --dry-run             Print what would run without starting
 
 Provisioning flags (packages, login, device-mode, license) apply only on a machine's
-**first boot**. On a machine that has booted they are refused, naming where the
-change can still be made — 'quickchr clean <name>' resets the disk and reopens the
-window for all of them.
-  --timeout-extra <s>, -T <s>  Add extra seconds to the auto-computed boot timeout
-  --dry-run             Print what would run without starting`);
+first boot. On a machine that has booted, a flag the machine already has (same
+packages, user, license, device-mode) is accepted as a no-op. Any other is refused,
+naming where the change can still be made — often 'quickchr set <name>'. Only reach for
+'quickchr clean <name>' if you mean it: it resets the disk to factory, erasing the
+guest's configuration, and reopens the first-boot window.`);
 			break;
 		case "stop":
 			console.log(`quickchr stop [<name>] [--all]
@@ -3534,7 +3542,7 @@ Credential resolution order:
   1. --account / --password flags
   2. MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD environment variables
   3. OS native secret store (macOS Keychain / Linux Keyring)
-  4. ~/.config/quickchr/credentials.json (fallback)`);
+  4. ~/.config/quickchr/com.quickchr.mikrotik-web.json (fallback)`);
 			break;
 		case "license":
 			console.log(`quickchr license <name> [options]
@@ -3556,7 +3564,7 @@ Credential resolution order (highest priority first):
   1. --account / --password flags
   2. MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD environment variables
   3. OS native secret store (macOS Keychain, Linux GNOME Keyring, Windows Credential Manager)
-  4. ~/.config/quickchr/credentials.json (fallback)`);
+  4. ~/.config/quickchr/com.quickchr.mikrotik-web.json (fallback)`);
 			break;
 		case "qga":
 			console.log(`quickchr qga <name> <operation> [options]

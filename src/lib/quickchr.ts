@@ -1398,29 +1398,33 @@ export async function captureRunningFailure(
 	});
 }
 
-/** Tear down a machine that failed to boot, and describe what was done.
- *
- *  Default is full cleanup — a failed `start()` must not leave a half-dead
- *  machine behind for the next call to trip over. The exception is `restore`: an
- *  `add()`-created machine on its first boot is reset to the record `add()` wrote
- *  rather than removed (#182). Every outcome names QUICKCHR_PRESERVE_ON_FAILURE,
- *  because an auto-removed machine is what hid #182's report. QUICKCHR_PRESERVE_ON_FAILURE=1
- *  inverts that for **local** debugging: the QEMU process is still stopped (it is
- *  wedged, and its port block must be released), but the machine directory
- *  survives so it can be inspected by hand.
- *
- *  Evidence does not depend on that flag, and CI deliberately does not set it —
- *  `captureBootFailure()` has already written its report outside the machine dir
- *  with qemu.log and serial.log embedded, so cleanup cannot destroy it (#79). */
+/** Cleanup intent is captured under the lifecycle lock, before launch mutates state. */
+export type BootFailureCleanup =
+	| { kind: "remove-new" }
+	| { kind: "reset-first-boot"; restore: MachineState }
+	| { kind: "preserve-existing" };
+
+/** Stop the failed guest, then apply the launch's cleanup intent.
+ * Diagnostics have already been captured outside the machine directory. */
 export async function cleanupAfterBootFailure(
 	instance: ChrInstance,
 	name: string,
 	failure: BootFailureReport,
-	restore?: MachineState,
+	cleanup: BootFailureCleanup,
 ): Promise<string> {
 	const quoted = shellQuote(name);
 	// Called from inside a start or relaunch that holds the machine lock.
-	try { await stopUnderLock(instance.state); } catch { /* ignore */ }
+	try {
+		await stopUnderLock(instance.state);
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		return ` Machine "${name}" was retained, but stopping QEMU failed (${reason}) — retry with \`quickchr stop ${quoted}\` before starting or removing it.`;
+	}
+	if (cleanup.kind === "preserve-existing") {
+		return ` Machine "${name}" was stopped and preserved with its disks and configuration — ` +
+			`retry with \`quickchr start ${quoted}\`, or explicitly remove it with \`quickchr remove ${quoted}\`.`;
+	}
+	const restore = cleanup.kind === "reset-first-boot" ? cleanup.restore : undefined;
 	if (failure.preserved) {
 		return ` Machine "${name}" was preserved for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — ` +
 			(restore ? `reset it with \`quickchr clean ${quoted}\` and start it again, or ` : "") +
@@ -2462,7 +2466,7 @@ export class QuickCHR {
 				"BOOT_TIMEOUT",
 				`CHR did not respond within ${bootTimeout / 1000}s (accel=${accel})` +
 				(hasProvisioning ? " — provisioning could not run." : ".") +
-				await cleanupAfterBootFailure(instance, name, failure) +
+				await cleanupAfterBootFailure(instance, name, failure, { kind: "remove-new" }) +
 				`\n${failure.summary}`,
 			);
 		}
@@ -2761,6 +2765,9 @@ export class QuickCHR {
 		// the same failed first boot as a provisioning error, and resets the same way
 		// instead of deleting what `add` recorded (#182).
 		const beforeLaunch = isProvisioningWindowOpen(state) ? structuredClone(state) : undefined;
+		const bootFailureCleanup: BootFailureCleanup = beforeLaunch
+			? { kind: "reset-first-boot", restore: beforeLaunch }
+			: { kind: "preserve-existing" };
 
 		const platform = await detectPlatform();
 		const accel = await detectAccel(state.arch);
@@ -2842,7 +2849,7 @@ export class QuickCHR {
 				"BOOT_TIMEOUT",
 				`CHR did not respond within ${bootTimeout / 1000}s (accel=${accel})` +
 				(hasProvisioning ? " — provisioning could not run." : ".") +
-				await cleanupAfterBootFailure(instance, state.name, failure, beforeLaunch) +
+				await cleanupAfterBootFailure(instance, state.name, failure, bootFailureCleanup) +
 				`\n${failure.summary}`,
 			);
 		}
