@@ -1236,11 +1236,11 @@ is unset.
 ### Credentials (separate from data dir)
 
 - **Per-instance CHR credentials**: file in the user config dir
-  (`~/.config/quickchr/secrets.json` on POSIX; not the OS keychain — a
+  (`~/.config/quickchr/com.quickchr.instance.json`; not the OS keychain — a
   Keychain dialog hangs in non-TTY contexts like tests and CI).
 - **MikroTik.com web account** (for license operations): tries
   `Bun.secrets` (OS keychain) when interactive, falls back to the same
-  config-file store otherwise.
+  config-file store otherwise (`~/.config/quickchr/com.quickchr.mikrotik-web.json`).
 
 Both honor explicit CLI flags / env vars first.
 
@@ -1337,7 +1337,8 @@ against:
 - Accidental credential leakage in commits, CI logs, CLI output.
 
 We **don't** protect against same-user code reading
-`secrets.json`, `ps`-visible CLI args, or memory inspection.
+the `~/.config/quickchr/*.json` credential files, `ps`-visible CLI args, or memory
+inspection.
 
 ### Auth resolution (`resolveAuth`)
 
