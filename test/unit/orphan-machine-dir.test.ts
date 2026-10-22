@@ -5,6 +5,11 @@ import { delimiter, join } from "node:path";
 const TEST_DIR = join(import.meta.dir, ".tmp-orphan-machine-dir");
 const STUB_BIN = join(TEST_DIR, "stub-bin");
 const CLI = join(import.meta.dir, "../../src/cli/index.ts");
+/** add() checks free space before it creates anything. These tests are about what a
+ *  failed add leaves behind, so the CLI child runs with the gate stubbed: on a checkout
+ *  with under 10 GiB free the real gate refused first, and "survives a failed second
+ *  add" failed while "a throw after ensureDir" passed without reaching cleanup (#193). */
+const AMPLE_STORAGE = join(import.meta.dir, "helpers/ample-storage.ts");
 
 /** `add()` calls `requireQemu(arch)` before it creates anything, and that only checks
  *  the binary is findable on PATH (`findQemuBinary`). These stubs satisfy that check on
@@ -37,7 +42,7 @@ function cachedImageName(version: string, arch: string): string {
 }
 
 async function runQuickchr(args: string[]) {
-	const proc = Bun.spawn(["bun", CLI, ...args], {
+	const proc = Bun.spawn(["bun", "--preload", AMPLE_STORAGE, CLI, ...args], {
 		env: {
 			...process.env,
 			PATH: `${STUB_BIN}${delimiter}${process.env.PATH ?? ""}`,
@@ -89,6 +94,10 @@ describe("a failed add leaves nothing behind (#155)", () => {
 		]);
 		expect(result.exitCode).toBe(1);
 		expect(result.stderr).not.toContain("stub");
+		// The fault this test plants, not an earlier refusal: anything that fails before
+		// ensureDir (a storage or version check) also leaves machines/ empty.
+		expect(result.stderr).toContain("unlink");
+		expect(result.stderr).toContain(cachedImageName("7.24.4", "x86"));
 		expect(machinesDirContents()).toEqual([]);
 	});
 

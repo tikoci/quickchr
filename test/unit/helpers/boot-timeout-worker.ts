@@ -7,6 +7,8 @@ import * as qemu from "../../../src/lib/qemu.ts";
 import * as images from "../../../src/lib/images.ts";
 import * as diagnostics from "../../../src/lib/diagnostics.ts";
 import * as disks from "../../../src/lib/disk.ts";
+// Routing is under test, not the host's free space (#193).
+import "./ample-storage.ts";
 import { getCacheDir, getMachineDir, loadMachine, saveMachine } from "../../../src/lib/state.ts";
 import { getInstanceCredentials, saveInstanceCredentials } from "../../../src/lib/credentials.ts";
 import { currentHolder, machineLockPath } from "../../../src/lib/lock.ts";
