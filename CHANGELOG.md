@@ -25,7 +25,18 @@ provisioning quirks agents work around get fixed.
   the retry is `quickchr start <name>` again. A machine `start` created in the same call is
   still removed. (#182)
 
+### Added
+
+- `quickchr shutdown <name>` / `ChrInstance.shutdown()` requests guest shutdown
+  over REST, waits up to 10 seconds by default, and reports a forced power cut if
+  needed. CLI `--timeout` / `QUICKCHR_SHUTDOWN_TIMEOUT` use seconds; library
+  `timeoutMs` uses milliseconds. Disks, credentials and restart configuration
+  survive. `stop()` remains the normal power-cut teardown primitive. (#143)
+
 ### Fixed
+
+- Stop help and API documentation now describe QEMU SIGTERM/SIGKILL accurately;
+  the manual previously called it a graceful guest shutdown. (#143)
 
 - `start --all` refuses options it cannot apply, including provisioning flags and
   foreground mode, instead of silently dropping them on a `--no-wait` start.

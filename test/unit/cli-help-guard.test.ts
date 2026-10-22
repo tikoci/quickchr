@@ -89,7 +89,7 @@ describe("--help is handled before any side effect (#156)", () => {
 		// The guard lives in the dispatcher so a new subcommand cannot miss it; this
 		// pins that for the commands that exist today.
 		const commands = [
-			"add", "start", "stop", "list", "remove", "clean", "console", "exec", "qga",
+			"add", "start", "stop", "shutdown", "list", "remove", "clean", "console", "exec", "qga",
 			"get", "set", "inspect", "env", "disk", "snapshot", "doctor", "logs",
 			"completions", "networks", "cache", "settings", "version",
 		];

@@ -340,6 +340,9 @@ async function main() {
 			case "stop":
 				await cmdStop(args.slice(1));
 				break;
+			case "shutdown":
+				await cmdShutdown(args.slice(1));
+				break;
 			case "list":
 			case "ls":
 			case "status":
@@ -1586,6 +1589,32 @@ async function cmdStart(argv: string[]) {
 			console.log(`  Login:   ${creds.user} / ${creds.password || "(no password)"}`);
 			console.log(`  Run:     quickchr exec ${instance.name} /system/resource/print`);
 		}
+	}
+}
+
+async function cmdShutdown(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const invalid = unknownFlags(flags, ["timeout"]);
+	if (invalid.length) throw new QuickCHRError("INVALID_ARGUMENT", "shutdown accepts only <name> and --timeout <seconds>");
+	if (positional.length !== 1 || positional[0] === undefined) throw new QuickCHRError("INVALID_ARGUMENT", "Usage: quickchr shutdown <name> [--timeout <seconds>]");
+	const raw = flags.timeout === undefined ? (process.env.QUICKCHR_SHUTDOWN_TIMEOUT ?? "10") : flag(flags, "timeout");
+	if (raw === undefined || !/^[0-9]+$/.test(raw) || Number(raw) <= 0) {
+		throw new QuickCHRError("INVALID_ARGUMENT", "shutdown timeout must be a positive integer number of seconds");
+	}
+	const { validateShutdownTimeout } = await import("../lib/shutdown.ts");
+	const timeoutMs = validateShutdownTimeout(Number(raw) * 1000);
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const name = positional[0];
+	const instance = QuickCHR.get(name);
+	if (!instance) throw new QuickCHRError("MACHINE_NOT_FOUND", `Machine "${name}" not found`);
+	const result = await instance.shutdown({ timeoutMs });
+	if (result.outcome === "forced") {
+		console.log(`${name}: forced power cut — guest shutdown not confirmed`);
+		if (result.requestError) console.error(`Shutdown request: ${result.requestError}`);
+	} else if (result.outcome === "already-stopped") {
+		console.log(`${name}: already stopped`);
+	} else {
+		console.log(`${name}: guest exited after shutdown request`);
 	}
 }
 
@@ -3136,7 +3165,8 @@ Commands:
   setup                   Interactive setup wizard (TTY only)
   add [options]           Create a new CHR machine (without starting)
   start [<name>|options]  Start or restart a CHR instance
-  stop [<name>|--all]     Stop instance(s) — print list if no name
+  stop [<name>|--all]     Power cut — print list if no name
+  shutdown <name>         Request guest shutdown, then bounded hard-stop fallback
   list [<name>] [--json]  List all instances, or detail for one
   status                  Alias for list
   inspect <name> [--json] Print running machine descriptor as JSON
@@ -3335,9 +3365,22 @@ window for all of them.
 		case "stop":
 			console.log(`quickchr stop [<name>] [--all]
 
+  Power cut: QEMU SIGTERM, then SIGKILL if needed. Pending guest changes may be lost.
+  Use shutdown to request /system/shutdown first.
+
   <name>      Stop a specific running instance.
               Omit to see a list of running instances.
   --all       Stop all running instances.`);
+			break;
+		case "shutdown":
+			console.log(`quickchr shutdown <name> [--timeout <seconds>]
+
+  Request /system/shutdown over REST, then wait for QEMU to exit.
+  If it is still running at the deadline, force a power cut and report it.
+  --timeout <seconds>  Positive integer seconds (default 10).
+                       Overrides QUICKCHR_SHUTDOWN_TIMEOUT.
+  Lock wait and hard-stop escalation are separate bounded waits.
+  Preserves disks and credentials. Use stop for immediate teardown.`);
 			break;
 		case "status":
 			console.log(`quickchr status [<name>] [--json]

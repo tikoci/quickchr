@@ -64,6 +64,8 @@ export type {
 	ServiceEndpoint,
 	ServiceName,
 	SnapshotInfo,
+	ShutdownOptions,
+	ShutdownResult,
 	SshServiceEndpoint,
 	StartOptions,
 } from "./lib/types.ts";

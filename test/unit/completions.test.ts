@@ -161,7 +161,7 @@ describe("generateCompletionScript", () => {
 	});
 
 	test("scripts include all main subcommands", () => {
-		const subcommands = ["start", "stop", "list", "remove", "console", "exec", "cache", "doctor", "completions"];
+		const subcommands = ["start", "stop", "shutdown", "list", "remove", "console", "exec", "cache", "doctor", "completions"];
 		for (const shell of SHELLS) {
 			const script = generateCompletionScript(shell);
 			for (const cmd of subcommands) {
