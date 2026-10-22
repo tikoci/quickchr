@@ -25,7 +25,7 @@ const CREATE_FLAGS = [
 /** `start` also boots, so it owns the run-time flags on top of the create set. */
 const START_ONLY_FLAGS = [
 	"all", "dry-run", "wait", "background", "bg", "fg", "foreground",
-	"install-deps", "timeout-extra",
+	"timeout-extra",
 	"license-level", "license-account", "license-password",
 ] as const;
 
@@ -96,10 +96,15 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
  *  that `--add-network` already expresses in general (#164). Removing them silently would
  *  repeat the defect they were removed for: a flag that is accepted and does nothing. A
  *  removed name stays known for as long as anyone might still type it, and says what
- *  replaced it. */
+ *  replaced it.
+ *
+ *  `--install-deps` is the same defect from the other side: `start` accepted it from
+ *  the beginning and nothing ever read it (#193). It never installed anything, so the
+ *  replacement is the command that names what to install. */
 export const REMOVED_FLAGS: ReadonlyMap<string, string> = new Map([
 	["vmnet-shared", "--add-network shared"],
 	["vmnet-bridge", "--add-network bridged:<iface>"],
+	["install-deps", "quickchr doctor (it never installed anything; doctor lists missing host dependencies and how to install them)"],
 ]);
 
 /** Value-taking flags with a documented `--no-` spelling, where `false` is a real

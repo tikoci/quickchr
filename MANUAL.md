@@ -150,6 +150,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--device-mode <m>` | — | `rose`, `advanced`, `basic`, `home`, `auto`, `skip`, ≥ 7.20.8 |
 | `--device-mode-enable <f,...>` | — | Repeatable, comma-separated |
 | `--device-mode-disable <f,...>` | — | Repeatable, comma-separated |
+| `--no-device-mode` | — | Skip device-mode provisioning entirely |
 | `--add-network <spec>` | `user` | See §7. Repeatable. |
 | `--no-network` | false | Headless, no NICs |
 | `--no-winbox` | false | Exclude WinBox port |
@@ -172,11 +173,10 @@ Additional flags:
 
 | Flag | Notes |
 |---|---|
-| `--all` | Start every stopped machine in background; accepts readiness, acceleration, timeout and secure-login options only. Other options are refused rather than ignored |
+| `--all` | Start every stopped machine in background; accepts readiness, acceleration, timeout and secure-login options only. Other options are refused rather than ignored. `--secure-login` is resolved per machine: one that has never booted creates the managed login; one that already booted accepts it as a no-op only if it already has one, and is refused otherwise. With `--no-wait`, a never-booted machine refuses it (provisioning needs the wait). Machines start one at a time, so a refusal stops the batch after the earlier machines have started |
 | `--no-wait` | Return as soon as QEMU is running (past the 1.5 s early-exit check), with state and ports persisted; do not wait for RouterOS. Refused with any provisioning flag, including first-boot options `add` recorded, and with `--fg` |
 | `--fg` / `--foreground` (alias `--no-bg`, `--no-background`) | Serial console on stdio |
 | `--bg` / `--background` | **Deprecated, does nothing.** Background is the default, and the flag never made `start` return early — it only ever chose where the serial console went. Prints a warning; use `--no-wait` |
-| `--install-deps` | Auto-install missing host deps (calls package manager) |
 | `--timeout-extra <s>` / `-T <s>` | Add extra seconds to computed boot timeout |
 | `--dry-run` | Print resolved options and QEMU command, exit |
 
@@ -567,6 +567,28 @@ appended directly to `$GITHUB_OUTPUT`.
 `--json` intentionally emits one JSON object for programmatic parsing; use the
 default output form when writing step outputs directly.
 
+`cache list [--json]` shows each cached image with its version, arch, size, age
+(time since it was cached) and whether it is in use. An image is **in use** when
+any machine, running or stopped, was created from that version and arch.
+`prune` and `clear` never delete an in-use image.
+
+```bash
+quickchr cache list
+quickchr cache prune --older-than 7.22 --dry-run   # versions below 7.22
+quickchr cache prune --max-age 30d                 # cached more than 30 days ago
+quickchr cache prune --max-size 2G                 # oldest versions first, until <= 2 GiB
+quickchr cache clear --all                         # every image not in use
+```
+
+`prune` needs at least one of `--older-than <ver>`, `--max-age <dur>` or
+`--max-size <size>`, and applies them in that order when combined. `--max-size`
+evicts the oldest RouterOS version first (oldest cache time breaks ties) until
+the total, in-use images included, fits. Durations are `<N>(s|m|h|d|w)`; sizes
+are `<N>(K|M|G|T)` with an optional `i`/`B`, read as IEC binary. `--dry-run`
+lists what `prune` or `clear` would delete without deleting it. `clear` refuses
+without `--all`. Separately, a successful `start` prunes to the
+`cache-max-size` setting (default `2G`; see `settings` below).
+
 #### `settings [print|get|set|reset] [key] [value] [--json]`
 
 Manage quickchr's own global preferences — repeated flags/defaults that
@@ -824,14 +846,14 @@ redact before logging or attaching to bug reports.
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `name` | string | auto | Must not start with `-` |
-| `version` | string | — | Mutually exclusive with `channel` |
+| `version` | string | — | Wins over `channel`: passing both warns and uses `version` |
 | `channel` | Channel | `"stable"` | |
 | `arch` | `"arm64" \| "x86"` | host | |
 | `cpu` | number | `1` | |
 | `mem` | number | `512` (1024 cross-arch TCG) | MiB |
 | `background` | boolean | `true` | Where the serial console goes — not whether `start()` waits |
 | `wait` | boolean | `true` | `false` resolves once QEMU is running and leaves readiness to the caller (`instance.waitForBoot()`); refused with provisioning or `background: false` (`INVALID_ARGUMENT`) |
-| `bootDiskFormat` | `"raw" \| "qcow2"` | `"raw"` (auto-`qcow2` if `bootSize`) | |
+| `bootDiskFormat` | `"raw" \| "qcow2"` | `"raw"` (auto-`qcow2` if `bootSize`) | The CLI always passes a format, defaulting to `qcow2`; the `"raw"` default applies to library callers only |
 | `bootSize` | string | — | e.g., `"512M"`, `"2G"`. Needs `qemu-img` |
 | `extraDisks` | string[] | `[]` | Each entry is a size string |
 | `networks` | NetworkSpecifier[] | `["user"]` | See §7 |
@@ -845,7 +867,7 @@ redact before logging or attaching to bug reports.
 | `secureLogin` | boolean | `false` | **`true` is the explicit trigger** for managed-account creation |
 | `license` | `LicenseInput` | — | `"p1"` / `"p10"` / `"unlimited"` or `LicenseOptions` |
 | `deviceMode` | `DeviceModeOptions` | — | `{mode?, enable?[], disable?[]}` |
-| `installDeps` | boolean | — | Auto-install missing OS deps |
+| `installDeps` | boolean | — | **Deprecated, ignored.** Never installed anything; run `quickchr doctor` for install hints |
 | `dryRun` | boolean | `false` | Print QEMU command and exit |
 | `timeoutExtra` | number | `0` | Extra **milliseconds** added to boot timeout |
 | `onProgress` | `(msg) => void` | `console.log` | `[debug]` lines only when `QUICKCHR_DEBUG=1` |

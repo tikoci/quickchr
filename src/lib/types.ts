@@ -432,7 +432,8 @@ export interface StartOptions {
 	 *  networks: ["user", { type: "socket-connect", port: hostTcpServerPort }]
 	 */
 	networks?: NetworkSpecifier[];
-	/** Install OS-level dependencies (QEMU, firmware) automatically if missing. */
+	/** @deprecated Ignored — nothing ever read it, so it never installed anything (#193).
+	 *  `quickchr doctor` lists missing host dependencies. To be removed in a later minor. */
 	installDeps?: boolean;
 	/** Print QEMU command and config without actually starting the VM. */
 	dryRun?: boolean;

@@ -1390,7 +1390,7 @@ function printReadinessTip(name: string, version: string): void {
 	tip(`wait for readiness with: centrs retrieve --quickchr ${name} /system/resource${via} --wait 5m`);
 }
 
-async function cmdStart(argv: string[]) {
+export async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	applyTimeoutExtraShortFlag(argv, flags, positional);
 	rejectUnknownFlags(flags, START_FLAGS, "start");
@@ -1474,7 +1474,6 @@ async function cmdStart(argv: string[]) {
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
-		installDeps: flagBool(flags, "install-deps"),
 		dryRun: flagBool(flags, "dry-run"),
 		timeoutExtra: await resolveTimeoutExtraMs(flags),
 	};
@@ -3174,6 +3173,7 @@ Commands:
   console <name>          Attach to serial console of a running instance
   exec <name> <command>   Run a RouterOS CLI command on a running instance
                           (raw /rest/execute — see 'quickchr exec --help' for centrs)
+  qga <name> <operation>  Query the QEMU Guest Agent (x86 only)
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
   get <name> [group]      Show machine config (license, device-mode, admin)
