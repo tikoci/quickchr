@@ -646,7 +646,7 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 | Platform id | Runner | CHR arch | Accel | Full-suite timeout |
 |-------------|--------|----------|-------|--------------------|
 | `linux-x86` | ubuntu-latest | x86 | KVM | 60 min |
-| `linux-arm64` | ubuntu-24.04-arm | arm64 | KVM if available; hosted runners may fall back to TCG | 60 min |
+| `linux-arm64` | ubuntu-24.04-arm | arm64 | **TCG** (no usable `/dev/kvm` in practice) | 75 min |
 | `macos-arm64` | macos-15 | arm64 | **TCG** | 60 min |
 | `macos-x86` | macos-15-intel | x86 | **HVF** | 300 min (90 with `tcg-smoke`/`test-filter`) |
 | `windows-x86` | windows-latest | x86 | TCG | 300 min (90 with `tcg-smoke`/`test-filter`) |
@@ -659,6 +659,14 @@ the HVF path. `macos-x86` is bare metal and `detectAccel()` returns `hvf` there;
 its extended timeout is about #76, not about its accelerator. A source-built
 QEMU (`qemu-version`) adds **+20 min** to the affected leg's job budget; the test
 step's own cap is deliberately left unchanged.
+
+**`linux-arm64` is a TCG leg.** It read "KVM if available" until 2026-10-22, but every
+`main.yml` run from 2026-09-20 on detected `tcg` (12 of 12). Its `long` budget class
+(75 min job / 65 min test step) exists because the full TCG suite outgrew the 50 min
+standard step once #189 added `restart-timeout.test.ts`: the last file, `start-stop`,
+needs about 488 s and was cut to a 457 s cap (#151). `long` is a measured size, not
+headroom for hangs. Re-measure before adding another slow file to the suite, and
+retune if the drift warning ever reports `kvm` on this leg.
 
 **Hosted `macos-15-intel` is 4 CPUs / 14336 MiB** — measured by B8a of #110 from
 the leg checkpoint's host snapshot, across four runners. That is half the cores

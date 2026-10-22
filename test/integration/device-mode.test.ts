@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeAll } from "bun:test";
+import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
 
@@ -303,7 +304,8 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
 		const { resolveAuth } = await import("../../src/lib/auth.ts");
-		const cli = new URL("../../src/cli/index.ts", import.meta.url).pathname;
+		// Not `new URL(...).pathname`: on Windows that is "/D:/...", which bun cannot load (#196).
+		const cli = join(import.meta.dir, "../../src/cli/index.ts");
 
 		const arch = process.arch === "arm64" ? "arm64" : "x86";
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
