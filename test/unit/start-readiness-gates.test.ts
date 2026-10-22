@@ -260,7 +260,7 @@ describe("cleanupAfterBootFailure — first-boot timeout (#182)", () => {
 		const { restore } = seedTimedOutFirstBoot();
 		const instance = QuickCHR.get("tb");
 		if (!instance) throw new Error("seeded machine did not load");
-		const message = await cleanupAfterBootFailure(instance, "tb", failure(false), restore);
+		const message = await cleanupAfterBootFailure(instance, "tb", failure(false), { kind: "reset-first-boot", restore });
 
 		const after = loadMachine("tb") as MachineState;
 		expect(after).toBeDefined();
@@ -277,7 +277,7 @@ describe("cleanupAfterBootFailure — first-boot timeout (#182)", () => {
 		seedTimedOutFirstBoot();
 		const instance = QuickCHR.get("tb");
 		if (!instance) throw new Error("seeded machine did not load");
-		const message = await cleanupAfterBootFailure(instance, "tb", failure(false));
+		const message = await cleanupAfterBootFailure(instance, "tb", failure(false), { kind: "remove-new" });
 		expect(loadMachine("tb")).toBeUndefined();
 		expect(message).toContain("cleaned up automatically");
 		expect(message).toContain("QUICKCHR_PRESERVE_ON_FAILURE=1");
@@ -287,10 +287,25 @@ describe("cleanupAfterBootFailure — first-boot timeout (#182)", () => {
 		const { restore } = seedTimedOutFirstBoot();
 		const instance = QuickCHR.get("tb");
 		if (!instance) throw new Error("seeded machine did not load");
-		const message = await cleanupAfterBootFailure(instance, "tb", failure(true), restore);
+		const message = await cleanupAfterBootFailure(instance, "tb", failure(true), { kind: "reset-first-boot", restore });
 		expect(readFileSync(join(restore.machineDir, "disk.img"), "utf-8")).toBe("guest-wrote-during-stalled-boot");
 		expect((loadMachine("tb") as MachineState).lastStartedAt).toBeDefined();
 		expect(message).toContain("quickchr clean tb");
 		expect(message).toContain("quickchr remove tb");
 	});
+});
+
+describe("boot-timeout launch routing (#189)", () => {
+	for (const kind of ["new", "first", "configured", "legacy"]) {
+		for (const preserve of [false, true]) {
+			test(`${kind}, preserve override ${preserve}`, async () => {
+				const proc = Bun.spawn([process.execPath, join(import.meta.dir, "helpers/boot-timeout-worker.ts"), kind, preserve ? "preserve" : "default"], {
+					env: { ...process.env, QUICKCHR_PRESERVE_ON_FAILURE: preserve ? "1" : undefined },
+					stdout: "pipe", stderr: "pipe",
+				});
+				const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+				expect({ exit, output: stdout + stderr }).toEqual({ exit: 0, output: "" });
+			});
+		}
+	}
 });

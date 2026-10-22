@@ -35,6 +35,11 @@ provisioning quirks agents work around get fixed.
 
 ### Fixed
 
+- A restart `BOOT_TIMEOUT` stops and preserves previously booted machines, including
+  configured boot/extra disks, stored credentials and diagnostics. Retry with `start`
+  or explicitly `remove`; preservation no longer requires an environment override.
+  New machines still clean up automatically and existing first boots still reset. (#189)
+
 - Stop help and API documentation now describe QEMU SIGTERM/SIGKILL accurately;
   the manual previously called it a graceful guest shutdown. (#143)
 
