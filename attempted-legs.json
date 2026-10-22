@@ -1977,23 +1977,23 @@
 		"ts": "2026-10-22T19:16:54.043Z"
 	},
 	"39857059647": {
-		"attempt": "1",
+		"attempt": "2",
 		"complete": 0,
 		"event": "workflow_dispatch",
 		"incomplete": {
 			"windows-x86|stable": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 705,
+				"job_conclusion": "success",
+				"job_elapsed_s": 658,
 				"job_matched": true,
 				"platform": "windows-x86",
 				"resolved": "7.24.5",
 				"target": "stable",
 				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
+				"why": "job ended 'success' before the suite could instrument itself"
 			}
 		},
 		"planned": 1,
 		"sha": "f74bd96d28896bcbadbc28780c31a77508c89602",
-		"ts": "2026-10-22T21:37:03.177Z"
+		"ts": "2026-10-22T21:49:50.597Z"
 	}
 }
