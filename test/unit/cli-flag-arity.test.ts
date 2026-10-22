@@ -145,6 +145,13 @@ describe("--vmnet-shared / --vmnet-bridge are removed, not repaired (#164)", () 
 		}
 	});
 
+	test("--install-deps errors instead of being accepted and ignored (#193)", () => {
+		// It was in START_FLAGS and parsed into StartOptions.installDeps, which nothing read.
+		for (const argv of [["--install-deps"], ["--install-deps", "lab"], ["--no-install-deps"]]) {
+			expect(() => parseFlags(argv)).toThrow(/--install-deps was removed. Use: quickchr doctor/);
+		}
+	});
+
 	test("the CLI flag is gone; the QEMU netdev of the same name is not", async () => {
 		// `vmnet-shared` is three things at once: the removed CLI flag, QEMU's own netdev
 		// name, and a legacy `machine.json` value. Only the first was removed, and the

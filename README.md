@@ -195,6 +195,7 @@ reports a forced power cut if the guest does not stop within the grace budget.
 | `--device-mode <m>` | Configure device-mode: rose\|advanced\|basic\|home\|auto\|skip | |
 | `--device-mode-enable <f>` | Set one or more device-mode flags to yes | |
 | `--device-mode-disable <f>` | Set one or more device-mode flags to no | |
+| `--no-device-mode` | Skip device-mode provisioning entirely | |
 | `--port-base <port>` | Starting port number | Auto (9100+) |
 | `--timeout-extra <s>` | Add extra seconds to the auto-computed boot timeout | |
 | `--dry-run` | Print what would run without executing | |
@@ -238,7 +239,7 @@ In **foreground** mode, your terminal becomes the CHR serial console. Use these 
 | `Ctrl-A C` | Toggle QEMU monitor (`quit` to force-stop) |
 | `Ctrl-A H` | List all key shortcuts |
 
-> **Note:** Background QEMU processes are true OS-level orphans — `quickchr` does not use shell job control (`&`). After the command returns you can close the terminal and QEMU keeps running. Use `quickchr stop <name>` to shut it down cleanly.
+> **Note:** Background QEMU processes are true OS-level orphans — `quickchr` does not use shell job control (`&`). After the command returns you can close the terminal and QEMU keeps running. `quickchr stop <name>` ends it with a power cut; `quickchr shutdown <name>` asks the guest to shut down first, and still falls back to a power cut if it does not exit in time.
 
 ### Disk Support
 

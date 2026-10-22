@@ -189,3 +189,33 @@ describe("unknown flags on machine-creating commands (#156)", () => {
 		expect(suggestFlag("completely-different-thing", ADD_FLAGS)).toBeUndefined();
 	});
 });
+
+describe("root help lists every dispatched command (#193)", () => {
+	// `qga` was dispatched and had its own help but was missing from the root list
+	// through 0.5.0. Read the dispatch switch rather than a hand-kept list, so a new
+	// command fails here until root help names it.
+	const ALIASES = new Set(["ls", "status", "rm", "snap", "net", "--version", "-v", "--help", "-h"]);
+
+	test("each primary command in main()'s switch appears in root help", async () => {
+		const source = await Bun.file(CLI).text();
+		const body = source.slice(source.indexOf("switch (command) {"), source.indexOf("case undefined:"));
+		const commands = [...body.matchAll(/case "([^"]+)":/g)]
+			.map((m) => m[1] as string)
+			.filter((c) => !ALIASES.has(c));
+		expect(commands).toContain("qga");
+
+		const result = await runQuickchr(["--help"]);
+		expect(result.exitCode).toBe(0);
+		const listed = new Set([...result.stdout.matchAll(/^ {2}([a-z]+)\b/gm)].map((m) => m[1]));
+		expect(commands.filter((c) => !listed.has(c))).toEqual([]);
+	});
+
+	test("qga --help works with no machine and does not create the data dir", async () => {
+		// beforeEach creates TEST_DIR; remove it so creating the data dir is detectable.
+		rmSync(TEST_DIR, { recursive: true, force: true });
+		const result = await runQuickchr(["qga", "--help"]);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("QEMU Guest Agent");
+		expect(existsSync(TEST_DIR)).toBe(false);
+	});
+});

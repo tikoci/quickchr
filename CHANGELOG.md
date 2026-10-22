@@ -8,6 +8,23 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+### Changed
+
+- **`start --install-deps` is now an error.** It was accepted but nothing ever read it, so
+  it never installed anything. The error points to `quickchr doctor`, which lists missing
+  host dependencies and how to install them. `StartOptions.installDeps` is deprecated and
+  ignored, and will be removed in a later minor. (#193)
+
+### Fixed
+
+- Root `--help` now lists `qga`. (#193)
+- Docs: the MANUAL `StartOptions` table no longer calls `version` and `channel`
+  mutually exclusive; `version` wins and passing both warns. README no longer says `stop`
+  shuts a machine down cleanly; it points to `shutdown`. The MANUAL also covers
+  `cache list`/`prune`/`clear` and their flags, `start --all` handling of
+  `--secure-login`, `--no-device-mode`, and why the CLI and library default
+  `bootDiskFormat` differently. (#193)
+
 ## [0.5.0] — 2026-10-22
 
 ### Breaking (0.5.0)
