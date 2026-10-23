@@ -17,7 +17,7 @@ import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, renameSync, u
 import { basename, dirname, join } from "node:path";
 import { ARCHES, CHANNELS, QuickCHRError, parseAccelMode } from "./types.ts";
 import type { AccelMode, Channel } from "./types.ts";
-import { parseSizeString, DEFAULT_CACHE_MAX_BYTES } from "./cache.ts";
+import { parseSizeString, DEFAULT_CACHE_MAX_BYTES, DEFAULT_STORAGE_RESERVE_BYTES } from "./cache.ts";
 import { loadSettingsFileDefaults, readSettingsFileLines, settingsFilePath } from "./settings-file.ts";
 
 // The quickchr.env file tier lives in the leaf module settings-file.ts (see its
@@ -56,12 +56,14 @@ function parseArchSetting(raw: string): SettingsValue {
 	return raw;
 }
 
-function parseCacheMaxSize(raw: string): SettingsValue {
-	try {
-		return parseSizeString(raw);
-	} catch (e) {
-		throw new QuickCHRError("INVALID_SETTING_VALUE", `Invalid value "${raw}" for cache-max-size — ${e instanceof Error ? e.message : String(e)}`);
-	}
+function sizeSetting(attr: string): (raw: string) => SettingsValue {
+	return (raw) => {
+		try {
+			return parseSizeString(raw);
+		} catch (e) {
+			throw new QuickCHRError("INVALID_SETTING_VALUE", `Invalid value "${raw}" for ${attr} — ${e instanceof Error ? e.message : String(e)}`);
+		}
+	};
 }
 
 /** Shared with the CLI's own `--timeout-extra`/`-T` flag validation (cmdStart in
@@ -112,7 +114,16 @@ export const SETTINGS_KEYS: readonly SettingsKeyDef[] = [
 		attr: "cache-max-size",
 		envKey: "QUICKCHR_CACHE_MAX_SIZE",
 		builtinDefault: DEFAULT_CACHE_MAX_BYTES,
-		parse: parseCacheMaxSize,
+		parse: sizeSetting("cache-max-size"),
+		serialize: (v) => String(v),
+	},
+	{
+		// Free space creating a machine or filling the cache must leave on the data
+		// dir's filesystem, on top of what the operation itself writes (#199).
+		attr: "storage-reserve",
+		envKey: "QUICKCHR_STORAGE_RESERVE",
+		builtinDefault: DEFAULT_STORAGE_RESERVE_BYTES,
+		parse: sizeSetting("storage-reserve"),
 		serialize: (v) => String(v),
 	},
 	{
@@ -123,7 +134,7 @@ export const SETTINGS_KEYS: readonly SettingsKeyDef[] = [
 		serialize: (v) => String(v),
 	},
 	{
-		// No builtinDefault: unlike the other 5 keys, the wizard needs to distinguish
+		// No builtinDefault: unlike the other keys, the wizard needs to distinguish
 		// "not configured" from "explicitly false" (src/cli/wizard.ts's userChoice
 		// initialValue only pre-highlights "admin" when the setting is concretely
 		// false) — a builtinDefault here would collapse that distinction and always

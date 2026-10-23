@@ -14,6 +14,22 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   it never installed anything. The error points to `quickchr doctor`, which lists missing
   host dependencies and how to install them. `StartOptions.installDeps` is deprecated and
   ignored, and will be removed in a later minor. (#193)
+- **The 10 GiB free-space floor is gone.** Creating a machine or filling the cache now
+  needs what the operation writes plus a 2 GiB reserve. About 2.2 GiB free is enough
+  for a create from a warm cache, and about 2.6 GiB for a cold one with packages. The
+  reserve is the new `storage-reserve` setting (`QUICKCHR_STORAGE_RESERVE`). When space
+  is short, quickchr first evicts what the cache can spare, measures again, and only
+  then refuses. The `INSUFFICIENT_DISK_SPACE` message now says what was needed, what
+  was evicted and what was kept. `doctor` measures the data dir's filesystem and warns
+  below reserve + 2 GiB. (#199)
+- **The cache cap now counts package archives and interrupted downloads.** Only images
+  were counted before, so a cache could sit well over `cache-max-size` (one host: 3.4 GiB
+  against the 2 GiB cap, 1.3 GiB of it packages). Expect the first automatic prune after
+  upgrading to evict more than usual. An all-packages ZIP and its extraction are one
+  entry. Stale `.part` downloads are pruned first. Automatic eviction skips anything
+  used in the last 30 minutes. A cache hit counts as a use, so `cache prune --max-age`
+  now means "not used for". Files quickchr didn't write are listed and never deleted.
+  `cache list --json` entries gain `kind` and `paths`. (#199)
 - **qcow2 machines no longer keep a raw copy of the image.** A new qcow2 machine (the
   CLI default) used to hold both `disk.img` and `boot.qcow2`; only `boot.qcow2` is ever
   booted. The qcow2 is now converted straight from the cached image, saving 128 MiB per
@@ -23,6 +39,13 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Fixed
 
+- **Cache deletes report failures.** `cache prune`/`clear` and the automatic prune
+  used to count a file as freed even when deleting it failed. Failures are now listed,
+  are not counted as freed, and make `cache prune`/`clear` exit 1. (#199)
+- **Windows: cache publishes retry a sharing violation.** Publishing a download,
+  extraction or boot disk by rename could fail with `EPERM` while Defender or the
+  indexer still had the fresh file open. It now retries `EPERM`/`EACCES`/`EBUSY` for up
+  to about 1.6 s before failing. (#202)
 - **A qcow2 machine restarts without `disk.img`.** Restart used to refuse with
   `MACHINE_NOT_FOUND` when the unused raw copy was missing. (#200)
 - **A booted machine's missing disk is an error, not a factory reset.** If `boot.qcow2`

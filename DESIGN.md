@@ -170,12 +170,31 @@ disks hold guest state, so a missing `boot.qcow2`, `disk.img` or extra disk is
 `MACHINE_NOT_FOUND`, never a silent rebuild from factory. The way out is to restore the
 file or run `quickchr clean`.
 
+**Storage admission (#199).** An operation that writes new data (creating a machine,
+an image or package download) is admitted when the data dir's filesystem has
+`estimate + storage-reserve` free. It replaced a flat 10 GiB floor that refused small
+hosts which had room. The estimate is a per-stage constant (`STORAGE_ESTIMATES` in
+`storage.ts`), rounded up from one host's measurements and written down there. The
+reserve (default 2 GiB) absorbs the estimate's error and keeps the host usable. Under
+pressure, eligible cache entries are evicted first and free space is **measured
+again**: logical sizes are not proof of room (sparse files, APFS clones, concurrent
+writers). There is no budget lock between concurrent creators. Instead, automatic
+eviction never touches an entry used in the last 30 minutes (a cache hit bumps its
+mtime), an entry a machine still needs, or the operation's own version. Each
+download re-checks at its own stage. Restart is never gated. Virtual disk capacity is
+not charged: a sparse disk's growth is the guest's, after admission.
+
+The cache cap (`cache-max-size`) is retention, separate from admission. It counts
+images, package archives with their extractions (one entry: the extraction is only a
+hit while its archive exists) and interrupted downloads. Files quickchr did not write
+are reported and never deleted. A failed delete is reported as failed, not freed.
+
 **Global settings** live separately, under the XDG **config** tier (not the data tree
 above): `~/.config/quickchr/quickchr.env`, dotenv-style (`QUICKCHR_KEY=value` lines).
 Managed via `quickchr settings get|set|print|reset`. Precedence per key: CLI flag >
-`QUICKCHR_<KEY>` env var > `quickchr.env` > built-in default. The 6 managed keys:
-`default-channel`, `default-arch`, `accel`, `cache-max-size`, `timeout-extra`,
-`secure-login`.
+`QUICKCHR_<KEY>` env var > `quickchr.env` > built-in default. The 7 managed keys:
+`default-channel`, `default-arch`, `accel`, `cache-max-size`, `storage-reserve`,
+`timeout-extra`, `secure-login`.
 See MANUAL.md's CLI reference and environment-variables sections for the full surface.
 
 ## Platform Support

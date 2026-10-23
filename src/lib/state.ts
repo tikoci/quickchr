@@ -2,7 +2,7 @@
  * Machine state persistence — JSON files in ~/.local/share/quickchr/machines/.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join, } from "node:path";
 import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -414,4 +414,29 @@ export function pruneCache(maxAgeDays: number = 30): number {
 	}
 
 	return removed;
+}
+
+/** Logical size of a file, or of everything under a directory. */
+export function directorySize(path: string): number {
+	if (!existsSync(path)) return 0;
+
+	const stat = lstatSync(path);
+	if (!stat.isDirectory()) {
+		return stat.size;
+	}
+
+	let total = 0;
+	for (const entry of readdirSync(path, { withFileTypes: true })) {
+		const fullPath = join(path, entry.name);
+		if (entry.isDirectory()) {
+			total += directorySize(fullPath);
+		} else {
+			try {
+				total += lstatSync(fullPath).size;
+			} catch {
+				// Skip entries that can't be stat'd (e.g. Windows named pipes throw EACCES)
+			}
+		}
+	}
+	return total;
 }

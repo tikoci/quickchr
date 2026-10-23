@@ -62,11 +62,11 @@ describe("CLI `quickchr settings`", () => {
 		expect(stdout).toContain("(unset)");
 	});
 
-	test("print --json is valid JSON with all 6 entries", async () => {
+	test("print --json is valid JSON with all 7 entries", async () => {
 		const { stdout, exitCode } = await runQuickchr(["settings", "print", "--json"]);
 		expect(exitCode).toBe(0);
 		const parsed = JSON.parse(stdout);
-		expect(parsed.settings).toHaveLength(6);
+		expect(parsed.settings).toHaveLength(7);
 	});
 
 	test("help documents the accel key and its accepted modes", async () => {

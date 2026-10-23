@@ -2,7 +2,7 @@
  * Image download, ZIP extraction, and cache management.
  */
 
-import { existsSync, mkdtempSync, readdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, unlinkSync, utimesSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -11,7 +11,19 @@ import { downloadToFile } from "./download.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { extractZip } from "./zip.ts";
-import { assertSufficientQuickchrStorage } from "./storage.ts";
+import { assertSufficientQuickchrStorage, STORAGE_ESTIMATES } from "./storage.ts";
+import { formatDiskSize } from "./disk.ts";
+import { renameWithRetry } from "./rename.ts";
+
+/** A cache hit is a use: bump the mtime so automatic eviction counts the entry as
+ *  recently used while this operation reads it (#199). Best-effort: a read-only cache
+ *  still works. */
+export function touchCacheEntry(path: string): void {
+	try {
+		const now = new Date();
+		utimesSync(path, now, now);
+	} catch { /* read-only cache */ }
+}
 
 function finalizeExtractedImage(zipPath: string, imgPath: string): string {
 	if (existsSync(imgPath) && existsSync(zipPath)) {
@@ -118,7 +130,7 @@ export async function extractImage(
 		if (!(await isUsableCachedImage(extractedPath))) {
 			throw new QuickCHRError("PROCESS_FAILED", `Extracted CHR image is incomplete or invalid: ${expected}`);
 		}
-		renameSync(extractedPath, imgPath);
+		renameWithRetry(extractedPath, imgPath);
 	} finally {
 		rmSync(tempDir, { recursive: true, force: true });
 	}
@@ -138,10 +150,16 @@ export async function ensureCachedImage(
 	if (await isUsableCachedImage(imgPath)) {
 		const log = logger ?? createLogger();
 		log.status(`  Using cached image: ${chrImageBasename(version, arch)}`);
+		touchCacheEntry(imgPath);
 		return imgPath;
 	}
 	if (existsSync(imgPath)) unlinkSync(imgPath);
-	assertSufficientQuickchrStorage(`cache CHR ${version} (${arch})`);
+	const log = logger ?? createLogger();
+	assertSufficientQuickchrStorage(
+		`cache CHR ${version} (${arch})`,
+		{ bytes: STORAGE_ESTIMATES.imageDownload, detail: `image download ${formatDiskSize(STORAGE_ESTIMATES.imageDownload)}`, protectVersions: [version] },
+		{ logger: (message) => log.status(message) },
+	);
 	const zipPath = await downloadImage(version, arch, cacheDir, logger);
 	const extractedImgPath = await extractImage(zipPath, cacheDir, logger);
 	return finalizeExtractedImage(zipPath, extractedImgPath);

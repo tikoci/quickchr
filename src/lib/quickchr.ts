@@ -103,7 +103,7 @@ import {
 import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
-import { assertSufficientQuickchrStorage, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
+import { assertSufficientQuickchrStorage, estimateMachineCreation, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
 import { existsSync, rmSync } from "node:fs";
 import { acquireLock, acquireLockNow, allocationLockPath, legacyMachineLockPath, listReservations, machineLockPath, type HeldLock, type LockOperation } from "./lock.ts";
 import { join } from "node:path";
@@ -2026,7 +2026,10 @@ export class QuickCHR {
 		}
 
 		const machineDir = getMachineDir(name);
-		assertSufficientQuickchrStorage(`prepare CHR ${name}`);
+		assertSufficientQuickchrStorage(
+			`prepare CHR ${name}`,
+			estimateMachineCreation({ version, arch, packages: !!(opts.installAllPackages || opts.packages?.length) }),
+		);
 		const { lock, portBase, ports, networks } = await claimNewMachine(name, "add", opts);
 		try {
 			const cachedImg = await ensureCachedImage(version, arch);
@@ -2279,7 +2282,11 @@ export class QuickCHR {
 		}
 
 		const machineDir = getMachineDir(name);
-		assertSufficientQuickchrStorage(`start CHR ${name}`);
+		assertSufficientQuickchrStorage(
+			`start CHR ${name}`,
+			estimateMachineCreation({ version, arch, packages: !!(opts.installAllPackages || opts.packages?.length) }),
+			{ logger: logger ? (message) => logger.status(message) : undefined },
+		);
 		const dirCreatedHere = !existsSync(machineDir);
 
 		const background = opts.background ?? true;
@@ -3065,14 +3072,14 @@ export class QuickCHR {
 			detail: `${machines.length} instance${machines.length !== 1 ? "s" : ""} (${running} running, ${formatDiskSize(storage.machinesBytes)} on disk)`,
 		});
 
-		let storageDetail = `${storage.path}: ${formatDiskSize(storage.freeBytes)} free; ${formatQuickchrUsage(storage)}`;
+		let storageDetail = `${storage.statPath}: ${formatDiskSize(storage.freeBytes)} free; ${formatQuickchrUsage(storage)}`;
 		if (storage.status === "error") {
-			storageDetail += ` — below required minimum ${formatDiskSize(storage.recommendedFreeBytes)}`;
+			storageDetail += ` — below the ${formatDiskSize(storage.reserveBytes)} reserve: new machines and image downloads are refused (after evicting what the cache can spare)`;
 		} else if (storage.status === "warn") {
 			storageDetail += ` — low headroom (target ${formatDiskSize(storage.warningFreeBytes)} free)`;
 		}
 		checks.push({
-			label: storage.label === ".local" ? "Storage (.local)" : "Storage",
+			label: "Storage",
 			status: storage.status,
 			detail: storageDetail,
 		});

@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	autoPruneIfOverCap,
+	cacheInventory,
 	formatSizeBytes,
+	RECENT_USE_MS,
 	listCacheEntries,
 	parseCacheBasename,
 	parseSizeString,
@@ -24,7 +26,21 @@ function writeFakeImage(name: string, sizeBytes: number): string {
 	return full;
 }
 
-function writeFakeMachine(name: string, version: string, arch: "x86" | "arm64"): void {
+/** Make a cache entry look last used `ageMs` ago. */
+function backdate(path: string, ageMs: number = 2 * RECENT_USE_MS): void {
+	const when = new Date(Date.now() - ageMs);
+	utimesSync(path, when, when);
+}
+
+/** An all-packages archive and its extraction, as packages.ts leaves them. */
+function writeFakePackages(arch: "x86" | "arm64", version: string, zipBytes: number, npkBytes: number): void {
+	const cacheDir = getCacheDir();
+	mkdirSync(join(cacheDir, `packages-${arch}-${version}`), { recursive: true });
+	writeFileSync(join(cacheDir, `all_packages-${arch}-${version}.zip`), Buffer.alloc(zipBytes));
+	writeFileSync(join(cacheDir, `packages-${arch}-${version}`, `container-${version}.npk`), Buffer.alloc(npkBytes));
+}
+
+function writeFakeMachine(name: string, version: string, arch: "x86" | "arm64", extra: Record<string, unknown> = {}): void {
 	const dir = join(getMachinesDir(), name);
 	mkdirSync(dir, { recursive: true });
 	const state = {
@@ -42,6 +58,7 @@ function writeFakeMachine(name: string, version: string, arch: "x86" | "arm64"):
 		createdAt: new Date().toISOString(),
 		status: "stopped",
 		machineDir: dir,
+		...extra,
 	};
 	writeFileSync(join(dir, "machine.json"), JSON.stringify(state, null, "\t"));
 }
@@ -175,6 +192,100 @@ describe("pruneCache", () => {
 	});
 });
 
+describe("cache inventory (#199)", () => {
+	test("a package archive and its extraction are one entry, sized and deleted together", () => {
+		writeFakePackages("x86", "7.24.5", 300, 200);
+		const [entry] = listCacheEntries();
+		expect(entry).toMatchObject({ basename: "packages-x86-7.24.5", kind: "packages", version: "7.24.5", arch: "x86", sizeBytes: 500, inUse: false });
+		expect(entry?.paths.sort()).toEqual([
+			join(getCacheDir(), "all_packages-x86-7.24.5.zip"),
+			join(getCacheDir(), "packages-x86-7.24.5"),
+		]);
+
+		const result = pruneCache({ maxSizeBytes: 0 });
+		expect(result.freedBytes).toBe(500);
+		expect(existsSync(join(getCacheDir(), "all_packages-x86-7.24.5.zip"))).toBe(false);
+		expect(existsSync(join(getCacheDir(), "packages-x86-7.24.5"))).toBe(false);
+	});
+
+	test("packages are in use only until the first boot that installs them is stamped done", () => {
+		writeFakePackages("x86", "7.24.5", 100, 100);
+		writeFakeMachine("pending", "7.24.5", "x86", { packages: ["container"] });
+		expect(listCacheEntries().find((e) => e.kind === "packages")?.inUse).toBe(true);
+
+		writeFakeMachine("pending", "7.24.5", "x86", { packages: ["container"], provisioning: { at: new Date().toISOString(), steps: ["packages"] } });
+		expect(listCacheEntries().find((e) => e.kind === "packages")?.inUse).toBe(false);
+	});
+
+	test("the image is still in use by a provisioned machine: clean rebuilds from it", () => {
+		writeFakeImage("chr-7.24.5.img", 100);
+		writeFakeMachine("done", "7.24.5", "x86", { provisioning: { at: new Date().toISOString(), steps: [] } });
+		expect(listCacheEntries()[0]?.inUse).toBe(true);
+	});
+
+	test("an interrupted download is a partial entry, live while its writer is, and goes first", () => {
+		backdate(writeFakeImage("chr-7.20.7.img", 1000));
+		backdate(writeFakeImage("chr-7.24.5.img.zip.999999-0a1b2c3d.part", 400));
+		writeFakeImage(`chr-7.26.img.zip.${process.pid}-0a1b2c3d.part`, 400);
+
+		const entries = listCacheEntries();
+		expect(entries.find((e) => e.basename.startsWith("chr-7.24.5"))).toMatchObject({ kind: "partial", version: "7.24.5", inUse: false });
+		expect(entries.find((e) => e.basename.startsWith("chr-7.26"))).toMatchObject({ kind: "partial", inUse: true });
+
+		const result = pruneCache({ reclaimBytes: 1 });
+		expect(result.evicted.map((e) => e.basename)).toEqual(["chr-7.24.5.img.zip.999999-0a1b2c3d.part"]);
+		expect(result.reasons[`chr-7.26.img.zip.${process.pid}-0a1b2c3d.part`]).toBe("in progress");
+	});
+
+	test("files quickchr did not write are counted, never deleted", () => {
+		writeFakeImage("notes.txt", 123);
+		writeFakeImage("chr-garbage.img", 7);
+		const inventory = cacheInventory();
+		expect(inventory.entries).toEqual([]);
+		expect(inventory.unmanagedBytes).toBe(130);
+		pruneCache({ maxSizeBytes: 0 });
+		expect(existsSync(join(getCacheDir(), "notes.txt"))).toBe(true);
+	});
+});
+
+describe("pruneCache reclaimBytes (#199)", () => {
+	test("evicts oldest version first until the target is met, then stops", () => {
+		writeFakeImage("chr-7.20.7.img", 1000);
+		writeFakeImage("chr-7.21.0.img", 1000);
+		writeFakeImage("chr-7.22.0.img", 1000);
+		const result = pruneCache({ reclaimBytes: 1500 });
+		expect(result.evicted.map((e) => e.version)).toEqual(["7.20.7", "7.21.0"]);
+		expect(result.freedBytes).toBe(2000);
+		expect(existsSync(join(getCacheDir(), "chr-7.22.0.img"))).toBe(true);
+	});
+
+	test("skipRecentMs keeps recently used entries", () => {
+		writeFakeImage("chr-7.20.7.img", 1000);
+		backdate(writeFakeImage("chr-7.22.0.img", 1000));
+		const result = pruneCache({ reclaimBytes: 5000, skipRecentMs: RECENT_USE_MS });
+		expect(result.evicted.map((e) => e.version)).toEqual(["7.22.0"]);
+		expect(result.reasons["chr-7.20.7.img"]).toBe("used recently");
+	});
+
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"a failed delete is reported as failed, not as freed",
+		() => {
+			writeFakeImage("chr-7.20.7.img", 1000);
+			chmodSync(getCacheDir(), 0o555);
+			try {
+				const result = pruneCache({ maxSizeBytes: 0 });
+				expect(result.evicted).toEqual([]);
+				expect(result.freedBytes).toBe(0);
+				expect(result.failed.map((f) => f.entry.basename)).toEqual(["chr-7.20.7.img"]);
+				expect(result.reasons["chr-7.20.7.img"]).toStartWith("delete failed:");
+			} finally {
+				chmodSync(getCacheDir(), 0o755);
+			}
+			expect(existsSync(join(getCacheDir(), "chr-7.20.7.img"))).toBe(true);
+		},
+	);
+});
+
 describe("autoPruneIfOverCap", () => {
 	test("no-op when under cap", () => {
 		writeFakeImage("chr-7.22.0.img", 100);
@@ -183,12 +294,29 @@ describe("autoPruneIfOverCap", () => {
 	});
 
 	test("prunes when over cap", () => {
-		writeFakeImage("chr-7.20.7.img", 1000);
-		writeFakeImage("chr-7.22.0.img", 1000);
+		backdate(writeFakeImage("chr-7.20.7.img", 1000));
+		backdate(writeFakeImage("chr-7.22.0.img", 1000));
 		const messages: string[] = [];
 		const result = autoPruneIfOverCap({ maxSizeBytes: 1500, logger: (m) => messages.push(m) });
 		expect(result.evicted.length).toBeGreaterThan(0);
 		expect(messages.some((m) => m.includes("evicted"))).toBe(true);
+	});
+
+	test("leaves entries used in the last RECENT_USE_MS alone, even over cap", () => {
+		writeFakeImage("chr-7.20.7.img", 1000);
+		backdate(writeFakeImage("chr-7.22.0.img", 1000));
+		const result = autoPruneIfOverCap({ maxSizeBytes: 500 });
+		expect(result.evicted.map((e) => e.basename)).toEqual(["chr-7.22.0.img"]);
+		expect(result.reasons["chr-7.20.7.img"]).toBe("used recently");
+		expect(existsSync(join(getCacheDir(), "chr-7.20.7.img"))).toBe(true);
+	});
+
+	test("names what it evicted", () => {
+		backdate(writeFakeImage("chr-7.20.7.img", 1000));
+		backdate(writeFakeImage("chr-7.22.0.img", 1000));
+		const messages: string[] = [];
+		autoPruneIfOverCap({ maxSizeBytes: 1500, logger: (m) => messages.push(m) });
+		expect(messages).toEqual(["cache: evicted chr-7.20.7.img — freed 1000 B"]);
 	});
 
 	test("never throws on errors", () => {

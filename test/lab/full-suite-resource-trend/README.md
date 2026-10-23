@@ -42,8 +42,8 @@ and record:
   trend survives but an absolute comparison does not.
 - **No stray `qemu-system` processes** (`pgrep -f qemu-system`) — an orphan from
   an earlier run is indistinguishable from a leak this run caused.
-- **Disk headroom.** quickchr's preflight needs 10 GiB free
-  (`QUICKCHR_MIN_FREE_BYTES`); the suite wants meaningfully more.
+- **Disk headroom.** quickchr's test preflight needs the 2 GiB `storage-reserve`
+  plus 2 GiB under `QUICKCHR_INTEGRATION`; the suite wants meaningfully more.
 - **Keep the image cache.** Purging it forces cold downloads mid-run, which is
   the exact confound #104/B3 exists to remove.
 

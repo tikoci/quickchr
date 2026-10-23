@@ -13,10 +13,11 @@
  */
 
 import { basename, join } from "node:path";
-import { copyFileSync, existsSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { copyFileSync, existsSync, rmSync, unlinkSync } from "node:fs";
 import type { BootDiskFormat, SnapshotInfo } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { requireQemuImg } from "./platform.ts";
+import { renameWithRetry } from "./rename.ts";
 
 const DISK_SIZE_RE = /^\d+[KMGT]?$/i;
 
@@ -188,7 +189,7 @@ export async function writeBootDisk(
 				);
 			}
 		}
-		renameSync(tmpPath, path);
+		renameWithRetry(tmpPath, path);
 	} finally {
 		rmSync(tmpPath, { force: true });
 	}

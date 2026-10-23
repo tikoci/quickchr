@@ -46,11 +46,12 @@
  * a transfer; it does not change the transport).
  */
 
-import { unlinkSync, existsSync, renameSync } from "node:fs";
+import { unlinkSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { QuickCHRError } from "./types.ts";
 import { fetchResilient } from "./net.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
+import { renameWithRetry } from "./rename.ts";
 
 /**
  * Throughput to assume when budgeting a COLD download from MikroTik, in bytes
@@ -257,7 +258,7 @@ export async function downloadToFile(
 			// so this is a same-filesystem move and the artifact appears at its final
 			// path atomically. Copying would re-write every byte (52 MB for the
 			// largest artifact) for no benefit.
-			renameSync(partPath, destPath);
+			renameWithRetry(partPath, destPath);
 			log.status(`  Saved (${describeTransfer(outcome)})`);
 			return outcome;
 		} catch (e) {

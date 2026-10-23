@@ -2,7 +2,7 @@
  * Extra package download and installation for CHR instances.
  */
 
-import { existsSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { QuickCHRError, type Arch } from "./types.ts";
 import { packagesDownloadUrl } from "./versions.ts";
@@ -12,6 +12,10 @@ import { createLogger, type ProgressLogger } from "./log.ts";
 import { restPost } from "./rest.ts";
 import { scpPush } from "./scp.ts";
 import { extractZip } from "./zip.ts";
+import { renameWithRetry } from "./rename.ts";
+import { assertSufficientQuickchrStorage, STORAGE_ESTIMATES } from "./storage.ts";
+import { touchCacheEntry } from "./images.ts";
+import { formatDiskSize } from "./disk.ts";
 
 const PACKAGE_CACHE_MANIFEST = ".quickchr-complete.json";
 
@@ -76,8 +80,15 @@ export async function downloadPackages(
 	if (await isCompletePackageCache(version, arch, cache)) {
 		const log = logger ?? createLogger();
 		log.status(`  Using cached packages: ${version} (${arch})`);
+		touchCacheEntry(zipPath);
 		return extractDir;
 	}
+
+	assertSufficientQuickchrStorage(
+		`cache packages ${version} (${arch})`,
+		{ bytes: STORAGE_ESTIMATES.packagesDownload, detail: `packages download ${formatDiskSize(STORAGE_ESTIMATES.packagesDownload)}`, protectVersions: [version] },
+		{ logger: (message) => (logger ?? createLogger()).status(message) },
+	);
 
 	// Download if needed. Same bounded path as the image download (#116) — this
 	// call site previously had neither a deadline nor retries, so its only bound
@@ -106,7 +117,7 @@ export async function downloadPackages(
 		};
 		await Bun.write(join(tempDir, PACKAGE_CACHE_MANIFEST), `${JSON.stringify(manifest, null, "\t")}\n`);
 		if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true });
-		renameSync(tempDir, extractDir);
+		renameWithRetry(tempDir, extractDir);
 	} catch (error) {
 		rmSync(tempDir, { recursive: true, force: true });
 		if (error instanceof Error && error.message.startsWith("No non-empty")) {

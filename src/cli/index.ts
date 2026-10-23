@@ -2832,7 +2832,7 @@ async function cmdCache(argv: string[]) {
 		return;
 	}
 
-	const { listCacheEntries, pruneCache, parseSizeString, formatSizeBytes } = await import("../lib/cache.ts");
+	const { cacheInventory, countEntries, pruneCache, parseSizeString, formatSizeBytes } = await import("../lib/cache.ts");
 
 	const parseDuration = (s: string): number => {
 		const m = s.match(/^(\d+(?:\.\d+)?)([smhdw])$/);
@@ -2844,6 +2844,11 @@ async function cmdCache(argv: string[]) {
 	};
 	const parseSize = parseSizeString;
 	const formatSize = formatSizeBytes;
+	const printFailedDeletes = (failed: Array<{ entry: { basename: string }; error: string }>) => {
+		if (failed.length === 0) return;
+		console.error(`Could not delete ${countEntries(failed.length)} (kept, not counted as freed):`);
+		for (const { entry, error } of failed) console.error(`  - ${entry.basename}: ${error}`);
+	};
 	const formatAge = (ms: number): string => {
 		const s = Math.floor(ms / 1000);
 		if (s < 60) return `${s}s`;
@@ -2894,13 +2899,14 @@ async function cmdCache(argv: string[]) {
 		}
 		case "list":
 		case "ls": {
-			const entries = listCacheEntries();
+			const { entries, unmanagedBytes } = cacheInventory();
 			if (flags.json === true) {
 				console.log(JSON.stringify(entries, null, 2));
 				return;
 			}
 			if (entries.length === 0) {
 				console.log("No cached images.");
+				if (unmanagedBytes > 0) console.log(`Other files: ${formatSize(unmanagedBytes)} (not written by quickchr; never pruned)`);
 				return;
 			}
 			const now = Date.now();
@@ -2927,7 +2933,8 @@ async function cmdCache(argv: string[]) {
 				);
 			}
 			const total = entries.reduce((s, e) => s + e.sizeBytes, 0);
-			console.log(`\nTotal: ${entries.length} image(s), ${formatSize(total)}`);
+			console.log(`\nTotal: ${countEntries(entries.length)}, ${formatSize(total)}`);
+			if (unmanagedBytes > 0) console.log(`Other files: ${formatSize(unmanagedBytes)} (not written by quickchr; never pruned)`);
 			break;
 		}
 		case "prune": {
@@ -2941,16 +2948,18 @@ async function cmdCache(argv: string[]) {
 			}
 			const result = pruneCache(opts);
 			const verb = opts.dryRun ? "Would evict" : "Evicted";
-			if (result.evicted.length === 0) {
+			if (result.evicted.length === 0 && result.failed.length === 0) {
 				console.log("Nothing to evict.");
-			} else {
-				console.log(`${verb} ${result.evicted.length} image(s):`);
+			} else if (result.evicted.length > 0) {
+				console.log(`${verb} ${countEntries(result.evicted.length)}:`);
 				for (const e of result.evicted) {
 					const reason = result.reasons[e.basename] ?? "policy";
 					console.log(`  - ${e.basename} (${formatSize(e.sizeBytes)}) — ${reason}`);
 				}
-				console.log(`Freed: ${formatSize(result.freedBytes)}`);
+				console.log(`${opts.dryRun ? "Would free" : "Freed"}: ${formatSize(result.freedBytes)}`);
 			}
+			printFailedDeletes(result.failed);
+			if (result.failed.length > 0) process.exitCode = 1;
 			break;
 		}
 		case "clear": {
@@ -2960,7 +2969,9 @@ async function cmdCache(argv: string[]) {
 			}
 			const result = pruneCache({ maxSizeBytes: 0, dryRun: flags["dry-run"] === true });
 			const verb = flags["dry-run"] === true ? "Would delete" : "Deleted";
-			console.log(`${verb} ${result.evicted.length} image(s), freed ${formatSize(result.freedBytes)}`);
+			console.log(`${verb} ${countEntries(result.evicted.length)}, ${flags["dry-run"] === true ? "would free" : "freed"} ${formatSize(result.freedBytes)}`);
+			printFailedDeletes(result.failed);
+			if (result.failed.length > 0) process.exitCode = 1;
 			if (result.kept.some((e) => e.inUse)) {
 				const inUse = result.kept.filter((e) => e.inUse);
 				console.log(`Kept ${inUse.length} in-use image(s):`);
@@ -2989,7 +3000,7 @@ async function cmdSettings(argv: string[]) {
 
 	const displayValue = (key: string, value: unknown): string => {
 		if (value === undefined) return "(unset)";
-		if (key === "cache-max-size" && typeof value === "number") return formatSizeBytes(value);
+		if ((key === "cache-max-size" || key === "storage-reserve") && typeof value === "number") return formatSizeBytes(value);
 		if (key === "timeout-extra" && typeof value === "number") return `${value}s`;
 		return String(value);
 	};
@@ -3076,7 +3087,7 @@ async function cmdDoctor(argv: string[] = []) {
 	const staleImages = await findStaleCacheImages();
 	if (staleImages.length > 0) {
 		const longTerm = staleImages[0]?.olderThan;
-		console.log(`Note: ${staleImages.length} cached image(s) older than current long-term (${longTerm}):`);
+		console.log(`Note: ${staleImages.length} cache item(s) older than current long-term (${longTerm}):`);
 		for (const e of staleImages) console.log(`  - ${e.basename} (${e.version})`);
 		console.log("  Hint: 'quickchr cache prune --older-than " + longTerm + "' to evict them.");
 		console.log();
@@ -3604,7 +3615,9 @@ Options:
 		case "cache":
 			console.log(`quickchr cache <add|key|list|prune|clear> [options]
 
-Manage cached CHR images in the data dir cache directory.
+Manage cached CHR images and package archives in the data dir cache directory.
+An all-packages archive and its extraction are one entry; an interrupted download
+is a partial entry. Files quickchr did not write are reported, never deleted.
 
 Subcommands:
   add [--channel <ch> | --version <ver>] [--arch <arch>] [--json]
@@ -3612,14 +3625,15 @@ Subcommands:
   key [--channel <ch> | --version <ver>] [--arch <arch>] [--json]
                                       Print cache directory, resolved version, and architecture for CI.
                                       Without --json, output is GITHUB_OUTPUT-compatible key=value lines.
-  list [--json]                       List cached images (basename, version, arch, size, age, in-use).
-  prune [options]                     Evict cached images per policy. Never evicts in-use images.
-    --older-than <ver>                Evict images with version < <ver>.
-    --max-age <dur>                   Evict images older than duration (e.g. 7d, 24h).
+  list [--json]                       List cache entries (basename, version, arch, size, age, in-use).
+  prune [options]                     Evict cache entries per policy. Never evicts in-use entries.
+    --older-than <ver>                Evict entries with version < <ver>.
+    --max-age <dur>                   Evict entries not used for longer than duration (e.g. 7d, 24h).
     --max-size <size>                 Evict oldest-version images until total size <= <size>.
     --dry-run                         Show what would be evicted without deleting.
-  clear --all                         Delete all non-in-use cached images.
+  clear --all                         Delete all non-in-use cache entries.
 
+A failed delete is listed on stderr, is not counted as freed, and exits 1.
 Duration: <N>(s|m|h|d|w)   Size: <N>(K|M|G|T)[i][B] (case-insensitive, IEC binary).
 
 Default auto-prune cap: 2 GiB — override via 'quickchr settings set cache-max-size <size>'
@@ -3639,6 +3653,8 @@ Managed keys:
                     auto|tcg|hvf|kvm (default: auto = detect)
   cache-max-size    Auto-prune cap applied after each successful start.
                     Size string (e.g. 2G, 512M). (default: 2G)
+  storage-reserve   Free space creating a machine or caching an image must
+                    leave, beyond what it writes. Size string. (default: 2G)
   timeout-extra     Default for 'start's --timeout-extra/-T when omitted.
                     Non-negative integer seconds. (default: 0)
   secure-login      Default for 'add'/'start's --secure-login when neither

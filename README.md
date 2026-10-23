@@ -438,7 +438,7 @@ afterAll(async () => {
 |----------|-------------|
 | `MIKROTIK_WEB_ACCOUNT` | MikroTik.com account email (for license renewal) |
 | `MIKROTIK_WEB_PASSWORD` | MikroTik.com password (for license renewal) |
-| `QUICKCHR_DEFAULT_CHANNEL`, `QUICKCHR_DEFAULT_ARCH`, `QUICKCHR_CACHE_MAX_SIZE`, `QUICKCHR_TIMEOUT_EXTRA`, `QUICKCHR_SECURE_LOGIN` | Env-tier overrides for the 5 `quickchr settings` keys — see [MANUAL.md §3 `settings`](./MANUAL.md#3-cli-command-reference) |
+| `QUICKCHR_DEFAULT_CHANNEL`, `QUICKCHR_DEFAULT_ARCH`, `QUICKCHR_ACCEL`, `QUICKCHR_CACHE_MAX_SIZE`, `QUICKCHR_STORAGE_RESERVE`, `QUICKCHR_TIMEOUT_EXTRA`, `QUICKCHR_SECURE_LOGIN` | Env-tier overrides for the 7 `quickchr settings` keys — see [MANUAL.md §3 `settings`](./MANUAL.md#3-cli-command-reference) |
 | `QUICKCHR_INTEGRATION` | Set to `1` to run integration tests |
 | `QUICKCHR_TEST_TARGET` | Integration tests only: RouterOS channel (`stable`/`long-term`/`testing`/`development`) or pinned version (e.g. `7.22.1`) to boot. Empty = `stable`. The Integration workflow resolves each `routeros-target` once, then sets this to that exact pin across platforms |
 

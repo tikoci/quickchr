@@ -1,11 +1,16 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { chmodSync, existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import {
 	assertSufficientQuickchrStorage,
+	estimateMachineCreation,
 	formatQuickchrUsage,
 	getQuickchrStorageReport,
+	STORAGE_ESTIMATES,
+	storageProbe,
 } from "../../src/lib/storage.ts";
+import { RECENT_USE_MS } from "../../src/lib/cache.ts";
+import { getDataDir } from "../../src/lib/state.ts";
 
 const TEST_DIR = join(import.meta.dir, ".tmp-storage-test");
 const originalHome = process.env.HOME;
@@ -74,26 +79,22 @@ async function freeSpaceInChild(
 }
 
 describe("storage helpers", () => {
-	test("reports .local as the default storage root", () => {
-		if (process.platform === "win32") {
-			// On Windows getDataDir() uses LOCALAPPDATA — the label is always "data dir"
-			const report = getQuickchrStorageReport();
-			expect(report.label).toBe("data dir");
-			expect(report.freeBytes).toBeGreaterThan(0);
-		} else {
-			const report = getQuickchrStorageReport();
-			expect(report.label).toBe(".local");
-			expect(report.path).toBe(join(TEST_DIR, ".local"));
-			expect(report.freeBytes).toBeGreaterThan(0);
-		}
+	test("measures the data dir's filesystem, at its nearest existing directory", () => {
+		// HOME is TEST_DIR, where nothing of ~/.local/share/quickchr exists yet. On Windows
+		// getDataDir() reads LOCALAPPDATA instead, so only the shape is asserted there.
+		const report = getQuickchrStorageReport();
+		expect(report.path).toBe(getDataDir());
+		if (process.platform !== "win32") expect(report.statPath).toBe(TEST_DIR);
+		expect(report.freeBytes).toBeGreaterThan(0);
 	});
 
 	test("uses QUICKCHR_DATA_DIR as the storage root override", () => {
 		process.env.QUICKCHR_DATA_DIR = join(TEST_DIR, "custom-data");
+		mkdirSync(join(TEST_DIR, "custom-data"), { recursive: true });
 
 		const report = getQuickchrStorageReport();
-		expect(report.label).toBe("data dir");
 		expect(report.path).toBe(join(TEST_DIR, "custom-data"));
+		expect(report.statPath).toBe(join(TEST_DIR, "custom-data"));
 	});
 
 	test("summarizes quickchr usage across cache and machines", () => {
@@ -156,7 +157,7 @@ describe("storage helpers", () => {
 		const { freeBytes } = getQuickchrStorageReport();
 
 		try {
-			assertSufficientQuickchrStorage("run quickchr tests", freeBytes + 1);
+			assertSufficientQuickchrStorage("run quickchr tests", { bytes: freeBytes + 1, detail: "everything" }, { reclaim: false });
 			expect.unreachable("should have thrown");
 		} catch (error) {
 			expect(error).toMatchObject({
@@ -164,5 +165,123 @@ describe("storage helpers", () => {
 				message: expect.stringContaining("Not enough free space"),
 			});
 		}
+	});
+});
+
+describe("storage admission (#199)", () => {
+	const GiB = 1024 ** 3;
+	const MiB = 1024 ** 2;
+	const originalReserve = process.env.QUICKCHR_STORAGE_RESERVE;
+	let probe: ReturnType<typeof spyOn> | undefined;
+
+	beforeEach(() => {
+		process.env.QUICKCHR_DATA_DIR = join(TEST_DIR, "data");
+		mkdirSync(join(TEST_DIR, "data", "cache"), { recursive: true });
+		delete process.env.QUICKCHR_STORAGE_RESERVE;
+	});
+
+	afterEach(() => {
+		probe?.mockRestore();
+		probe = undefined;
+		if (originalReserve === undefined) delete process.env.QUICKCHR_STORAGE_RESERVE;
+		else process.env.QUICKCHR_STORAGE_RESERVE = originalReserve;
+	});
+
+	/** Free space reads come from `readings` in order; the last one repeats. */
+	function freeSpace(...readings: number[]): void {
+		let call = 0;
+		probe = spyOn(storageProbe, "freeBytes").mockImplementation(() => readings[Math.min(call++, readings.length - 1)] as number);
+	}
+
+	function cachedImage(name: string, bytes: number): string {
+		const path = join(TEST_DIR, "data", "cache", name);
+		writeFileSync(path, Buffer.alloc(bytes));
+		const old = new Date(Date.now() - 2 * RECENT_USE_MS);
+		utimesSync(path, old, old);
+		return path;
+	}
+
+	test("admits when free space covers the estimate plus the 2 GiB default reserve", () => {
+		freeSpace(2 * GiB + 200 * MiB);
+		const old = cachedImage("chr-7.20.7.img", 1000);
+		const report = assertSufficientQuickchrStorage("start CHR lab", { bytes: 200 * MiB, detail: "boot disk" });
+		expect(report.reserveBytes).toBe(2 * GiB);
+		expect(existsSync(old)).toBe(true);
+	});
+
+	test("a small host is admitted where the old 10 GiB floor refused it", () => {
+		freeSpace(3 * GiB);
+		expect(() => assertSufficientQuickchrStorage("start CHR lab", { bytes: STORAGE_ESTIMATES.bootDisk + STORAGE_ESTIMATES.imageDownload, detail: "cold" })).not.toThrow();
+	});
+
+	test("when short, evicts the cache's oldest eligible entries, remeasures, then admits", () => {
+		freeSpace(2 * GiB, 2 * GiB + 300 * MiB);
+		const oldest = cachedImage("chr-7.20.7.img", 1000);
+		const newer = cachedImage("chr-7.21.0.img", 1000);
+		const needed = cachedImage("chr-7.24.5.img", 1000);
+		const logs: string[] = [];
+		assertSufficientQuickchrStorage("start CHR lab", { bytes: 1500, detail: "boot disk", protectVersions: ["7.24.5"] }, { logger: (m) => logs.push(m) });
+		expect(existsSync(oldest)).toBe(false);
+		expect(existsSync(newer)).toBe(false);
+		expect(existsSync(needed)).toBe(true);
+		expect(logs).toEqual(["cache: evicted chr-7.20.7.img, chr-7.21.0.img — freed 2.0 KiB"]);
+	});
+
+	test("admits on the new measurement, not on the logical size it deleted", () => {
+		freeSpace(2 * GiB);
+		cachedImage("chr-7.20.7.img", 4096);
+		expect(() => assertSufficientQuickchrStorage("start CHR lab", { bytes: 1024, detail: "boot disk" })).toThrow("Not enough free space");
+	});
+
+	test("refuses with what was needed and what is kept — and evicts nothing that could not cover it", () => {
+		freeSpace(GiB);
+		const old = cachedImage("chr-7.20.7.img", 1000);
+		writeFileSync(join(TEST_DIR, "data", "cache", "chr-7.24.5.img"), Buffer.alloc(3000));
+		try {
+			assertSufficientQuickchrStorage("start CHR lab", { bytes: 192 * MiB, detail: "boot disk 192.0 MB" });
+			expect.unreachable("should have thrown");
+		} catch (error) {
+			const message = (error as Error).message;
+			expect((error as { code: string }).code).toBe("INSUFFICIENT_DISK_SPACE");
+			expect(message).toContain(join(TEST_DIR, "data"));
+			expect(message).toContain("boot disk 192.0 MB + 2.0 GiB reserve");
+			expect(message).toContain("The cache could spare only 1000 B (1 entry), not enough, so nothing was evicted.");
+			expect(message).toContain("is kept: in use by a machine, needed by this operation, or used in the last 30 minutes");
+			expect((error as { installHint?: string }).installHint).toContain("storage-reserve");
+		}
+		expect(existsSync(old)).toBe(true);
+	});
+
+	test("a refusal after eviction says what it evicted", () => {
+		freeSpace(2 * GiB);
+		cachedImage("chr-7.20.7.img", 4096);
+		expect(() => assertSufficientQuickchrStorage("start CHR lab", { bytes: 1024, detail: "boot disk" })).toThrow("Evicted 1 entry from the cache (4 KiB) first.");
+	});
+
+	test("reclaim: false never evicts", () => {
+		freeSpace(GiB);
+		const old = cachedImage("chr-7.20.7.img", 1000);
+		expect(() => assertSufficientQuickchrStorage("run quickchr tests", undefined, { reclaim: false })).toThrow("Not enough free space");
+		expect(existsSync(old)).toBe(true);
+	});
+
+	test("QUICKCHR_STORAGE_RESERVE sets the reserve", () => {
+		process.env.QUICKCHR_STORAGE_RESERVE = "512M";
+		freeSpace(600 * MiB);
+		const report = assertSufficientQuickchrStorage("start CHR lab", { bytes: 64 * MiB, detail: "boot disk" });
+		expect(report.reserveBytes).toBe(512 * MiB);
+	});
+
+	test("estimates a cold create as boot disk + image, and a warm one as the boot disk", () => {
+		const cold = estimateMachineCreation({ version: "7.24.5", arch: "x86", packages: true });
+		expect(cold.bytes).toBe(STORAGE_ESTIMATES.bootDisk + STORAGE_ESTIMATES.imageDownload + STORAGE_ESTIMATES.packagesDownload);
+		expect(cold.protectVersions).toEqual(["7.24.5"]);
+
+		cachedImage("chr-7.24.5.img", 10);
+		mkdirSync(join(TEST_DIR, "data", "cache", "packages-x86-7.24.5"));
+		const warm = estimateMachineCreation({ version: "7.24.5", arch: "x86", packages: true });
+		expect(warm.bytes).toBe(STORAGE_ESTIMATES.bootDisk);
+		expect(estimateMachineCreation({ version: "7.24.5", arch: "arm64", packages: false }).bytes)
+			.toBe(STORAGE_ESTIMATES.bootDisk + STORAGE_ESTIMATES.imageDownload);
 	});
 });
