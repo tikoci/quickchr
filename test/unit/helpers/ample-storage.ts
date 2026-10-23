@@ -14,4 +14,7 @@
 import { spyOn } from "bun:test";
 import * as storage from "../../../src/lib/storage.ts";
 
-spyOn(storage, "assertSufficientQuickchrStorage").mockImplementation(() => storage.getQuickchrStorageReport(0, 0));
+spyOn(storage, "admitStorage").mockImplementation((action) => ({
+	record: { pid: process.pid, at: "", action, pins: [], reservations: [] },
+	release() {},
+}));

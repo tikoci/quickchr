@@ -567,17 +567,30 @@ appended directly to `$GITHUB_OUTPUT`.
 `--json` intentionally emits one JSON object for programmatic parsing; use the
 default output form when writing step outputs directly.
 
-`cache list [--json]` shows each cached image with its version, arch, size, age
-(time since it was cached) and whether it is in use. An image is **in use** when
-any machine, running or stopped, was created from that version and arch.
-`prune` and `clear` never delete an in-use image.
+`cache list [--json]` shows each cache entry with its version, arch, size, age
+(time since it was cached or last used) and whether it is in use. Entries are:
+
+- **images** (`chr-<ver>[-arm64].img`, and a `.img.zip` not yet extracted). An
+  image is **in use** while any machine, running or stopped, was created from
+  that version and arch: `clean` and a failed first boot rebuild from it.
+- **package archives** (`packages-<arch>-<ver>`): the `all_packages` ZIP and its
+  extraction, sized and deleted together, since the extraction is only a cache
+  hit while its ZIP is there. In use while a machine that asks for packages has
+  not finished its first boot.
+- **partial** entries: an interrupted download (`*.<pid>-<id>.part`) or
+  extraction (`.quickchr-image-*`, `.quickchr-packages-*`). In use while the
+  process that wrote it is alive (an extraction: for 30 minutes after its last
+  write). `prune` removes stale ones before anything else.
+
+Files in the cache that quickchr did not write are reported as "Other files"
+and never deleted. `prune` and `clear` never delete an in-use entry.
 
 ```bash
 quickchr cache list
 quickchr cache prune --older-than 7.22 --dry-run   # versions below 7.22
 quickchr cache prune --max-age 30d                 # cached more than 30 days ago
 quickchr cache prune --max-size 2G                 # oldest versions first, until <= 2 GiB
-quickchr cache clear --all                         # every image not in use
+quickchr cache clear --all                         # every entry not in use
 ```
 
 `prune` needs at least one of `--older-than <ver>`, `--max-age <dur>` or
@@ -586,8 +599,29 @@ evicts the oldest RouterOS version first (oldest cache time breaks ties) until
 the total, in-use images included, fits. Durations are `<N>(s|m|h|d|w)`; sizes
 are `<N>(K|M|G|T)` with an optional `i`/`B`, read as IEC binary. `--dry-run`
 lists what `prune` or `clear` would delete without deleting it. `clear` refuses
-without `--all`. Separately, a successful `start` prunes to the
-`cache-max-size` setting (default `2G`; see `settings` below).
+without `--all`. A delete that fails is listed on stderr, is not counted as
+freed, and makes the command exit 1. A cache hit counts as a use, so `--max-age`
+measures time since an entry was last used.
+
+Separately, a successful `start` prunes to the `cache-max-size` setting (default
+`2G`; see `settings` below). That automatic prune, and the one below, skip any
+entry used in the last 30 minutes, which another create may be reading.
+
+**Disk space.** Creating a machine (`add`, or `start` with a new name) and
+filling the cache (an image or package download) are admitted when each
+filesystem the operation writes to has room for what it writes there plus the
+`storage-reserve` setting (default `2G`), less what other quickchr operations
+in progress have already claimed. The estimate is the boot disk
+(192 MiB), plus an image download (256 MiB) and a package download (192 MiB)
+when those are not cached yet, so a cold create needs about 2.6 GiB free and a
+warm one about 2.2 GiB. When there is not enough, quickchr first evicts what the
+cache can spare on that filesystem (oldest version first; never entries a
+machine or an operation in progress needs, nor recently used ones), measures
+again until there is room or nothing more can go, and only then refuses with `INSUFFICIENT_DISK_SPACE`,
+naming the free space, what it needed, what it evicted and what it kept.
+Restarting an existing machine, `stop`, `remove` and read-only commands are
+never gated. The estimate covers creation, not a guest that later fills its
+disk: extra disks and `--boot-size` are sparse and grow as the guest writes.
 
 #### `settings [print|get|set|reset] [key] [value] [--json]`
 
@@ -605,6 +639,7 @@ Precedence per key (highest wins): CLI flag > `QUICKCHR_<KEY>` env var >
 | `default-arch` | `add`/`start`'s `--arch`, wizard's arch prompt | `arm64`\|`x86`\|`auto` | `auto` (host native) |
 | `accel` | `add`/`start`'s `--accel`; every `detectAccel()` call in the run | `auto`\|`tcg`\|`hvf`\|`kvm` | `auto` (detect) |
 | `cache-max-size` | Auto-prune cap applied after each successful `start` | size string (e.g. `2G`, `512M`) | `2G` |
+| `storage-reserve` | Free space creating a machine or filling the cache must leave, beyond what it writes | size string | `2G` |
 | `timeout-extra` | `start`'s `--timeout-extra`/`-T` when omitted | non-negative integer seconds | `0` |
 | `secure-login` | `add`/`start`'s `--secure-login` when neither `--secure-login` nor `--no-secure-login` is passed | boolean | `unset` (reported as `(unset)` — see note) |
 
@@ -623,7 +658,7 @@ the wizard's own recommended "managed login" highlighted). Giving it a real
 the setting resolves to exactly `true`.
 
 ```bash
-quickchr settings print                       # all 6 keys, resolved value + source
+quickchr settings print                       # all 7 keys, resolved value + source
 quickchr settings set default-channel testing # write one key to quickchr.env
 quickchr settings get default-arch            # print one key's resolved value
 quickchr settings reset default-channel       # delete one managed line
@@ -631,7 +666,7 @@ quickchr settings reset                       # clear all managed lines
 ```
 
 Credentials (`--add-user`, `MIKROTIK_WEB_ACCOUNT`/`MIKROTIK_WEB_PASSWORD`) are
-never stored here — `settings` only manages the 6 keys above, and does not
+never stored here — `settings` only manages the 7 keys above, and does not
 mutate any machine's `machine.json`.
 
 ### Global behavior
@@ -1392,7 +1427,7 @@ managed via `quickchr settings get|set|print|reset` (§3, Meta). Atomic writes
 preserve every other line (comments, blank lines, foreign vars) byte-for-byte.
 `reset <key>` deletes the line entirely rather than blanking it, since a blank
 `KEY=` line is still "set" to a bash-sourced file. Never stores credentials —
-the 6 managed keys are all structural preferences, not secrets.
+the 7 managed keys are all structural preferences, not secrets.
 
 ### Environment variables consumed
 
@@ -1409,6 +1444,7 @@ the 6 managed keys are all structural preferences, not secrets.
 | `QUICKCHR_DEFAULT_ARCH` | `settings.ts` — env tier for the `default-arch` setting |
 | `QUICKCHR_ACCEL` | `settings.ts` / `platform.ts` — env tier for the `accel` setting; forces `-accel` and bypasses detection |
 | `QUICKCHR_CACHE_MAX_SIZE` | `settings.ts` — env tier for the `cache-max-size` setting |
+| `QUICKCHR_STORAGE_RESERVE` | `settings.ts` — env tier for the `storage-reserve` setting |
 | `QUICKCHR_SHUTDOWN_TIMEOUT` | CLI `shutdown` grace budget in positive integer seconds; default 10, overridden by `--timeout` |
 | `QUICKCHR_TIMEOUT_EXTRA` | `settings.ts` — env tier for the `timeout-extra` setting |
 | `QUICKCHR_SECURE_LOGIN` | `settings.ts` — env tier for the `secure-login` setting |
@@ -1640,7 +1676,7 @@ present, then exits `1`.
 | `PROVISIONING_VERSION_UNSUPPORTED` | provisioning option on RouterOS < 7.20.8 (including any 6.x) | use `--channel long-term` or pin a `7.20.8+` version |
 | `REST_UNAVAILABLE` | REST operation (`exec`, `get`, `rest()`) on a RouterOS 6 machine | use the native API — `centrs … --via native-api --no-validate` |
 | `INVALID_ARGUMENT` | a flag combination quickchr will not honour — e.g. `--no-wait` with provisioning | drop one of the two |
-| `INSUFFICIENT_DISK_SPACE` | host data dir full | free space or move via `QUICKCHR_DATA_DIR` |
+| `INSUFFICIENT_DISK_SPACE` | data dir's filesystem has less than the operation's estimate plus `storage-reserve`, even after evicting what the cache could spare | free space, remove machines, lower `storage-reserve`, or move via `QUICKCHR_DATA_DIR` |
 | `STATE_ERROR` | snapshot on raw boot disk | recreate with `--boot-disk-format=qcow2` |
 | `INVALID_SIZE_STRING` | invalid cache/settings size string | use size syntax like `512M`, `2G`, or `1.5G` |
 | `INVALID_SETTING_KEY` | `settings get`/`set`/`reset` received an unrecognized key | `quickchr settings print` to see the managed keys |
