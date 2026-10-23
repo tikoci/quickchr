@@ -32,6 +32,23 @@ async function waitForIdentity(
 	throw new Error(`Timed out waiting for identity "${expected}"`);
 }
 
+async function readIdentity(
+	instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>>,
+	timeoutMs: number,
+): Promise<string> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		try {
+			const identity = (await instance.exec(":put [/system identity get name]")).output.trim();
+			if (identity) return identity;
+		} catch {
+			// /rest/execute can lag briefly behind basic HTTP readiness.
+		}
+		await Bun.sleep(1000);
+	}
+	throw new Error("Timed out reading identity");
+}
+
 function parseExecJsonArray(output: string): Array<Record<string, unknown>> {
 	const parsed = JSON.parse(output) as unknown;
 	if (Array.isArray(parsed)) return parsed as Array<Record<string, unknown>>;
@@ -88,6 +105,7 @@ describe.skipIf(SKIP)("disk support", () => {
 	beforeAll(async () => {
 		await cleanupMachine("integration-disk-add-start");
 		await cleanupMachine("integration-snapshot-savevm");
+		await cleanupMachine("integration-disk-qcow2-restart");
 	});
 
 	test("QuickCHR.add + first start materializes bootSize/extraDisks and guest sees extra drives", async () => {
@@ -116,7 +134,8 @@ describe.skipIf(SKIP)("disk support", () => {
 			const extra1Path = join(added.machineDir, "disk1.qcow2");
 			const extra2Path = join(added.machineDir, "disk2.qcow2");
 
-			expect(existsSync(join(added.machineDir, "disk.img"))).toBe(true);
+			// qcow2 is converted straight from the cache: no machine-local raw copy (#199).
+			expect(existsSync(join(added.machineDir, "disk.img"))).toBe(false);
 			expect(existsSync(bootQcow2Path)).toBe(true);
 			expect(existsSync(extra1Path)).toBe(true);
 			expect(existsSync(extra2Path)).toBe(true);
@@ -145,6 +164,49 @@ describe.skipIf(SKIP)("disk support", () => {
 			await cleanupMachine("integration-disk-add-start");
 		}
 	}, bootTestTimeout());
+
+	// #200: a qcow2 machine boots from boot.qcow2 alone. Restart used to demand the
+	// machine-local disk.img, which #199 stopped creating.
+	test("a qcow2 machine with no disk.img restarts with its guest state, and clean() resets it", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { getDiskInfo } = await import("../../src/lib/disk.ts");
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const name = "integration-disk-qcow2-restart";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			instance = await QuickCHR.start({ ...imageTarget(), arch, name, bootDiskFormat: "qcow2", networks: ["user"] });
+			const machineDir = instance.state.machineDir;
+			expect(existsSync(join(machineDir, "disk.img"))).toBe(false);
+
+			const marker = `qcow2-${Date.now().toString(36)}`;
+			await setIdentityWithRetry(instance, marker, 30_000);
+			// A guest shutdown flushes the marker; stop() is a power cut.
+			await instance.shutdown();
+			instance = undefined;
+			// Inspected once QEMU has let go: it holds a write lock on the image while running.
+			const boot = await getDiskInfo(join(machineDir, "boot.qcow2"));
+			expect(boot.format).toBe("qcow2");
+			expect(boot.backingFilename).toBeUndefined();
+
+			instance = await QuickCHR.start({ name });
+			expect(existsSync(join(machineDir, "disk.img"))).toBe(false);
+			await waitForIdentity(instance, marker, 30_000);
+
+			// clean() rebuilds boot.qcow2 from the cache: the marker is gone, still no raw copy.
+			// (The factory identity itself varies by version — "CHR" on 7.24.5.)
+			await instance.clean();
+			instance = await QuickCHR.start({ name });
+			expect(existsSync(join(machineDir, "disk.img"))).toBe(false);
+			expect(await readIdentity(instance, 30_000)).not.toBe(marker);
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine(name);
+		}
+	}, bootTestTimeout({ boots: 3 }));
 
 	// Runs on ALL arches — arm64 savevm was broken until the qcow2 EFI-vars
 	// pflash fix (#31, test/lab/arm64-rollback/REPORT.md); this test is the

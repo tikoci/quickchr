@@ -8,7 +8,6 @@ import {
 	downloadImage,
 	extractImage,
 	ensureCachedImage,
-	copyImageToMachine,
 	isUsableCachedImage,
 } from "../../src/lib/images.ts";
 
@@ -123,20 +122,6 @@ describe("downloadImage", () => {
 		const result = await downloadImage("7.22.1", "x86", TMP);
 		expect(result).toBe(join(TMP, "chr-7.22.1.img.zip"));
 		expect(existsSync(result)).toBe(true);
-	});
-});
-
-describe("copyImageToMachine", () => {
-	test("copies source image to machine dir as disk.img", () => {
-		const srcPath = join(TMP, "chr-7.22.1.img");
-		writeFileSync(srcPath, "fake-chr-img-content");
-
-		const machineDir = join(TMP, "machine");
-		const dest = copyImageToMachine(srcPath, machineDir);
-
-		expect(dest).toBe(join(machineDir, "disk.img"));
-		expect(existsSync(dest)).toBe(true);
-		expect(readFileSync(dest, "utf-8")).toBe("fake-chr-img-content");
 	});
 });
 

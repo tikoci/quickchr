@@ -14,9 +14,22 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   it never installed anything. The error points to `quickchr doctor`, which lists missing
   host dependencies and how to install them. `StartOptions.installDeps` is deprecated and
   ignored, and will be removed in a later minor. (#193)
+- **qcow2 machines no longer keep a raw copy of the image.** A new qcow2 machine (the
+  CLI default) used to hold both `disk.img` and `boot.qcow2`; only `boot.qcow2` is ever
+  booted. The qcow2 is now converted straight from the cached image, saving 128 MiB per
+  x86 machine. It is written to a temporary file and checked before it replaces
+  anything, so an interrupted conversion is not mistaken for a disk. `clean` removes the
+  leftover `disk.img` from older qcow2 machines; nothing else deletes it. (#199)
 
 ### Fixed
 
+- **A qcow2 machine restarts without `disk.img`.** Restart used to refuse with
+  `MACHINE_NOT_FOUND` when the unused raw copy was missing. (#200)
+- **A booted machine's missing disk is an error, not a factory reset.** If `boot.qcow2`
+  or an extra disk went missing, restart rebuilt it, from the raw copy or blank, and
+  booted a factory router under the configured machine's name. It now refuses with
+  `MACHINE_NOT_FOUND` and points to `quickchr clean`. A machine that has never booted
+  still gets its disks built. (#200)
 - Root `--help` now lists `qga`. (#193)
 - Docs: the MANUAL `StartOptions` table no longer calls `version` and `channel`
   mutually exclusive; `version` wins and passing both warns. README no longer says `stop`

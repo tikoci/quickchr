@@ -12,8 +12,8 @@
  *  - {@link formatSnapshotTable} — render snapshot list as a human-readable ANSI table
  */
 
-import { join } from "node:path";
-import { existsSync, unlinkSync } from "node:fs";
+import { basename, join } from "node:path";
+import { copyFileSync, existsSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import type { BootDiskFormat, SnapshotInfo } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { requireQemuImg } from "./platform.ts";
@@ -25,6 +25,8 @@ export interface DiskInfo {
 	virtualSize: number;
 	actualSize: number;
 	filename: string;
+	/** Set when the image depends on another file (a qcow2 backing chain). */
+	backingFilename?: string;
 }
 
 /** True when a disk size string is valid for qemu-img (e.g. 512M, 1G, 2048). */
@@ -139,34 +141,58 @@ export async function getDiskInfo(path: string): Promise<DiskInfo> {
 		virtualSize: info["virtual-size"],
 		actualSize: info["actual-size"],
 		filename: info.filename,
+		backingFilename: info["backing-filename"],
 	};
 }
 
+/** The boot format a machine record implies. Records from before `bootDiskFormat`
+ *  existed only had `bootSize`, which always meant qcow2. */
+export function bootDiskFormatOf(state: { bootDiskFormat?: BootDiskFormat; bootSize?: string }): BootDiskFormat {
+	return state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+}
+
+/** Where a machine's boot disk lives: `disk.img` for raw, `boot.qcow2` for qcow2. */
+export function bootDiskPath(machineDir: string, format: BootDiskFormat): string {
+	return join(machineDir, format === "qcow2" ? "boot.qcow2" : "disk.img");
+}
+
 /**
- * Prepare the boot disk for a machine.
- * If bootSize is specified, converts the raw disk.img to boot.qcow2 and resizes it.
- * Otherwise returns the raw disk.img as-is.
+ * Write a machine's boot disk from a factory raw image, replacing any existing one.
+ *
+ * The disk is built under a `.tmp` name and renamed into place only once complete, so
+ * an interrupted copy or conversion never leaves a file the next start would accept.
+ * qcow2 is converted straight from `sourceImg` (normally the shared cache image) and
+ * checked to be standalone: no machine-local raw copy is kept, and no guest disk
+ * depends on the cache through a backing chain.
  */
-export async function prepareBootDisk(
+export async function writeBootDisk(
 	machineDir: string,
+	sourceImg: string,
+	format: BootDiskFormat,
 	bootSize?: string,
-	bootDiskFormat?: BootDiskFormat,
 ): Promise<{ path: string; format: BootDiskFormat }> {
-	const format: BootDiskFormat = bootDiskFormat ?? (bootSize ? "qcow2" : "raw");
-	const rawPath = join(machineDir, "disk.img");
-
-	if (format === "raw") {
-		return { path: rawPath, format: "raw" };
+	const path = bootDiskPath(machineDir, format);
+	const tmpPath = `${path}.tmp`;
+	rmSync(tmpPath, { force: true });
+	try {
+		if (format === "raw") {
+			copyFileSync(sourceImg, tmpPath);
+		} else {
+			await convertRawToQcow2(sourceImg, tmpPath);
+			if (bootSize) await resizeQcow2(tmpPath, bootSize);
+			const info = await getDiskInfo(tmpPath);
+			if (info.format !== "qcow2" || info.backingFilename) {
+				throw new QuickCHRError(
+					"PROCESS_FAILED",
+					`Converted boot disk is not a standalone qcow2 (format=${info.format}${info.backingFilename ? `, backing=${info.backingFilename}` : ""})`,
+				);
+			}
+		}
+		renameSync(tmpPath, path);
+	} finally {
+		rmSync(tmpPath, { force: true });
 	}
-
-	const qcow2Path = join(machineDir, "boot.qcow2");
-	if (!existsSync(qcow2Path)) {
-		await convertRawToQcow2(rawPath, qcow2Path);
-	}
-	if (bootSize) {
-		await resizeQcow2(qcow2Path, bootSize);
-	}
-	return { path: qcow2Path, format: "qcow2" };
+	return { path, format };
 }
 
 /**
@@ -186,24 +212,53 @@ export async function prepareExtraDisks(
 	return results;
 }
 
-/** Ensure disk artifacts referenced by machine state exist on disk.
- *  Used both for new-machine creation and to heal older add()-created states
- *  that predate eager disk materialization. */
+export interface DiskSources {
+	/** True once the guest has booted. Its disks then hold guest state, so a missing one
+	 *  is an error: rebuilding it from the factory image would quietly reset the router. */
+	booted: boolean;
+	/** The factory raw image a missing boot disk of a never-booted machine is built from.
+	 *  Called only when it is needed. */
+	factoryImage?: () => Promise<string>;
+}
+
+function missingDiskError(machineDir: string, path: string): QuickCHRError {
+	const name = basename(machineDir);
+	return new QuickCHRError(
+		"MACHINE_NOT_FOUND",
+		`Disk image not found for "${name}": ${path}. The machine has booted before, so quickchr will not rebuild it from the factory image — that would silently reset the router. Restore the file, or run 'quickchr clean ${name}' to reset it to factory.`,
+	);
+}
+
+/** Resolve the disks a machine record calls for, creating any that a never-booted
+ *  machine is still missing. New machines, and older add()-created states that predate
+ *  eager disk materialization, are built here; a booted machine's disks never are.
+ *
+ *  A qcow2 machine needs only `boot.qcow2`. Machines created before 0.5.1 also hold a
+ *  `disk.img`; it is unused once `boot.qcow2` exists, and is the conversion source for a
+ *  legacy never-booted state that has no `boot.qcow2` yet. */
 export async function ensureConfiguredDisks(
 	machineDir: string,
-	bootSize?: string,
-	extraDiskSizes?: string[],
-	bootDiskFormat?: BootDiskFormat,
+	bootSize: string | undefined,
+	extraDiskSizes: string[] | undefined,
+	bootDiskFormat: BootDiskFormat,
+	sources: DiskSources,
 ): Promise<{
 	bootDisk: { path: string; format: BootDiskFormat };
 	extraDisks?: { path: string; format: "qcow2" }[];
 }> {
-	const format: BootDiskFormat = bootDiskFormat ?? (bootSize ? "qcow2" : "raw");
-	const bootDisk = format === "raw"
-		? { path: join(machineDir, "disk.img"), format: "raw" as const }
-		: (existsSync(join(machineDir, "boot.qcow2"))
-			? { path: join(machineDir, "boot.qcow2"), format: "qcow2" as const }
-			: await prepareBootDisk(machineDir, bootSize, "qcow2"));
+	const bootPath = bootDiskPath(machineDir, bootDiskFormat);
+	let bootDisk = { path: bootPath, format: bootDiskFormat };
+	if (!existsSync(bootPath)) {
+		if (sources.booted) throw missingDiskError(machineDir, bootPath);
+		const legacyRaw = join(machineDir, "disk.img");
+		const source = bootDiskFormat === "qcow2" && existsSync(legacyRaw)
+			? legacyRaw
+			: await sources.factoryImage?.();
+		if (!source) {
+			throw new QuickCHRError("MACHINE_NOT_FOUND", `Disk image not found for "${basename(machineDir)}": ${bootPath}`);
+		}
+		bootDisk = await writeBootDisk(machineDir, source, bootDiskFormat, bootSize);
+	}
 
 	let extraDisks: { path: string; format: "qcow2" }[] | undefined;
 	if (extraDiskSizes && extraDiskSizes.length > 0) {
@@ -211,6 +266,7 @@ export async function ensureConfiguredDisks(
 		for (let i = 0; i < extraDiskSizes.length; i++) {
 			const diskPath = join(machineDir, `disk${i + 1}.qcow2`);
 			if (!existsSync(diskPath)) {
+				if (sources.booted) throw missingDiskError(machineDir, diskPath);
 				await createQcow2Disk(diskPath, extraDiskSizes[i] as string);
 			}
 			extraDisks.push({ path: diskPath, format: "qcow2" });

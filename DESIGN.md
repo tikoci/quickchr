@@ -144,7 +144,8 @@ Current consumers are all first-party tikoci projects (centrs, donny, restraml),
 ├── machines/
 │   └── 7.22.1-arm64-1/
 │       ├── machine.json       # Config + state
-│       ├── disk.img           # Working copy
+│       ├── boot.qcow2         # Boot disk, qcow2 — or disk.img when raw (see below)
+│       ├── disk<N>.qcow2      # Extra disks
 │       ├── efi-vars.qcow2     # UEFI vars (arm64; qcow2 so savevm works — #31)
 │       ├── monitor.sock       # QEMU monitor
 │       ├── serial.sock        # Serial console
@@ -155,6 +156,19 @@ Current consumers are all first-party tikoci projects (centrs, donny, restraml),
 └── failures/                  # Boot-failure reports (see below)
     └── boot-failure-<machine>-<iso8601>.json
 ```
+
+**One boot disk per machine.** A raw machine boots `disk.img`, a copy of the cached
+image. A qcow2 machine boots `boot.qcow2`, converted straight from the cached image
+into a `.tmp` file, checked to be a standalone qcow2 (no backing file), then renamed
+into place. Machines created before 0.5.1 also kept the raw `disk.img` the qcow2 came
+from: a full-size copy (128 MiB x86) that nothing reads. Restart no longer requires it
+(#200). `clean` removes it, and nothing else deletes it implicitly (#199). The shared
+cache image stays: `clean` and a failed first boot's rollback rebuild from it.
+
+A missing disk is rebuilt only while the machine has never booted. A booted machine's
+disks hold guest state, so a missing `boot.qcow2`, `disk.img` or extra disk is
+`MACHINE_NOT_FOUND`, never a silent rebuild from factory. The way out is to restore the
+file or run `quickchr clean`.
 
 **Global settings** live separately, under the XDG **config** tier (not the data tree
 above): `~/.config/quickchr/quickchr.env`, dotenv-style (`QUICKCHR_KEY=value` lines).

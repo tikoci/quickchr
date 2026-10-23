@@ -2,7 +2,7 @@
  * Image download, ZIP extraction, and cache management.
  */
 
-import { existsSync, copyFileSync, mkdtempSync, readdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { join, basename } from "node:path";
 import type { Arch } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -145,14 +145,6 @@ export async function ensureCachedImage(
 	const zipPath = await downloadImage(version, arch, cacheDir, logger);
 	const extractedImgPath = await extractImage(zipPath, cacheDir, logger);
 	return finalizeExtractedImage(zipPath, extractedImgPath);
-}
-
-/** Copy a cached image to a machine's working directory as disk.img. */
-export function copyImageToMachine(cachedImgPath: string, machineDir: string): string {
-	ensureDir(machineDir);
-	const dest = join(machineDir, "disk.img");
-	copyFileSync(cachedImgPath, dest);
-	return dest;
 }
 
 /** List cached images. */
