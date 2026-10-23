@@ -1217,8 +1217,8 @@ $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
 ├── machines/
 │   └── <name>/
 │       ├── machine.json         Persisted MachineState
-│       ├── disk.img | disk.qcow2
-│       ├── extra-disk-*.qcow2
+│       ├── boot.qcow2 | disk.img  boot disk: qcow2 (CLI default) or raw — one, not both
+│       ├── disk<N>.qcow2        extra disks
 │       ├── efi-vars.fd          arm64 only (UEFI vars)
 │       ├── monitor.sock         QEMU monitor
 │       ├── serial.sock          serial console
@@ -1246,7 +1246,7 @@ var list.
 ├── cache\
 ├── machines\<name>\
 │   ├── machine.json
-│   ├── disk.img
+│   ├── boot.qcow2 | disk.img
 │   ├── monitor (named pipe handle, no on-disk file)
 │   └── …
 └── …
@@ -1627,7 +1627,7 @@ present, then exits `1`.
 | `DOWNLOAD_FAILED` | image fetch failed | retry; check connectivity to MikroTik download server |
 | `INVALID_VERSION` / `INVALID_ARCH` / `INVALID_NAME` / `INVALID_DISK_SIZE` | argument parse | fix the value |
 | `MACHINE_EXISTS` | name already in `machines/` | choose another name or `QuickCHR.get(name)` |
-| `MACHINE_NOT_FOUND` | name not in `machines/` | `quickchr list` |
+| `MACHINE_NOT_FOUND` | name not in `machines/`, or a booted machine's disk file is missing | `quickchr list`; for a missing disk, restore it or `quickchr clean <name>` |
 | `MACHINE_RUNNING` / `MACHINE_STOPPED` | wrong lifecycle state | `start` or `stop` first |
 | `MACHINE_LOCKED` | another operation holds the machine (the message names it, its pid and age) | wait for it; a `foreground` holder must be quit from its console |
 | `EXEC_FAILED` | RouterOS rejected the command (auth, syntax) | check creds, command syntax |

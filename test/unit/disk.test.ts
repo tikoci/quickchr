@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+	bootDiskFormatOf,
 	ensureConfiguredDisks,
-	prepareBootDisk,
+	writeBootDisk,
 	prepareExtraDisks,
 	cleanDiskFiles,
 	getDiskInfo,
@@ -59,31 +60,57 @@ describe("cleanDiskFiles", () => {
 	});
 });
 
-describe("prepareBootDisk", () => {
+describe("writeBootDisk", () => {
+	const source = join(TEST_DIR, "factory.img");
 	beforeEach(() => {
 		mkdirSync(TEST_DIR, { recursive: true });
-		// Create a fake raw disk image
-		writeFileSync(join(TEST_DIR, "disk.img"), Buffer.alloc(512));
+		writeFileSync(source, Buffer.alloc(1024 * 1024, 1));
 	});
 	afterEach(() => {
 		rmSync(TEST_DIR, { recursive: true, force: true });
 	});
 
-	test("returns raw disk when no bootSize specified", async () => {
-		const result = await prepareBootDisk(TEST_DIR);
-		expect(result.format).toBe("raw");
-		expect(result.path).toBe(join(TEST_DIR, "disk.img"));
+	test("raw copies the source to disk.img and leaves no temp file", async () => {
+		const result = await writeBootDisk(TEST_DIR, source, "raw");
+		expect(result).toEqual({ path: join(TEST_DIR, "disk.img"), format: "raw" });
+		expect(readFileSync(result.path).equals(readFileSync(source))).toBe(true);
+		expect(existsSync(`${result.path}.tmp`)).toBe(false);
 	});
 
-	test("converts and resizes when bootSize specified", async () => {
+	test("qcow2 converts straight from the source: standalone, resized, no local disk.img", async () => {
 		if (!hasQemuImg()) {
 			console.log("Skipping: qemu-img not installed");
 			return;
 		}
-		const result = await prepareBootDisk(TEST_DIR, "1G");
-		expect(result.format).toBe("qcow2");
-		expect(result.path).toBe(join(TEST_DIR, "boot.qcow2"));
-		expect(existsSync(result.path)).toBe(true);
+		const result = await writeBootDisk(TEST_DIR, source, "qcow2", "64M");
+		expect(result).toEqual({ path: join(TEST_DIR, "boot.qcow2"), format: "qcow2" });
+		const info = await getDiskInfo(result.path);
+		expect(info.format).toBe("qcow2");
+		expect(info.backingFilename).toBeUndefined();
+		expect(info.virtualSize).toBe(64 * 1024 * 1024);
+		expect(existsSync(join(TEST_DIR, "disk.img"))).toBe(false);
+		expect(existsSync(`${result.path}.tmp`)).toBe(false);
+	});
+
+	test("a failed conversion publishes nothing", async () => {
+		if (!hasQemuImg()) {
+			console.log("Skipping: qemu-img not installed");
+			return;
+		}
+		await expect(writeBootDisk(TEST_DIR, join(TEST_DIR, "missing.img"), "qcow2")).rejects.toThrow("qemu-img convert failed");
+		expect(existsSync(join(TEST_DIR, "boot.qcow2"))).toBe(false);
+		expect(existsSync(join(TEST_DIR, "boot.qcow2.tmp"))).toBe(false);
+	});
+
+	test("a failed resize publishes nothing, and leaves an existing disk alone", async () => {
+		if (!hasQemuImg()) {
+			console.log("Skipping: qemu-img not installed");
+			return;
+		}
+		writeFileSync(join(TEST_DIR, "boot.qcow2"), "previous-disk");
+		await expect(writeBootDisk(TEST_DIR, source, "qcow2", "1K")).rejects.toThrow("qemu-img resize failed");
+		expect(readFileSync(join(TEST_DIR, "boot.qcow2"), "utf-8")).toBe("previous-disk");
+		expect(existsSync(join(TEST_DIR, "boot.qcow2.tmp"))).toBe(false);
 	});
 });
 
@@ -116,32 +143,109 @@ describe("prepareExtraDisks", () => {
 });
 
 describe("ensureConfiguredDisks", () => {
+	const factory = join(TEST_DIR, "factory.img");
+	let factoryCalls = 0;
+	const factoryImage = async () => {
+		factoryCalls++;
+		return factory;
+	};
 	beforeEach(() => {
 		mkdirSync(TEST_DIR, { recursive: true });
-		writeFileSync(join(TEST_DIR, "disk.img"), Buffer.alloc(512));
+		writeFileSync(factory, Buffer.alloc(1024 * 1024, 2));
+		factoryCalls = 0;
 	});
 	afterEach(() => {
 		rmSync(TEST_DIR, { recursive: true, force: true });
 	});
 
-	test("returns raw boot disk when no disk customizations are requested", async () => {
-		const disks = await ensureConfiguredDisks(TEST_DIR);
-		expect(disks.bootDisk.format).toBe("raw");
-		expect(disks.bootDisk.path).toBe(join(TEST_DIR, "disk.img"));
+	test("returns an existing raw disk without touching the factory image", async () => {
+		writeFileSync(join(TEST_DIR, "disk.img"), "guest-disk");
+		const disks = await ensureConfiguredDisks(TEST_DIR, undefined, undefined, "raw", { booted: true, factoryImage });
+		expect(disks.bootDisk).toEqual({ path: join(TEST_DIR, "disk.img"), format: "raw" });
 		expect(disks.extraDisks).toBeUndefined();
+		expect(factoryCalls).toBe(0);
 	});
 
-	test("creates missing resized boot and extra disks from persisted config", async () => {
+	test("a booted qcow2 machine needs only boot.qcow2, not disk.img (#200)", async () => {
+		writeFileSync(join(TEST_DIR, "boot.qcow2"), "guest-disk");
+		const disks = await ensureConfiguredDisks(TEST_DIR, "1G", undefined, "qcow2", { booted: true, factoryImage });
+		expect(disks.bootDisk).toEqual({ path: join(TEST_DIR, "boot.qcow2"), format: "qcow2" });
+		expect(readFileSync(join(TEST_DIR, "boot.qcow2"), "utf-8")).toBe("guest-disk");
+		expect(factoryCalls).toBe(0);
+	});
+
+	test("a booted qcow2 machine with boot.qcow2 missing is refused, not rebuilt from disk.img", async () => {
+		writeFileSync(join(TEST_DIR, "disk.img"), "factory-copy");
+		await expect(
+			ensureConfiguredDisks(TEST_DIR, undefined, undefined, "qcow2", { booted: true, factoryImage }),
+		).rejects.toThrow("quickchr clean");
+		expect(existsSync(join(TEST_DIR, "boot.qcow2"))).toBe(false);
+		expect(factoryCalls).toBe(0);
+	});
+
+	test("a booted raw machine with disk.img missing is refused", async () => {
+		await expect(
+			ensureConfiguredDisks(TEST_DIR, undefined, undefined, "raw", { booted: true, factoryImage }),
+		).rejects.toThrow("Disk image not found");
+		expect(existsSync(join(TEST_DIR, "disk.img"))).toBe(false);
+		expect(factoryCalls).toBe(0);
+	});
+
+	test("a booted machine with an extra disk missing is refused, not given a blank one", async () => {
+		writeFileSync(join(TEST_DIR, "disk.img"), "guest-disk");
+		await expect(
+			ensureConfiguredDisks(TEST_DIR, undefined, ["256M"], "raw", { booted: true, factoryImage }),
+		).rejects.toThrow("disk1.qcow2");
+		expect(existsSync(join(TEST_DIR, "disk1.qcow2"))).toBe(false);
+	});
+
+	test("a never-booted raw machine with no disk.img is built from the factory image", async () => {
+		const disks = await ensureConfiguredDisks(TEST_DIR, undefined, undefined, "raw", { booted: false, factoryImage });
+		expect(disks.bootDisk.path).toBe(join(TEST_DIR, "disk.img"));
+		expect(readFileSync(disks.bootDisk.path).equals(readFileSync(factory))).toBe(true);
+		expect(factoryCalls).toBe(1);
+	});
+
+	test("a never-booted machine with no disk and no factory image is refused", async () => {
+		await expect(
+			ensureConfiguredDisks(TEST_DIR, undefined, undefined, "raw", { booted: false }),
+		).rejects.toThrow("Disk image not found");
+	});
+
+	test("a new qcow2 machine is built from the factory image, with no local disk.img", async () => {
 		if (!hasQemuImg()) {
 			console.log("Skipping: qemu-img not installed");
 			return;
 		}
-		const disks = await ensureConfiguredDisks(TEST_DIR, "1G", ["256M", "512M"]);
-		expect(disks.bootDisk.format).toBe("qcow2");
-		expect(existsSync(join(TEST_DIR, "boot.qcow2"))).toBe(true);
+		const disks = await ensureConfiguredDisks(TEST_DIR, "1G", ["256M", "512M"], "qcow2", { booted: false, factoryImage });
+		expect(disks.bootDisk).toEqual({ path: join(TEST_DIR, "boot.qcow2"), format: "qcow2" });
+		expect((await getDiskInfo(disks.bootDisk.path)).virtualSize).toBe(1024 ** 3);
+		expect(existsSync(join(TEST_DIR, "disk.img"))).toBe(false);
 		expect(disks.extraDisks).toHaveLength(2);
 		expect(existsSync(join(TEST_DIR, "disk1.qcow2"))).toBe(true);
 		expect(existsSync(join(TEST_DIR, "disk2.qcow2"))).toBe(true);
+		expect(factoryCalls).toBe(1);
+	});
+
+	test("a legacy never-booted qcow2 state converts its own disk.img, not the factory image", async () => {
+		if (!hasQemuImg()) {
+			console.log("Skipping: qemu-img not installed");
+			return;
+		}
+		writeFileSync(join(TEST_DIR, "disk.img"), Buffer.alloc(1024 * 1024, 3));
+		const disks = await ensureConfiguredDisks(TEST_DIR, undefined, undefined, "qcow2", { booted: false, factoryImage });
+		expect(disks.bootDisk.path).toBe(join(TEST_DIR, "boot.qcow2"));
+		expect(existsSync(disks.bootDisk.path)).toBe(true);
+		expect(factoryCalls).toBe(0);
+	});
+});
+
+describe("bootDiskFormatOf", () => {
+	test("explicit format wins; a bare bootSize means qcow2; otherwise raw", () => {
+		expect(bootDiskFormatOf({ bootDiskFormat: "raw" })).toBe("raw");
+		expect(bootDiskFormatOf({ bootDiskFormat: "qcow2" })).toBe("qcow2");
+		expect(bootDiskFormatOf({ bootSize: "1G" })).toBe("qcow2");
+		expect(bootDiskFormatOf({})).toBe("raw");
 	});
 });
 

@@ -2235,7 +2235,7 @@ async function cmdDisk(argv: string[]) {
 
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold, dim, machineNotFoundMessage } = await import("./format.ts");
-	const { getDiskInfo } = await import("../lib/disk.ts");
+	const { bootDiskFormatOf, bootDiskPath, getDiskInfo } = await import("../lib/disk.ts");
 	const { join } = await import("node:path");
 	const { existsSync } = await import("node:fs");
 	const { findQemuImg } = await import("../lib/platform.ts");
@@ -2258,10 +2258,8 @@ async function cmdDisk(argv: string[]) {
 	console.log(bold(`Disks for ${name}\n`));
 
 	// Boot disk
-	const bootPath = state.bootDiskFormat === "qcow2"
-		? join(state.machineDir, "boot.qcow2")
-		: join(state.machineDir, "disk.img");
-	const bootFormat = state.bootDiskFormat ?? "raw";
+	const bootFormat = bootDiskFormatOf(state);
+	const bootPath = bootDiskPath(state.machineDir, bootFormat);
 
 	if (qemuImg && existsSync(bootPath)) {
 		try {

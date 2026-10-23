@@ -62,11 +62,11 @@ import {
 	getDataDir,
 	appendBootLog,
 } from "./state.ts";
-import { ensureCachedImage, copyImageToMachine, listCachedImages } from "./images.ts";
+import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
-import { cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
+import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
@@ -104,7 +104,7 @@ import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
 import { assertSufficientQuickchrStorage, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
-import { existsSync, rmSync, copyFileSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { acquireLock, acquireLockNow, allocationLockPath, legacyMachineLockPath, listReservations, machineLockPath, type HeldLock, type LockOperation } from "./lock.ts";
 import { join } from "node:path";
 
@@ -373,19 +373,15 @@ async function resetGuestToFactory(state: MachineState): Promise<void> {
 	if (!existsSync(imgPath)) {
 		throw new QuickCHRError("MACHINE_NOT_FOUND", `Cached image not found: ${imgPath}`);
 	}
-	const destPath = join(state.machineDir, "disk.img");
-	copyFileSync(imgPath, destPath);
-
-	// Clean up disk files (boot.qcow2, extra disks)
+	// Drop boot.qcow2 and the extra disks, then rebuild the boot disk from the cache.
+	// A raw disk.img is replaced atomically. On a qcow2 machine, disk.img is the unused
+	// raw copy machines created before 0.5.1 kept: the new boot.qcow2 is converted from
+	// the cache, so the copy goes too (#199).
+	const format = bootDiskFormatOf(state);
 	cleanDiskFiles(state.machineDir);
-
-	// Re-prepare disks if the machine had disk customizations
-	await ensureConfiguredDisks(
-		state.machineDir,
-		state.bootSize,
-		state.extraDisks,
-		state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
-	);
+	await writeBootDisk(state.machineDir, imgPath, format, state.bootSize);
+	if (format === "qcow2") rmSync(join(state.machineDir, "disk.img"), { force: true });
+	await ensureConfiguredDisks(state.machineDir, state.bootSize, state.extraDisks, format, { booted: false });
 
 	deleteInstanceCredentials(state.name);
 	// The managed keypair authenticated to the account factory reset erased,
@@ -1119,7 +1115,7 @@ function createInstance(state: MachineState): ChrInstance {
 
 		snapshot: {
 			async list(): Promise<SnapshotInfo[]> {
-				const format = state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+				const format = bootDiskFormatOf(state);
 				if (format !== "qcow2") return [];
 
 				// Try monitor first (works on running machines, gives live state)
@@ -1131,7 +1127,7 @@ function createInstance(state: MachineState): ChrInstance {
 				}
 
 				// Fall back to qemu-img info (works on stopped machines too)
-				const bootPath = join(state.machineDir, "boot.qcow2");
+				const bootPath = bootDiskPath(state.machineDir, "qcow2");
 				if (existsSync(bootPath)) {
 					return listSnapshots(bootPath);
 				}
@@ -1139,7 +1135,7 @@ function createInstance(state: MachineState): ChrInstance {
 			},
 
 			async save(name?: string): Promise<SnapshotInfo> {
-				const format = state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+				const format = bootDiskFormatOf(state);
 				if (format !== "qcow2") {
 					throw new QuickCHRError("STATE_ERROR", "Snapshots require a qcow2 boot disk. Recreate with bootDiskFormat: \"qcow2\".");
 				}
@@ -1176,7 +1172,7 @@ function createInstance(state: MachineState): ChrInstance {
 			},
 
 			async load(name: string): Promise<void> {
-				const format = state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+				const format = bootDiskFormatOf(state);
 				if (format !== "qcow2") {
 					throw new QuickCHRError("STATE_ERROR", "Snapshots require a qcow2 boot disk.");
 				}
@@ -1202,7 +1198,7 @@ function createInstance(state: MachineState): ChrInstance {
 			},
 
 			async delete(name: string): Promise<void> {
-				const format = state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
+				const format = bootDiskFormatOf(state);
 				if (format !== "qcow2") {
 					throw new QuickCHRError("STATE_ERROR", "Snapshots require a qcow2 boot disk.");
 				}
@@ -1584,7 +1580,8 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 		state.machineDir,
 		state.bootSize,
 		state.extraDisks,
-		state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
+		bootDiskFormatOf(state),
+		{ booted: true },
 	);
 	const platform = await detectPlatform();
 	const hostfwd = buildHostfwdString(state.ports);
@@ -2033,12 +2030,12 @@ export class QuickCHR {
 		const { lock, portBase, ports, networks } = await claimNewMachine(name, "add", opts);
 		try {
 			const cachedImg = await ensureCachedImage(version, arch);
-			copyImageToMachine(cachedImg, machineDir);
 			const diskArtifacts = await ensureConfiguredDisks(
 				machineDir,
 				diskOpts.bootSize,
 				diskOpts.extraDisks,
 				diskOpts.bootDiskFormat,
+				{ booted: false, factoryImage: async () => cachedImg },
 			);
 
 			const state: MachineState = {
@@ -2316,14 +2313,14 @@ export class QuickCHR {
 
 		// Download and prepare image
 		const cachedImg = await ensureCachedImage(version, arch, undefined, logger);
-		copyImageToMachine(cachedImg, machineDir);
 
-		// Prepare disks (boot resize + extra disks)
+		// Build the boot disk from the cache (resized if asked) and any extra disks
 		const diskArtifacts = await ensureConfiguredDisks(
 			machineDir,
 			diskOpts.bootSize,
 			diskOpts.extraDisks,
 			diskOpts.bootDiskFormat,
+			{ booted: false, factoryImage: async () => cachedImg },
 		);
 		const bootDisk = diskArtifacts.bootDisk;
 		const extraDiskConfigs = diskArtifacts.extraDisks;
@@ -2743,16 +2740,17 @@ export class QuickCHR {
 			hasProvisioning = false;
 		}
 
-		const diskPath = join(state.machineDir, "disk.img");
-		if (!existsSync(diskPath)) {
-			throw new QuickCHRError("MACHINE_NOT_FOUND", `Disk image not found for "${state.name}"`);
-		}
-
+		// Checks the disk this machine boots from — a qcow2 machine needs only boot.qcow2
+		// (#200) — and refuses, rather than rebuilds, a booted machine's missing disk.
 		const diskArtifacts = await ensureConfiguredDisks(
 			state.machineDir,
 			state.bootSize,
 			state.extraDisks,
-			state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw"),
+			bootDiskFormatOf(state),
+			{
+				booted: !isProvisioningWindowOpen(state),
+				factoryImage: () => ensureCachedImage(state.version, state.arch, undefined, logger),
+			},
 		);
 		const bootDisk = diskArtifacts.bootDisk;
 		const extraDiskConfigs = diskArtifacts.extraDisks;
