@@ -8,16 +8,20 @@
  *   matching CHANGELOG.md section and never mutates tracked files.
  *
  * Usage: bun scripts/release-prep.ts <patch|minor|major|X.Y.Z> [--dry-run] [--notes-out <file>]
- *        bun scripts/release-prep.ts --from-package [--notes-out <file>]
+ *        bun scripts/release-prep.ts --from-package [--npm-tag next|latest]
+ *                [--current-latest X.Y.Z] [--notes-out <file>]
  *
  * - Local prep mode fails if CHANGELOG.md's [Unreleased] section is empty, then
  *   inserts `## [X.Y.Z] — YYYY-MM-DD` below a fresh [Unreleased] heading.
  * - CI mode fails if CHANGELOG.md lacks a non-empty `## [X.Y.Z]` section matching
  *   package.json.
  * - Prints machine-readable lines: `version=X.Y.Z`, `npm-tag=next|latest`
- *   (odd minor → next, even minor → latest — the repo's pre-release scheme), and
- *   `npm-extra-tags=` (comma list) for tags moved onto the release after publish:
- *   a stable release also advances `next` so it never lags `latest`.
+ *   (the dist-tag is chosen per release with --npm-tag, default `next`; it is not
+ *   derived from the version number), and `npm-extra-tags=` (comma list) for tags
+ *   moved onto the release after publish: a `latest` release also advances `next`
+ *   so it never lags `latest`.
+ * - --current-latest X.Y.Z (the registry's current `latest`) refuses a version
+ *   older than it, so neither tag can ever be pointed backwards.
  * - --notes-out writes just the released section body (the GitHub Release notes).
  * - --dry-run computes and prints everything but writes no files.
  */
@@ -45,23 +49,46 @@ export function nextVersion(current: string, bump: string): string {
 	}
 }
 
-export function npmTag(version: string): "next" | "latest" {
-	const m = version.match(/^\d+\.(\d+)\.\d+$/);
-	if (!m) throw new Error(`version "${version}" is not X.Y.Z`);
-	return Number(m[1]) % 2 !== 0 ? "next" : "latest";
+export type NpmTag = "next" | "latest";
+
+/** The dist-tag is a per-release decision (default `next`), never inferred from the version. */
+export function parseNpmTag(value: string | undefined): NpmTag {
+	const tag = value ?? "next";
+	if (tag !== "next" && tag !== "latest") {
+		throw new Error(`npm tag "${tag}" is not next or latest`);
+	}
+	return tag;
 }
 
 /**
- * Dist-tags to move onto the release *after* publishing it under `npmTag()`.
+ * Dist-tags to move onto the release *after* publishing it under `tag`.
  *
  * There is no separately maintained pre-release line: a quickchr bug is fixed on
- * main and ships in the next stable. So `next` must never point at something
+ * main and ships in the next release. So `next` must never point at something
  * older than `latest` — left alone it strands `@next` consumers on whatever the
- * last odd-minor release was. A stable release therefore also advances `next`.
- * A pre-release publishes to `next` only; it must not become `latest`.
+ * last prerelease was. Publishing to `latest` therefore also advances `next`.
+ * Publishing to `next` moves nothing else; it must not become `latest`.
  */
-export function extraNpmTags(version: string): string[] {
-	return npmTag(version) === "latest" ? ["next"] : [];
+export function extraNpmTags(tag: NpmTag): string[] {
+	return tag === "latest" ? ["next"] : [];
+}
+
+function parseXyz(version: string): number[] {
+	const m = version.match(/^(\d+)\.(\d+)\.(\d+)$/);
+	if (!m) throw new Error(`version "${version}" is not X.Y.Z`);
+	return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/** Refuse a release older than the registry's current `latest` (that would point a tag backwards). */
+export function assertNotBehindLatest(version: string, currentLatest: string | undefined): void {
+	if (!currentLatest) return;
+	const [a, b] = [parseXyz(version), parseXyz(currentLatest)];
+	const diff = a.map((n, i) => n - (b[i] ?? 0)).find((d) => d !== 0) ?? 0;
+	if (diff < 0) {
+		throw new Error(
+			`version ${version} is older than npm latest ${currentLatest} — next must never lag latest`,
+		);
+	}
 }
 
 function escapeRegex(s: string): string {
@@ -122,7 +149,7 @@ function positionals(args: string[]): string[] {
 	const out: string[] = [];
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i] ?? "";
-		if (arg === "--notes-out") {
+		if (arg === "--notes-out" || arg === "--npm-tag" || arg === "--current-latest") {
 			i += 1;
 			continue;
 		}
@@ -142,14 +169,26 @@ async function main(): Promise<void> {
 		console.error("--notes-out requires a file path");
 		process.exit(2);
 	}
+	const valueOf = (flag: string): string | undefined => {
+		const i = args.indexOf(flag);
+		if (i < 0) return undefined;
+		const v = args[i + 1];
+		if (!v || v.startsWith("--")) {
+			console.error(`${flag} requires a value`);
+			process.exit(2);
+		}
+		return v;
+	};
+	const tag = parseNpmTag(valueOf("--npm-tag"));
+	const currentLatest = valueOf("--current-latest");
 	if (fromPackage && bump) {
 		console.error("--from-package does not accept a bump argument");
 		process.exit(2);
 	}
 	if (!fromPackage && !bump) {
 		console.error(
-			"usage: bun scripts/release-prep.ts <patch|minor|major|X.Y.Z> [--dry-run] [--notes-out <file>]\n" +
-				"       bun scripts/release-prep.ts --from-package [--notes-out <file>]",
+			"usage: bun scripts/release-prep.ts <patch|minor|major|X.Y.Z> [--npm-tag next|latest] [--dry-run] [--notes-out <file>]\n" +
+				"       bun scripts/release-prep.ts --from-package [--npm-tag next|latest] [--current-latest X.Y.Z] [--notes-out <file>]",
 		);
 		process.exit(2);
 	}
@@ -163,19 +202,18 @@ async function main(): Promise<void> {
 
 	if (fromPackage) {
 		const version = pkg.version;
-		const tag = npmTag(version);
+		assertNotBehindLatest(version, currentLatest);
 		const notes = releaseNotesForVersion(readFileSync(clPath, "utf-8"), version);
 		if (notesOut) writeFileSync(notesOut, `${notes}\n`);
 		console.log(`version=${version}`);
 		console.log(`npm-tag=${tag}`);
-		console.log(`npm-extra-tags=${extraNpmTags(version).join(",")}`);
+		console.log(`npm-extra-tags=${extraNpmTags(tag).join(",")}`);
 		console.log("from-package=true");
 		console.log(`\n--- release notes (${version}) ---\n${notes}`);
 		return;
 	}
 
 	const version = nextVersion(pkg.version, bump ?? "");
-	const tag = npmTag(version);
 	const date = new Date().toISOString().slice(0, 10);
 
 	const { changelog, notes } = rolloverChangelog(readFileSync(clPath, "utf-8"), version, date);
@@ -195,7 +233,7 @@ async function main(): Promise<void> {
 
 	console.log(`version=${version}`);
 	console.log(`npm-tag=${tag}`);
-	console.log(`npm-extra-tags=${extraNpmTags(version).join(",")}`);
+	console.log(`npm-extra-tags=${extraNpmTags(tag).join(",")}`);
 	console.log(`dry-run=${dryRun}`);
 	console.log(`\n--- release notes (${version}) ---\n${notes}`);
 }

@@ -84,12 +84,12 @@ supported ways to depend on it:
 
 ```sh
 bun add @tikoci/quickchr            # stable channel (latest)
-bun add @tikoci/quickchr@next       # pre-release channel
+bun add @tikoci/quickchr@next       # QA candidate channel
 ```
 
-Channel policy (see `.github/workflows/release.yml`): **even** minor versions (`0.2.x`,
-`0.4.x`, …) publish to npm tag `latest` (stable); **odd** minors (`0.3.x`, …)
-publish to `next` (pre-release).
+Channel policy (see `.github/workflows/release.yml`): a release publishes to npm tag
+`next` first and is promoted to `latest` after QA; `next` is never older than `latest`.
+Pin an exact version (`@tikoci/quickchr@0.5.1`) for reproducible runs.
 
 ### 2. Local path (recommended for sibling experiment dirs)
 

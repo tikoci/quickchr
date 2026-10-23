@@ -80,9 +80,9 @@ bun add @tikoci/quickchr
 ```
 
 For prerelease QA, use `@next` for the current candidate or, after publication,
-`@0.5.1` to pin this candidate. Odd minor versions (0.5.x) publish to `next`;
-even minor versions publish to `latest`. The quickchr package channel is
-independent of `--channel`, which selects a RouterOS firmware channel.
+`@0.5.1` to pin this candidate. A release is published to `next` first and promoted
+to `latest` once QA passes; `next` is never older than `latest`. The quickchr package
+channel is independent of `--channel`, which selects a RouterOS firmware channel.
 
 ```bash
 bun install -g @tikoci/quickchr@0.5.1
@@ -103,7 +103,9 @@ bun run dev -- doctor
 
 Reports prerequisite status, accelerator availability, image cache
 size, machine count, free disk space, and shell-completion install
-state. Exit code is `0` when no checks return `error` (warnings are OK).
+state. The disk check measures the data dir's filesystem and warns when free
+space is under `storage-reserve` + 2 GiB. Exit code is `0` when no checks return
+`error` (warnings are OK).
 
 ```bash
 quickchr doctor              # human-readable
@@ -175,6 +177,11 @@ RouterOS is ready (REST answers; on 6.x, a native-API login), or attaches QEMU
 stdio to your terminal (`--fg`). Accepts the same provisioning flags as `add`.
 QEMU runs detached in its own session either way, so it survives a signal to the
 shell that started it.
+
+When `<name>` matches no machine (a typo, or one removed earlier), `start` creates a
+factory CHR under that name and says so: `<name> created and started`, or
+`created — not waiting for RouterOS` with `--no-wait`. A machine that already
+existed, including one made by `add`, prints `started`.
 
 Additional flags:
 
@@ -590,6 +597,8 @@ default output form when writing step outputs directly.
   process that wrote it is alive (an extraction: for 30 minutes after its last
   write). `prune` removes stale ones before anything else.
 
+`cache list --json` prints one object per entry, including `kind` (`image`, `image-zip`,
+`packages` or `partial`) and `paths` (every file deleting the entry removes).
 Files in the cache that quickchr did not write are reported as "Other files"
 and never deleted. `prune` and `clear` never delete an in-use entry.
 

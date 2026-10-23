@@ -1,14 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+	assertNotBehindLatest,
 	extraNpmTags,
 	nextVersion,
-	npmTag,
+	parseNpmTag,
 	releaseNotesForVersion,
 	rolloverChangelog,
 } from "../../scripts/release-prep.ts";
 
-// Anchor tests for release metadata: version arithmetic, the odd/even-minor npm
-// dist-tag scheme, the local CHANGELOG rollover helper, and the CI read-only
+// Anchor tests for release metadata: version arithmetic, the explicit npm
+// dist-tag choice (next|latest; never inferred from the version), the local CHANGELOG rollover helper, and the CI read-only
 // package.json-as-truth release notes path.
 
 describe("nextVersion", () => {
@@ -25,25 +26,39 @@ describe("nextVersion", () => {
 	});
 });
 
-describe("npmTag", () => {
-	test("odd minor → next (pre-release), even minor → latest", () => {
-		expect(npmTag("0.5.0")).toBe("next");
-		expect(npmTag("0.4.3")).toBe("latest");
-		expect(npmTag("1.0.0")).toBe("latest");
+describe("parseNpmTag", () => {
+	test("defaults to next; accepts next and latest only", () => {
+		expect(parseNpmTag(undefined)).toBe("next");
+		expect(parseNpmTag("next")).toBe("next");
+		expect(parseNpmTag("latest")).toBe("latest");
+		expect(() => parseNpmTag("beta")).toThrow(/next or latest/);
 	});
 });
 
 describe("extraNpmTags", () => {
-	test("a stable release also advances next; a pre-release moves nothing", () => {
+	test("a latest release also advances next; a next release moves nothing", () => {
 		// `next` has no separately maintained line, so it must never point at
 		// something older than `latest`.
-		expect(extraNpmTags("0.4.8")).toEqual(["next"]);
-		expect(extraNpmTags("1.0.0")).toEqual(["next"]);
-		expect(extraNpmTags("0.5.0")).toEqual([]);
+		expect(extraNpmTags("latest")).toEqual(["next"]);
+		expect(extraNpmTags("next")).toEqual([]);
 	});
 
-	test("never makes a pre-release latest", () => {
-		expect(extraNpmTags("0.5.1")).not.toContain("latest");
+	test("never makes a next release latest", () => {
+		expect(extraNpmTags("next")).not.toContain("latest");
+	});
+});
+
+describe("assertNotBehindLatest", () => {
+	test("refuses a version older than npm latest", () => {
+		expect(() => assertNotBehindLatest("0.5.1", "0.5.2")).toThrow(/older than npm latest 0\.5\.2/);
+		expect(() => assertNotBehindLatest("0.4.9", "0.5.0")).toThrow(/older/);
+		expect(() => assertNotBehindLatest("0.9.9", "1.0.0")).toThrow(/older/);
+	});
+
+	test("allows equal-or-newer, and an unknown latest", () => {
+		expect(() => assertNotBehindLatest("0.5.1", "0.4.8")).not.toThrow();
+		expect(() => assertNotBehindLatest("1.0.0", "0.9.9")).not.toThrow();
+		expect(() => assertNotBehindLatest("0.5.1", undefined)).not.toThrow();
 	});
 });
 

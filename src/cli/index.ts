@@ -2911,7 +2911,7 @@ async function cmdCache(argv: string[]) {
 				return;
 			}
 			if (entries.length === 0) {
-				console.log("No cached images.");
+				console.log("No cache entries.");
 				if (unmanagedBytes > 0) console.log(`Other files: ${formatSize(unmanagedBytes)} (not written by quickchr; never pruned)`);
 				return;
 			}
@@ -2980,7 +2980,7 @@ async function cmdCache(argv: string[]) {
 			if (result.failed.length > 0) process.exitCode = 1;
 			if (result.kept.some((e) => e.inUse)) {
 				const inUse = result.kept.filter((e) => e.inUse);
-				console.log(`Kept ${inUse.length} in-use image(s):`);
+				console.log(`Kept ${inUse.length} in-use cache ${inUse.length === 1 ? "entry" : "entries"}:`);
 				for (const e of inUse) console.log(`  - ${e.basename}`);
 			}
 			break;
@@ -3642,7 +3642,8 @@ Subcommands:
   prune [options]                     Evict cache entries per policy. Never evicts in-use entries.
     --older-than <ver>                Evict entries with version < <ver>.
     --max-age <dur>                   Evict entries not used for longer than duration (e.g. 7d, 24h).
-    --max-size <size>                 Evict oldest-version entries until total size <= <size>.
+    --max-size <size>                 Evict entries until total size <= <size>: partial downloads
+                                      first, then oldest RouterOS version.
     --dry-run                         Show what would be evicted without deleting.
   clear --all                         Delete all non-in-use cache entries.
 

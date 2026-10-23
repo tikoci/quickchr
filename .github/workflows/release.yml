@@ -2,7 +2,8 @@ name: Release
 
 # The one-click release path (replaces publish.yml + scripts/release.ts):
 #
-#   gh workflow run release.yml                         # release package.json version
+#   gh workflow run release.yml                         # publish package.json version to `next`
+#   gh workflow run release.yml -f npm-tag=latest       # ...to `latest` (and `next` with it)
 #   gh workflow run release.yml -f dry-run=true         # preview
 #
 # What it does (prepare job → publish job):
@@ -15,11 +16,14 @@ name: Release
 #        that version (it becomes the notes).
 #   2. Quick sanity re-check on the exact release commit: bun test test/unit/.
 #   3. Create tag vX.Y.Z and the GitHub Release (notes = changelog section).
-#   4. Publish to npm with --provenance. Dist-tag from the odd/even-minor
-#      scheme: odd minor (0.5.x) → `next`, even minor (0.4.x) → `latest`.
-#      A stable release then also moves `next` onto it, so `next` never points at
+#   4. Publish to npm with --provenance under the dist-tag chosen at dispatch
+#      (`npm-tag` input, default `next`; not derived from the version number).
+#      A `latest` release also moves `next` onto it, so `next` never points at
 #      something older than `latest` — there is no separately maintained
 #      pre-release line, so a fix ships on main and `@next` must not lag it.
+#      A version older than the registry's current `latest` is refused.
+#      Releasing to `next` first and promoting after QA is the usual path
+#      (see "Release Process" in .github/instructions/ci.instructions.md).
 #
 # Dry-run mode runs every check and prints the would-be version/notes but
 # creates no tag/release and publishes nothing.
@@ -35,6 +39,13 @@ on:
         type: boolean
         description: "Dry run — run all checks, create no release, publish nothing"
         default: false
+      npm-tag:
+        type: choice
+        description: "npm dist-tag to publish under (latest also moves next)"
+        options:
+          - next
+          - latest
+        default: next
 
 permissions:
   contents: read
@@ -86,13 +97,19 @@ jobs:
         id: prep
         env:
           DRY_RUN: ${{ inputs.dry-run }}
+          INPUT_NPM_TAG: ${{ inputs.npm-tag }}
         run: |
           set -eo pipefail
-          bun scripts/release-prep.ts --from-package --notes-out /tmp/release-notes.md \
+          # Best-effort: if the lookup fails the older-than-latest guard is skipped,
+          # but the strict npm availability check below still runs.
+          CURRENT_LATEST=$(npm view "$(node -p "require('./package.json').name")" dist-tags.latest \
+            --registry https://registry.npmjs.org/ 2>/dev/null || true)
+          bun scripts/release-prep.ts --from-package --npm-tag "$INPUT_NPM_TAG" \
+            ${CURRENT_LATEST:+--current-latest "$CURRENT_LATEST"} --notes-out /tmp/release-notes.md \
             | tee /tmp/release-prep.txt
           VERSION=$(grep -m1 '^version=' /tmp/release-prep.txt | cut -d= -f2)
           NPM_TAG=$(grep -m1 '^npm-tag=' /tmp/release-prep.txt | cut -d= -f2)
-          # Empty is a legitimate value here (a pre-release moves no extra tag),
+          # Empty is a legitimate value here (a `next` release moves no extra tag),
           # so this one is not checked for emptiness below.
           EXTRA_TAGS=$(grep -m1 '^npm-extra-tags=' /tmp/release-prep.txt | cut -d= -f2)
           if [ -z "$VERSION" ] || [ -z "$NPM_TAG" ]; then
@@ -200,7 +217,7 @@ jobs:
         run: bunx npm publish --access public --provenance --tag "$NPM_TAG"
 
       # `next` has no separately maintained line — a fix lands on main and ships in
-      # the next stable — so leaving it behind strands `@next` on an old release.
+      # the next release — so leaving it behind strands `@next` on an old release.
       # Runs after publish: the version must exist before a tag can point at it.
       #
       # This step is the one place a failure cannot be repaired by re-running
