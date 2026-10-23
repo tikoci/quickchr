@@ -741,8 +741,8 @@ export interface ChrInstance {
 	 *  **Soft errors.** Some RouterOS commands return HTTP 200 with an error
 	 *  string in `output` (e.g. `/dude/agent/add` may resolve OK with
 	 *  `"doAdd Agent not implemented"`). `exec()` does not parse output for these
-	 *  patterns — inspect `result.output` if you need to assert success, or see
-	 *  {@link ExecResult} for the centrs route to a pass/fail result.
+	 *  patterns — inspect `result.output` if you need to assert success. For a
+	 *  pass/fail result, use `centrs execute --quickchr <name> --yes <command>`.
 	 */
 	exec(command: string, opts?: ExecOptions): Promise<ExecResult>;
 	/** Apply or renew a CHR trial license.

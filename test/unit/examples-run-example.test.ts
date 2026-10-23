@@ -34,7 +34,9 @@ beforeEach(() => {
 
 afterEach(() => {
 	mock.restore();
-	process.exitCode = savedExitCode;
+	// Bun ignores `process.exitCode = undefined`: restoring that would leave the 1 a
+	// test set, and fail the whole `bun test` run with every test passing.
+	process.exitCode = savedExitCode ?? 0;
 });
 
 describe("runExample teardown (#145)", () => {
