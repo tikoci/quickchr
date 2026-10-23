@@ -9,7 +9,7 @@ version parity, mark the channel: a release is published to `next` first and pro
 `latest` once QA passes, and `next` is never older than `latest`. (Through 0.5.0 an
 odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
-## [Unreleased]
+## [0.5.2] — 2026-10-23
 
 ### Fixed
 
