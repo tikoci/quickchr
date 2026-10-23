@@ -594,7 +594,8 @@ export function resolveInterfaceAlias(
 /** Compare the running Bun against the same pin CI installs. */
 export async function bunRuntimeCheck(version = Bun.version): Promise<DoctorCheck> {
 	const pin = (await Bun.file(new URL("../../.bun-version", import.meta.url)).text()).trim();
-	const older = Bun.semver.order(version, pin) < 0;
+	// Runtimes predating the Semver API are also older than the tested pin.
+	const older = typeof Bun.semver?.order !== "function" || Bun.semver.order(version, pin) < 0;
 	return {
 		label: "Bun runtime",
 		status: older ? "warn" : "ok",

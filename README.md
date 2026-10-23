@@ -196,7 +196,7 @@ reports a forced power cut if the guest does not stop within the grace budget.
 | `--install-all-packages` | Install all packages from `all_packages.zip` | |
 | `--add-user <user:pass>` | Create a user after boot | |
 | `--disable-admin` | Disable the default admin account | |
-| `--secure-login` | Opt into a managed login (create account, disable admin) | |
+| `--secure-login` | Create a managed login; use `--disable-admin` to disable admin | |
 | `--no-secure-login` | Keep admin with no password (skip managed account creation) | |
 | `--add-network <spec>` | Add a network NIC (repeatable). Specs: `user`, `shared`, `bridged:<iface>`, `socket::<name>`, `tap:<iface>`. Default: single user NIC. | |
 | `--no-network` | Start with no NICs (headless) | |

@@ -61,7 +61,7 @@ describe("--help is handled before any side effect (#156)", () => {
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout).toContain("quickchr add [options]");
 		expect(result.stdout).toContain("--name <name>         Instance name (auto-generated if omitted)");
-		expect(result.stdout).toContain("--secure-login");
+		expect(result.stdout).toContain("Create a managed login; use --disable-admin to disable admin");
 		expect(dataDirContents()).toEqual([]);
 	});
 
@@ -69,7 +69,7 @@ describe("--help is handled before any side effect (#156)", () => {
 		const result = await runQuickchr(["start", "--help"]);
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout).toContain("an unknown name creates a fresh machine");
-		expect(result.stdout).toContain("--secure-login");
+		expect(result.stdout).toContain("Create a managed login; use --disable-admin to disable admin");
 	});
 
 	test("networks sockets create --help prints help and registers no socket", async () => {

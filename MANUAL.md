@@ -517,7 +517,8 @@ another machine, view status, or quit.
 
 The wizard requires `qemu-img` and refuses before any prompts or image downloads
 when it is absent, showing the install remedy. For a raw x86 boot without `qemu-img`,
-use `quickchr add --arch x86 --boot-disk-format raw` instead. Step 10
+use `quickchr add --arch x86 --boot-disk-format raw` to create a stopped machine,
+then `quickchr start <name>` with the returned name to boot it. Step 10
 only appears when the platform supports networks beyond user-mode (macOS or
 Linux). The provisioning gate (step 11) only appears for RouterOS ≥ 7.20.8;
 older versions show an upgrade prompt.

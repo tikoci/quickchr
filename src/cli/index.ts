@@ -3257,7 +3257,7 @@ Options:
   --install-all-packages  Install all packages on first boot
   --add-user <u:p>      Create user on first boot (name:password)
   --disable-admin       Disable the default admin account on first boot
-  --secure-login        Opt into a managed login (create account, disable admin)
+  --secure-login        Create a managed login; use --disable-admin to disable admin
   --no-secure-login     Keep admin with no password (skip managed account)
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
@@ -3368,7 +3368,7 @@ Options:
                         btest:9200-9210:2000-2010/udp.
   --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
-  --secure-login        Opt into a managed login (create account, disable admin)
+  --secure-login        Create a managed login; use --disable-admin to disable admin
   --no-secure-login     Keep admin with no password (skip managed account)
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
