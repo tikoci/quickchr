@@ -20,8 +20,24 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   x86 machine. It is written to a temporary file and checked before it replaces
   anything, so an interrupted conversion is not mistaken for a disk. `clean` removes the
   leftover `disk.img` from older qcow2 machines; nothing else deletes it. (#199)
+- **`start <name>` says when it created the machine.** A name no machine has (a typo,
+  or a machine removed earlier) boots a fresh factory CHR, and the output used to read
+  the same as resuming one. It now prints `<name> created and started`, or
+  `created — not waiting for RouterOS` with `--no-wait`. A machine that already
+  existed, including one from `add`, still prints `started`. (#194)
 
 ### Fixed
+
+- **Examples no longer hide a failed teardown.** `runExample()` in `examples/lib.ts`
+  used to drop any `remove()` error, so a leaked machine showed up only as a leftover
+  later. It now prints the machine name and the error, still removes the other
+  machines, and exits 1 even when the example itself passed. The example's own error
+  is printed first. (#145)
+- Docs: `exec --help`, the MANUAL and the `ExecResult` TSDoc say that exit 0 means
+  the command was delivered, not that RouterOS accepted it: `/rest/execute` answers
+  HTTP 200 with the rejection text. For a pass/fail exit code they point to
+  `centrs execute --quickchr <name> --yes <command>`. quickchr does not parse RouterOS error
+  text. (#142)
 
 - **A qcow2 machine restarts without `disk.img`.** Restart used to refuse with
   `MACHINE_NOT_FOUND` when the unused raw copy was missing. (#200)

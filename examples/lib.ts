@@ -59,6 +59,11 @@ export function check(cond: unknown, message: string): asserts cond {
  * which would strand a running QEMU/machine (quickchr spawns QEMU detached, so an
  * abrupt exit leaves a tracked-but-running machine until `quickchr remove` reaps it).
  *
+ * A failed removal is never silent (#145): it is printed with the machine name and
+ * its error, the remaining machines are still removed, and the run exits 1 even
+ * when the body passed. The body's own error is printed first and stays the
+ * primary failure.
+ *
  * @example
  * if (import.meta.main) {
  *   await runExample(async (track) => {
@@ -78,15 +83,20 @@ export async function runExample(
 	try {
 		await body(track);
 	} catch (err) {
-		console.error(`\n✗ example failed: ${err instanceof Error ? err.message : String(err)}`);
+		console.error(`\n✗ example failed: ${errorText(err)}`);
 		process.exitCode = 1;
 	} finally {
 		for (const instance of tracked) {
 			try {
 				await instance.remove();
-			} catch {
-				/* ignore cleanup errors — best-effort teardown */
+			} catch (err) {
+				console.error(`✗ teardown failed for ${instance.name}: ${errorText(err)} — clear it with: quickchr remove ${instance.name}`);
+				process.exitCode = 1;
 			}
 		}
 	}
+}
+
+function errorText(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
 }

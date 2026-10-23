@@ -741,7 +741,8 @@ export interface ChrInstance {
 	 *  **Soft errors.** Some RouterOS commands return HTTP 200 with an error
 	 *  string in `output` (e.g. `/dude/agent/add` may resolve OK with
 	 *  `"doAdd Agent not implemented"`). `exec()` does not parse output for these
-	 *  patterns — inspect `result.output` if you need to assert success.
+	 *  patterns — inspect `result.output` if you need to assert success, or see
+	 *  {@link ExecResult} for the centrs route to a pass/fail result.
 	 */
 	exec(command: string, opts?: ExecOptions): Promise<ExecResult>;
 	/** Apply or renew a CHR trial license.
@@ -950,7 +951,15 @@ export interface ExecOptions {
 	timeout?: number;
 }
 
-/** Result of a ChrInstance.exec() call. */
+/** Result of a ChrInstance.exec() call.
+ *
+ *  A resolved `exec()` means the command was **delivered**, not that RouterOS
+ *  accepted it. `/rest/execute` answers HTTP 200 with the rejection text (e.g.
+ *  `failure: invalid user name`) in the same envelope as a success, so there is no
+ *  failure field here, and quickchr does not pattern-match RouterOS error text
+ *  (#142). For a pass/fail result, run the command through
+ *  `centrs execute --quickchr <name> --yes <command>`, which validates it first and
+ *  exits non-zero on a rejection (`--yes` confirms a write command outside a TTY). */
 export interface ExecResult {
 	/** Command output as a string (or parsed JSON when output="json"). */
 	output: string;
