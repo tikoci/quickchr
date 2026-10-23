@@ -11,6 +11,19 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Fixed
+
+- Setup refuses a missing `qemu-img` before prompting or downloading, with the host
+  install remedy, instead of skipping disk prompts and then failing to create the
+  default qcow2 disk. (#208)
+- Correct disk defaults and prerequisites, storage paths, help for generated names
+  and fresh starts, managed-login flags, and manual image links. (#206)
+
+### Changed
+
+- Pin the tested Bun runtime to 1.4.4. `doctor` reports the tested pin and warns
+  when the running Bun is older; the pin ships with the npm package. (#207)
+
 ## [0.5.1] — 2026-10-22
 
 Prerelease for QA on npm `next`; `latest` stays on 0.4.8 until QA passes, and 0.5.1 may

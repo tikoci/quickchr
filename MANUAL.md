@@ -64,7 +64,7 @@ by the user (or their AI agent) using `quickchr` as a building block.
 | Bun ≥ 1.1 | runtime | macOS/Linux: `curl -fsSL https://bun.sh/install \| bash` · Windows: `powershell -c "irm bun.sh/install.ps1 \| iex"` (or `winget install Oven-sh.Bun`) |
 | `qemu-system-x86_64` | x86 CHR | brew/apt/dnf/pacman · Windows: `winget install SoftwareFreedomConservancy.QEMU` |
 | `qemu-system-aarch64` | arm64 CHR | brew/apt/dnf/pacman · Windows: bundled in the SFC QEMU package above |
-| `qemu-img` | `--boot-size`, `--add-disk`, snapshots | included in all standard QEMU packages (brew, apt, dnf, SFC installer) |
+| `qemu-img` | Default qcow2 creation, setup wizard, `--boot-size`, `--add-disk`, snapshots | included in all standard QEMU packages (brew, apt, dnf, SFC installer) |
 | UEFI firmware (edk2) | arm64 CHR | `qemu-efi-aarch64` (apt), `edk2-aarch64` (dnf), bundled with `qemu` (brew) |
 | `socket_vmnet` (optional) | rootless `shared`/`bridged` networking on macOS | `brew install socket_vmnet` |
 | `socat` (optional) | piping serial console externally | brew/apt |
@@ -116,7 +116,9 @@ The `--json` form emits `{ ok, checks, staleImages }`, where `checks` is an
 array of `{ label, status, detail }` and `staleImages` lists cached images older
 than the current long-term release. The exit code still reflects `ok`.
 
-![quickchr doctor output](./images/doctor-demo.gif)
+`doctor` reports the tested Bun pin and warns when the running runtime is older.
+
+![quickchr doctor output](./docs/images/doctor-demo.gif)
 
 Use this whenever a `start` fails — the diagnostic almost always points
 at a missing dependency, missing firmware, or insufficient disk.
@@ -125,7 +127,7 @@ at a missing dependency, missing firmware, or insufficient disk.
 
 ## 3. CLI command reference
 
-The dispatcher lives in `src/cli/index.ts` (lines 121–194). Help text is
+The dispatcher lives in `src/cli/index.ts`. Help text is
 available for every command via `quickchr help <command>`.
 
 ### Lifecycle
@@ -138,14 +140,14 @@ directory, downloads the RouterOS image (cached), and writes
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--name <s>` | auto | `host-arch-N` if omitted |
+| `--name <s>` | auto | `version-arch-N` if omitted |
 | `--version <ver>` | latest in channel | e.g., `7.22.1` |
 | `--channel <ch>` | `stable` | `stable`, `long-term`, `testing`, `development` |
 | `--arch <a>` | host native | `arm64`, `x86`, or `auto` |
 | `--cpu <n>` | `1` | vCPU count |
 | `--mem <mb>` | `512` | RAM (cross-arch TCG bumps to `1024`) |
 | `--boot-disk-format <f>` | `qcow2` | `qcow2` or `raw` |
-| `--boot-size <size>` | — | Resize boot disk; needs `qemu-img`; auto-converts to qcow2 |
+| `--boot-size <size>` | — | Resize qcow2 boot disk; needs `qemu-img`; explicit raw is refused |
 | `--add-disk <size>` | — | Extra blank qcow2 disk; repeatable |
 | `--forward <spec>` | — | Extra hostfwd port or built-in service host-port pin; repeatable. See §Custom port forwards. |
 | `--add-package <pkg>` | — | Provisioning, repeatable, ≥ 7.20.8 |
@@ -486,7 +488,7 @@ Interactive wizard (`@clack/prompts`) that walks through all machine creation
 options and starts the CHR. Triggered by `quickchr setup` or automatically
 when `quickchr` is run with no subcommand on a TTY.
 
-![quickchr setup wizard walkthrough](./images/wizard-demo.gif)
+![quickchr setup wizard walkthrough](./docs/images/wizard-demo.gif)
 
 **First-run detection**: if no machines exist yet, the wizard opens with a
 welcome message before the first prompt.
@@ -513,7 +515,9 @@ another machine, view status, or quit.
 | 12 | Run mode: background / foreground | background | (default) / `--fg` |
 | 13 | Final confirmation | — | — |
 
-Steps 7–9 are skipped when `qemu-img` is absent (a warning is shown). Step 10
+The wizard requires `qemu-img` and refuses before any prompts or image downloads
+when it is absent, showing the install remedy. For a raw x86 boot without `qemu-img`,
+use `quickchr add --arch x86 --boot-disk-format raw` instead. Step 10
 only appears when the platform supports networks beyond user-mode (macOS or
 Linux). The provisioning gate (step 11) only appears for RouterOS ≥ 7.20.8;
 older versions show an upgrade prompt.
@@ -597,7 +601,7 @@ default output form when writing step outputs directly.
   process that wrote it is alive (an extraction: for 30 minutes after its last
   write). `prune` removes stale ones before anything else.
 
-`cache list --json` prints one object per entry, including `kind` (`image`, `image-zip`,
+`cache list --json` prints an array of entry objects, including `kind` (`image`, `image-zip`,
 `packages` or `partial`) and `paths` (every file deleting the entry removes).
 Files in the cache that quickchr did not write are reported as "Other files"
 and never deleted. `prune` and `clear` never delete an in-use entry.
@@ -690,7 +694,7 @@ mutate any machine's `machine.json`.
 
 | Env var | Effect |
 |---|---|
-| `QUICKCHR_DATA_DIR` | Override the data root (defaults to `$XDG_DATA_HOME/quickchr` or platform equivalent — see §8) |
+| `QUICKCHR_DATA_DIR` | Override the data root (defaults to `~/.local/share/quickchr` on POSIX or the Windows path — see §8) |
 | `QUICKCHR_NO_PROMPT` | Force non-interactive mode (skips all wizards) |
 | `QUICKCHR_DEBUG` | Emit `[debug]` lines from the progress logger |
 | `QUICKCHR_INTEGRATION` | Required to run `test/integration/` |
@@ -1257,10 +1261,10 @@ restrictions, half-open SLiRP under TCG), see `docs/networking.md`.
 
 ## 8. Storage layout
 
-### macOS / Linux (XDG)
+### macOS / Linux
 
 ```text
-$XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
+~/.local/share/quickchr/
 ├── .allocate.lock/              held while a new machine picks its ports/MACs
 ├── cache/                       Downloaded RouterOS images
 │   ├── chr-7.22.1.img.zip
@@ -1283,8 +1287,8 @@ $XDG_DATA_HOME/quickchr/  (defaults to ~/.local/share/quickchr/)
     └── <name>.json
 ```
 
-`$XDG_DATA_HOME` defaults to `~/.local/share/quickchr/`. Override the
-whole tree with `QUICKCHR_DATA_DIR=/some/path`.
+The data root is `~/.local/share/quickchr/`; `XDG_DATA_HOME` does not
+change it. Override the whole tree with `QUICKCHR_DATA_DIR=/some/path`.
 
 **Global settings** live separately, under the XDG **config** tier, not this
 data tree: `~/.config/quickchr/quickchr.env` (dotenv-style). See §3's
@@ -1581,12 +1585,16 @@ ceiling.
 
 ### Boot disk
 
-Default format is **raw** (the image MikroTik ships). `--boot-size`
-auto-converts to **qcow2** before the first boot and resizes to the
-requested size. Requires `qemu-img` on the host.
+The CLI and wizard default to **qcow2**, converted from the raw MikroTik
+image before first boot. Creating qcow2 requires `qemu-img` even without resize.
+`--boot-size` resizes qcow2 to the requested size; explicitly selecting raw
+with a boot size is refused. Without `--boot-size`, qcow2 keeps the original
+image size and enables snapshots.
 
-`--boot-disk-format=qcow2` (without `--boot-size`) just keeps the
-default size but enables snapshots.
+Library callers default to **raw** unless `bootSize` implies qcow2. CLI users
+can select raw explicitly with `--boot-disk-format raw`. On x86, this permits
+creation without `qemu-img` when no resize or extra disks are requested. ARM64
+also needs `qemu-img` for its writable UEFI firmware disk.
 
 ### Extra disks
 

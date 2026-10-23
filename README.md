@@ -8,7 +8,7 @@ CLI and library to download, launch, and manage MikroTik CHR virtual machines vi
 
 - [Bun](https://bun.sh) runtime
 - [QEMU](https://www.qemu.org) with `qemu-system-x86_64` and/or `qemu-system-aarch64`
-- `qemu-img` for disk resize and extra-disk features (`--boot-size`, `--add-disk`, `quickchr disk`)
+- `qemu-img` for default qcow2 creation, the setup wizard, disk resize, extra disks, and snapshots
 - UEFI firmware (edk2) for arm64 CHR
 
 Install QEMU:
@@ -54,7 +54,7 @@ bun add @tikoci/quickchr
 ### Prerelease QA (0.5.1)
 
 0.5.1 is published to npm `next` first; the unqualified install above uses `latest`,
-and 0.5.1 is promoted there once QA passes. After 0.5.1 is published, pin it for
+and 0.5.1 is promoted there once QA passes. Pin this published candidate for
 reproducible CLI or library QA:
 
 ```bash
@@ -71,7 +71,8 @@ The [0.5.0 notes](./CHANGELOG.md#050--2026-10-22) cover migration from 0.4.x.
 ### CLI Usage
 
 The easiest way to start is the interactive wizard — it walks through
-every option and starts the CHR for you:
+every option and starts the CHR for you. It requires `qemu-img` and reports
+a missing tool before prompting or downloading:
 
 ```bash
 quickchr setup
@@ -195,6 +196,7 @@ reports a forced power cut if the guest does not stop within the grace budget.
 | `--install-all-packages` | Install all packages from `all_packages.zip` | |
 | `--add-user <user:pass>` | Create a user after boot | |
 | `--disable-admin` | Disable the default admin account | |
+| `--secure-login` | Opt into a managed login (create account, disable admin) | |
 | `--no-secure-login` | Keep admin with no password (skip managed account creation) | |
 | `--add-network <spec>` | Add a network NIC (repeatable). Specs: `user`, `shared`, `bridged:<iface>`, `socket::<name>`, `tap:<iface>`. Default: single user NIC. | |
 | `--no-network` | Start with no NICs (headless) | |
@@ -254,7 +256,8 @@ In **foreground** mode, your terminal becomes the CHR serial console. Use these 
 
 ### Disk Support
 
-- The CHR boot image starts as raw. Using `--boot-size` converts it to qcow2 and resizes it before first boot.
+- CLI and wizard boot disks default to qcow2, converted from the raw MikroTik image using `qemu-img`. Library callers default to raw unless `bootSize` implies qcow2.
+- `--boot-size` resizes qcow2 before first boot; explicitly combining raw with a boot size is refused.
 - Extra disks from `--add-disk` are always created as blank qcow2 images.
 - `quickchr clean <name>` removes any resized boot disk and extra disks, then recreates them from the saved machine config.
 - `quickchr disk <name>` shows the stored disk layout. If `qemu-img` is installed, it also shows virtual and actual sizes.

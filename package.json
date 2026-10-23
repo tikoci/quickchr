@@ -15,6 +15,7 @@
     }
   },
   "files": [
+    ".bun-version",
     "src",
     "README.md",
     "DESIGN.md",

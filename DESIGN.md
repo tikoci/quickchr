@@ -245,7 +245,9 @@ CI, integration and release all install, enforced by `scripts/check-bun-pin.ts` 
 runtime could change between two identical commits — and did: a six-week gap with no `ci.yml`
 runs spanned the Bun 1.4.0 release, and the next PR inherited a 1.3.14 → 1.4.2 jump as if it
 were its own regression. Anything that can turn the build red is a dependency and belongs in
-a reviewable diff; "whatever is newest at run time" is not a version.
+a reviewable diff; "whatever is newest at run time" is not a version. The same
+`.bun-version` file ships in the npm package so `doctor` can name the tested
+runtime and warn when the running Bun is older without duplicating the pin.
 
 **The 2026-07 refactor (#29)** replaced the organically-grown scheme (integration on every
 PR push, three parallel copies of the runner logic, `continue-on-error` green-washing)

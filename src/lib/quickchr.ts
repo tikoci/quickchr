@@ -30,7 +30,7 @@ import type {
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION, HOST_GATEWAY_IP, PORTS_PER_BLOCK } from "./types.ts";
 import { assertValidResourceName, assertPathSafeName, shellQuote } from "./names.ts";
 import packageJson from "../../package.json";
-import { detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
+import { bunRuntimeCheck, detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath } from "./platform.ts";
 import {
 	resolveVersion,
 	isValidVersion,
@@ -2997,12 +2997,7 @@ export class QuickCHR {
 	static async doctor(): Promise<DoctorResult> {
 		const checks: DoctorResult["checks"] = [];
 
-		// Bun version
-		checks.push({
-			label: "Bun runtime",
-			status: "ok",
-			detail: `bun ${Bun.version}`,
-		});
+		checks.push(await bunRuntimeCheck());
 
 		// QEMU for each arch
 		for (const arch of ARCHES) {
@@ -3125,7 +3120,7 @@ export class QuickCHR {
 			});
 		}
 
-		// qemu-img (optional, for disk resize and extra disks)
+		// qemu-img (default qcow2 creation and disk features)
 		const qemuImgPath = findQemuImg();
 		if (qemuImgPath) {
 			checks.push({
@@ -3137,7 +3132,7 @@ export class QuickCHR {
 			checks.push({
 				label: "qemu-img",
 				status: "warn",
-				detail: `not found — required for --boot-size and --add-disk (${getQemuInstallHint()})`,
+				detail: `not found — required for default qcow2 creation, setup, --boot-size and --add-disk (${getQemuInstallHint()})`,
 			});
 		}
 

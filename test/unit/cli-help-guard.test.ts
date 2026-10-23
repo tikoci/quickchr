@@ -60,8 +60,16 @@ describe("--help is handled before any side effect (#156)", () => {
 		const result = await runQuickchr(["add", "--help"]);
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout).toContain("quickchr add [options]");
-		expect(result.stdout).toContain("--name <name>");
+		expect(result.stdout).toContain("--name <name>         Instance name (auto-generated if omitted)");
+		expect(result.stdout).toContain("--secure-login");
 		expect(dataDirContents()).toEqual([]);
+	});
+
+	test("start help describes fresh names and managed login", async () => {
+		const result = await runQuickchr(["start", "--help"]);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("an unknown name creates a fresh machine");
+		expect(result.stdout).toContain("--secure-login");
 	});
 
 	test("networks sockets create --help prints help and registers no socket", async () => {

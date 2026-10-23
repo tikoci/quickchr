@@ -3,7 +3,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import type { AccelMode, EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo } from "./types.ts";
+import type { AccelMode, EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo, DoctorCheck } from "./types.ts";
 import { QuickCHRError as QError, parseAccelMode } from "./types.ts";
 // settings-file.ts, not settings.ts: the latter's graph (cache → state → network
 // → platform) is a cycle that would load eagerly on every CLI start.
@@ -589,4 +589,15 @@ export function resolveInterfaceAlias(
 		"NETWORK_UNAVAILABLE",
 		`No interface found for alias '${alias}' — run 'quickchr doctor' to see available interfaces`,
 	);
+}
+
+/** Compare the running Bun against the same pin CI installs. */
+export async function bunRuntimeCheck(version = Bun.version): Promise<DoctorCheck> {
+	const pin = (await Bun.file(new URL("../../.bun-version", import.meta.url)).text()).trim();
+	const older = Bun.semver.order(version, pin) < 0;
+	return {
+		label: "Bun runtime",
+		status: older ? "warn" : "ok",
+		detail: `bun ${version}; tested with Bun ${pin}${older ? ` — upgrade to ${pin} or newer` : ""}`,
+	};
 }

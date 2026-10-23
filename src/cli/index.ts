@@ -3233,7 +3233,7 @@ options still work on older versions when the required host tools are installed.
 ${ROUTEROS6_HELP}
 
 Options:
-  --name <name>         Instance name (required)
+  --name <name>         Instance name (auto-generated if omitted)
   --version <ver>       RouterOS version (e.g., 7.22.1)
   --channel <ch>        Channel: stable, long-term, testing, development
   --arch <arch>         Architecture: arm64, x86, auto (default: host native)
@@ -3257,6 +3257,7 @@ Options:
   --install-all-packages  Install all packages on first boot
   --add-user <u:p>      Create user on first boot (name:password)
   --disable-admin       Disable the default admin account on first boot
+  --secure-login        Opt into a managed login (create account, disable admin)
   --no-secure-login     Keep admin with no password (skip managed account)
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
@@ -3319,7 +3320,7 @@ ${CENTRS_SEE_ALSO}`);
 		case "start":
 			console.log(`quickchr start [<name>] [options]
 
-  <name>              Restart an existing stopped machine by name.
+  <name>              Restart a stopped machine; an unknown name creates a fresh machine.
                       Omit to see a list of stopped machines.
 
 Creation flags below apply when using 'start' to create a new machine in one step.
@@ -3367,6 +3368,7 @@ Options:
                         btest:9200-9210:2000-2010/udp.
   --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
+  --secure-login        Opt into a managed login (create account, disable admin)
   --no-secure-login     Keep admin with no password (skip managed account)
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping

@@ -37,6 +37,9 @@ export function resolveUserChoiceOptions(
 
 /** Run the interactive wizard using @clack/prompts. */
 export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<void> {
+	const { requireQemuImg } = await import("../lib/platform.ts");
+	requireQemuImg();
+
 	// Dynamic import — only loaded when wizard is actually used
 	const clack = await import("@clack/prompts");
 	const { QuickCHR } = await import("../lib/quickchr.ts");
@@ -148,75 +151,68 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	});
 	if (clack.isCancel(mem)) { clack.cancel("Cancelled."); process.exit(0); }
 
-	// 4b. Disk configuration — requires qemu-img; skip gracefully if absent
+	// 4b. Disk configuration — qemu-img was checked before any prompts
 	let bootSize: string | undefined;
 	let bootDiskFormat: "qcow2" | "raw" = "qcow2";
 	const extraDisks: string[] = [];
 
-	const { findQemuImg, getQemuInstallHint } = await import("../lib/platform.ts");
 	const { isValidDiskSize } = await import("../lib/disk.ts");
-	const qemuImg = findQemuImg();
+	const diskFormatChoice = await clack.select({
+		message: "Boot disk format:",
+		options: [
+			{ value: "qcow2", label: "qcow2 (recommended)", hint: "supports snapshots and resize" },
+			{ value: "raw", label: "raw", hint: "no resize support" },
+		],
+		initialValue: "qcow2",
+	});
+	if (clack.isCancel(diskFormatChoice)) { clack.cancel("Cancelled."); process.exit(0); }
+	bootDiskFormat = diskFormatChoice as "qcow2" | "raw";
 
-	if (!qemuImg) {
-		clack.log.warn(`Disk features (boot resize, extra disks) require qemu-img. Run 'quickchr doctor' to confirm setup. ${getQemuInstallHint()}`);
-	} else {
-		const diskFormatChoice = await clack.select({
-			message: "Boot disk format:",
-			options: [
-				{ value: "qcow2", label: "qcow2 (recommended)", hint: "supports snapshots and resize" },
-				{ value: "raw", label: "raw", hint: "no resize support" },
-			],
-			initialValue: "qcow2",
-		});
-		if (clack.isCancel(diskFormatChoice)) { clack.cancel("Cancelled."); process.exit(0); }
-		bootDiskFormat = diskFormatChoice as "qcow2" | "raw";
-
-		if (bootDiskFormat === "qcow2") {
-			const wantBootResize = await clack.confirm({
-				message: "Resize the boot disk? (default is ~128 MB)",
-				initialValue: false,
-			});
-			if (clack.isCancel(wantBootResize)) { clack.cancel("Cancelled."); process.exit(0); }
-
-			if (wantBootResize) {
-				const size = await clack.text({
-					message: "Boot disk size (e.g., 512M, 1G, 2G):",
-					validate: (v) => {
-						if (!isValidDiskSize(v)) return "Size like 512M, 1G, or 2048";
-					},
-				});
-				if (clack.isCancel(size)) { clack.cancel("Cancelled."); process.exit(0); }
-				bootSize = size.trim();
-			}
-		} else {
-			clack.log.info("Raw boot disk selected — boot resize is disabled.");
-		}
-
-		const wantExtraDisks = await clack.confirm({
-			message: "Add extra blank disks?",
+	if (bootDiskFormat === "qcow2") {
+		const wantBootResize = await clack.confirm({
+			message: "Resize the boot disk? (default is ~128 MB)",
 			initialValue: false,
 		});
-		if (clack.isCancel(wantExtraDisks)) { clack.cancel("Cancelled."); process.exit(0); }
+		if (clack.isCancel(wantBootResize)) { clack.cancel("Cancelled."); process.exit(0); }
 
-		if (wantExtraDisks) {
-			let addMore = true;
-			while (addMore) {
-				const diskSize = await clack.text({
-					message: `Extra disk ${extraDisks.length + 1} size (e.g., 64M, 512M, 1G):`,
-					validate: (v) => {
-						if (!isValidDiskSize(v)) return "Size like 64M, 512M, or 1G";
-					},
-				});
-				if (clack.isCancel(diskSize)) { clack.cancel("Cancelled."); process.exit(0); }
-				extraDisks.push(diskSize.trim());
+		if (wantBootResize) {
+			const size = await clack.text({
+				message: "Boot disk size (e.g., 512M, 1G, 2G):",
+				validate: (v) => {
+					if (!isValidDiskSize(v)) return "Size like 512M, 1G, or 2048";
+				},
+			});
+			if (clack.isCancel(size)) { clack.cancel("Cancelled."); process.exit(0); }
+			bootSize = size.trim();
+		}
+	} else {
+		clack.log.info("Raw boot disk selected — boot resize is disabled.");
+	}
 
-				const another = await clack.confirm({
-					message: "Add another disk?",
-					initialValue: false,
-				});
-				if (clack.isCancel(another)) { clack.cancel("Cancelled."); process.exit(0); }
-				addMore = another;
-			}
+	const wantExtraDisks = await clack.confirm({
+		message: "Add extra blank disks?",
+		initialValue: false,
+	});
+	if (clack.isCancel(wantExtraDisks)) { clack.cancel("Cancelled."); process.exit(0); }
+
+	if (wantExtraDisks) {
+		let addMore = true;
+		while (addMore) {
+			const diskSize = await clack.text({
+				message: `Extra disk ${extraDisks.length + 1} size (e.g., 64M, 512M, 1G):`,
+				validate: (v) => {
+					if (!isValidDiskSize(v)) return "Size like 64M, 512M, or 1G";
+				},
+			});
+			if (clack.isCancel(diskSize)) { clack.cancel("Cancelled."); process.exit(0); }
+			extraDisks.push(diskSize.trim());
+
+			const another = await clack.confirm({
+				message: "Add another disk?",
+				initialValue: false,
+			});
+			if (clack.isCancel(another)) { clack.cancel("Cancelled."); process.exit(0); }
+			addMore = another;
 		}
 	}
 
