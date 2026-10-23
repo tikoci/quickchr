@@ -1390,6 +1390,12 @@ function printReadinessTip(name: string, version: string): void {
 	tip(`wait for readiness with: centrs retrieve --quickchr ${name} /system/resource${via} --wait 5m`);
 }
 
+/** Single-target start's status word: a machine this call created says so (#194). */
+function startStatusLine(created: boolean, noWait: boolean): string {
+	if (noWait) return `${created ? "created" : "launched"} — not waiting for RouterOS (--no-wait)`;
+	return created ? "created and started" : "started";
+}
+
 export async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	applyTimeoutExtraShortFlag(argv, flags, positional);
@@ -1504,10 +1510,10 @@ export async function cmdStart(argv: string[]) {
 	}
 
 	opts.disableAdmin = flagOptionalBool(flags, "disable-admin");
+	// No name, or a name no machine has: this call creates the machine (#194).
+	const target = opts.name ? QuickCHR.get(opts.name) : null;
 	{
-		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const { isProvisioningWindowOpen } = await import("../lib/provisioning-window.ts");
-		const target = opts.name ? QuickCHR.get(opts.name) : null;
 		// No machine yet, or one that was added and never booted: still a first boot,
 		// so the setting applies. Only a closed window suppresses it — otherwise a
 		// plain `quickchr start <booted-name>` would ask to provision a booted guest
@@ -1572,7 +1578,7 @@ export async function cmdStart(argv: string[]) {
 	} else {
 		const creds = await resolveDisplayCredentials(instance.state);
 		const v6 = isRouterOs6(instance.state.version);
-		console.log(`${statusIcon("running")} ${bold(instance.name)} ${opts.wait === false ? "launched — not waiting for RouterOS (--no-wait)" : "started"}`);
+		console.log(`${statusIcon("running")} ${bold(instance.name)} ${startStatusLine(!target, opts.wait === false)}`);
 		console.log(`  Version: ${instance.state.version} (${instance.state.arch})${v6 ? `  ${dim("boot-only: no REST, no provisioning")}` : ""}`);
 		console.log(`  Network: ${formatNetworks(instance.state.networks ?? [])}`);
 		console.log(`  Ports:   ${formatPorts(instance.state.ports)}`);
@@ -3300,6 +3306,13 @@ Examples:
   quickchr exec my-chr /system/resource/print
   quickchr exec my-chr ":put [:serialize to=json [/ip/address/print]]"
   quickchr exec my-chr "/log/info message=hello"
+
+Exit status:
+  0 means the command was delivered, not that RouterOS accepted it. A rejected
+  command (e.g. "failure: invalid user name") still exits 0, with
+  RouterOS's message as the output. For a pass/fail exit code, use centrs
+  (a write command needs --yes when not run at a TTY):
+    centrs execute --quickchr <name> --yes <command>
 
 ${CENTRS_SEE_ALSO}`);
 			break;

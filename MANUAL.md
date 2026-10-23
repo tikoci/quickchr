@@ -394,7 +394,8 @@ the Library API reference.
 #### `exec <name> <command> [--via=auto|rest|qga|console|ssh] [--user u] [--password p] [--timeout=ms]`
 
 Run a RouterOS CLI command. See §12 for transport details and JSON
-output trick.
+output trick. Exit 0 means the command was delivered, not that RouterOS
+accepted it — see §12 "Exit status" for the pass/fail route.
 
 #### `console <name>`
 
@@ -1493,6 +1494,29 @@ funnel through the same transport selector.
 > centrs resolves the machine's live connection facts through `quickchr inspect`
 > (see [`docs/centrs-interface.md`](./docs/centrs-interface.md)) — it never reads
 > `machine.json`, and neither should you.
+
+### Exit status
+
+`quickchr exec` exits 0 when the command was **delivered**, not when RouterOS
+accepted it. `/rest/execute` returns HTTP 200 with the rejection text in the same
+envelope as a success, so a refused command looks like this:
+
+```console
+$ quickchr exec my-chr "/user/add name=-2 group=read password=x"; echo "rc=$?"
+failure: invalid user name (/user/add; line 1)
+rc=0
+```
+
+The library is the same: `chr.exec()` resolves, and `ExecResult` has no failure
+field. quickchr does not pattern-match RouterOS error text, whose wording changes
+between versions (#142). When a script needs a pass/fail exit code, run the
+command through centrs, which validates it first and exits non-zero on a rejection.
+A write command needs `--yes` outside a TTY; without it centrs refuses with
+`usage/confirmation-required` (also exit 1) and sends nothing:
+
+```bash
+centrs execute --quickchr my-chr --yes "/user/add name=-2 group=read password=x"
+```
 
 ### Transports
 

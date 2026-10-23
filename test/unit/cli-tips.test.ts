@@ -38,6 +38,12 @@ describe("tips point at the validated path", () => {
 		expect(result.stdout).toContain("/rest/execute");
 	});
 
+	test("exec --help says exit 0 means delivered, and names the pass/fail route (#142)", async () => {
+		const result = await runQuickchr(["exec", "--help"]);
+		expect(result.stdout).toContain("0 means the command was delivered, not that RouterOS accepted it");
+		expect(result.stdout).toContain("centrs execute --quickchr <name> --yes <command>");
+	});
+
 	test("exec with no arguments tips toward centrs", async () => {
 		const result = await runQuickchr(["exec"]);
 		expect(result.exitCode).toBe(1);
