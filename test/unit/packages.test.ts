@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { promises as dns } from "node:dns";
 import { zipSync } from "fflate";
 import { listAvailablePackages, findPackageFile, downloadPackages, downloadAndListPackages } from "../../src/lib/packages.ts";
+import * as leases from "../../src/lib/storage-lease.ts";
 
 // Keep these tests network-free: fail the public-DNS A-record lookup so
 // fetchResilient takes its fallback (a normal fetch on the original URL), which
@@ -349,5 +350,22 @@ describe("downloadAndListPackages", () => {
 		const names = await downloadAndListPackages("7.22.1", "x86");
 
 		expect(names).toEqual(["container", "zerotier"]);
+	});
+
+	test("pins the package cache through the listing, then releases it", async () => {
+		const zipData = zipSync({ "container-7.22.1.npk": new TextEncoder().encode("container") });
+		globalThis.fetch = makeMockFetch(() => Promise.resolve(new Response(zipData, { status: 200 })));
+		const released: string[][] = [];
+		const pin = spyOn(leases, "pinCacheEntries").mockImplementation((action: string, pins: string[]) => ({
+			record: { pid: process.pid, at: "", action, pins, reservations: [] },
+			release: () => { released.push(pins); },
+		}));
+		try {
+			expect(await downloadAndListPackages("7.22.1", "x86")).toEqual(["container"]);
+			expect(pin.mock.calls.map((call) => call[1])).toEqual([["packages-x86-7.22.1"]]);
+			expect(released).toEqual([["packages-x86-7.22.1"]]);
+		} finally {
+			pin.mockRestore();
+		}
 	});
 });

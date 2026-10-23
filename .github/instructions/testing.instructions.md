@@ -346,10 +346,11 @@ nobody ran `curl` first to see what RouterOS actually returned.
   Listen on port 0 (auto-assign), pass port to function under test, clean up in `afterEach`.
 - **External URL code** (uses `fetch()` directly): Mock with `globalThis.fetch = ...`.
   Only valid for `versions.ts`, `images.ts`, `packages.ts`.
-- **The storage gate** (`assertSufficientQuickchrStorage`, ≥ 10 GiB free): a unit test
+- **The storage gate** (`admitStorage`: the operation's estimate plus
+  the 2 GiB `storage-reserve`, see DESIGN.md "Storage admission"): a unit test
   that reaches `add()`/`start()` must not depend on the host's free space. Unit tests
   put `QUICKCHR_DATA_DIR` in the checkout, so the gate measures the **checkout's**
-  filesystem, while `test/preload.ts` measures `$HOME/.local`. With those on different
+  filesystem, while `test/preload.ts` measures the real data dir. With those on different
   filesystems the preload passes and the test fails with `INSUFFICIENT_DISK_SPACE`
   (#193). Stub the gate itself with `test/unit/helpers/ample-storage.ts`, not `df`.
   The gate reads `df` on POSIX and `statfsSync` on Windows, and a `df` stub leaves
@@ -360,10 +361,15 @@ nobody ran `curl` first to see what RouterOS actually returned.
   a child process: Bun resolves a spawned command against the PATH the process
   **started** with, so setting `process.env.PATH` at runtime does not reach the gate's
   `df`. Stub `statfsSync` there too, so the expected value is exact rather than a live
-  disk reading. Repro: a `df` fixture that reports under 10 GiB only for paths inside
-  the checkout, put first on PATH for `bun test test/unit/`. Keep the preload and the
-  production threshold as they are. A host whose `$HOME` is short of space still stops
-  in the preload, by design.
+  disk reading. To test admission itself (reclaim, remeasure, refusal, leases), stub
+  `storageProbe.freeBytes` in-process with `spyOn` and give it a sequence of readings;
+  stub `storageProbe.filesystem` to model a second filesystem. The gate is
+  `admitStorage()`, and `ample-storage.ts` replaces it with a no-op lease.
+  Repro: a `df` fixture that reports under the reserve only for paths inside
+  the checkout, put first on PATH for `bun test test/unit/`. The preload asks for the
+  reserve alone on a unit run and for reserve + 2 GiB under `QUICKCHR_INTEGRATION`, and
+  never evicts (`reclaim: false`): the suite must not prune the developer's own cache.
+  A host whose data dir is short of space still stops in the preload, by design.
 
 ### Assert what quickchr owns, not what the runtime synthesizes
 
