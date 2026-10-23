@@ -1,11 +1,5 @@
 # quickchr
 
-> **Experimental** — quickchr is under active development. Most testing has been on
-> macOS (Apple Silicon + Intel), with CI on Linux (x86_64 + aarch64). Windows support
-> is early-stage: unit tests pass on `windows-latest` CI, and a weekly sweep boots a real
-> CHR on Windows (TCG, anchor smoke subset only). Expect rough edges on Windows — bug
-> reports welcome.
-
 CLI and library to download, launch, and manage MikroTik CHR virtual machines via QEMU.
 
 ## Quick Start
