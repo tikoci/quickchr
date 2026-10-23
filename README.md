@@ -57,6 +57,22 @@ Library:
 bun add @tikoci/quickchr
 ```
 
+### Prerelease QA (0.5.1)
+
+The 0.5.x line publishes to npm `next`; the unqualified install above uses
+`latest`. After 0.5.1 is published, pin it for reproducible CLI or library QA:
+
+```bash
+bun install -g @tikoci/quickchr@0.5.1
+bun add @tikoci/quickchr@0.5.1
+quickchr --version
+```
+
+Use `@next` instead of `@0.5.1` to follow subsequent prereleases. See the
+[0.5.1 changelog](./CHANGELOG.md#051--2026-10-22) for the changes since 0.5.0,
+including storage admission, cache accounting, and disk preservation fixes.
+The [0.5.0 notes](./CHANGELOG.md#050--2026-10-22) cover migration from 0.4.x.
+
 ### CLI Usage
 
 The easiest way to start is the interactive wizard — it walks through

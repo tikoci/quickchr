@@ -8,6 +8,10 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-22
+
+Prerelease for QA on npm `next`; `latest` remains on the stable line.
+
 ### Changed
 
 - **`start --install-deps` is now an error.** It was accepted but nothing ever read it, so
