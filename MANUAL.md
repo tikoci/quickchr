@@ -72,31 +72,40 @@ by the user (or their AI agent) using `quickchr` as a building block.
 
 ### Install quickchr
 
-The first GitHub release is **0.1.1** — pre-release per the changelog's
-odd/even policy. Not yet on npm.
+Install the stable npm channel:
 
 ```bash
-# Library
-bun add github:tikoci/quickchr
+bun install -g @tikoci/quickchr
+bun add @tikoci/quickchr
+```
 
-# CLI from source (until npm publish)
+For prerelease QA, use `@next` for the current candidate or, after publication,
+`@0.5.1` to pin this candidate. A release is published to `next` first and promoted
+to `latest` once QA passes; `next` is never older than `latest`. The quickchr package
+channel is independent of `--channel`, which selects a RouterOS firmware channel.
+
+```bash
+bun install -g @tikoci/quickchr@0.5.1
+bun add @tikoci/quickchr@0.5.1
+quickchr --version
+```
+
+To run an unpublished checkout:
+
+```bash
 git clone https://github.com/tikoci/quickchr
 cd quickchr
 bun install
 bun run dev -- doctor
 ```
 
-Once `0.2.0` is published to npm:
-
-```bash
-bun install -g @tikoci/quickchr
-```
-
 ### `quickchr doctor`
 
 Reports prerequisite status, accelerator availability, image cache
 size, machine count, free disk space, and shell-completion install
-state. Exit code is `0` when no checks return `error` (warnings are OK).
+state. The disk check measures the data dir's filesystem and warns when free
+space is under `storage-reserve` + 2 GiB. Exit code is `0` when no checks return
+`error` (warnings are OK).
 
 ```bash
 quickchr doctor              # human-readable
@@ -168,6 +177,11 @@ RouterOS is ready (REST answers; on 6.x, a native-API login), or attaches QEMU
 stdio to your terminal (`--fg`). Accepts the same provisioning flags as `add`.
 QEMU runs detached in its own session either way, so it survives a signal to the
 shell that started it.
+
+When `<name>` matches no machine (a typo, or one removed earlier), `start` creates a
+factory CHR under that name and says so: `<name> created and started`, or
+`created — not waiting for RouterOS` with `--no-wait`. A machine that already
+existed, including one made by `add`, prints `started`.
 
 Additional flags:
 
@@ -583,13 +597,15 @@ default output form when writing step outputs directly.
   process that wrote it is alive (an extraction: for 30 minutes after its last
   write). `prune` removes stale ones before anything else.
 
+`cache list --json` prints one object per entry, including `kind` (`image`, `image-zip`,
+`packages` or `partial`) and `paths` (every file deleting the entry removes).
 Files in the cache that quickchr did not write are reported as "Other files"
 and never deleted. `prune` and `clear` never delete an in-use entry.
 
 ```bash
 quickchr cache list
 quickchr cache prune --older-than 7.22 --dry-run   # versions below 7.22
-quickchr cache prune --max-age 30d                 # cached more than 30 days ago
+quickchr cache prune --max-age 30d                 # not used for more than 30 days
 quickchr cache prune --max-size 2G                 # oldest versions first, until <= 2 GiB
 quickchr cache clear --all                         # every entry not in use
 ```
@@ -597,7 +613,7 @@ quickchr cache clear --all                         # every entry not in use
 `prune` needs at least one of `--older-than <ver>`, `--max-age <dur>` or
 `--max-size <size>`, and applies them in that order when combined. `--max-size`
 evicts the oldest RouterOS version first (oldest cache time breaks ties) until
-the total, in-use images included, fits. Durations are `<N>(s|m|h|d|w)`; sizes
+the total, in-use entries included, fits. Durations are `<N>(s|m|h|d|w)`; sizes
 are `<N>(K|M|G|T)` with an optional `i`/`B`, read as IEC binary. `--dry-run`
 lists what `prune` or `clear` would delete without deleting it. `clear` refuses
 without `--all`. A delete that fails is listed on stderr, is not counted as

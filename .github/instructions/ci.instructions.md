@@ -99,8 +99,8 @@ prepare (gate: main-only + Integration freshness green
          + package.json version has a non-empty CHANGELOG section
          + tag/GitHub Release/npm version unused
          → unit re-check → tag+GitHub Release)
-  → publish (npm publish --provenance, dist-tag from odd/even minor, then
-    trailing tags moved forward)
+  → publish (npm publish --provenance, dist-tag from the dispatch `npm-tag` input,
+    then trailing tags moved forward)
 ```
 
 The integration bar is the freshness gate: the latest completed `main.yml` run on `main`
@@ -520,8 +520,9 @@ spread, see the script's header for why a plain IQR fence was rejected).
 ## Release Process
 
 ```bash
-gh workflow run release.yml -f dry-run=true # preview package.json version
-gh workflow run release.yml                 # release package.json version
+gh workflow run release.yml -f dry-run=true            # preview package.json version
+gh workflow run release.yml                            # publish package.json version to `next`
+gh workflow run release.yml -f npm-tag=latest          # ...or straight to `latest`
 ```
 
 `release.yml` (`workflow_dispatch` only, main-only) publishes the committed version:
@@ -534,16 +535,24 @@ gh workflow run release.yml                 # release package.json version
 3. **Publish**: `npm publish --provenance` from the tag, then `npm dist-tag add` for
    any trailing tag (see below).
 
-**Pre-release vs stable** (from version minor — pick the version accordingly):
-- `0.1.x`, `0.3.x` — odd minor → `npm tag: next` (pre-release, GitHub Release marked pre-release)
-- `0.2.x`, `0.4.x` — even minor → `npm tag: latest` (stable release)
+**Versioning and channels.** Normal semver; while 0.x, a breaking API or CLI change bumps
+the minor. The npm channel is an explicit dispatch choice (`npm-tag` input, default
+`next`), never inferred from the version number — the old odd/even-minor scheme was
+retired in 0.5.1. A `next` release is marked a GitHub pre-release. The usual path is to
+publish to `next`, QA it (e.g. agent runs), then promote the same version:
 
-**`next` never lags `latest`.** A stable release publishes to `latest` and is then also
-tagged `next` (`extraNpmTags()` in `scripts/release-prep.ts`; the "Move trailing
-dist-tags" step in `release.yml`). There is no separately maintained pre-release line —
-a quickchr bug is fixed on `main` and ships in the next stable — so a `next` left where
-the last odd-minor release put it silently serves `@next` consumers an old package.
-A pre-release still publishes to `next` only and never becomes `latest`.
+```bash
+npm dist-tag add @tikoci/quickchr@X.Y.Z latest
+gh release edit vX.Y.Z --prerelease=false --latest
+```
+
+**`next` never lags `latest`.** A `latest` release is also tagged `next`
+(`extraNpmTags()` in `scripts/release-prep.ts`; the "Move trailing dist-tags" step in
+`release.yml`), and promoting by hand must keep that true (`npm dist-tag add ... next`
+too if it was behind). `release-prep.ts --current-latest` refuses a version older than the
+registry's `latest`. There is no separately maintained pre-release line — a quickchr bug
+is fixed on `main` and ships in the next release — so a `next` left behind silently serves
+`@next` consumers an old package.
 
 **If the tag move fails after a successful publish**, the release is complete and correct
 — only the tag is outstanding — but nothing in CI can repair it: the version now exists,

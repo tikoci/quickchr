@@ -70,8 +70,12 @@ One-click, maintainer-triggered (see "Release Process" in
 
 ```bash
 gh workflow run release.yml -f dry-run=true  # preview package.json version
-gh workflow run release.yml                  # release package.json version
+gh workflow run release.yml                  # publish package.json version to npm `next`
+gh workflow run release.yml -f npm-tag=latest  # ...or to `latest` (also moves `next`)
 ```
+
+Releases normally go to `next` first and are promoted to `latest` after QA; `next` is
+never older than `latest`. While 0.x, a breaking API/CLI change bumps the minor version.
 
 ## Development Setup
 

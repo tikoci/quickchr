@@ -2911,7 +2911,7 @@ async function cmdCache(argv: string[]) {
 				return;
 			}
 			if (entries.length === 0) {
-				console.log("No cached images.");
+				console.log("No cache entries.");
 				if (unmanagedBytes > 0) console.log(`Other files: ${formatSize(unmanagedBytes)} (not written by quickchr; never pruned)`);
 				return;
 			}
@@ -2970,7 +2970,7 @@ async function cmdCache(argv: string[]) {
 		}
 		case "clear": {
 			if (flags.all !== true) {
-				console.error("cache clear: refuses without --all (deletes all non-in-use cached images)");
+				console.error("cache clear: refuses without --all (deletes all non-in-use cache entries)");
 				process.exit(1);
 			}
 			const result = pruneCache({ maxSizeBytes: 0, dryRun: flags["dry-run"] === true });
@@ -2980,7 +2980,7 @@ async function cmdCache(argv: string[]) {
 			if (result.failed.length > 0) process.exitCode = 1;
 			if (result.kept.some((e) => e.inUse)) {
 				const inUse = result.kept.filter((e) => e.inUse);
-				console.log(`Kept ${inUse.length} in-use image(s):`);
+				console.log(`Kept ${inUse.length} in-use cache ${inUse.length === 1 ? "entry" : "entries"}:`);
 				for (const e of inUse) console.log(`  - ${e.basename}`);
 			}
 			break;
@@ -3197,7 +3197,7 @@ Commands:
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
   networks                Network discovery & socket management
-  cache [add|key|list|prune|clear] Manage cached CHR images
+  cache [add|key|list|prune|clear] Manage cached CHR images and packages
   settings [print|get|set|reset]  Manage quickchr's own global settings (quickchr.env)
   completions             Manage shell completions (Tab completion)
   logs <name>             Tail the QEMU log for an instance
@@ -3642,7 +3642,8 @@ Subcommands:
   prune [options]                     Evict cache entries per policy. Never evicts in-use entries.
     --older-than <ver>                Evict entries with version < <ver>.
     --max-age <dur>                   Evict entries not used for longer than duration (e.g. 7d, 24h).
-    --max-size <size>                 Evict oldest-version images until total size <= <size>.
+    --max-size <size>                 Evict entries until total size <= <size>: partial downloads
+                                      first, then oldest RouterOS version.
     --dry-run                         Show what would be evicted without deleting.
   clear --all                         Delete all non-in-use cache entries.
 
@@ -3666,7 +3667,7 @@ Managed keys:
                     auto|tcg|hvf|kvm (default: auto = detect)
   cache-max-size    Auto-prune cap applied after each successful start.
                     Size string (e.g. 2G, 512M). (default: 2G)
-  storage-reserve   Free space creating a machine or caching an image must
+  storage-reserve   Free space creating a machine or filling the cache must
                     leave, beyond what it writes. Size string. (default: 2G)
   timeout-extra     Default for 'start's --timeout-extra/-T when omitted.
                     Non-negative integer seconds. (default: 0)

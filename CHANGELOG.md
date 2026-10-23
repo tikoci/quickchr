@@ -4,12 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are pre-releases.
+While 0.x, a breaking API or CLI change bumps the minor version. npm dist-tags, not
+version parity, mark the channel: a release is published to `next` first and promoted to
+`latest` once QA passes, and `next` is never older than `latest`. (Through 0.5.0 an
+odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-22
+
+Prerelease for QA on npm `next`; `latest` stays on 0.4.8 until QA passes, and 0.5.1 may
+then be promoted to `latest`.
+
 ### Changed
 
+- **Release channels are npm dist-tags, not odd/even minors.** `release.yml` takes an
+  `npm-tag` input (`next` by default, or `latest`); a `latest` release also moves `next`,
+  and a version older than the registry's `latest` is refused. `scripts/release-prep.ts`
+  no longer infers the tag from the version.
 - **`start --install-deps` is now an error.** It was accepted but nothing ever read it, so
   it never installed anything. The error points to `quickchr doctor`, which lists missing
   host dependencies and how to install them. `StartOptions.installDeps` is deprecated and
@@ -82,7 +94,7 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
 
 ### Breaking (0.5.0)
 
-0.5.0 is a pre-release line (odd minor), and the clean break where the CHR and
+0.5.0 is a pre-release (npm `next`), and the clean break where the CHR and
 provisioning quirks agents work around get fixed.
 
 - **Removed `ChrInstance.tzspGatewayIp`**, the alias deprecated in 0.4.8. Use
@@ -1260,7 +1272,7 @@ plus the changes below.
 ## [0.1.1] - 2026-04-20
 
 - First GitHub release as `tikoci/quickchr`. Pre-release per the odd/even
-  policy above: GitHub Actions CI has not yet run end-to-end against the
+  policy then in force: GitHub Actions CI has not yet run end-to-end against the
   hosted repo. Promote to `0.2.0` only after a green CI run on `main`.
 - Not yet published to npm. Install from the GitHub repo (`bun add github:tikoci/quickchr`)
   or by cloning. The npm publish workflow exists (`.github/workflows/publish.yml`)
