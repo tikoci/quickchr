@@ -65,7 +65,8 @@ export type LockOperation =
 	| "remove"
 	| "device-mode"
 	| "remove-orphan"
-	| "allocate";
+	| "allocate"
+	| "storage";
 
 /** Resources a machine creation has claimed but not yet persisted in `machine.json`.
  *  Carried in the creator's machine lock, so it lives exactly as long as the create

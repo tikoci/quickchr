@@ -608,14 +608,16 @@ Separately, a successful `start` prunes to the `cache-max-size` setting (default
 entry used in the last 30 minutes, which another create may be reading.
 
 **Disk space.** Creating a machine (`add`, or `start` with a new name) and
-filling the cache (an image or package download) are admitted when the data
-dir's filesystem has room for what the operation writes plus the
-`storage-reserve` setting (default `2G`). The estimate is the boot disk
+filling the cache (an image or package download) are admitted when each
+filesystem the operation writes to has room for what it writes there plus the
+`storage-reserve` setting (default `2G`), less what other quickchr operations
+in progress have already claimed. The estimate is the boot disk
 (192 MiB), plus an image download (256 MiB) and a package download (192 MiB)
 when those are not cached yet, so a cold create needs about 2.6 GiB free and a
 warm one about 2.2 GiB. When there is not enough, quickchr first evicts what the
-cache can spare (oldest version first; never in-use, needed or recently used
-entries), measures again, and only then refuses with `INSUFFICIENT_DISK_SPACE`,
+cache can spare on that filesystem (oldest version first; never entries a
+machine or an operation in progress needs, nor recently used ones), measures
+again until there is room or nothing more can go, and only then refuses with `INSUFFICIENT_DISK_SPACE`,
 naming the free space, what it needed, what it evicted and what it kept.
 Restarting an existing machine, `stop`, `remove` and read-only commands are
 never gated. The estimate covers creation, not a guest that later fills its

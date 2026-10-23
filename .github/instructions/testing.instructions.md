@@ -361,8 +361,10 @@ nobody ran `curl` first to see what RouterOS actually returned.
   a child process: Bun resolves a spawned command against the PATH the process
   **started** with, so setting `process.env.PATH` at runtime does not reach the gate's
   `df`. Stub `statfsSync` there too, so the expected value is exact rather than a live
-  disk reading. To test admission itself (reclaim, remeasure, refusal), stub
-  `storageProbe.freeBytes` in-process with `spyOn` and give it a sequence of readings.
+  disk reading. To test admission itself (reclaim, remeasure, refusal, leases), stub
+  `storageProbe.freeBytes` in-process with `spyOn` and give it a sequence of readings;
+  stub `storageProbe.filesystem` to model a second filesystem. The gate is
+  `admitStorage()`, and `ample-storage.ts` replaces it with a no-op lease.
   Repro: a `df` fixture that reports under the reserve only for paths inside
   the checkout, put first on PATH for `bun test test/unit/`. The preload asks for the
   reserve alone on a unit run and for reserve + 2 GiB under `QUICKCHR_INTEGRATION`, and

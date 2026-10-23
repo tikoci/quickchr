@@ -103,7 +103,8 @@ import {
 import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
-import { assertSufficientQuickchrStorage, estimateMachineCreation, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
+import { admitStorage, estimateMachineCreation, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
+import { pinCacheEntries } from "./storage-lease.ts";
 import { existsSync, rmSync } from "node:fs";
 import { acquireLock, acquireLockNow, allocationLockPath, legacyMachineLockPath, listReservations, machineLockPath, type HeldLock, type LockOperation } from "./lock.ts";
 import { join } from "node:path";
@@ -997,21 +998,28 @@ function createInstance(state: MachineState): ChrInstance {
 			const names = typeof packages === "string" ? [packages] : packages;
 			if (names.length === 0) return [];
 
-			const extractDir = await downloadPackages(state.version, state.arch);
+			// A booted machine no longer holds its package cache in use, so pin it until the
+			// upload is done: a concurrent eviction must not remove it mid-read.
+			const pin = pinCacheEntries(`install packages on ${state.name}`, [`packages-${state.arch}-${state.version}`]);
 			const packagePaths: string[] = [];
 			const installed: string[] = [];
-			for (const pkg of names) {
-				const pkgPath = findPackageFile(extractDir, pkg);
-				if (!pkgPath) {
-					console.warn(`Package "${pkg}" not found in all_packages for ${state.version} (${state.arch})`);
-					continue;
+			try {
+				const extractDir = await downloadPackages(state.version, state.arch);
+				for (const pkg of names) {
+					const pkgPath = findPackageFile(extractDir, pkg);
+					if (!pkgPath) {
+						console.warn(`Package "${pkg}" not found in all_packages for ${state.version} (${state.arch})`);
+						continue;
+					}
+					packagePaths.push(pkgPath);
+					installed.push(pkg);
 				}
-				packagePaths.push(pkgPath);
-				installed.push(pkg);
-			}
-			if (packagePaths.length === 0) return [];
+				if (packagePaths.length === 0) return [];
 
-			await uploadPackages(packagePaths, ports.ssh);
+				await uploadPackages(packagePaths, ports.ssh);
+			} finally {
+				pin.release();
+			}
 
 			// Reboot to activate packages
 			let rebootAuth: string;
@@ -2026,11 +2034,20 @@ export class QuickCHR {
 		}
 
 		const machineDir = getMachineDir(name);
-		assertSufficientQuickchrStorage(
+		// Held until machine.json is saved: it reserves the boot disk's bytes and pins the
+		// image against a concurrent eviction (storage-lease.ts).
+		const storageLease = admitStorage(
 			`prepare CHR ${name}`,
 			estimateMachineCreation({ version, arch, packages: !!(opts.installAllPackages || opts.packages?.length) }),
 		);
-		const { lock, portBase, ports, networks } = await claimNewMachine(name, "add", opts);
+		let claimed: Awaited<ReturnType<typeof claimNewMachine>>;
+		try {
+			claimed = await claimNewMachine(name, "add", opts);
+		} catch (err) {
+			storageLease.release();
+			throw err;
+		}
+		const { lock, portBase, ports, networks } = claimed;
 		try {
 			const cachedImg = await ensureCachedImage(version, arch);
 			const diskArtifacts = await ensureConfiguredDisks(
@@ -2083,6 +2100,7 @@ export class QuickCHR {
 			throw err;
 		} finally {
 			lock.release();
+			storageLease.release();
 		}
 	}
 
@@ -2282,10 +2300,12 @@ export class QuickCHR {
 		}
 
 		const machineDir = getMachineDir(name);
-		assertSufficientQuickchrStorage(
+		// Held until machine.json is saved — after the spawn, or in the foreground once
+		// QEMU exits — and released on failure: see add().
+		const storageLease = admitStorage(
 			`start CHR ${name}`,
 			estimateMachineCreation({ version, arch, packages: !!(opts.installAllPackages || opts.packages?.length) }),
-			{ logger: logger ? (message) => logger.status(message) : undefined },
+			{ logger: logger ? (message: string) => logger.status(message) : undefined },
 		);
 		const dirCreatedHere = !existsSync(machineDir);
 
@@ -2305,11 +2325,14 @@ export class QuickCHR {
 			opts.secureLogin === true
 		);
 
-		const { lock, portBase, ports, networks: networkConfigs } = await claimNewMachine(
-			name,
-			!background && !hasProvisioning ? "foreground" : "start",
-			opts,
-		);
+		let claimed: Awaited<ReturnType<typeof claimNewMachine>>;
+		try {
+			claimed = await claimNewMachine(name, !background && !hasProvisioning ? "foreground" : "start", opts);
+		} catch (err) {
+			storageLease.release();
+			throw err;
+		}
+		const { lock, portBase, ports, networks: networkConfigs } = claimed;
 		// Endpoints are claimed before QEMU is spawned, because resolution needs to know
 		// which end this machine holds. A launch that fails before its state is persisted
 		// has no instance lifecycle to release them later, so a failed start would leave a
@@ -2418,6 +2441,7 @@ export class QuickCHR {
 
 		saveMachine(state);
 		unpersistedSocketClaim = undefined;
+		storageLease.release();
 
 		const instance = createInstance(state);
 		if (opts.wait === false) return instance;
@@ -2543,6 +2567,7 @@ export class QuickCHR {
 			throw err;
 		} finally {
 			lock.release();
+			storageLease.release();
 		}
 	}
 

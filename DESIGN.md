@@ -171,18 +171,34 @@ disks hold guest state, so a missing `boot.qcow2`, `disk.img` or extra disk is
 file or run `quickchr clean`.
 
 **Storage admission (#199).** An operation that writes new data (creating a machine,
-an image or package download) is admitted when the data dir's filesystem has
-`estimate + storage-reserve` free. It replaced a flat 10 GiB floor that refused small
-hosts which had room. The estimate is a per-stage constant (`STORAGE_ESTIMATES` in
-`storage.ts`), rounded up from one host's measurements and written down there. The
-reserve (default 2 GiB) absorbs the estimate's error and keeps the host usable. Under
-pressure, eligible cache entries are evicted first and free space is **measured
-again**: logical sizes are not proof of room (sparse files, APFS clones, concurrent
-writers). There is no budget lock between concurrent creators. Instead, automatic
-eviction never touches an entry used in the last 30 minutes (a cache hit bumps its
-mtime), an entry a machine still needs, or the operation's own version. Each
-download re-checks at its own stage. Restart is never gated. Virtual disk capacity is
-not charged: a sparse disk's growth is the guest's, after admission.
+an image or package download) is admitted when **each filesystem it writes to** has
+`estimate + storage-reserve` free there. It replaced a flat 10 GiB floor that refused
+small hosts which had room. The operation's writes are parts with paths (boot disk →
+`machines/`, downloads → the cache it writes to), grouped by `stat().dev`. The estimate
+is a per-stage constant (`STORAGE_ESTIMATES` in `storage.ts`), rounded up from one
+host's measurements and written down there. The reserve (default 2 GiB) absorbs the
+estimate's error and keeps the host usable. Restart is never gated. Virtual disk
+capacity is not charged: a sparse disk's growth is the guest's, after admission.
+
+Under pressure, eligible cache entries are evicted, but only from a cache on the short
+filesystem, and only when everything eligible could cover the gap. Free space is then
+**measured again**, in passes, until the measurement admits or nothing more can be
+evicted. Logical sizes are not proof of room (sparse files, APFS clones).
+
+**Coordination** (`storage-lease.ts`, after Codex's review of #203 reproduced both
+races). One data-dir lock, held for milliseconds: a check-and-record, or an eviction
+pass. Under it, an operation records a **lease** naming the cache entries it is about
+to read (pins) and the bytes it is about to write, per filesystem. Admission subtracts
+other live leases' bytes from measured free space, so two creators cannot spend the
+same bytes. Eviction skips pinned entries. A pin is recorded before the reader checks
+the entry exists, so an eviction either sees it or has already finished, and then the
+reader fetches the entry again. A create's lease lasts until its `machine.json` is
+saved, which protects the image from then on. A download's lease lasts the download.
+A dead pid's lease is ignored and deleted. A create's own downloads are checked up
+front, so it refuses early, but are reserved only by the download itself, so they are
+not counted twice. Automatic eviction also skips anything used in the last 30
+minutes (a cache hit bumps its mtime). That rule is not what protects a reader; pins
+are. It spares what a finished `cache add` fetched for a later process.
 
 The cache cap (`cache-max-size`) is retention, separate from admission. It counts
 images, package archives with their extractions (one entry: the extraction is only a

@@ -1,15 +1,16 @@
 /**
  * Storage admission and usage helpers for quickchr-managed files.
  *
- * An operation that writes is admitted when the data dir's filesystem has room for
- * what the operation itself will write (its estimated peak) plus the configured host
- * reserve. When it does not, eligible cache entries are evicted first and free space
- * is measured again; only then is the operation refused (#199).
+ * An operation that writes is admitted when each filesystem it writes to has room for
+ * what the operation itself will write there (its estimated peak) plus the configured
+ * host reserve. When one does not, eligible cache entries are evicted first and free
+ * space is measured again; only then is the operation refused (#199).
  */
 
 import { existsSync, statfsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { countEntries, describePrune, pruneCache, RECENT_USE_MS } from "./cache.ts";
+import { type CacheEntry, countEntries, describePrune, type PruneResult, pruneCacheUnderLock, RECENT_USE_MS } from "./cache.ts";
+import { createLease, filesystemOf, liveLeases, type StorageLease, withStorageLock } from "./storage-lease.ts";
 import { formatDiskSize } from "./disk.ts";
 import { resolveSetting } from "./settings.ts";
 import { directorySize, getCacheDir, getDataDir, getMachinesDir } from "./state.ts";
@@ -52,14 +53,29 @@ export interface QuickchrStorageReport {
 	status: "ok" | "warn" | "error";
 }
 
-/** What an operation is about to write, for admission. */
-export interface StorageNeed {
-	/** Estimated peak new bytes, before the reserve. */
+/** One stage of an operation's writes. */
+export interface StoragePart {
+	/** For the refusal message, e.g. "boot disk". */
+	label: string;
+	/** Estimated peak new bytes. */
 	bytes: number;
-	/** What the estimate is made of, for the refusal message. */
-	detail: string;
+	/** Where they are written: the part is checked on that path's filesystem. */
+	path: string;
+	/** Reserve the bytes in the operation's lease (the default). False for a stage that
+	 *  admits and reserves for itself when it runs, such as a download a create will
+	 *  trigger: checked now, so the create refuses early, but not held twice. */
+	hold?: boolean;
+}
+
+/** What an operation is about to write and read, for admission. */
+export interface StorageNeed {
+	parts: StoragePart[];
 	/** Versions the operation reads from the cache: reclamation never evicts them. */
 	protectVersions?: string[];
+	/** Cache entries the operation reads; pinned in its lease. */
+	pins?: string[];
+	/** The cache reclamation evicts from. Default: the data dir's cache. */
+	cacheDir?: string;
 }
 
 function nearestExistingPath(path: string): string {
@@ -95,8 +111,9 @@ function freeBytesForPath(path: string): number {
 	return fsStats.bavail * (fsStats.bsize || 4096);
 }
 
-/** The free-space measurement, as an object so tests can replace it. */
-export const storageProbe = { freeBytes: freeBytesForPath };
+/** The free-space measurement and filesystem identity, as an object so tests can
+ *  replace them (a unit test cannot mount a second filesystem). */
+export const storageProbe = { freeBytes: freeBytesForPath, filesystem: filesystemOf };
 
 /** The configured host reserve: the `storage-reserve` setting (default 2 GiB). */
 export function resolveStorageReserve(): number {
@@ -150,83 +167,152 @@ export function formatQuickchrUsage(report: QuickchrStorageReport): string {
 }
 
 /** What creating a machine will write: its boot disk, plus the image and package
- *  downloads it still needs. Extra disks are sparse qcow2 and start near zero. */
+ *  downloads it still needs. Extra disks are sparse qcow2 and start near zero.
+ *  Only the boot disk is held in the create's lease: each download admits and
+ *  reserves for itself when it runs, so holding it here would count it twice. */
 export function estimateMachineCreation(opts: { version: string; arch: Arch; packages: boolean }): StorageNeed {
 	const cache = getCacheDir();
-	const parts: Array<[string, number]> = [["boot disk", STORAGE_ESTIMATES.bootDisk]];
-	if (!existsSync(join(cache, `${chrImageBasename(opts.version, opts.arch)}.img`))) {
-		parts.push(["image download", STORAGE_ESTIMATES.imageDownload]);
+	const image = chrImageBasename(opts.version, opts.arch);
+	const parts: StoragePart[] = [{ label: "boot disk", bytes: STORAGE_ESTIMATES.bootDisk, path: getMachinesDir() }];
+	if (!existsSync(join(cache, `${image}.img`))) {
+		parts.push({ label: "image download", bytes: STORAGE_ESTIMATES.imageDownload, path: cache, hold: false });
 	}
 	if (opts.packages && !existsSync(join(cache, `packages-${opts.arch}-${opts.version}`))) {
-		parts.push(["packages download", STORAGE_ESTIMATES.packagesDownload]);
+		parts.push({ label: "packages download", bytes: STORAGE_ESTIMATES.packagesDownload, path: cache, hold: false });
 	}
-	return {
-		bytes: parts.reduce((sum, [, bytes]) => sum + bytes, 0),
-		detail: parts.map(([label, bytes]) => `${label} ${formatDiskSize(bytes)}`).join(" + "),
-		protectVersions: [opts.version],
-	};
+	return { parts, protectVersions: [opts.version], pins: [`${image}.img`, `${image}.img.zip`] };
+}
+
+interface FilesystemGroup {
+	dev: number;
+	statPath: string;
+	parts: StoragePart[];
+	bytes: number;
+}
+
+function groupByFilesystem(parts: StoragePart[]): FilesystemGroup[] {
+	const groups = new Map<number, FilesystemGroup>();
+	for (const part of parts.length > 0 ? parts : [{ label: "", bytes: 0, path: getDataDir() }]) {
+		const { dev, statPath } = storageProbe.filesystem(part.path);
+		const group = groups.get(dev) ?? { dev, statPath, parts: [], bytes: 0 };
+		if (part.label) group.parts.push(part);
+		group.bytes += part.bytes;
+		groups.set(dev, group);
+	}
+	return [...groups.values()];
 }
 
 /**
- * Admit an operation that will write `need.bytes`, or throw `INSUFFICIENT_DISK_SPACE`.
+ * Admit an operation, or throw `INSUFFICIENT_DISK_SPACE`. Returns a lease the caller
+ * releases once its writes are done (see storage-lease.ts).
  *
- * Admitted when free space ≥ `need.bytes` + the reserve. Otherwise, unless `reclaim` is
- * false, eligible cache entries are evicted (oldest version first; never in-use,
- * protected or recently used ones) and free space is measured again. Logical sizes are
- * not trusted as proof of room: only the new measurement admits. When everything
- * eligible for eviction could not cover the shortage, nothing is evicted.
+ * Each filesystem the operation writes to is checked on its own: free space, less
+ * what other in-flight operations have reserved there, must cover that filesystem's
+ * parts plus the reserve. When it does not, and the cache being reclaimed lives on that
+ * filesystem, eligible entries are evicted (oldest version first; never in-use, pinned,
+ * protected or recently used ones) and free space is measured again — repeatedly,
+ * because logical sizes are no proof of room (sparse files, APFS clones), until the
+ * measurement admits or nothing more can be evicted. When everything eligible could
+ * not cover the shortage, nothing is evicted.
+ *
+ * The check and the lease are made under the storage lock, so two creators cannot
+ * spend the same free bytes, and an eviction cannot remove what this operation pins.
  */
-export function assertSufficientQuickchrStorage(
+export function admitStorage(
 	action: string,
-	need: StorageNeed = { bytes: 0, detail: "" },
+	need: StorageNeed = { parts: [] },
 	opts: { reclaim?: boolean; logger?: (message: string) => void } = {},
-): QuickchrStorageReport {
-	let report = getQuickchrStorageReport();
-	const required = need.bytes + report.reserveBytes;
-	if (report.freeBytes >= required) return report;
+): StorageLease {
+	return withStorageLock(() => {
+		const reserveBytes = resolveStorageReserve();
+		const leases = liveLeases();
+		const pins = new Set([...leases.flatMap((lease) => lease.pins), ...(need.pins ?? [])]);
+		const cacheDir = need.cacheDir ?? getCacheDir();
+		const cacheDev = storageProbe.filesystem(cacheDir).dev;
 
-	let reclaimed: ReturnType<typeof pruneCache> | undefined;
-	let wouldNotCover = false;
-	if (opts.reclaim !== false) {
-		const reclaim = {
-			reclaimBytes: required - report.freeBytes,
-			protectVersions: need.protectVersions,
-			skipRecentMs: RECENT_USE_MS,
-		};
-		// Evicting cannot close a gap larger than everything eligible: refuse with the
-		// cache intact rather than empty it for nothing.
-		const plan = pruneCache({ ...reclaim, dryRun: true });
-		if (plan.freedBytes < reclaim.reclaimBytes) {
-			reclaimed = plan;
-			wouldNotCover = true;
-		} else {
-			reclaimed = pruneCache(reclaim);
-			for (const line of describePrune(reclaimed)) opts.logger?.(line);
-			report = getQuickchrStorageReport(report.reserveBytes, report.warningFreeBytes);
-			if (report.freeBytes >= required) return report;
+		for (const group of groupByFilesystem(need.parts)) {
+			const reservedByOthers = leases
+				.flatMap((lease) => lease.reservations)
+				.filter((r) => r.dev === group.dev)
+				.reduce((sum, r) => sum + r.bytes, 0);
+			const measure = () => storageProbe.freeBytes(group.statPath) - reservedByOthers;
+			const required = group.bytes + reserveBytes;
+			let free = measure();
+			if (free >= required) continue;
+
+			const reclaim = opts.reclaim !== false && cacheDev === group.dev;
+			const evicted: CacheEntry[] = [];
+			const failed: PruneResult["failed"] = [];
+			let kept: PruneResult | undefined;
+			let wouldNotCover = false;
+			if (reclaim) {
+				const policy = { cacheDir, protectVersions: need.protectVersions, skipRecentMs: RECENT_USE_MS };
+				// Evicting cannot close a gap larger than everything eligible: refuse with the
+				// cache intact rather than empty it for nothing.
+				kept = pruneCacheUnderLock({ ...policy, reclaimBytes: required - free, dryRun: true }, pins);
+				wouldNotCover = kept.freedBytes < required - free;
+				while (!wouldNotCover && free < required) {
+					const pass = pruneCacheUnderLock({
+						...policy,
+						reclaimBytes: required - free,
+						skipEntries: failed.map((f) => f.entry.basename),
+					}, pins);
+					for (const line of describePrune(pass)) opts.logger?.(line);
+					evicted.push(...pass.evicted);
+					failed.push(...pass.failed);
+					kept = pass;
+					free = measure();
+					if (pass.evicted.length === 0) break;
+				}
+				if (free >= required) continue;
+			}
+
+			throw insufficientSpace(action, group, { free, required, reserveBytes, reservedByOthers, reclaimed: kept && { evicted, failed, kept, wouldNotCover } });
 		}
-	}
 
-	const needs = need.detail
-		? `${need.detail} + ${formatDiskSize(report.reserveBytes)} reserve`
-		: `${formatDiskSize(report.reserveBytes)} reserve`;
+		const reservations = groupByFilesystem(need.parts.filter((part) => part.hold !== false))
+			.filter((group) => group.bytes > 0)
+			.map((group) => ({ dev: group.dev, bytes: group.bytes }));
+		if (reservations.length === 0 && (need.pins ?? []).length === 0) return { record: { pid: process.pid, at: "", action, pins: [], reservations: [] }, release() {} };
+		return createLease(action, need.pins ?? [], reservations);
+	});
+}
+
+function insufficientSpace(
+	action: string,
+	group: FilesystemGroup,
+	facts: {
+		free: number;
+		required: number;
+		reserveBytes: number;
+		reservedByOthers: number;
+		reclaimed?: { evicted: CacheEntry[]; failed: PruneResult["failed"]; kept: PruneResult; wouldNotCover: boolean };
+	},
+): QuickCHRError {
+	const detail = group.parts.map((part) => `${part.label} ${formatDiskSize(part.bytes)}`).join(" + ");
+	const needs = detail ? `${detail} + ${formatDiskSize(facts.reserveBytes)} reserve` : `${formatDiskSize(facts.reserveBytes)} reserve`;
+	const available = facts.reservedByOthers > 0
+		? `${formatDiskSize(facts.free)} available after ${formatDiskSize(facts.reservedByOthers)} held by other operations in progress`
+		: `${formatDiskSize(facts.free)} available`;
 	const sentences = [
-		`Not enough free space to ${action} in ${report.statPath}: ${formatDiskSize(report.freeBytes)} available, need ${formatDiskSize(required)} (${needs}), ${formatDiskSize(required - report.freeBytes)} short.`,
+		`Not enough free space to ${action} in ${group.statPath}: ${available}, need ${formatDiskSize(facts.required)} (${needs}), ${formatDiskSize(facts.required - facts.free)} short.`,
 	];
-	if (reclaimed) {
-		const kept = reclaimed.kept.filter((e) => reclaimed.reasons[e.basename] !== "kept");
-		const keptBytes = kept.reduce((sum, e) => sum + e.sizeBytes, 0);
-		let line = wouldNotCover
-			? reclaimed.evicted.length > 0
-				? `The cache could spare only ${formatDiskSize(reclaimed.freedBytes)} (${countEntries(reclaimed.evicted.length)}), not enough, so nothing was evicted.`
+	const r = facts.reclaimed;
+	if (r) {
+		const freed = r.evicted.reduce((sum, e) => sum + e.sizeBytes, 0);
+		let line = r.wouldNotCover
+			? r.kept.evicted.length > 0
+				? `The cache could spare only ${formatDiskSize(r.kept.freedBytes)} (${countEntries(r.kept.evicted.length)}), not enough, so nothing was evicted.`
 				: "Nothing in the cache could be evicted."
-			: `Evicted ${countEntries(reclaimed.evicted.length)} from the cache (${formatDiskSize(reclaimed.freedBytes)}) first.`;
-		if (reclaimed.failed.length > 0) line += ` ${reclaimed.failed.length} delete(s) failed.`;
-		if (keptBytes > 0) line += ` ${formatDiskSize(keptBytes)} is kept: in use by a machine, needed by this operation, or used in the last ${RECENT_USE_MS / 60_000} minutes.`;
+			: `Evicted ${countEntries(r.evicted.length)} from the cache (${formatDiskSize(freed)}) first.`;
+		if (r.failed.length > 0) line += ` ${r.failed.length} delete(s) failed.`;
+		const keptBytes = r.kept.kept
+			.filter((e) => r.kept.reasons[e.basename] !== "kept")
+			.reduce((sum, e) => sum + e.sizeBytes, 0);
+		if (keptBytes > 0) line += ` ${formatDiskSize(keptBytes)} is kept: in use by a machine or an operation in progress, needed by this operation, or used in the last ${RECENT_USE_MS / 60_000} minutes.`;
 		sentences.push(line);
 	}
-	sentences.push(`${formatQuickchrUsage(report)}.`);
-	throw new QuickCHRError(
+	return new QuickCHRError(
 		"INSUFFICIENT_DISK_SPACE",
 		sentences.join(" "),
 		"Free space on that filesystem, remove machines you no longer need, or lower the reserve with 'quickchr settings set storage-reserve <size>' (QUICKCHR_STORAGE_RESERVE).",

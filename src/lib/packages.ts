@@ -13,9 +13,8 @@ import { restPost } from "./rest.ts";
 import { scpPush } from "./scp.ts";
 import { extractZip } from "./zip.ts";
 import { renameWithRetry } from "./rename.ts";
-import { assertSufficientQuickchrStorage, STORAGE_ESTIMATES } from "./storage.ts";
+import { admitStorage, STORAGE_ESTIMATES } from "./storage.ts";
 import { touchCacheEntry } from "./images.ts";
-import { formatDiskSize } from "./disk.ts";
 
 const PACKAGE_CACHE_MANIFEST = ".quickchr-complete.json";
 
@@ -84,53 +83,61 @@ export async function downloadPackages(
 		return extractDir;
 	}
 
-	assertSufficientQuickchrStorage(
+	const lease = admitStorage(
 		`cache packages ${version} (${arch})`,
-		{ bytes: STORAGE_ESTIMATES.packagesDownload, detail: `packages download ${formatDiskSize(STORAGE_ESTIMATES.packagesDownload)}`, protectVersions: [version] },
-		{ logger: (message) => (logger ?? createLogger()).status(message) },
+		{
+			parts: [{ label: "packages download", bytes: STORAGE_ESTIMATES.packagesDownload, path: cache }],
+			protectVersions: [version],
+			pins: [`packages-${arch}-${version}`],
+			cacheDir: cache,
+		},
+		{ logger: (message: string) => (logger ?? createLogger()).status(message) },
 	);
-
-	// Download if needed. Same bounded path as the image download (#116) — this
-	// call site previously had neither a deadline nor retries, so its only bound
-	// was whatever the calling test happened to impose.
-	if (!existsSync(zipPath)) {
-		const log = logger ?? createLogger();
-		log.status(`Downloading packages for ${version} (${arch})...`);
-		log.status(`  ${url}`);
-		await downloadToFile(url, zipPath, { logger: log });
-	}
-
-	// Extract into a sibling directory, record the exact complete set, then
-	// rename it into place. A killed extraction can never look like a cache hit.
-	const tempDir = mkdtempSync(join(cache, ".quickchr-packages-"));
 	try {
-		extractZip(zipPath, tempDir);
-		const packages = packageFiles(tempDir);
-		if (packages.length === 0) {
-			throw new Error(`No non-empty .npk files found in ${zipName}`);
+		// Download if needed. Same bounded path as the image download (#116) — this
+		// call site previously had neither a deadline nor retries, so its only bound
+		// was whatever the calling test happened to impose.
+		if (!existsSync(zipPath)) {
+			const log = logger ?? createLogger();
+			log.status(`Downloading packages for ${version} (${arch})...`);
+			log.status(`  ${url}`);
+			await downloadToFile(url, zipPath, { logger: log });
 		}
-		const manifest: PackageCacheManifest = {
-			version,
-			arch,
-			archiveSize: statSync(zipPath).size,
-			packages,
-		};
-		await Bun.write(join(tempDir, PACKAGE_CACHE_MANIFEST), `${JSON.stringify(manifest, null, "\t")}\n`);
-		if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true });
-		renameWithRetry(tempDir, extractDir);
-	} catch (error) {
-		rmSync(tempDir, { recursive: true, force: true });
-		if (error instanceof Error && error.message.startsWith("No non-empty")) {
-			throw new QuickCHRError("PROCESS_FAILED", error.message);
-		}
-		throw error;
-	}
 
-	if (!(await isCompletePackageCache(version, arch, cache))) {
-		throw new QuickCHRError(
-			"PROCESS_FAILED",
-			`Package cache verification failed for ${version} (${arch})`,
-		);
+		// Extract into a sibling directory, record the exact complete set, then
+		// rename it into place. A killed extraction can never look like a cache hit.
+		const tempDir = mkdtempSync(join(cache, ".quickchr-packages-"));
+		try {
+			extractZip(zipPath, tempDir);
+			const packages = packageFiles(tempDir);
+			if (packages.length === 0) {
+				throw new Error(`No non-empty .npk files found in ${zipName}`);
+			}
+			const manifest: PackageCacheManifest = {
+				version,
+				arch,
+				archiveSize: statSync(zipPath).size,
+				packages,
+			};
+			await Bun.write(join(tempDir, PACKAGE_CACHE_MANIFEST), `${JSON.stringify(manifest, null, "\t")}\n`);
+			if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true });
+			renameWithRetry(tempDir, extractDir);
+		} catch (error) {
+			rmSync(tempDir, { recursive: true, force: true });
+			if (error instanceof Error && error.message.startsWith("No non-empty")) {
+				throw new QuickCHRError("PROCESS_FAILED", error.message);
+			}
+			throw error;
+		}
+
+		if (!(await isCompletePackageCache(version, arch, cache))) {
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				`Package cache verification failed for ${version} (${arch})`,
+			);
+		}
+	} finally {
+		lease.release();
 	}
 
 	return extractDir;

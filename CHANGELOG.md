@@ -15,7 +15,8 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   host dependencies and how to install them. `StartOptions.installDeps` is deprecated and
   ignored, and will be removed in a later minor. (#193)
 - **The 10 GiB free-space floor is gone.** Creating a machine or filling the cache now
-  needs what the operation writes plus a 2 GiB reserve. About 2.2 GiB free is enough
+  needs what the operation writes plus a 2 GiB reserve, on each filesystem it writes
+  to, less what other quickchr operations in progress have claimed there. About 2.2 GiB free is enough
   for a create from a warm cache, and about 2.6 GiB for a cold one with packages. The
   reserve is the new `storage-reserve` setting (`QUICKCHR_STORAGE_RESERVE`). When space
   is short, quickchr first evicts what the cache can spare, measures again, and only
@@ -26,8 +27,9 @@ Even minor versions (0.2.x, 0.4.x) are releases; odd minors (0.3.x, 0.5.x) are p
   were counted before, so a cache could sit well over `cache-max-size` (one host: 3.4 GiB
   against the 2 GiB cap, 1.3 GiB of it packages). Expect the first automatic prune after
   upgrading to evict more than usual. An all-packages ZIP and its extraction are one
-  entry. Stale `.part` downloads are pruned first. Automatic eviction skips anything
-  used in the last 30 minutes. A cache hit counts as a use, so `cache prune --max-age`
+  entry. Stale `.part` downloads are pruned first. Eviction never removes an entry an
+  operation in progress is reading (a short-lived lock and per-operation leases),
+  and automatic eviction also skips anything used in the last 30 minutes. A cache hit counts as a use, so `cache prune --max-age`
   now means "not used for". Files quickchr didn't write are listed and never deleted.
   `cache list --json` entries gain `kind` and `paths`. (#199)
 - **qcow2 machines no longer keep a raw copy of the image.** A new qcow2 machine (the

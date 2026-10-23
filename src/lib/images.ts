@@ -11,8 +11,7 @@ import { downloadToFile } from "./download.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { extractZip } from "./zip.ts";
-import { assertSufficientQuickchrStorage, STORAGE_ESTIMATES } from "./storage.ts";
-import { formatDiskSize } from "./disk.ts";
+import { admitStorage, STORAGE_ESTIMATES } from "./storage.ts";
 import { renameWithRetry } from "./rename.ts";
 
 /** A cache hit is a use: bump the mtime so automatic eviction counts the entry as
@@ -155,14 +154,24 @@ export async function ensureCachedImage(
 	}
 	if (existsSync(imgPath)) unlinkSync(imgPath);
 	const log = logger ?? createLogger();
-	assertSufficientQuickchrStorage(
+	const base = chrImageBasename(version, arch);
+	const lease = admitStorage(
 		`cache CHR ${version} (${arch})`,
-		{ bytes: STORAGE_ESTIMATES.imageDownload, detail: `image download ${formatDiskSize(STORAGE_ESTIMATES.imageDownload)}`, protectVersions: [version] },
-		{ logger: (message) => log.status(message) },
+		{
+			parts: [{ label: "image download", bytes: STORAGE_ESTIMATES.imageDownload, path: cache }],
+			protectVersions: [version],
+			pins: [`${base}.img`, `${base}.img.zip`],
+			cacheDir: cache,
+		},
+		{ logger: (message: string) => log.status(message) },
 	);
-	const zipPath = await downloadImage(version, arch, cacheDir, logger);
-	const extractedImgPath = await extractImage(zipPath, cacheDir, logger);
-	return finalizeExtractedImage(zipPath, extractedImgPath);
+	try {
+		const zipPath = await downloadImage(version, arch, cacheDir, logger);
+		const extractedImgPath = await extractImage(zipPath, cacheDir, logger);
+		return finalizeExtractedImage(zipPath, extractedImgPath);
+	} finally {
+		lease.release();
+	}
 }
 
 /** List cached images. */

@@ -11,6 +11,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { directorySize, getCacheDir, loadAllMachines } from "./state.ts";
+import { isPidAlive, liveLeases, pinnedEntries, withStorageLock } from "./storage-lease.ts";
 import { chrImageBasename, compareRouterOsVersion, isValidVersion } from "./versions.ts";
 import { QuickCHRError, type Arch } from "./types.ts";
 
@@ -78,8 +79,11 @@ export interface PruneOptions {
 	protectVersions?: string[];
 	/** Evict eligible entries, oldest version first, until this many bytes are gone. */
 	reclaimBytes?: number;
-	/** Keep entries written or used this recently: another create may be reading them. */
+	/** Keep entries written or used this recently. Pins are what protect a reader; this
+	 *  also spares what a just-finished `cache add` fetched for a later process. */
 	skipRecentMs?: number;
+	/** Leave these entries alone (a reclaim loop's earlier failed deletes). */
+	skipEntries?: string[];
 	dryRun?: boolean;
 }
 
@@ -143,20 +147,13 @@ function inUseSet(): Set<string> {
 	return set;
 }
 
-function isPidAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === "EPERM";
-	}
-}
-
-/** Inventory the cache: every entry quickchr manages, plus the bytes it does not. */
-export function cacheInventory(cacheDir?: string): CacheInventory {
+/** Inventory the cache: every entry quickchr manages, plus the bytes it does not.
+ *  An entry is in use when a machine needs it or a live operation has pinned it. */
+export function cacheInventory(cacheDir?: string, pins: Set<string> = pinnedEntries()): CacheInventory {
 	const dir = cacheDir ?? getCacheDir();
 	if (!existsSync(dir)) return { entries: [], unmanagedBytes: 0 };
 	const used = inUseSet();
+	for (const pin of pins) used.add(pin);
 	const now = Date.now();
 	const entries: CacheEntry[] = [];
 	const packageGroups = new Map<string, CacheEntry>();
@@ -172,9 +169,13 @@ export function cacheInventory(cacheDir?: string): CacheInventory {
 		}
 		const sizeBytes = stat.isDirectory() ? directorySize(full) : stat.size;
 
-		const packages = name.match(/^(?:all_)?packages-(x86|arm64)-(.+?)(\.zip)?$/);
-		if (packages && (stat.isDirectory() !== Boolean(packages[3]))) {
-			const key = `packages-${packages[1]}-${packages[2]}`;
+		// Only exact quickchr names are managed: `all_packages-<arch>-<ver>.zip` (a file)
+		// and `packages-<arch>-<ver>` (a directory), with a real RouterOS version.
+		const packages = name.match(/^(all_)?packages-(x86|arm64)-(.+?)(\.zip)?$/);
+		const isPackageArtifact = packages !== null && isValidVersion(packages[3] ?? "") &&
+			(packages[1] && packages[4] ? stat.isFile() : !packages[1] && !packages[4] && stat.isDirectory());
+		if (packages && isPackageArtifact) {
+			const key = `packages-${packages[2]}-${packages[3]}`;
 			const group = packageGroups.get(key);
 			if (group) {
 				group.paths.push(full);
@@ -201,8 +202,8 @@ export function cacheInventory(cacheDir?: string): CacheInventory {
 		// `.quickchr-image-*` / `.quickchr-packages-*` extraction dirs have no owner
 		// recorded, so they count as live for RECENT_USE_MS after their last write.
 		const part = name.match(/^(.+)\.(\d+)-[0-9a-f]+\.part$/);
-		const extraction = name.startsWith(".quickchr-image-") || name.startsWith(".quickchr-packages-");
-		if (part || extraction) {
+		const extraction = stat.isDirectory() && (name.startsWith(".quickchr-image-") || name.startsWith(".quickchr-packages-"));
+		if ((part && isManagedDownloadTarget(part[1] ?? "")) || extraction) {
 			const { version, arch } = parseCacheBasename(part?.[1] ?? name);
 			entries.push({
 				path: full,
@@ -243,6 +244,14 @@ export function cacheInventory(cacheDir?: string): CacheInventory {
 	return { entries, unmanagedBytes };
 }
 
+/** True for the files download.ts writes into the cache: an image ZIP or an
+ *  all-packages ZIP, with a real RouterOS version. Anything else is not ours. */
+function isManagedDownloadTarget(name: string): boolean {
+	if (name.endsWith(".img.zip")) return parseCacheBasename(name).version !== "unknown";
+	const packages = name.match(/^all_packages-(x86|arm64)-(.+)\.zip$/);
+	return packages !== null && isValidVersion(packages[2] ?? "");
+}
+
 /** List cache entries with parsed metadata and in-use status. */
 export function listCacheEntries(cacheDir?: string): CacheEntry[] {
 	return cacheInventory(cacheDir).entries;
@@ -272,7 +281,18 @@ function compareVersionsSafe(a: string, b: string): number {
  * entries are never evicted. Interrupted downloads go first, then oldest version.
  */
 export function pruneCache(opts: PruneOptions = {}): PruneResult {
-	const entries = listCacheEntries(opts.cacheDir);
+	// A dry run deletes nothing, so it reads the pins without taking the lock.
+	return opts.dryRun ? pruneCacheUnderLock(opts, pinnedEntries()) : withStorageLock(() => pruneCacheUnderLock(opts));
+}
+
+/** `pruneCache` for a caller already holding the storage lock (storage.ts admission).
+ *  Entries pinned by a live lease count as in use. */
+export function pruneCacheUnderLock(
+	opts: PruneOptions = {},
+	pins: Set<string> = new Set(liveLeases().flatMap((lease) => lease.pins)),
+): PruneResult {
+	const entries = cacheInventory(opts.cacheDir, pins).entries;
+	const skip = new Set(opts.skipEntries ?? []);
 	const protect = new Set(opts.protectVersions ?? []);
 	const dryRun = opts.dryRun ?? false;
 	const now = Date.now();
@@ -292,6 +312,9 @@ export function pruneCache(opts: PruneOptions = {}): PruneResult {
 		} else if (protect.has(e.version)) {
 			protectedEntries.push(e);
 			reasons[e.basename] = `protected (version ${e.version})`;
+		} else if (skip.has(e.basename)) {
+			protectedEntries.push(e);
+			reasons[e.basename] = "skipped";
 		} else if (opts.skipRecentMs !== undefined && now - e.mtimeMs < opts.skipRecentMs) {
 			protectedEntries.push(e);
 			reasons[e.basename] = "used recently";

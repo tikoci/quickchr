@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	autoPruneIfOverCap,
@@ -12,6 +12,7 @@ import {
 	pruneCache,
 } from "../../src/lib/cache.ts";
 import { getCacheDir, getMachinesDir } from "../../src/lib/state.ts";
+import { pinCacheEntries } from "../../src/lib/storage-lease.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
 const TEST_DIR = join(import.meta.dir, ".tmp-cache-test");
@@ -237,6 +238,25 @@ describe("cache inventory (#199)", () => {
 		expect(result.reasons[`chr-7.26.img.zip.${process.pid}-0a1b2c3d.part`]).toBe("in progress");
 	});
 
+	test("names that only resemble quickchr's are not managed (Codex review of #203)", () => {
+		const cacheDir = getCacheDir();
+		mkdirSync(join(cacheDir, "packages-x86-notes"), { recursive: true });
+		writeFileSync(join(cacheDir, "packages-x86-notes", "notes.txt"), "a user's notes");
+		writeFileSync(join(cacheDir, "packages-x86-7.24.5.zip"), "a file under the directory's name");
+		writeFileSync(join(cacheDir, "all_packages-x86-notes.zip"), "x");
+		writeFileSync(join(cacheDir, "backup.2147483647-dead.part"), "an unrelated partial backup");
+		mkdirSync(join(cacheDir, ".quickchr-image-file"));
+		writeFileSync(join(cacheDir, ".quickchr-packages-file"), "a file, not an extraction dir");
+		for (const name of readdirSync(cacheDir)) backdate(join(cacheDir, name));
+
+		const inventory = cacheInventory();
+		expect(inventory.entries.map((e) => e.basename)).toEqual([".quickchr-image-file"]);
+		pruneCache({ maxSizeBytes: 0 });
+		for (const name of ["packages-x86-notes", "packages-x86-7.24.5.zip", "all_packages-x86-notes.zip", "backup.2147483647-dead.part", ".quickchr-packages-file"]) {
+			expect(existsSync(join(cacheDir, name))).toBe(true);
+		}
+	});
+
 	test("files quickchr did not write are counted, never deleted", () => {
 		writeFakeImage("notes.txt", 123);
 		writeFakeImage("chr-garbage.img", 7);
@@ -245,6 +265,57 @@ describe("cache inventory (#199)", () => {
 		expect(inventory.unmanagedBytes).toBe(130);
 		pruneCache({ maxSizeBytes: 0 });
 		expect(existsSync(join(getCacheDir(), "notes.txt"))).toBe(true);
+	});
+});
+
+describe("pins from operations in progress (Codex review of #203)", () => {
+	/** A child process that pins `pins`, prints "pinned", and holds them until killed. */
+	async function pinInChild(pins: string[]) {
+		const lease = join(import.meta.dir, "../../src/lib/storage-lease.ts");
+		const child = Bun.spawn([process.execPath, "-e", `
+			import { pinCacheEntries } from ${JSON.stringify(lease)};
+			pinCacheEntries("test reader", ${JSON.stringify(pins)});
+			console.log("pinned");
+			setInterval(() => {}, 1000);
+		`], { env: process.env, stdout: "pipe", stderr: "inherit" });
+		const reader = child.stdout.getReader();
+		const { value } = await reader.read();
+		expect(new TextDecoder().decode(value)).toContain("pinned");
+		return child;
+	}
+
+	test("an entry another process has pinned is not evicted, and is shown in use", async () => {
+		backdate(writeFakeImage("chr-7.20.7.img", 1000));
+		backdate(writeFakeImage("chr-7.22.0.img", 1000));
+		const child = await pinInChild(["chr-7.20.7.img"]);
+		try {
+			expect(listCacheEntries().find((e) => e.basename === "chr-7.20.7.img")?.inUse).toBe(true);
+			const result = pruneCache({ maxSizeBytes: 0 });
+			expect(result.evicted.map((e) => e.basename)).toEqual(["chr-7.22.0.img"]);
+			expect(result.reasons["chr-7.20.7.img"]).toBe("in use");
+		} finally {
+			child.kill();
+			await child.exited;
+		}
+		// Once the reader is gone, so is its pin.
+		expect(pruneCache({ maxSizeBytes: 0 }).evicted.map((e) => e.basename)).toEqual(["chr-7.20.7.img"]);
+	});
+
+	test("pinning waits for an eviction pass in progress, so it is seen or comes after", async () => {
+		const lease = join(import.meta.dir, "../../src/lib/storage-lease.ts");
+		const child = Bun.spawn([process.execPath, "-e", `
+			import { withStorageLock } from ${JSON.stringify(lease)};
+			withStorageLock(() => { console.log("locked"); Bun.sleepSync(600); });
+		`], { env: process.env, stdout: "pipe", stderr: "inherit" });
+		try {
+			const { value } = await child.stdout.getReader().read();
+			expect(new TextDecoder().decode(value)).toContain("locked");
+			const started = Date.now();
+			pinCacheEntries("test reader", ["chr-7.20.7.img"]).release();
+			expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+		} finally {
+			await child.exited;
+		}
 	});
 });
 
