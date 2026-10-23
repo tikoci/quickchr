@@ -18,10 +18,11 @@
  * deliberate over-estimate for the length of one create.
  */
 
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, renameSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { acquireLockNow, type HeldLock } from "./lock.ts";
 import { ensureDir, getDataDir } from "./state.ts";
+import { renameWithRetry } from "./rename.ts";
 import { QuickCHRError } from "./types.ts";
 
 /** Bytes an in-flight operation will write to one filesystem, by `stat().dev`. */
@@ -134,7 +135,7 @@ export function createLease(action: string, pins: string[], reservations: Storag
 	mkdirSync(leaseDir(), { recursive: true });
 	const path = join(leaseDir(), `${process.pid}-${crypto.randomUUID()}.json`);
 	writeFileSync(`${path}.tmp`, JSON.stringify(record));
-	renameSync(`${path}.tmp`, path);
+	renameWithRetry(`${path}.tmp`, path);
 	let released = false;
 	return {
 		record,

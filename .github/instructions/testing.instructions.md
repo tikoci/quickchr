@@ -346,7 +346,7 @@ nobody ran `curl` first to see what RouterOS actually returned.
   Listen on port 0 (auto-assign), pass port to function under test, clean up in `afterEach`.
 - **External URL code** (uses `fetch()` directly): Mock with `globalThis.fetch = ...`.
   Only valid for `versions.ts`, `images.ts`, `packages.ts`.
-- **The storage gate** (`assertSufficientQuickchrStorage`: the operation's estimate plus
+- **The storage gate** (`admitStorage`: the operation's estimate plus
   the 2 GiB `storage-reserve`, see DESIGN.md "Storage admission"): a unit test
   that reaches `add()`/`start()` must not depend on the host's free space. Unit tests
   put `QUICKCHR_DATA_DIR` in the checkout, so the gate measures the **checkout's**

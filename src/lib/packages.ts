@@ -15,6 +15,7 @@ import { extractZip } from "./zip.ts";
 import { renameWithRetry } from "./rename.ts";
 import { admitStorage, STORAGE_ESTIMATES } from "./storage.ts";
 import { touchCacheEntry } from "./images.ts";
+import { pinCacheEntries } from "./storage-lease.ts";
 
 const PACKAGE_CACHE_MANIFEST = ".quickchr-complete.json";
 
@@ -243,8 +244,15 @@ export async function downloadAndListPackages(
 	version: string,
 	arch: Arch,
 ): Promise<string[]> {
-	const extractDir = await downloadPackages(version, arch);
-	return listAvailablePackages(extractDir);
+	// Pinned through the listing: once downloadPackages() returns, nothing else stops a
+	// concurrent eviction from removing the extraction mid-read.
+	const pin = pinCacheEntries(`list packages ${version} (${arch})`, [`packages-${arch}-${version}`]);
+	try {
+		const extractDir = await downloadPackages(version, arch);
+		return listAvailablePackages(extractDir);
+	} finally {
+		pin.release();
+	}
 }
 
 /** Download all packages and install every one of them. Useful for API schema generation.
