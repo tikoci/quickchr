@@ -1,0 +1,3 @@
+{"kind":"boot","ts":"2026-10-26T11:30:56.754Z","run_id":"40315320887","sha":"2158582723e309f7a2bfd615e5a62ac99ceb188b","platform":"macos-x86","host":"darwin","name":"integration-anchor","version":"7.25","arch":"x86","accel":"hvf","boot_ms":38911}
+{"kind":"test-file","ts":"2026-10-26T11:31:03.768Z","run_id":"40315320887","sha":"2158582723e309f7a2bfd615e5a62ac99ceb188b","platform":"macos-x86","host":"darwin","file":"anchor.test.ts","duration_s":47,"status":"pass","outcome":"pass"}
+{"kind":"suite","ts":"2026-10-26T11:31:03.768Z","run_id":"40315320887","sha":"2158582723e309f7a2bfd615e5a62ac99ceb188b","platform":"macos-x86","host":"darwin","scope":"filtered","conclusion":"pass","target":"7.25","files":1,"failed":0}
