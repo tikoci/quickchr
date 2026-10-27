@@ -36,6 +36,10 @@ powershell -c "irm bun.sh/install.ps1 | iex"
 # Alternative: winget install Oven-sh.Bun
 ```
 
+Running in a Claude Code cloud session or another proxied sandbox with no KVM? See
+[MANUAL.md → Claude Code cloud sessions](./MANUAL.md#claude-code-cloud-sessions-and-other-proxied-sandboxes)
+for the network access and setup script it needs.
+
 ### Install
 
 CLI:

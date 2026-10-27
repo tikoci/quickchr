@@ -123,6 +123,67 @@ than the current long-term release. The exit code still reflects `ok`.
 Use this whenever a `start` fails — the diagnostic almost always points
 at a missing dependency, missing firmware, or insufficient disk.
 
+### Claude Code cloud sessions and other proxied sandboxes
+
+quickchr runs in a Claude Code cloud session (claude.ai/code, the Claude app's
+cloud environments), but the defaults need two changes. The constraints there are
+typical of CI sandboxes generally:
+
+| Constraint | Effect on quickchr |
+|---|---|
+| No `/dev/kvm` | TCG only. `detectAccel()` picks it automatically; no `QUICKCHR_ACCEL` needed |
+| All egress goes through an HTTPS proxy (`HTTPS_PROXY`) | Bun's `fetch` honours it. Image downloads work only if the proxy allows the MikroTik hosts |
+| Default "Trusted" network policy | `download.mikrotik.com` and `upgrade.mikrotik.com` are refused: the proxy answers `403` to CONNECT and quickchr reports `ERR_PROXY_TUNNEL` |
+| QEMU not preinstalled | Ubuntu mirrors are allowed even on "Trusted", so `apt-get` works |
+| CHR guest uses user-mode NAT, which bypasses the proxy | The CHR itself has no internet: no package downloads, container pulls or online catalogs from inside RouterOS. Host ↔ guest traffic (port forwards, and the guest reaching the host at `10.0.2.2`) still works |
+
+**1. Network access.** Network policy belongs to the *environment*. To change it,
+open the environment menu in the session's title bar, choose **Edit**, then
+**Network access**, and pick either:
+
+- **Full**, or
+- **Custom**: keep "include default list of package managers" ticked and add
+  `*.mikrotik.com` and `mikrotik.com`.
+
+The claude.ai *Settings → Capabilities → Code execution* domain allowlist is a
+different setting: it governs the claude.ai chat sandbox only and has no effect on
+Claude Code cloud sessions. A policy change applies to new sessions only, not a
+running one.
+
+**2. Setup script.** The same **Edit** dialog has a **Setup script** field. It runs
+before the session starts and cannot read the environment's variables or secrets.
+Keep each step non-fatal, so a blocked host doesn't break the session:
+
+```bash
+#!/bin/bash
+set -u
+export DEBIAN_FRONTEND=noninteractive PATH="$HOME/.bun/bin:$PATH"
+
+# QEMU for quickchr; openssh-client for SSH/SFTP-based tools such as centrs
+apt-get update -q && apt-get install -y -q --no-install-recommends \
+  qemu-system-x86 qemu-system-arm qemu-efi-aarch64 qemu-utils socat openssh-client \
+  || echo "WARN: package install failed"
+
+# Pre-fetch a CHR image (needs *.mikrotik.com allowed)
+bunx @tikoci/quickchr@latest cache add --channel stable --arch x86 \
+  || echo "WARN: CHR prefetch failed (is *.mikrotik.com allowed?)"
+```
+
+**3. Environment variables.** None are needed.
+
+Measured in a cloud session (4 vCPU, 15 GiB RAM, no KVM, "Full" network, Ubuntu
+24.04, QEMU 8.2.2, Bun 1.4.4):
+
+| Step | Time |
+|---|---|
+| `apt-get install` QEMU + socat | 20 s |
+| `quickchr cache add --channel stable --arch x86` (7.25, 43 MB) | 8 s |
+| `quickchr start --arch x86` to REST ready, default timeouts | 35 s |
+
+`quickchr doctor` currently reports `✓ Acceleration: tcg` and says nothing about
+the proxy. See tikoci/quickchr#210 for the planned doctor and error-message
+improvements.
+
 ---
 
 ## 3. CLI command reference
