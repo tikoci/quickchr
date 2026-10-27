@@ -179,6 +179,7 @@ Measured in a cloud session (4 vCPU, 15 GiB RAM, no KVM, "Full" network, Ubuntu
 | `apt-get install` QEMU + socat | 20 s |
 | `quickchr cache add --channel stable --arch x86` (7.25, 43 MB) | 8 s |
 | `quickchr start --arch x86` to REST ready, default timeouts | 35 s |
+| `quickchr start --arch arm64` (cross-arch TCG) to REST ready, including the 18 MB image download | 45 s |
 
 `quickchr doctor` currently reports `✓ Acceleration: tcg` and says nothing about
 the proxy. See tikoci/quickchr#210 for the planned doctor and error-message
