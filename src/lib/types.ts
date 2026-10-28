@@ -661,19 +661,6 @@ export interface ShutdownResult {
 	requestError?: string;
 }
 
-/**
- * Runtime handle for a CHR virtual machine.
- *
- * Returned by {@link QuickCHR.start}. Provides methods to interact with the running
- * (or stopped) instance: REST API calls, CLI command execution, QGA, serial console,
- * snapshots, licensing, and lifecycle management.
- *
- * After `QuickCHR.start()` resolves, the instance is REST-ready — all requested
- * provisioning (packages, license, device-mode, user creation) has completed —
- * unless it was started with `wait: false`, or is a RouterOS 6 guest (no REST:
- * `rest()` and REST `exec()` throw `REST_UNAVAILABLE`).
- */
-
 /** Options for {@link ChrInstance.continue}. */
 export interface ContinueOptions {
 	/** Wait for REST-ready before resolving (true, default), mirroring `start()`'s
@@ -686,6 +673,18 @@ export interface ContinueOptions {
 	timeoutExtra?: number;
 }
 
+/**
+ * Runtime handle for a CHR virtual machine.
+ *
+ * Returned by {@link QuickCHR.start}. Provides methods to interact with the running
+ * (or stopped) instance: REST API calls, CLI command execution, QGA, serial console,
+ * snapshots, licensing, and lifecycle management.
+ *
+ * After `QuickCHR.start()` resolves, the instance is REST-ready — all requested
+ * provisioning (packages, license, device-mode, user creation) has completed —
+ * unless it was started with `wait: false` or `frozen: true`, or is a RouterOS 6 guest (no REST:
+ * `rest()` and REST `exec()` throw `REST_UNAVAILABLE`).
+ */
 export interface ChrInstance {
 	name: string;
 	state: MachineState;

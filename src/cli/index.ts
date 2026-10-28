@@ -2228,6 +2228,9 @@ async function cmdSet(argv: string[]) {
 	const qemuArgs = flagList(flags, "qemu-arg");
 	const clearQemuArgs = flagBool(flags, "clear-qemu-args");
 	const wantsQemuArgs = qemuArgs.length > 0 || clearQemuArgs;
+	if (qemuArgs.length > 0 && clearQemuArgs) {
+		throw new QuickCHRError("INVALID_ARGUMENT", "--qemu-arg and --clear-qemu-args conflict: --qemu-arg already replaces the recorded args wholesale");
+	}
 
 	if (!wantsLicense && !deviceMode && !wantsQemuArgs) {
 		console.error("Nothing to set. Available flags: --license, --device-mode, --device-mode-enable, --device-mode-disable, --qemu-arg, --clear-qemu-args");

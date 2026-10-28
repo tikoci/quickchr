@@ -94,6 +94,14 @@ describe("set --qemu-arg", () => {
 		expect(await recordedArgs("qa")).toEqual([]);
 	});
 
+	test("refuses --qemu-arg together with --clear-qemu-args", async () => {
+		saveMachine(machine("qa", { qemuArgs: ["-M", "pc"] }));
+		const result = await runQuickchr(["set", "qa", "--qemu-arg", "-name", "--clear-qemu-args"]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("conflict");
+		expect(await recordedArgs("qa")).toEqual(["-M", "pc"]);
+	});
+
 	test("refuses a running machine — boot config applies at boot", async () => {
 		saveMachine(machine("qa", { status: "running", pid: process.pid }));
 		const result = await runQuickchr(["set", "qa", "--qemu-arg", "-M"]);
