@@ -1625,7 +1625,10 @@ quickchr exec my-chr ":put [:serialize to=json [/ip/address/print detail as-valu
 ```
 
 `:serialize` accepts `json` and `dsv` to output structure data from an array. The exec result body is the
-literal stdout — no quickchr processing.  
+literal stdout — no quickchr processing.
+
+Line endings are CRLF (RouterOS console style): multi-line output joins lines
+with `\r\n`, so strip `\r` (e.g. `tr -d '\r'`) before hashing or diffing.  
 
 | Command         | Syntax     | Description          | Example                |
 |:--|:--|:--|:--|
