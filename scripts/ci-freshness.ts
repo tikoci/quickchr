@@ -3,7 +3,8 @@
  * ci-freshness — the PR "Integration freshness" gate (see ci.instructions.md).
  *
  * Integration tests do not run on PRs; they run on every push to main
- * (main.yml). This gate makes that arrangement honest: a PR may only merge
+ * (main.yml) except pushes touching only docs (main.yml paths-ignore, #218).
+ * This gate makes that arrangement honest: a PR may only merge
  * while the latest completed integration run on main is GREEN. A red main
  * visibly blocks all PRs until someone fixes it — the failure cannot rot
  * quietly in the Actions list.
@@ -11,8 +12,8 @@
  * Verdict logic (latest-first over recent completed main.yml runs on main):
  *   - skip conclusion "cancelled"/"skipped" runs (superseded pushes carry no signal)
  *   - first remaining run green  → PASS (warn if main tip is ahead of it — a
- *     newer integration run is still in flight; merging is allowed but the
- *     result lands after you)
+ *     newer run may still be in flight, or the newer push may have skipped
+ *     integration as docs-only; merging is allowed either way)
  *   - first remaining run red    → FAIL with the run URL
  *   - no runs at all             → FAIL with a bootstrap hint
  *
@@ -101,7 +102,7 @@ export function evaluateFreshness(runs: WorkflowRun[], tipSha: string): Verdict 
 		message:
 			`${BRANCH} integration is green at ${latest.head_sha.slice(0, 7)}: ${latest.html_url}` +
 			(stale
-				? ` — note: ${BRANCH} tip ${tipSha.slice(0, 7)} has a newer integration run still in flight`
+				? ` — note: ${BRANCH} tip ${tipSha.slice(0, 7)} is newer than the last completed run`
 				: ""),
 	};
 }
