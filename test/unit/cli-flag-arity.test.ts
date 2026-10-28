@@ -112,6 +112,27 @@ describe("flag arity is declared, not guessed (#164)", () => {
 	});
 });
 
+describe("--qemu-arg passthrough (#213)", () => {
+	test("is a known value-taking flag on add and start", () => {
+		expect(ADD_FLAGS.includes("qemu-arg")).toBe(true);
+		expect(START_FLAGS.includes("qemu-arg")).toBe(true);
+		expect(VALUE_FLAGS.has("qemu-arg")).toBe(true);
+	});
+
+	test("space form accumulates one argv element per occurrence", () => {
+		const { flags, positional } = parseFlags([
+			"--qemu-arg", "-M", "--qemu-arg", "pc,pcspk-audiodev=cap", "lab",
+		]);
+		expect(flags["qemu-arg"]).toEqual(["-M", "pc,pcspk-audiodev=cap"]);
+		expect(positional).toEqual(["lab"]);
+	});
+
+	test("equals form overwrites instead of accumulating — space form only", () => {
+		const { flags } = parseFlags(["--qemu-arg=-M", "--qemu-arg=-audiodev"]);
+		expect(flags["qemu-arg"]).toBe("-audiodev");
+	});
+});
+
 describe("--vmnet-shared / --vmnet-bridge are removed, not repaired (#164)", () => {
 	test("neither name is a known flag any more", () => {
 		for (const name of REMOVED_FLAGS.keys()) {

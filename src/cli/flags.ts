@@ -20,12 +20,13 @@ const CREATE_FLAGS = [
 	"boot-disk-format", "boot-size", "add-disk",
 	"device-mode", "device-mode-enable", "device-mode-disable",
 	"add-user", "disable-admin", "secure-login",
+	"qemu-arg",
 ] as const;
 
 /** `start` also boots, so it owns the run-time flags on top of the create set. */
 const START_ONLY_FLAGS = [
 	"all", "dry-run", "wait", "background", "bg", "fg", "foreground",
-	"timeout-extra",
+	"timeout-extra", "frozen",
 	"license-level", "license-account", "license-password",
 ] as const;
 
@@ -78,6 +79,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
 	"device-mode", "device-mode-enable", "device-mode-disable",
 	"add-user", "timeout-extra",
 	"license-level", "license-account", "license-password",
+	"qemu-arg",
 	// exec / qga / console
 	"via", "user", "password", "timeout", "path", "data", "script",
 	// set --license

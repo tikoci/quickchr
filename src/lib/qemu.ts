@@ -38,6 +38,13 @@ export interface QemuLaunchConfig {
 	 * can be used for both QEMU args and boot timeout calculation.
 	 */
 	accel?: string;
+	/** Extra argv elements (`StartOptions.qemuArgs`), appended verbatim after
+	 *  quickchr's own args. Ordering is load-bearing: last-wins on conflicts. */
+	qemuArgs?: string[];
+	/** Hold the guest at reset (`-S`) with a gdbstub on `<machineDir>/gdb.sock`
+	 *  (`start --frozen`). Unix socket, `server=on,wait=off` so the spawn never
+	 *  blocks waiting for a client. */
+	frozen?: boolean;
 }
 
 /** Build the full QEMU command-line arguments array. */
@@ -135,6 +142,15 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 
 	// Serial, monitor, QGA channels
 	buildChannelArgs(args, arch, machineDir, background, portBase);
+
+	// Frozen boot (#214): hold at reset with a gdbstub. Before the passthrough
+	// below, which is always last.
+	if (config.frozen) {
+		args.push("-S", "-gdb", `unix:${join(machineDir, "gdb.sock")},server=on,wait=off`);
+	}
+
+	// Lab escape hatch (#213): verbatim passthrough, always last so it wins conflicts.
+	if (config.qemuArgs) args.push(...config.qemuArgs);
 
 	return args;
 }

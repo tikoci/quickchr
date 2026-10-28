@@ -9,6 +9,25 @@ version parity, mark the channel: a release is published to `next` first and pro
 `latest` once QA passes, and `next` is never older than `latest`. (Through 0.5.0 an
 odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
+## [Unreleased]
+
+### Added
+
+- **`add`/`start --qemu-arg <argv-element>` passthrough.** Repeatable, one QEMU
+  argv element per occurrence (space form only), appended verbatim after
+  quickchr's own args — a lab escape hatch for QEMU surface quickchr does not
+  model, e.g. `-M pc,pcspk-audiodev=cap -audiodev wav,id=cap,path=...` to
+  capture the CHR PC speaker on x86. `add` records the args to `machine.json`
+  for every boot; `start` takes session args that replace the stored ones for
+  that boot only. Library: `StartOptions.qemuArgs`. (#213)
+- **`start --frozen` + `quickchr continue` for pre-init lab workflows.**
+  `--frozen` boots held at reset (`-S`) with a gdbstub on
+  `<machineDir>/gdb.sock`, skipping the boot wait; `continue` resumes with one
+  monitor `cont` and waits for REST-ready by default (`--no-wait` to return
+  immediately). Frozen is per-boot intent, not config — `stop` clears it and
+  `list` marks frozen machines. Library: `StartOptions.frozen`,
+  `instance.continue()`. (#214)
+
 ## [0.5.2] — 2026-10-23
 
 ### Fixed

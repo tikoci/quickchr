@@ -337,6 +337,9 @@ async function main() {
 			case "start":
 				await cmdStart(args.slice(1));
 				break;
+			case "continue":
+				await cmdContinue(args.slice(1));
+				break;
 			case "stop":
 				await cmdStop(args.slice(1));
 				break;
@@ -732,6 +735,7 @@ async function cmdAdd(argv: string[]) {
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
+		qemuArgs: flagList(flags, "qemu-arg").length > 0 ? flagList(flags, "qemu-arg") : undefined,
 	};
 
 	opts.deviceMode = deviceModeFromFlags(flags);
@@ -1362,15 +1366,16 @@ async function cmdSetup() {
 
 /** Whether the `secure-login` *setting* reaches this start. The setting is a default,
  *  not a request, so it stays out of every start that cannot provision: a closed
- *  window, a `--no-wait` start (#159), and a RouterOS 6 machine (#182). Otherwise a
- *  user with `secure-login=true` configured could never use either. An explicit
- *  `--secure-login` is still passed through, and refused by name. */
+ *  window, a `--no-wait` start (#159), a `--frozen` start (#214), and a RouterOS 6
+ *  machine (#182). Otherwise a user with `secure-login=true` configured could never
+ *  use any of them. An explicit `--secure-login` is still passed through, and
+ *  refused by name. */
 export function secureLoginSettingApplies(
 	flags: Record<string, string | boolean | string[]>,
 	windowOpen: boolean,
 	version: string | undefined,
 ): boolean {
-	return windowOpen && flags.wait !== false && !isRouterOs6(version ?? "");
+	return windowOpen && flags.wait !== false && flags.frozen !== true && !isRouterOs6(version ?? "");
 }
 
 /** `--bg` never did what it reads as (#159): background is the default, and the flag
@@ -1482,6 +1487,7 @@ export async function cmdStart(argv: string[]) {
 		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
 		dryRun: flagBool(flags, "dry-run"),
 		timeoutExtra: await resolveTimeoutExtraMs(flags),
+		qemuArgs: flagList(flags, "qemu-arg").length > 0 ? flagList(flags, "qemu-arg") : undefined,
 	};
 
 	opts.deviceMode = deviceModeFromFlags(flags);
@@ -1525,6 +1531,7 @@ export async function cmdStart(argv: string[]) {
 		));
 	}
 	opts.wait = wait;
+	opts.frozen = flagBool(flags, "frozen") || undefined;
 
 	// Background default: true. Explicitly foreground only with --fg / --foreground / --no-background / --no-bg.
 	// `--bg` / `--background` are accepted and change nothing (see warnDeprecatedBackgroundFlag).
@@ -1541,8 +1548,9 @@ export async function cmdStart(argv: string[]) {
 	}
 
 	// --fg on already-running machine: attach to its serial console.
-	// `--fg --no-wait` skips both foreground blocks so start() refuses the pair before any I/O.
-	if (!opts.background && opts.wait !== false && opts.name) {
+	// `--fg --no-wait` and `--fg --frozen` skip both foreground blocks so start()
+	// refuses the pair before any I/O.
+	if (!opts.background && opts.wait !== false && !opts.frozen && opts.name) {
 		const runningMachine = QuickCHR.list().find((m) => m.name === opts.name && m.status === "running");
 		if (runningMachine) {
 			await attachSerial(runningMachine.name, runningMachine.machineDir);
@@ -1550,7 +1558,7 @@ export async function cmdStart(argv: string[]) {
 		}
 	}
 
-	if (!opts.background && opts.wait !== false) {
+	if (!opts.background && opts.wait !== false && !opts.frozen) {
 		const wantsDeviceMode = !!opts.deviceMode && !["skip", "none", "off", "disabled"].includes((opts.deviceMode.mode ?? "auto").toLowerCase());
 		const hasProv = !!(
 			opts.installAllPackages ||
@@ -1571,7 +1579,10 @@ export async function cmdStart(argv: string[]) {
 
 	const instance = await QuickCHR.start(opts);
 
-	if (!opts.background) {
+	if (opts.frozen) {
+		console.log(`${statusIcon("running")} ${bold(instance.name)} frozen at reset — patch RAM, then ${bold(`quickchr continue ${instance.name}`)}`);
+		console.log(`  GDB:     ${dim(`${instance.state.machineDir}/gdb.sock`)}`);
+	} else if (!opts.background) {
 		console.log(`\n${bold(instance.name)} session ended`);
 		console.log(`  ${dim("Tip: resume session")}   quickchr start ${instance.name} --fg`);
 		console.log(`  ${dim("Tip: run background")}   quickchr start ${instance.name}`);
@@ -1595,6 +1606,37 @@ export async function cmdStart(argv: string[]) {
 			console.log(`  Run:     quickchr exec ${instance.name} /system/resource/print`);
 		}
 	}
+}
+
+async function cmdContinue(argv: string[]) {
+	const { flags, positional } = parseFlags(argv);
+	const invalid = unknownFlags(flags, ["wait"]);
+	if (invalid.length) throw new QuickCHRError("INVALID_ARGUMENT", "continue accepts only <name> and --no-wait");
+	const name = positional[0];
+	if (!name || positional.length !== 1) throw new QuickCHRError("INVALID_ARGUMENT", "Usage: quickchr continue <name> [--no-wait]");
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { machineNotFoundMessage } = await import("./format.ts");
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+	const wait = flags.wait !== false;
+	await instance.continue({ wait });
+	const { statusIcon, bold, link, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
+	if (!wait) {
+		console.log(`${statusIcon("running")} ${bold(name)} resumed — not waiting for RouterOS (--no-wait)`);
+		printReadinessTip(name, instance.state.version);
+		return;
+	}
+	const creds = await resolveDisplayCredentials(instance.state);
+	console.log(`${statusIcon("running")} ${bold(name)} resumed`);
+	if (isRouterOs6(instance.state.version)) {
+		console.log(`  API:     127.0.0.1:${instance.ports.api}`);
+	} else {
+		console.log(`  REST:    ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`);
+	}
+	console.log(`  SSH:     ${formatSshCommand(creds.user, instance.sshPort)}`);
 }
 
 async function cmdShutdown(argv: string[]) {
@@ -1691,6 +1733,7 @@ async function cmdList(argv: string[] = []) {
 				networks: s.networks,
 				ports: s.ports,
 				pid: s.pid ?? null,
+				frozen: s.frozen ?? false,
 				packages: s.packages,
 				machineDir: s.machineDir,
 				createdAt: s.createdAt,
@@ -1706,6 +1749,10 @@ async function cmdList(argv: string[] = []) {
 		console.log(`  Network:    ${formatNetworks(s.networks)}`);
 		console.log(`  Ports:      ${formatPorts(s.ports)}`);
 		console.log(`  Status:     ${s.status}${s.pid ? ` (PID ${s.pid})` : ""}`);
+		if (s.frozen) {
+			console.log(`  Frozen:     yes — awaiting quickchr continue`);
+			console.log(`  GDB:        ${dim(`${s.machineDir}/gdb.sock`)}`);
+		}
 		console.log(`  Created:    ${new Date(s.createdAt).toLocaleString()}`);
 		if (s.lastStartedAt) console.log(`  Started:    ${new Date(s.lastStartedAt).toLocaleString()}`);
 		if (s.packages.length > 0) console.log(`  Packages:   ${s.packages.join(", ")}`);
@@ -1760,7 +1807,7 @@ async function cmdList(argv: string[] = []) {
 	const headers = ["", "Name", "Version", "Arch", "Network", "Ports", "PID"];
 	const rows = machines.map((m) => [
 		statusIcon(m.status),
-		m.name,
+		m.frozen ? `${m.name} (frozen)` : m.name,
 		m.version,
 		m.arch,
 		formatNetworks(m.networks ?? []),
@@ -3179,6 +3226,7 @@ Commands:
   setup                   Interactive setup wizard (TTY only)
   add [options]           Create a new CHR machine (without starting)
   start [<name>|options]  Start or restart a CHR instance
+  continue <name>         Resume a machine started with --frozen
   stop [<name>|--all]     Power cut — print list if no name
   shutdown <name>         Request guest shutdown, then bounded hard-stop fallback
   list [<name>] [--json]  List all instances, or detail for one
@@ -3269,6 +3317,10 @@ Options:
   --add-network <spec>  Add a network NIC (repeatable). Specs: user, shared, bridged:<if>,
                         socket::<name>, tap:<if>. Default: single user NIC.
   --no-network          Start with no NICs (headless)
+  --qemu-arg <arg>      Extra QEMU argv element, appended verbatim after quickchr's
+                        own args (repeatable, space-form only: one element per
+                        flag). Recorded here and reused every boot; a start-time
+                        value replaces it for that boot only.
 
 Provisioning flags apply on the machine's first boot — whether they are given
 here or on that first 'start'. After the guest has booted, a flag the machine already
@@ -3346,6 +3398,8 @@ Options:
                         (plus the deprecated no-op --bg / --background); any other
                         option is refused rather than ignored
   --no-wait             Return once QEMU is running; do not wait for RouterOS (not with --fg)
+  --frozen              Boot frozen at reset (-S) with a gdbstub on <machineDir>/gdb.sock;
+                        resume with 'quickchr continue' (not with --fg or provisioning)
   --fg / --foreground   Run in foreground — serial console on stdio
   --bg / --background   Deprecated, does nothing: background is already the default
   --version <ver>       RouterOS version (e.g., 7.22.1)
@@ -3386,6 +3440,10 @@ Options:
   --no-device-mode      Skip device-mode provisioning entirely
   --timeout-extra <s>, -T <s>  Add extra seconds to the auto-computed boot timeout
   --dry-run             Print what would run without starting
+  --qemu-arg <arg>      Extra QEMU argv element, appended verbatim after quickchr's
+                        own args (repeatable, space-form only: one element per
+                        flag). Recorded when creating; on an existing machine it
+                        replaces recorded args for this boot only.
 
 Provisioning flags (packages, login, device-mode, license) apply only on a machine's
 first boot. On a machine that has booted, a flag the machine already has (same
@@ -3393,6 +3451,20 @@ packages, user, license, device-mode) is accepted as a no-op. Any other is refus
 naming where the change can still be made — often 'quickchr set <name>'. Only reach for
 'quickchr clean <name>' if you mean it: it resets the disk to factory, erasing the
 guest's configuration, and reopens the first-boot window.`);
+			break;
+		case "continue":
+			console.log(`quickchr continue <name> [--no-wait]
+
+Resume a machine started with 'start --frozen' (held at reset with a gdbstub
+on <machineDir>/gdb.sock). Sends one monitor 'cont', then waits for RouterOS
+to become ready — the same promise 'start' makes.
+
+  <name>      Name of a frozen (or otherwise paused) running machine.
+  --no-wait   Return right after resuming; do not wait for RouterOS.
+
+Resuming is idempotent: when the guest is already running (e.g. gdb continued
+it), this just clears the frozen marker. A wait that never reaches readiness
+is a BOOT_TIMEOUT; the machine is stopped and preserved.`);
 			break;
 		case "stop":
 			console.log(`quickchr stop [<name>] [--all]

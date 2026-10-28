@@ -7,6 +7,7 @@ import type {
 	Channel,
 	ChrInstance,
 	ChrLoadSample,
+	ContinueOptions,
 	CustomForward,
 	Descriptor,
 	DeviceModeOptions,
@@ -211,6 +212,18 @@ function describeProvisioningOperation(opts: Parameters<typeof listProvisioningM
 	return `use ${PROVISIONING_FEATURE_LABEL} (${joinHumanList(operations)})`;
 }
 
+/** Per-boot launch intent for `_launchExisting`: session `qemuArgs` and `frozen`
+ *  when given, used for the spawn but never persisted.
+ *  Absent (`undefined`) means "not given", and only absent falls through to what
+ *  `add` recorded — the same rule as `pendingProvisioningFor` (#185): an empty
+ *  array is not an instruction to drop the stored args. */
+function sessionLaunch(opts: StartOptions): { qemuArgs?: string[]; frozen?: boolean } | undefined {
+	const launch: { qemuArgs?: string[]; frozen?: boolean } = {};
+	if (opts.qemuArgs?.length) launch.qemuArgs = [...opts.qemuArgs];
+	if (opts.frozen) launch.frozen = true;
+	return launch.qemuArgs || launch.frozen ? launch : undefined;
+}
+
 /** `wait: false` returns before the guest has booted, and provisioning needs a booted
  *  guest — so the pair is refused by name rather than the provisioning silently
  *  skipped (#159). `machine` is set when the provisioning is first-boot intent that
@@ -224,6 +237,20 @@ function assertWaitAllowsProvisioning(opts: StartOptions, operation: string, mac
 		"INVALID_ARGUMENT",
 		`--no-wait (wait: false) cannot be combined with provisioning: ${source}, and provisioning runs against the booted guest, so start has to wait for it. ` +
 		"Drop --no-wait for this first boot — later starts can use it.",
+	);
+}
+
+/** `frozen` returns before the guest has booted, like `wait: false` — and
+ *  provisioning needs a booted guest, so the pair is refused by name (#214). */
+function assertFrozenAllowsProvisioning(opts: StartOptions, operation: string, machine?: string): void {
+	if (!opts.frozen) return;
+	const source = machine
+		? `machine "${machine}" has first-boot provisioning recorded by 'add' (${operation})`
+		: `provisioning was requested (${operation})`;
+	throw new QuickCHRError(
+		"INVALID_ARGUMENT",
+		`--frozen (frozen: true) cannot be combined with provisioning: ${source}, and provisioning runs against the booted guest, so a frozen start cannot provision it. ` +
+		"Drop --frozen for this first boot — later starts can use it.",
 	);
 }
 
@@ -456,15 +483,93 @@ async function stopUnderLock(state: MachineState): Promise<void> {
 /** Persist stopped state and release endpoints. Caller holds the lifecycle lock. */
 function finalizeStoppedState(state: MachineState): void {
 	unregisterSocketMembers(state);
-	// Update persisted state
+	// A frozen marker belongs to a live QEMU held at reset — a stopped machine
+	// holds nothing, so the flag goes with the pid (#214).
 	const current = loadMachine(state.name);
 	if (current) {
 		current.status = "stopped";
 		current.pid = undefined;
+		current.frozen = undefined;
 		saveMachine(current);
 	}
 	state.status = "stopped";
 	state.pid = undefined;
+	state.frozen = undefined;
+}
+
+/** Drop the frozen marker after a resume, in state and on disk. Dual-write like
+ *  the provisioning record: the caller's handle and the next reader agree. */
+function clearFrozenMarker(state: MachineState): void {
+	const current = loadMachine(state.name);
+	if (current) {
+		current.frozen = undefined;
+		saveMachine(current);
+	}
+	state.frozen = undefined;
+}
+
+/** Best-effort QEMU argv for a continue-timeout forensics report: rebuilt from
+ *  stored state with the frozen flags the spawn carried. A session `--qemu-arg`
+ *  override from that start is not reflected — the report is context, and the
+ *  override was deliberately never persisted. */
+async function launchedQemuArgsForReport(state: MachineState): Promise<string[]> {
+	try {
+		return await buildQemuArgs({ ...(await buildLaunchConfigFromState(state)), frozen: true });
+	} catch {
+		return [];
+	}
+}
+
+/** The body of `continue()`, for a caller that already holds the machine lock. */
+async function continueUnderLock(state: MachineState, wait: boolean): Promise<void> {
+	const pid = state.pid;
+	if (!pid || !isMachineRunning(state)) {
+		// Leave clean state behind: the marker belonged to a QEMU that is gone.
+		finalizeStoppedState(state);
+		throw new QuickCHRError(
+			"MACHINE_STOPPED",
+			`Machine "${state.name}" is not running — nothing to continue.`,
+		);
+	}
+	// Idempotent: gdb (or an earlier continue) may have resumed the guest already.
+	const status = await monitorCommand(state.machineDir, "info status", undefined, state.portBase);
+	if (!status.includes("running")) {
+		await monitorCommand(state.machineDir, "cont", undefined, state.portBase);
+	}
+	clearFrozenMarker(state);
+	if (!wait) return;
+
+	const instance = createInstance(state);
+	const accel = await detectAccel(state.arch);
+	const bootTimeout = defaultBootTimeout(state.arch, undefined, accel);
+	const probe = newBootProbeStats();
+	if (await instance.waitForBoot(bootTimeout, probe)) return;
+
+	const guest = bootFailureGuestExec(state);
+	const failure = await captureBootFailure({
+		name: state.name,
+		machineDir: state.machineDir,
+		arch: state.arch,
+		accel,
+		bootTimeoutMs: bootTimeout,
+		pid,
+		httpPort: toChrPorts(state.ports).http,
+		portBase: state.portBase,
+		qemuArgs: await launchedQemuArgsForReport(state),
+		probe,
+		phase: "continue",
+		reportDir: bootFailureReportDir(),
+		monitorQuery: (cmd) => monitorCommand(state.machineDir, cmd, 3000, state.portBase),
+		forwards: Object.values(state.ports),
+		guestExec: guest?.exec,
+		guestUser: guest?.users.join(" → "),
+	});
+	throw new QuickCHRError(
+		"BOOT_TIMEOUT",
+		`CHR did not respond within ${bootTimeout / 1000}s (accel=${accel}) after continue.` +
+		await cleanupAfterBootFailure(instance, state.name, failure, { kind: "preserve-existing" }) +
+		`\n${failure.summary}`,
+	);
 }
 
 /** The body of `remove()`, for a caller that already holds the machine lock. The lock
@@ -521,6 +626,7 @@ async function cleanUnderLock(state: MachineState): Promise<void> {
 	if (current) {
 		current.status = "stopped";
 		current.pid = undefined;
+		current.frozen = undefined;
 		current.user = undefined;
 		current.managedSshKey = undefined;
 		current.disableAdmin = undefined;
@@ -532,6 +638,7 @@ async function cleanUnderLock(state: MachineState): Promise<void> {
 	}
 	state.status = "stopped";
 	state.pid = undefined;
+	state.frozen = undefined;
 	state.user = undefined;
 	state.managedSshKey = undefined;
 	state.disableAdmin = undefined;
@@ -768,6 +875,10 @@ function createInstance(state: MachineState): ChrInstance {
 				finalizeStoppedState(state);
 				return result;
 			});
+		},
+
+		async continue(options?: ContinueOptions): Promise<void> {
+			await withMachineLock(state, "continue", () => continueUnderLock(state, options?.wait ?? true));
 		},
 
 		async remove(): Promise<void> {
@@ -1609,6 +1720,7 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 		networks: resolvedNetworks,
 		background: true,
 		portBase: state.portBase,
+		qemuArgs: state.qemuArgs,
 	};
 }
 
@@ -2078,6 +2190,7 @@ export class QuickCHR {
 				bootSize: diskOpts.bootSize,
 				extraDisks: diskOpts.extraDisks,
 				bootDiskFormat: diskArtifacts.bootDisk.format,
+				qemuArgs: opts.qemuArgs?.length ? [...opts.qemuArgs] : undefined,
 				createdAt: new Date().toISOString(),
 				status: "stopped",
 				machineDir,
@@ -2108,8 +2221,9 @@ export class QuickCHR {
 	 * Start a new or existing CHR instance.
 	 *
 	 * The returned {@link ChrInstance} is REST-ready: all provisioning (packages, license,
-	 * device-mode, user) has completed before this promise resolves. Two exceptions:
-	 * `wait: false` resolves once QEMU is running and leaves readiness to the caller, and
+	 * device-mode, user) has completed before this promise resolves. Three exceptions:
+	 * `wait: false` resolves once QEMU is running and leaves readiness to the caller,
+	 * `frozen: true` additionally holds the guest at reset for `continue()`, and
 	 * a RouterOS 6 guest (boot-only, no REST) is ready when its native API answers a login.
 	 * Callers do not need to call {@link ChrInstance.waitForBoot} again unless they have
 	 * stopped and restarted the instance manually. Disk options (`bootSize`, `extraDisks`)
@@ -2128,6 +2242,13 @@ export class QuickCHR {
 			throw new QuickCHRError(
 				"INVALID_ARGUMENT",
 				"--no-wait (wait: false) cannot be combined with --fg (background: false): a foreground start holds the serial console until QEMU exits, so there is nothing to return early from.",
+			);
+		}
+
+		if (opts.frozen && opts.background === false) {
+			throw new QuickCHRError(
+				"INVALID_ARGUMENT",
+				"--frozen (frozen: true) cannot be combined with --fg (background: false): a frozen start holds the guest at reset for gdb and a later continue, and a foreground start holds the serial console until QEMU exits instead.",
 			);
 		}
 
@@ -2176,6 +2297,7 @@ export class QuickCHR {
 		if (hasProvisioningMutations(mutations)) {
 			assertProvisioningSupportedVersion(version, describeProvisioningOperation(mutations));
 			assertWaitAllowsProvisioning(opts, describeProvisioningOperation(mutations));
+			assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(mutations));
 		}
 
 		// Resolve architecture
@@ -2254,13 +2376,14 @@ export class QuickCHR {
 					};
 					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
 					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
+					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					requireHostFor(existing.arch);
-					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger);
+					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger, opts.wait ?? true, sessionLaunch(opts));
 				}
 			}
 			// Exists but stopped — restart it
 			requireHostFor(existing.arch);
-			return QuickCHR._launchExisting(existing, opts.background ?? true, undefined, logger, opts.wait ?? true);
+			return QuickCHR._launchExisting(existing, opts.background ?? true, undefined, logger, opts.wait ?? true, sessionLaunch(opts));
 		}
 
 		assertRouterOs6Arch(version, arch);
@@ -2292,6 +2415,7 @@ export class QuickCHR {
 				bootSize: diskOpts.bootSize,
 				extraDisks: diskOpts.extraDisks,
 				bootDiskFormat: diskOpts.bootDiskFormat,
+				qemuArgs: opts.qemuArgs?.length ? [...opts.qemuArgs] : undefined,
 				createdAt: new Date().toISOString(),
 				status: "stopped",
 				machineDir,
@@ -2384,6 +2508,7 @@ export class QuickCHR {
 			bootSize: diskOpts.bootSize,
 			extraDisks: diskOpts.extraDisks,
 			bootDiskFormat: bootDisk.format,
+			qemuArgs: opts.qemuArgs?.length ? [...opts.qemuArgs] : undefined,
 			createdAt: new Date().toISOString(),
 			status: "running",
 			machineDir,
@@ -2415,6 +2540,8 @@ export class QuickCHR {
 			background: spawnInBackground,
 			portBase: state.portBase,
 			accel,
+			qemuArgs: state.qemuArgs,
+			frozen: opts.frozen,
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
@@ -2438,12 +2565,16 @@ export class QuickCHR {
 
 		state.pid = pid;
 		state.lastStartedAt = new Date().toISOString();
+		// Frozen skips the boot wait entirely and returns after the spawn
+		// early-exit check — by construction it can never produce BOOT_TIMEOUT.
+		if (opts.frozen) state.frozen = true;
 
 		saveMachine(state);
 		unpersistedSocketClaim = undefined;
 		storageLease.release();
 
 		const instance = createInstance(state);
+		if (opts.frozen) return instance;
 		if (opts.wait === false) return instance;
 
 		const bootTimeout = defaultBootTimeout(arch, opts.installAllPackages, accel) + (opts.timeoutExtra ?? 0);
@@ -2717,7 +2848,11 @@ export class QuickCHR {
 		recordProvisioning(machineState, applied);
 	}
 
-	/** Re-launch an existing stopped machine. */
+	/** Re-launch an existing stopped machine.
+	 *
+	 *  `launch` carries per-boot intent that is used for this spawn but never
+	 *  persisted: session `qemuArgs` replace the stored ones for that boot, and
+	 *  `frozen` holds the guest at reset for a later `continue()`. */
 	static async _launchExisting(
 		state: MachineState,
 		background: boolean,
@@ -2732,6 +2867,7 @@ export class QuickCHR {
 		},
 		logger?: ProgressLogger,
 		wait = true,
+		launch?: { qemuArgs?: string[]; frozen?: boolean },
 	): Promise<ChrInstance> {
 		const wantsProvisioning = (opts: typeof provisioningOpts) => !!(
 			opts && (
@@ -2812,6 +2948,9 @@ export class QuickCHR {
 		unpersistedSocketClaim = state;
 		reportSocketTransports(state, logger ?? createLogger());
 
+		// Session passthrough replaces stored args for this boot only — never written
+		// back to state, so the next plain start reuses what `add` recorded (#213).
+		const effectiveQemuArgs = launch?.qemuArgs?.length ? launch.qemuArgs : state.qemuArgs;
 		const launchConfig: QemuLaunchConfig = {
 			arch: state.arch,
 			machineDir: state.machineDir,
@@ -2824,6 +2963,8 @@ export class QuickCHR {
 			background: spawnBackground,
 			portBase: state.portBase,
 			accel,
+			qemuArgs: effectiveQemuArgs,
+			frozen: launch?.frozen,
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
@@ -2845,10 +2986,12 @@ export class QuickCHR {
 		state.pid = pid;
 		state.status = "running";
 		state.lastStartedAt = new Date().toISOString();
+		if (launch?.frozen) state.frozen = true;
 		saveMachine(state);
 		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);
+		if (launch?.frozen) return instance;
 		if (!wait) return instance;
 
 		// Always wait for boot in background mode — start() promises "REST-ready".
@@ -2939,6 +3082,7 @@ export class QuickCHR {
 		if (state.status === "running" && !isMachineRunning(state)) {
 			state.status = "stopped";
 			state.pid = undefined;
+			state.frozen = undefined;
 			saveMachine(state);
 		}
 

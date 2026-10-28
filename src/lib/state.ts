@@ -386,6 +386,7 @@ export function refreshAllStatuses(): MachineState[] {
 		if (m.status === "running" && !isMachineRunning(m)) {
 			m.status = "stopped";
 			m.pid = undefined;
+			m.frozen = undefined;
 			saveMachine(m);
 		}
 	}

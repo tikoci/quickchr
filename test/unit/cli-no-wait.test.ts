@@ -55,7 +55,7 @@ describe("flag resolution", () => {
 });
 
 describe("start --no-wait", () => {
-	for (const extra of [["--add-package", "container"], ["--fg"], ["--no-bg"], ["--device-mode", "rose"], ["--add-user", "ops:pw"]]) {
+	for (const extra of [["--add-package", "container"], ["--fg"], ["--no-bg"], ["--device-mode", "rose"], ["--add-user", "ops:pw"], ["--qemu-arg", "-M"]]) {
 		test(`--all refuses ignored options: ${extra.join(" ")}`, async () => {
 			const result = await runQuickchr(["start", "--all", "--no-wait", ...extra]);
 			expect(result.exitCode).toBe(1);
