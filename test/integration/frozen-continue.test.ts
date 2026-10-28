@@ -38,6 +38,8 @@ describe.skipIf(SKIP)("frozen start + continue", () => {
 			const frozen = await QuickCHR.start({ ...imageTarget(), arch, name, frozen: true });
 			expect(frozen.state.status).toBe("running");
 			expect(frozen.state.frozen).toBe(true);
+			const { detectAccel } = await import("../../src/lib/platform.ts");
+			expect(frozen.state.lastAccel).toBe(await detectAccel(arch));
 			expect(await frozen.monitor("info status")).toContain("prelaunch");
 			expect(existsSync(join(frozen.state.machineDir, "gdb.sock"))).toBe(true);
 

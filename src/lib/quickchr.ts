@@ -549,7 +549,9 @@ async function continueUnderLock(state: MachineState, wait: boolean, timeoutExtr
 	if (!wait) return;
 
 	const instance = createInstance(state);
-	const accel = await detectAccel(state.arch);
+	// The frozen launch's accelerator when recorded: detectAccel() prefers the
+	// current process's override, which may differ from the launch's.
+	const accel = state.lastAccel ?? await detectAccel(state.arch);
 	const bootTimeout = defaultBootTimeout(state.arch, undefined, accel) + (timeoutExtra ?? 0);
 	const probe = newBootProbeStats();
 	if (await instance.waitForBoot(bootTimeout, probe)) return;
@@ -2579,7 +2581,12 @@ export class QuickCHR {
 		state.lastStartedAt = new Date().toISOString();
 		// Frozen skips the boot wait entirely and returns after the spawn
 		// early-exit check — by construction it can never produce BOOT_TIMEOUT.
-		if (opts.frozen) state.frozen = true;
+		// It also skips the post-boot lastAccel recording below, so record the
+		// launch accelerator here for continue()'s resume timeout.
+		if (opts.frozen) {
+			state.frozen = true;
+			state.lastAccel = accel;
+		}
 
 		saveMachine(state);
 		unpersistedSocketClaim = undefined;
@@ -3002,6 +3009,9 @@ export class QuickCHR {
 		// not frozen must not inherit a stale one (e.g. a kill -9'd frozen
 		// machine rebooted normally still listing as frozen).
 		state.frozen = launch?.frozen ? true : undefined;
+		// Frozen returns before the post-boot lastAccel recording below, so a
+		// frozen relaunch records the launch accelerator for continue().
+		if (launch?.frozen) state.lastAccel = accel;
 		saveMachine(state);
 		unpersistedSocketClaim = undefined;
 

@@ -24,6 +24,11 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 - Integration tests: use `describe.skipIf(!process.env.QUICKCHR_INTEGRATION)`
 - Long-running tests: set timeout as second arg to `test("...", async () => {...}, 120_000)`
 - Temp directories: create in `import.meta.dir`, clean up in `afterEach`
+- Spawned workers need explicit `env: { ...process.env, ... }` in `Bun.spawn()`:
+  without `env` the child does not see runtime `process.env` mutations (verified
+  on Bun 1.4.4), so a worker silently uses the real data dir instead of the
+  test's — seen as `continue-*` workers polluting `~/.local/share/quickchr` and
+  colliding on their monitor socket across runs (#214 review round)
 - Unix socket tests: use `join(tmpdir(), "quickchr-tmp-<name>")` from `node:os` — FUSE mounts (e.g. Multipass) don't support Unix domain sockets
 - Always clean up CHR instances in a `finally` block so failures don't leak machines
 - Reach CHR's REST API only through `test/integration/chr-rest.ts` — see below

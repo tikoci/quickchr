@@ -5,6 +5,10 @@ import { expect, spyOn } from "bun:test";
 // would never reach — same rule as the in-process socket tests. Silent exit:
 // the driver asserts empty output.
 if (process.platform === "win32") process.exit(0);
+// Tripwire: the driver must pass its data dir explicitly (Bun.spawn without
+// env ignores runtime process.env mutations). Without it this worker would
+// silently write a test machine into the developer's real data dir.
+if (!process.env.QUICKCHR_DATA_DIR) throw new Error("QUICKCHR_DATA_DIR is not set");
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { createServer, type Server } from "node:net";
@@ -77,6 +81,8 @@ try {
 	message = (err as Error).message;
 }
 expect(message).toContain("diagnostic-sentinel");
+// No lastAccel recorded: the resume timeout falls back to fresh detection.
+expect(message).toContain("accel=tcg");
 expect(message).toContain("stopped and preserved");
 expect(message).toContain(`quickchr start ${name}`);
 expect(message).toContain(`quickchr remove ${name}`);

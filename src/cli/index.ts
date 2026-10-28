@@ -4,6 +4,7 @@
  */
 
 import type { StartOptions, Arch, Channel, DeviceModeOptions, ServiceName, NetworkSpecifier } from "../lib/types.ts";
+import { join } from "node:path";
 import { parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
 import { ADD_FLAGS, REMOVED_FLAGS, SET_FLAGS, START_FLAGS, VALUE_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
@@ -1583,7 +1584,7 @@ export async function cmdStart(argv: string[]) {
 	// already-running normal machine returns that handle unfrozen.
 	if (instance.state.frozen) {
 		console.log(`${statusIcon("running")} ${bold(instance.name)} frozen at reset — patch RAM, then ${bold(`quickchr continue ${instance.name}`)}`);
-		console.log(`  GDB:     ${dim(`${instance.state.machineDir}/gdb.sock`)}`);
+		console.log(`  GDB:     ${dim(join(instance.state.machineDir, "gdb.sock"))}`);
 	} else if (!opts.background) {
 		console.log(`\n${bold(instance.name)} session ended`);
 		console.log(`  ${dim("Tip: resume session")}   quickchr start ${instance.name} --fg`);
@@ -1756,7 +1757,7 @@ async function cmdList(argv: string[] = []) {
 		console.log(`  Status:     ${s.status}${s.pid ? ` (PID ${s.pid})` : ""}`);
 		if (s.frozen) {
 			console.log(`  Frozen:     yes — awaiting quickchr continue`);
-			console.log(`  GDB:        ${dim(`${s.machineDir}/gdb.sock`)}`);
+			console.log(`  GDB:        ${dim(join(s.machineDir, "gdb.sock"))}`);
 		}
 		console.log(`  Created:    ${new Date(s.createdAt).toLocaleString()}`);
 		if (s.lastStartedAt) console.log(`  Started:    ${new Date(s.lastStartedAt).toLocaleString()}`);
