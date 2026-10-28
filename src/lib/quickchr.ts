@@ -509,19 +509,21 @@ function clearFrozenMarker(state: MachineState): void {
 }
 
 /** Best-effort QEMU argv for a continue-timeout forensics report: rebuilt from
- *  stored state with the frozen flags the spawn carried. A session `--qemu-arg`
- *  override from that start is not reflected — the report is context, and the
- *  override was deliberately never persisted. */
-async function launchedQemuArgsForReport(state: MachineState): Promise<string[]> {
+ *  stored state. `wasFrozen` is the marker as it stood before this resume — the
+ *  marker is already cleared by the time a timeout is captured, and only a truly
+ *  frozen spawn carried `-S`/`-gdb`. A session `--qemu-arg` override from that
+ *  start is not reflected — the report is context, and the override was
+ *  deliberately never persisted. */
+async function launchedQemuArgsForReport(state: MachineState, wasFrozen: boolean): Promise<string[]> {
 	try {
-		return await buildQemuArgs({ ...(await buildLaunchConfigFromState(state)), frozen: true });
+		return await buildQemuArgs({ ...(await buildLaunchConfigFromState(state)), frozen: wasFrozen });
 	} catch {
 		return [];
 	}
 }
 
 /** The body of `continue()`, for a caller that already holds the machine lock. */
-async function continueUnderLock(state: MachineState, wait: boolean): Promise<void> {
+async function continueUnderLock(state: MachineState, wait: boolean, timeoutExtra?: number): Promise<void> {
 	const pid = state.pid;
 	if (!pid || !isMachineRunning(state)) {
 		// Leave clean state behind: the marker belonged to a QEMU that is gone.
@@ -534,14 +536,21 @@ async function continueUnderLock(state: MachineState, wait: boolean): Promise<vo
 	// Idempotent: gdb (or an earlier continue) may have resumed the guest already.
 	const status = await monitorCommand(state.machineDir, "info status", undefined, state.portBase);
 	if (!status.includes("running")) {
-		await monitorCommand(state.machineDir, "cont", undefined, state.portBase);
+		const contOut = await monitorCommand(state.machineDir, "cont", undefined, state.portBase);
+		// A QEMU-level `cont` error is the answer, not a cue to wait: the guest
+		// never resumed, so the marker stays and no boot wait is burned. Same
+		// /^error/i contract as savevm/loadvm/delvm.
+		if (/^error[:\s]/i.test(contOut)) {
+			throw new QuickCHRError("PROCESS_FAILED", `continue failed: ${contOut.trim() || "(empty)"}`);
+		}
 	}
+	const wasFrozen = state.frozen === true;
 	clearFrozenMarker(state);
 	if (!wait) return;
 
 	const instance = createInstance(state);
 	const accel = await detectAccel(state.arch);
-	const bootTimeout = defaultBootTimeout(state.arch, undefined, accel);
+	const bootTimeout = defaultBootTimeout(state.arch, undefined, accel) + (timeoutExtra ?? 0);
 	const probe = newBootProbeStats();
 	if (await instance.waitForBoot(bootTimeout, probe)) return;
 
@@ -555,7 +564,7 @@ async function continueUnderLock(state: MachineState, wait: boolean): Promise<vo
 		pid,
 		httpPort: toChrPorts(state.ports).http,
 		portBase: state.portBase,
-		qemuArgs: await launchedQemuArgsForReport(state),
+		qemuArgs: await launchedQemuArgsForReport(state, wasFrozen),
 		probe,
 		phase: "continue",
 		reportDir: bootFailureReportDir(),
@@ -878,7 +887,7 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async continue(options?: ContinueOptions): Promise<void> {
-			await withMachineLock(state, "continue", () => continueUnderLock(state, options?.wait ?? true));
+			await withMachineLock(state, "continue", () => continueUnderLock(state, options?.wait ?? true, options?.timeoutExtra));
 		},
 
 		async remove(): Promise<void> {
@@ -1686,6 +1695,9 @@ async function hardRebootMachine(
 	state.pid = pid;
 	state.status = "running";
 	state.lastStartedAt = new Date().toISOString();
+	// A power-cycle always boots normally: the replacement QEMU carries no -S,
+	// so a frozen marker from before must not survive it.
+	state.frozen = undefined;
 	saveMachine(state);
 
 	return method;
@@ -2986,7 +2998,10 @@ export class QuickCHR {
 		state.pid = pid;
 		state.status = "running";
 		state.lastStartedAt = new Date().toISOString();
-		if (launch?.frozen) state.frozen = true;
+		// The marker describes this spawn, not the machine: a relaunch that is
+		// not frozen must not inherit a stale one (e.g. a kill -9'd frozen
+		// machine rebooted normally still listing as frozen).
+		state.frozen = launch?.frozen ? true : undefined;
 		saveMachine(state);
 		unpersistedSocketClaim = undefined;
 

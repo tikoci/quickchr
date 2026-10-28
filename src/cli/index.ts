@@ -1579,7 +1579,9 @@ export async function cmdStart(argv: string[]) {
 
 	const instance = await QuickCHR.start(opts);
 
-	if (opts.frozen) {
+	// The marker describes the machine, not the request: --frozen on an
+	// already-running normal machine returns that handle unfrozen.
+	if (instance.state.frozen) {
 		console.log(`${statusIcon("running")} ${bold(instance.name)} frozen at reset — patch RAM, then ${bold(`quickchr continue ${instance.name}`)}`);
 		console.log(`  GDB:     ${dim(`${instance.state.machineDir}/gdb.sock`)}`);
 	} else if (!opts.background) {
@@ -1608,12 +1610,13 @@ export async function cmdStart(argv: string[]) {
 	}
 }
 
-async function cmdContinue(argv: string[]) {
+export async function cmdContinue(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
-	const invalid = unknownFlags(flags, ["wait"]);
-	if (invalid.length) throw new QuickCHRError("INVALID_ARGUMENT", "continue accepts only <name> and --no-wait");
+	applyTimeoutExtraShortFlag(argv, flags, positional);
+	const invalid = unknownFlags(flags, ["wait", "timeout-extra"]);
+	if (invalid.length) throw new QuickCHRError("INVALID_ARGUMENT", "continue accepts only <name>, --no-wait and --timeout-extra <s>");
 	const name = positional[0];
-	if (!name || positional.length !== 1) throw new QuickCHRError("INVALID_ARGUMENT", "Usage: quickchr continue <name> [--no-wait]");
+	if (!name || positional.length !== 1) throw new QuickCHRError("INVALID_ARGUMENT", "Usage: quickchr continue <name> [--no-wait] [--timeout-extra <s>]");
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { machineNotFoundMessage } = await import("./format.ts");
 	const instance = QuickCHR.get(name);
@@ -1622,7 +1625,8 @@ async function cmdContinue(argv: string[]) {
 		process.exit(1);
 	}
 	const wait = flags.wait !== false;
-	await instance.continue({ wait });
+	const timeoutExtra = await resolveTimeoutExtraMs(flags);
+	await instance.continue({ wait, timeoutExtra });
 	const { statusIcon, bold, link, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 	if (!wait) {
 		console.log(`${statusIcon("running")} ${bold(name)} resumed — not waiting for RouterOS (--no-wait)`);
@@ -1734,6 +1738,7 @@ async function cmdList(argv: string[] = []) {
 				ports: s.ports,
 				pid: s.pid ?? null,
 				frozen: s.frozen ?? false,
+				qemuArgs: s.qemuArgs ?? [],
 				packages: s.packages,
 				machineDir: s.machineDir,
 				createdAt: s.createdAt,
@@ -1762,6 +1767,7 @@ async function cmdList(argv: string[] = []) {
 		if (s.status === "running") {
 			const creds = await resolveDisplayCredentials(s);
 			console.log();
+			if (s.frozen) console.log(`  ${dim(`(endpoints answer after 'quickchr continue ${s.name}')`)}`);
 			console.log(`  REST:       ${link(formatRestUrl(instance.ports.http, creds.user, creds.password))}`);
 			console.log(`  WinBox:     127.0.0.1:${instance.ports.winbox}`);
 			console.log(`  SSH:        ${formatSshCommand(creds.user, instance.sshPort)}`);
@@ -2196,7 +2202,7 @@ async function cmdSet(argv: string[]) {
 	// --license` printed a usage error while `quickchr license --name lab` worked.
 	const name = positional[0] ?? flag(flags, "name");
 
-	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|unlimited]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>]";
+	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|unlimited]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>] [--qemu-arg <arg>] [--clear-qemu-args]";
 	if (!name) {
 		console.error(usage);
 		process.exit(1);
@@ -2218,11 +2224,18 @@ async function cmdSet(argv: string[]) {
 
 	const wantsLicense = flagBool(flags, "license");
 	const deviceMode = deviceModeFromFlags(flags);
+	const qemuArgs = flagList(flags, "qemu-arg");
+	const clearQemuArgs = flagBool(flags, "clear-qemu-args");
+	const wantsQemuArgs = qemuArgs.length > 0 || clearQemuArgs;
 
-	if (!wantsLicense && !deviceMode) {
-		console.error("Nothing to set. Available flags: --license, --device-mode, --device-mode-enable, --device-mode-disable");
+	if (!wantsLicense && !deviceMode && !wantsQemuArgs) {
+		console.error("Nothing to set. Available flags: --license, --device-mode, --device-mode-enable, --device-mode-disable, --qemu-arg, --clear-qemu-args");
 		process.exit(1);
 	}
+
+	// Recorded args first: they need a stopped machine, and failing fast here
+	// keeps a running-machine refusal from racing a device-mode power cycle.
+	if (wantsQemuArgs) await applyQemuArgsChange(name, qemuArgs, clearQemuArgs);
 
 	// Device-mode first: it power-cycles the guest, and a license applied beforehand
 	// would be read back across a reboot it did not expect.
@@ -2230,6 +2243,43 @@ async function cmdSet(argv: string[]) {
 	if (wantsLicense) {
 		const subcmdArgs = [name, ...Object.entries(flags).flatMap(([k, v]) => v === true ? [`--${k}`] : [`--${k}=${v}`]), ...positional.slice(1)];
 		await applyLicense(subcmdArgs);
+	}
+}
+
+/** `set <name> --qemu-arg…` — the recovery route for recorded passthrough.
+ *
+ *  Boot config, not provisioning: it takes effect on the next start, so the
+ *  machine must be stopped — accepting it on a running machine would promise a
+ *  change that cannot happen until reboot. Replaces the recorded args wholesale
+ *  (one element per flag, like `add`); `--clear-qemu-args` drops them. A bad
+ *  recorded arg otherwise fails every start until `machine.json` is hand-edited;
+ *  this is the supported way back. */
+async function applyQemuArgsChange(name: string, qemuArgs: string[], clear: boolean) {
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { bold, machineNotFoundMessage } = await import("./format.ts");
+	const { loadMachine, saveMachine } = await import("../lib/state.ts");
+
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+	if (instance.state.status === "running") {
+		console.error(`Machine "${name}" is running — stop it first: qemuArgs apply at boot, so 'set' only records them on a stopped machine.`);
+		process.exit(1);
+	}
+	const current = loadMachine(name);
+	if (!current) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+	current.qemuArgs = clear ? undefined : [...qemuArgs];
+	saveMachine(current);
+	instance.state.qemuArgs = current.qemuArgs;
+	if (clear) {
+		console.log(`Cleared recorded QEMU args on ${bold(name)} — the next start boots without passthrough.`);
+	} else {
+		console.log(`Recorded QEMU args on ${bold(name)}: ${qemuArgs.join(" ")}`);
 	}
 }
 
@@ -3399,7 +3449,7 @@ Options:
                         option is refused rather than ignored
   --no-wait             Return once QEMU is running; do not wait for RouterOS (not with --fg)
   --frozen              Boot frozen at reset (-S) with a gdbstub on <machineDir>/gdb.sock;
-                        resume with 'quickchr continue' (not with --fg or provisioning)
+                        resume with 'quickchr continue' (not with --fg, --all or provisioning)
   --fg / --foreground   Run in foreground — serial console on stdio
   --bg / --background   Deprecated, does nothing: background is already the default
   --version <ver>       RouterOS version (e.g., 7.22.1)
@@ -3453,7 +3503,7 @@ naming where the change can still be made — often 'quickchr set <name>'. Only 
 guest's configuration, and reopens the first-boot window.`);
 			break;
 		case "continue":
-			console.log(`quickchr continue <name> [--no-wait]
+			console.log(`quickchr continue <name> [--no-wait] [--timeout-extra <s>]
 
 Resume a machine started with 'start --frozen' (held at reset with a gdbstub
 on <machineDir>/gdb.sock). Sends one monitor 'cont', then waits for RouterOS
@@ -3461,6 +3511,8 @@ to become ready — the same promise 'start' makes.
 
   <name>      Name of a frozen (or otherwise paused) running machine.
   --no-wait   Return right after resuming; do not wait for RouterOS.
+  --timeout-extra <s>, -T <s>
+              Add extra seconds to the auto-computed resume timeout.
 
 Resuming is idempotent: when the guest is already running (e.g. gdb continued
 it), this just clears the frozen marker. A wait that never reaches readiness
@@ -3617,6 +3669,10 @@ Flags:
   --device-mode <m>   Set device-mode: rose|advanced|basic|home|auto
   --device-mode-enable <f>   Set one or more device-mode flags to yes (e.g. container)
   --device-mode-disable <f>  Set one or more device-mode flags to no
+  --qemu-arg <arg>    Replace the recorded QEMU passthrough args (repeatable,
+                      space-form only). The machine must be stopped; takes
+                      effect on the next start.
+  --clear-qemu-args   Drop the recorded QEMU passthrough args. Stopped only.
 
 Device-mode notes:
   RouterOS only applies device-mode across a power cycle, so 'set' restarts the

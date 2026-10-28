@@ -680,6 +680,10 @@ export interface ContinueOptions {
 	 *  promise. `false` returns right after the monitor `cont`, leaving readiness
 	 *  to the caller. A wait that never reaches REST is a genuine `BOOT_TIMEOUT`. */
 	wait?: boolean;
+	/** Extra milliseconds added to the computed boot timeout — the same knob as
+	 *  `StartOptions.timeoutExtra`, for slow hosts where the default underestimates
+	 *  the resume-to-ready time. */
+	timeoutExtra?: number;
 }
 
 export interface ChrInstance {

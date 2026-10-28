@@ -41,6 +41,7 @@ const START_ONLY_FLAGS = [
 const SET_ONLY_FLAGS = [
 	"name", "license", "level", "account", "password",
 	"device-mode", "device-mode-enable", "device-mode-disable",
+	"qemu-arg", "clear-qemu-args",
 ] as const;
 
 export const ADD_FLAGS: readonly string[] = CREATE_FLAGS;

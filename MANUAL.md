@@ -195,7 +195,7 @@ Additional flags:
 | `--fg` / `--foreground` (alias `--no-bg`, `--no-background`) | Serial console on stdio |
 | `--bg` / `--background` | **Deprecated, does nothing.** Background is the default, and the flag never made `start` return early — it only ever chose where the serial console went. Prints a warning; use `--no-wait` |
 | `--timeout-extra <s>` / `-T <s>` | Add extra seconds to computed boot timeout |
-| `--dry-run` | Print resolved options and QEMU command, exit |
+| `--dry-run` | Print the resolved start options as JSON (including `qemuArgs`/`frozen`) and exit — not the final QEMU argv |
 | `--qemu-arg <arg>` | Extra QEMU argv element, repeatable (space form only). Recorded when creating; on an existing machine it replaces recorded args for this boot only. Refused with `--all`. |
 | `--frozen` | Boot frozen at reset (`-S`) with a gdbstub; resume with `continue`. Refused with `--fg`, provisioning, and `--all` |
 
@@ -223,7 +223,16 @@ machine state.
 
 **Extra QEMU arguments (`--qemu-arg`).** One argv element per occurrence,
 appended verbatim (no splitting, no validation) after quickchr's own args.
-Use the space form: `--qemu-arg=x` overwrites instead of accumulating.
+Use the space form: `--qemu-arg=x` overwrites instead of accumulating, so
+mixing space and `=` forms keeps only the `=` values. Values beginning with
+`--` need the `--qemu-arg=<arg>` form (one element per flag).
+
+Passthrough runs with your privileges and is replayed every boot: it can
+touch any path you can (`-drive`, `-audiodev`) or open QEMU-side listeners,
+so treat recorded args like config you own. A bad recorded arg fails every
+start; recover with a session override (`start <name> --qemu-arg …`) and then
+persist the fix with `set <name> --qemu-arg …` (or `--clear-qemu-args`) while
+stopped.
 Ordering is load-bearing — passthrough goes last, so a conflicting option
 resolves last-wins (a duplicate `-M pc,...` merges over quickchr's `-M pc`;
 measured on QEMU 11.1.2). A bad element surfaces as `SPAWN_FAILED` with the
@@ -240,12 +249,12 @@ quickchr start beep-lab --version 7.25 --arch x86 \
 # hypervisor, so an unpatched guest never emits audio.
 ```
 
-#### `continue <name> [--no-wait]`
+#### `continue <name> [--no-wait] [--timeout-extra <s>]`
 
 Resume a machine started with `start --frozen` (held at reset with a
 gdbstub). Sends one monitor `cont`, then waits for RouterOS to become
 ready — the same promise `start` makes. `--no-wait` returns right after
-resuming. Idempotent: when the guest is already running (e.g. gdb
+resuming; `--timeout-extra`/`-T` extends the resume timeout like `start`. Idempotent: when the guest is already running (e.g. gdb
 continued it), this just clears the frozen marker. A machine that never
 reaches readiness is a `BOOT_TIMEOUT`; it is stopped and preserved.
 
@@ -374,7 +383,8 @@ Without a name: tabular summary of every machine. With a name: detailed
 view including credentials and connection tips. `--json` for
 machine-readable output. A machine held by `start --frozen` shows
 `(frozen)` in the table and a `Frozen:` line with its gdb socket path in
-the detail view.
+the detail view; single-machine `--json` carries `frozen` (and the recorded
+`qemuArgs`) alongside the other fields.
 
 A machine whose `machine.json` cannot be read — unreadable on disk, not valid JSON, or
 valid JSON that is not usable machine state — still appears, as a row marked
@@ -501,6 +511,8 @@ flags that were asked for so it can be run as given.
 | `--device-mode <m>` | `rose`, `advanced`, `basic`, `home`, `auto`. |
 | `--device-mode-enable <f,…>` | Set one or more device-mode flags to yes. Repeatable, comma-separated. |
 | `--device-mode-disable <f,…>` | Set one or more to no. |
+| `--qemu-arg <arg>` | Replace the recorded QEMU passthrough args (repeatable, space-form only). Stopped only; takes effect on the next start. |
+| `--clear-qemu-args` | Drop the recorded QEMU passthrough args. Stopped only. |
 
 **Device-mode restarts the machine.** RouterOS only applies a device-mode change
 across a power cycle, and quickchr owns the power button — which is why this lives

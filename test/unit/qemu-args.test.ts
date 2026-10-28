@@ -12,6 +12,7 @@ import {
 	type QemuLaunchConfig,
 } from "../../src/lib/qemu.ts";
 import type { MachineState, PortMapping } from "../../src/lib/types.ts";
+import { requireQemu } from "../../src/lib/platform.ts";
 
 // These tests verify QEMU arg generation without spawning QEMU.
 // They depend on QEMU being installed (for binary path resolution).
@@ -706,6 +707,26 @@ describe("spawnQemu", () => {
 			message: expect.stringContaining("Empty QEMU args"),
 		});
 	});
+
+	test("foreground QEMU failing fast (e.g. bad --qemu-arg) throws SPAWN_FAILED", async () => {
+		// Needs a real binary: the failure under test is QEMU's own nonzero
+		// exit, not the empty-argv guard above.
+		let bin: string;
+		try {
+			bin = requireQemu("x86");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+		const dir = join("/tmp", `quickchr-fg-spawn-test-${process.pid}`);
+		await expect(spawnQemu([bin, "--bogus-quickchr-test-flag"], dir, false)).rejects.toMatchObject({
+			code: "SPAWN_FAILED",
+			message: expect.stringContaining("--qemu-arg"),
+		});
+	});
 });
 
 // --- stopQemu ---
@@ -845,10 +866,11 @@ describe("cleanupQemuSockets", () => {
 	beforeEach(() => { mkdirSync(dir, { recursive: true }); });
 	afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-	test("removes monitor/serial/qga socket files left by a killed QEMU", () => {
+	test("removes monitor/serial/qga/gdb socket files left by a killed QEMU", () => {
 		// A SIGKILLed QEMU leaves its server=on sockets behind; the respawn in
-		// start() must clear them or the new process fails to bind.
-		for (const s of ["monitor.sock", "serial.sock", "qga.sock"]) {
+		// start() must clear them or the new process fails to bind. gdb.sock
+		// joins the list so a frozen boot leaves nothing a later boot trips on.
+		for (const s of ["monitor.sock", "serial.sock", "qga.sock", "gdb.sock"]) {
 			writeFileSync(join(dir, s), "");
 		}
 		// An unrelated file in the same dir must be preserved.
@@ -859,6 +881,7 @@ describe("cleanupQemuSockets", () => {
 		expect(existsSync(join(dir, "monitor.sock"))).toBe(false);
 		expect(existsSync(join(dir, "serial.sock"))).toBe(false);
 		expect(existsSync(join(dir, "qga.sock"))).toBe(false);
+		expect(existsSync(join(dir, "gdb.sock"))).toBe(false);
 		expect(existsSync(join(dir, "qemu.log"))).toBe(true);
 	});
 

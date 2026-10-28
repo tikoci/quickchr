@@ -487,8 +487,17 @@ export async function spawnQemu(
 
 	const pid = proc.pid;
 	writeFileSync(pidPath, String(pid));
-	await proc.exited;
+	const exitCode = await proc.exited;
 	try { unlinkSync(pidPath); } catch { /* ignore */ }
+	// A bad argv element (e.g. --qemu-arg) fails fast here with a QEMU error on
+	// the terminal — but without this check the caller reports a clean stop.
+	// Only a numeric non-zero code throws: a signal kill (null) is a user quit.
+	if (typeof exitCode === "number" && exitCode !== 0) {
+		throw new QuickCHRError(
+			"SPAWN_FAILED",
+			`QEMU exited with status ${exitCode} — see the QEMU error output above (often a bad --qemu-arg value).`,
+		);
+	}
 	return { pid };
 }
 
@@ -521,11 +530,13 @@ export async function stopQemu(pid: number): Promise<boolean> {
 	return true;
 }
 
-/** Remove the listening unix-socket files QEMU binds (monitor/serial/qga).
+/** Remove the listening unix-socket files QEMU binds (monitor/serial/qga/gdb).
  *  A SIGKILLed QEMU leaves these behind; a respawn with `server=on` then fails
- *  to bind ("Address already in use"). Call before re-spawning into the same dir. */
+ *  to bind ("Address already in use"). Call before re-spawning into the same dir.
+ *  `gdb.sock` is included: a stale one from a frozen boot would otherwise linger
+ *  after stop and refuse a harness attach on a later non-frozen boot. */
 export function cleanupQemuSockets(machineDir: string): void {
-	for (const sock of ["monitor.sock", "serial.sock", "qga.sock"]) {
+	for (const sock of ["monitor.sock", "serial.sock", "qga.sock", "gdb.sock"]) {
 		const path = join(machineDir, sock);
 		try {
 			if (existsSync(path)) unlinkSync(path);

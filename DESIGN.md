@@ -1204,9 +1204,11 @@ entirely, and `start` returns after the spawn early-exit check.
 
 `continue` is one existing primitive — `monitorCommand("cont")` — plus the
 promise `start` makes: REST-ready by default, `--no-wait` to return
-immediately. It checks `info status` first, so a guest gdb already resumed just
-clears the marker (idempotent); a dead pid is `MACHINE_STOPPED`; a wait that
-never reaches REST is a genuine `BOOT_TIMEOUT` with `preserve-existing`
-cleanup. Deliberately out: no frozen-specific hint on `exec`/`get` failures,
+immediately, `--timeout-extra` extending the resume wait like `start`. It
+checks `info status` first, so a guest gdb already resumed just clears the
+marker (idempotent); a QEMU-level `cont` error throws `PROCESS_FAILED` before
+the marker is touched (same `/^error/i` contract as savevm/loadvm); a dead pid
+is `MACHINE_STOPPED`; a wait that never reaches REST is a genuine
+`BOOT_TIMEOUT` with `preserve-existing` cleanup. Deliberately out: no frozen-specific hint on `exec`/`get` failures,
 and no `savevm` refusal on prelaunch VMs (snapshot is already tricky business;
 QEMU accepts or errors on its own).

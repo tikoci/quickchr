@@ -41,6 +41,10 @@ describe.skipIf(SKIP)("frozen start + continue", () => {
 			expect(await frozen.monitor("info status")).toContain("prelaunch");
 			expect(existsSync(join(frozen.state.machineDir, "gdb.sock"))).toBe(true);
 
+			// gdb-continued shape: resume behind quickchr's back (marker stays
+			// set), then continue() must notice `running` and just clear it.
+			await frozen.monitor("cont");
+			expect(frozen.state.frozen).toBe(true);
 			await frozen.continue();
 			expect(frozen.state.frozen).toBeFalsy();
 			const resource = await frozen.rest("/system/resource") as Record<string, unknown>;
