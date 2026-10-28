@@ -41,7 +41,7 @@ The repo has several workflows, each with a distinct purpose:
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
 | **CI** | `ci.yml` | push/PR to `main`, `workflow_dispatch` | Fast quality gate (~3-5 min, no QEMU): lint, unit, Windows unit, PR freshness gate |
-| **Main Integration** | `main.yml` | push to `main`, `workflow_dispatch` | The continuous integration-test signal: full suite on linux/x86_64 + linux/aarch64 |
+| **Main Integration** | `main.yml` | push to `main` (except docs-only — `paths-ignore`), `workflow_dispatch` | The continuous integration-test signal: full suite on linux/x86_64 + linux/aarch64 |
 | **Weekly Sweep** | `sweep.yml` | schedule (Mon 05:37 UTC), `workflow_dispatch` | All-platform sweep + examples smoke (separate file so a red TCG leg never blocks PRs) |
 | **Integration** | `integration.yml` | `workflow_dispatch`, `workflow_call` | THE reusable integration unit — any platform × RouterOS target × test filter |
 | **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1` or `PSScriptAnalyzerSettings.psd1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
@@ -56,7 +56,8 @@ lint ∥ unit-tests (coverage) ∥ windows-unit-tests ∥ integration-freshness 
 ```
 
 All four jobs run **in parallel** — nothing boots QEMU, so PR feedback lands in ~3-5 min.
-Integration tests do NOT run on PRs; they run on every push to `main` (see below).
+Integration tests do NOT run on PRs; they run on every push to `main` except
+docs-only pushes, which produce no run (see below).
 
 ### Main Integration (main.yml) + the PR freshness gate
 
@@ -64,13 +65,15 @@ Integration tests do NOT run on PRs; they run on every push to `main` (see below
 linux/x86_64 + linux/aarch64** (the release bar) on every push to `main`, delegating to
 `integration.yml`. Examples are part of the per-push flow, not a weekly extra. Superseded pushes are
 cancelled (their signal is stale by definition — a cancelled run never counts as red).
+Pushes touching only docs (`**.md`, `LICENSE` via `paths-ignore`) produce no run at
+all — docs are validated by `ci.yml` on the PR instead (#218).
 
 The **`integration-freshness`** job in `ci.yml` (PR-only, a required branch-protection
 check) is the honesty contract for that arrangement: it queries the latest completed
 `main.yml` run on `main` (skipping cancelled/skipped runs) and
 
-- **PASSES** when that run is green — with a note if `main`'s tip has a newer run still
-  in flight;
+- **PASSES** when that run is green — with a note if `main`'s tip is newer than that
+  run (a newer run in flight, or a docs-only push that produced no run);
 - **FAILS** when that run is red, with the run URL. A red `main` therefore visibly blocks
   ALL PRs until someone fixes it — the failure cannot rot quietly in the Actions list.
 
@@ -105,7 +108,8 @@ prepare (gate: main-only + Integration freshness green
 
 The integration bar is the freshness gate: the latest completed `main.yml` run on `main`
 must be green — the same full x86+arm64 suite the old publish pipeline re-ran, but paid
-continuously on every push instead of at release time (arm64 gate lineage: #15/#16).
+continuously on every push (except docs-only pushes, which produce no run) instead of
+at release time (arm64 gate lineage: #15/#16).
 
 `package.json` is the source of truth. CI reads it, extracts release notes from the
 matching `CHANGELOG.md` section via `scripts/release-prep.ts --from-package`, and never

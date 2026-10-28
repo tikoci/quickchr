@@ -55,10 +55,10 @@ describe("evaluateFreshness", () => {
 		expect(v.message).toContain("bootstrap");
 	});
 
-	test("green but main tip is newer → PASS with in-flight note", () => {
+	test("green but main tip is newer → PASS with newer-tip note", () => {
 		const v = evaluateFreshness([run()], "b".repeat(40));
 		expect(v.ok).toBe(true);
-		expect(v.message).toContain("still in flight");
+		expect(v.message).toContain("newer than the last completed run");
 	});
 
 	test("red run older than a cancelled one still FAILS (cancel does not launder a red)", () => {

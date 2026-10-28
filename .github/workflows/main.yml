@@ -8,6 +8,7 @@ name: Main Integration
 #                       (TCG in practice — hosted arm64 has no usable KVM) —
 #                       the same bar releases require, kept continuously green.
 #                       Examples are part of the flow, not an optional extra.
+#                       Pushes touching only docs (paths-ignore) produce no run.
 #   workflow_dispatch → same (manual freshness refresh)
 #
 # The broader weekly platform sweep lives in sweep.yml — deliberately a separate
@@ -21,6 +22,11 @@ name: Main Integration
 on:
   push:
     branches: [main]
+    # Docs-only pushes produce no run — docs are validated by ci.yml on the
+    # PR instead, so the ~30 min suite would be pure overhead (#218).
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 permissions:
