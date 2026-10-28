@@ -11,6 +11,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-10-28
+
 ### Added
 
 - **`add`/`start --qemu-arg <argv-element>` passthrough.** Repeatable, one QEMU
