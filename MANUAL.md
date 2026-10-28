@@ -167,6 +167,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--no-winbox` | false | Exclude WinBox port |
 | `--no-api-ssl` | false | Exclude API-SSL port |
 | `--port-base <n>` | auto from 9100 | First port of the 10-port block |
+| `--qemu-arg <arg>` | — | Extra QEMU argv element, repeatable (space form only). Recorded and reused every boot. See Extra QEMU arguments below. |
 
 `--vmnet-shared` and `--vmnet-bridge <iface>` have been removed. Use
 `--add-network shared` and `--add-network bridged:<iface>`; either old spelling is
@@ -194,7 +195,9 @@ Additional flags:
 | `--fg` / `--foreground` (alias `--no-bg`, `--no-background`) | Serial console on stdio |
 | `--bg` / `--background` | **Deprecated, does nothing.** Background is the default, and the flag never made `start` return early — it only ever chose where the serial console went. Prints a warning; use `--no-wait` |
 | `--timeout-extra <s>` / `-T <s>` | Add extra seconds to computed boot timeout |
-| `--dry-run` | Print resolved options and QEMU command, exit |
+| `--dry-run` | Print the resolved start options as JSON (including `qemuArgs`/`frozen`) and exit — not the final QEMU argv |
+| `--qemu-arg <arg>` | Extra QEMU argv element, repeatable (space form only). Recorded when creating; on an existing machine it replaces recorded args for this boot only. Refused with `--all`. |
+| `--frozen` | Boot frozen at reset (`-S`) with a gdbstub; resume with `continue`. Refused with `--fg`, provisioning, and `--all` |
 
 After `--no-wait`, readiness is yours. centrs (0.1.8+) waits for it in one command:
 
@@ -217,6 +220,62 @@ When `--fg` is combined with provisioning options, quickchr boots
 **background** first, runs provisioning, then **stops** and re-launches
 foreground with stdio attached. This is observable as a brief stop in
 machine state.
+
+**Extra QEMU arguments (`--qemu-arg`).** One argv element per occurrence,
+appended verbatim (no splitting, no validation) after quickchr's own args.
+Use the space form: `--qemu-arg=x` overwrites instead of accumulating, so
+mixing space and `=` forms keeps only the `=` values. Values beginning with
+`--` need the `--qemu-arg=<arg>` form (one element per flag).
+
+Passthrough runs with your privileges and is replayed every boot: it can
+touch any path you can (`-drive`, `-audiodev`) or open QEMU-side listeners,
+so treat recorded args like config you own. A bad recorded arg fails every
+start; recover with a session override (`start <name> --qemu-arg …`) and then
+persist the fix with `set <name> --qemu-arg …` (or `--clear-qemu-args`) while
+stopped.
+Ordering is load-bearing — passthrough goes last, so a conflicting option
+resolves last-wins (a duplicate `-M pc,...` merges over quickchr's `-M pc`;
+measured on QEMU 11.1.2). A bad element surfaces as `SPAWN_FAILED` with the
+QEMU log tail. Lab escape hatch for QEMU surface quickchr does not model —
+e.g. capturing the CHR PC speaker (x86 only) to a WAV file:
+
+```sh
+quickchr start beep-lab --version 7.25 --arch x86 \
+  --qemu-arg -M --qemu-arg pc,pcspk-audiodev=cap \
+  --qemu-arg -audiodev --qemu-arg wav,id=cap,path=$PWD/cap.wav
+# cap.wav is created at spawn (0 bytes while running); QEMU flushes the
+# 44-byte RIFF header on exit. Capturing actual beeps also needs the
+# --frozen RAM-patch workflow below: stock CHR skips :beep under a
+# hypervisor, so an unpatched guest never emits audio.
+```
+
+#### `continue <name> [--no-wait] [--timeout-extra <s>]`
+
+Resume a machine started with `start --frozen` (held at reset with a
+gdbstub). Sends one monitor `cont`, then waits for RouterOS to become
+ready — the same promise `start` makes. `--no-wait` returns right after
+resuming; `--timeout-extra`/`-T` extends the resume timeout like `start`. Idempotent: when the guest is already running (e.g. gdb
+continued it), this just clears the frozen marker. A machine that never
+reaches readiness is a `BOOT_TIMEOUT`; it is stopped and preserved.
+
+`--frozen` exists for harnesses that must touch the guest before RouterOS
+init runs — e.g. patching guest RAM via gdb, then resuming:
+
+```sh
+quickchr start beep-lab --version 7.25 --arch x86 --frozen
+# frozen at reset; gdb at <machineDir>/gdb.sock (see 'quickchr list beep-lab')
+gdb -ex "target remote /path/to/machines/beep-lab/gdb.sock" \
+    -ex "set *(char *)0xADDR = 0x.." -ex detach -ex quit
+quickchr continue beep-lab
+# resumed, REST-ready
+```
+
+Frozen is per-boot intent, not config: `stop` clears it and a later plain
+`start` boots normally. `list` marks frozen machines (`(frozen)` in the
+table, a `Frozen:` line plus the gdb socket path in the detail view).
+Note the vocabulary overlap: this `frozen` (QEMU held at reset) is a
+different domain from QGA `fsfreeze-status` (guest filesystems frozen for
+snapshots).
 
 #### `stop [name | --all]`
 
@@ -322,7 +381,10 @@ repeat the original command rather than to run a bare `start`.
 
 Without a name: tabular summary of every machine. With a name: detailed
 view including credentials and connection tips. `--json` for
-machine-readable output.
+machine-readable output. A machine held by `start --frozen` shows
+`(frozen)` in the table and a `Frozen:` line with its gdb socket path in
+the detail view; single-machine `--json` carries `frozen` (and the recorded
+`qemuArgs`) alongside the other fields.
 
 A machine whose `machine.json` cannot be read — unreadable on disk, not valid JSON, or
 valid JSON that is not usable machine state — still appears, as a row marked
@@ -449,6 +511,8 @@ flags that were asked for so it can be run as given.
 | `--device-mode <m>` | `rose`, `advanced`, `basic`, `home`, `auto`. |
 | `--device-mode-enable <f,…>` | Set one or more device-mode flags to yes. Repeatable, comma-separated. |
 | `--device-mode-disable <f,…>` | Set one or more to no. |
+| `--qemu-arg <arg>` | Replace the recorded QEMU passthrough args (repeatable, space-form only). Stopped only; takes effect on the next start. |
+| `--clear-qemu-args` | Drop the recorded QEMU passthrough args. Stopped only. |
 
 **Device-mode restarts the machine.** RouterOS only applies a device-mode change
 across a power cycle, and quickchr owns the power button — which is why this lives
@@ -819,7 +883,7 @@ throws `INVALID_NAME` for a name that is not a usable path segment.
 |---|---|---|
 | Identity | `name`, `state`, `ports`, `restUrl`, `sshPort`, `portBase` | Static metadata persisted in `machine.json` |
 | Capture | `captureInterface`, `hostGatewayIp` | Platform-correct values for TZSP capture (`tshark -i …`) and the guest→host address any UDP emitter targets |
-| Lifecycle | `waitForBoot()`, `waitFor(fn, ms?)`, `stop()`, `shutdown(opts?)`, `remove()`, `clean()`, `destroy()` | Boot readiness, custom polling, power-cut or guest-shutdown teardown |
+| Lifecycle | `waitForBoot()`, `waitFor(fn, ms?)`, `stop()`, `shutdown(opts?)`, `continue(opts?)`, `remove()`, `clean()`, `destroy()` | Boot readiness, custom polling, power-cut or guest-shutdown teardown, frozen resume |
 | Comms | `rest()`, `exec()`, `monitor()`, `serial()`, `qga()` | REST, RouterOS CLI, QEMU monitor, serial console, QGA (x86 only) |
 | Provisioning | `license()`, `setDeviceMode()`, `availablePackages()`, `installPackage()` | Post-boot configuration |
 | Files | `upload()`, `download()` | SCP transfer to/from the CHR |
@@ -841,6 +905,7 @@ interface ChrInstance {
   waitFor(condition: () => Promise<boolean>, timeoutMs?: number): Promise<boolean>;
   stop(): Promise<void>;      // power cut: SIGTERM, then SIGKILL
   shutdown(opts?: ShutdownOptions): Promise<ShutdownResult>; // /system/shutdown, bounded fallback
+  continue(opts?: ContinueOptions): Promise<void>; // resume a frozen start, REST-ready by default
   remove(): Promise<void>;
   clean(): Promise<void>;
   destroy(): Promise<void>;   // stop + remove
@@ -927,6 +992,8 @@ redact before logging or attaching to bug reports.
 | `installDeps` | boolean | — | **Deprecated, ignored.** Never installed anything; run `quickchr doctor` for install hints |
 | `dryRun` | boolean | `false` | Print QEMU command and exit |
 | `timeoutExtra` | number | `0` | Extra **milliseconds** added to boot timeout |
+| `qemuArgs` | string[] | — | Extra QEMU argv elements, one entry each, appended verbatim last. Recorded by `add()`; a `start()` value replaces stored args for that boot only |
+| `frozen` | boolean | `false` | Boot frozen at reset with a gdbstub; resume with `continue()`. Refused with provisioning or `background: false` |
 | `onProgress` | `(msg) => void` | `console.log` | `[debug]` lines only when `QUICKCHR_DEBUG=1` |
 
 Provisioning fields trigger a version check at the top of `start()` /

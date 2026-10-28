@@ -32,6 +32,7 @@ export type {
 	Channel,
 	ChrInstance,
 	ChrPorts,
+	ContinueOptions,
 	CustomForward,
 	Descriptor,
 	DeviceModeOptions,

@@ -309,3 +309,29 @@ describe("boot-timeout launch routing (#189)", () => {
 		}
 	}
 });
+
+describe("continue BOOT_TIMEOUT keeps the machine stopped and preserved (#214)", () => {
+	test("a resumed guest that never reaches REST is stopped, not removed", async () => {
+		// Explicit env: Bun.spawn without it does not see runtime process.env
+		// mutations (verified 1.4.4), so the worker would use the real data dir.
+		const proc = Bun.spawn([process.execPath, join(import.meta.dir, "helpers/continue-timeout-worker.ts")], {
+			env: { ...process.env },
+			stdout: "pipe", stderr: "pipe",
+		});
+		const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+		expect({ exit, output: stdout + stderr }).toEqual({ exit: 0, output: "" });
+	});
+});
+
+describe("continue reuses the frozen launch's recorded accelerator (#214)", () => {
+	test("a recorded lastAccel wins over fresh detection", async () => {
+		// Explicit env, same as above: without it the worker lands in the
+		// real data dir and collides with other runs on its monitor socket.
+		const proc = Bun.spawn([process.execPath, join(import.meta.dir, "helpers/continue-accel-worker.ts")], {
+			env: { ...process.env },
+			stdout: "pipe", stderr: "pipe",
+		});
+		const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+		expect({ exit, output: stdout + stderr }).toEqual({ exit: 0, output: "" });
+	});
+});
