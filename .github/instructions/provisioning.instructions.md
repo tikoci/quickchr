@@ -96,7 +96,8 @@ not a general "apply provisioning later" verb, and the three refusals above are
 refusals on purpose rather than gaps waiting to be filled.
 
 **Preconditions any post-boot provisioning path inherits.** Both fail confusingly when
-unchecked, which is why `assertDeviceModeApplicable()` exists:
+unchecked, which is why `assertDeviceModeApplicable()` and `assertPackageApplicable()`
+exist — one per post-boot step that reaches the guest:
 
 - **The machine must be running with REST reachable.** `applyDeviceMode()` polls
   `waitForDeviceModeApi` before it does anything, so a stopped machine otherwise spends

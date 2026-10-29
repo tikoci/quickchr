@@ -56,6 +56,12 @@ export function parseFlags(
 			if (eqIdx !== -1) {
 				const key = arg.slice(2, eqIdx);
 				rejectRemovedFlag(key);
+				// Last wins on purpose, unlike the space form below which
+				// accumulates repeats: single-value readers (`flag()`) return
+				// `undefined` for an array, so accumulating here would turn
+				// `--name=a --name=b` into no name at all. Repeatable flags
+				// (`--package`, `--add-package`, …) therefore only repeat with
+				// a space; the `=` form keeps quiet last-wins semantics.
 				flags[key] = arg.slice(eqIdx + 1);
 			} else if (arg.startsWith("--no-")) {
 				rejectRemovedFlag(arg.slice(5));
@@ -2349,10 +2355,15 @@ async function applyPackageChange(name: string, packages: string[]) {
 	// Before announcing an install that cannot happen (installPackage() refuses it as well).
 	const { assertProvisioningSupportedVersion } = await import("../lib/versions.ts");
 	assertProvisioningSupportedVersion(instance.state.version, "install packages");
+	// The cheap local checks before the announcement too: a stopped machine and
+	// a missing user-mode NIC are refused from state alone, with no guest I/O.
+	// (installPackage() checks again under the machine lock.)
+	const { assertPackageApplicable } = await import("../lib/quickchr.ts");
+	assertPackageApplicable(instance.state);
 
 	console.log(`Installing packages on ${bold(name)}: ${packages.join(", ")}`);
-	// installPackage() checks the preconditions (running, user-mode NIC, REST
-	// reachable) and warns about names it cannot find in all_packages.
+	// installPackage() probes REST reachability and warns about names it cannot
+	// find in all_packages.
 	const installed = await instance.installPackage(packages);
 	if (installed.length === 0) {
 		console.error(`None of the requested packages were found for RouterOS ${instance.state.version} (${instance.state.arch}): ${packages.join(", ")}`);

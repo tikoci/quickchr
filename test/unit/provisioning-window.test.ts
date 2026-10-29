@@ -163,6 +163,14 @@ describe("assertProvisioningWindow", () => {
 		expect(installAll).not.toContain("--package");
 	});
 
+	test("a package name needing quotes is quoted — the route must paste", () => {
+		// Same rule as the machine name and the device-mode values: the route is
+		// a line you can paste and run. Per-name quoting keeps the comma join
+		// intact (`--package 'my pkg',ups` still splits into two requests).
+		const { message } = refusal(booted(), { packages: ["my pkg", "ups"] });
+		expect(message).toContain("--package 'my pkg',ups");
+	});
+
 	test("license names the CLI route that already ships", () => {
 		expect(() => assertProvisioningWindow(booted(), { license: "p10" })).toThrow(/quickchr set pw-test --license/);
 	});

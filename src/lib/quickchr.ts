@@ -1119,94 +1119,80 @@ function createInstance(state: MachineState): ChrInstance {
 			assertProvisioningSupportedVersion(state.version, "install packages");
 			const names = typeof packages === "string" ? [packages] : packages;
 			if (names.length === 0) return [];
-			// #176's preconditions, inherited: a stopped machine has no guest to reach,
-			// and without a user-mode NIC there is no localhost route to REST or SSH.
-			assertPackageApplicable(state);
+			// The machine lock, mirroring setDeviceMode(): this reboots the guest and
+			// rewrites `machine.json`, so a concurrent lifecycle operation would act
+			// on a machine mid-reboot and both would persist over each other. State
+			// is re-read under the lock — this handle's snapshot may predate whatever
+			// another process just did.
+			return withMachineLock(state, "install-package", async () => {
+				// Inside the lock: the applicability check has to hold for the
+				// operation, not merely at the moment it was made. A stopped machine
+				// has no guest to reach, and without a user-mode NIC there is no
+				// localhost route to REST or SSH (#176's preconditions, inherited).
+				assertPackageApplicable(state);
 
-			// Post-boot auth, not factory admin: a machine provisioned with
-			// `--disable-admin` answers 401 to `admin:`, and those are exactly the
-			// machines this route exists for.
-			const auth = resolveAuth(state);
-			const creds = resolveCreds(state);
+				// Post-boot auth, not factory admin: a machine provisioned with
+				// `--disable-admin` answers 401 to `admin:`, and those are exactly the
+				// machines this route exists for.
+				const auth = resolveAuth(state);
+				const creds = resolveCreds(state);
 
-			// REST has to answer *before* the reboot, so the connection drop the
-			// reboot causes can be attributed to the reboot. Without this a machine
-			// whose REST is dead uploads fine over SSH, has its failed reboot POST
-			// swallowed below, burns the whole boot budget in waitForBoot — and then
-			// reports the packages installed although nothing activated them.
-			if (!await waitForBoot(ports.http, 30_000, auth.header)) {
-				throw new QuickCHRError(
-					"BOOT_TIMEOUT",
-					`Machine "${state.name}" is running but its REST API did not answer on port ${ports.http} within 30s, ` +
-					"so packages cannot be installed (the activating reboot goes over REST). " +
-					"Check the guest's firewall and IP services.",
-				);
-			}
-
-			// A booted machine no longer holds its package cache in use, so pin it until the
-			// upload is done: a concurrent eviction must not remove it mid-read.
-			const pin = pinCacheEntries(`install packages on ${state.name}`, [`packages-${state.arch}-${state.version}`]);
-			const packagePaths: string[] = [];
-			const installed: string[] = [];
-			try {
-				const extractDir = await downloadPackages(state.version, state.arch);
-				for (const pkg of names) {
-					const pkgPath = findPackageFile(extractDir, pkg);
-					if (!pkgPath) {
-						console.warn(`Package "${pkg}" not found in all_packages for ${state.version} (${state.arch})`);
-						continue;
+				// A booted machine no longer holds its package cache in use, so pin it until the
+				// upload is done: a concurrent eviction must not remove it mid-read.
+				const pin = pinCacheEntries(`install packages on ${state.name}`, [`packages-${state.arch}-${state.version}`]);
+				const packagePaths: string[] = [];
+				const installed: string[] = [];
+				try {
+					const extractDir = await downloadPackages(state.version, state.arch);
+					for (const pkg of names) {
+						const pkgPath = findPackageFile(extractDir, pkg);
+						if (!pkgPath) {
+							console.warn(`Package "${pkg}" not found in all_packages for ${state.version} (${state.arch})`);
+							continue;
+						}
+						packagePaths.push(pkgPath);
+						installed.push(pkg);
 					}
-					packagePaths.push(pkgPath);
-					installed.push(pkg);
+					// After the find loop on purpose: a request naming nothing
+					// installable returns `[]` without probing the guest, so an
+					// unknown name on a REST-dead machine is a quiet no-match, not a
+					// BOOT_TIMEOUT. The probe still runs before anything is uploaded.
+					if (packagePaths.length === 0) return [];
+
+					// REST has to answer *before* the reboot, so the connection drop
+					// the reboot causes can be attributed to the reboot. Without this
+					// a machine whose REST is dead uploads fine over SSH, and the
+					// reboot that follows can neither be sent nor observed.
+					await assertRestAnswering(ports.http, auth.header, state.name);
+
+					await uploadPackages(packagePaths, ports.ssh, creds.user, creds.password);
+				} finally {
+					pin.release();
 				}
-				if (packagePaths.length === 0) return [];
 
-				await uploadPackages(packagePaths, ports.ssh, creds.user, creds.password);
-			} finally {
-				pin.release();
-			}
+				// Reboot to activate, confirm the guest went down, and wait for REST.
+				// Pass resolved credentials so waitForBoot can validate the response body
+				// (not just check for a connection), preventing ECONNRESET on the first
+				// real REST call after the reboot completes.
+				const accel = await detectAccel(state.arch);
+				const timeout = defaultBootTimeout(state.arch, true, accel);
+				await rebootForPackageActivation(ports.http, auth.header, state.name, timeout);
 
-			// Reboot to activate packages
-			try {
-				await restPost(
-					`http://127.0.0.1:${ports.http}/rest/system/reboot`,
-					auth.header,
-					{},
-					5000,
-				);
-			} catch {
-				// Expected — connection drops during reboot. Attributable to the reboot
-				// only because the pre-flight probe above proved REST answered.
-			}
+				// Persist installed packages to machine.json
+				const current = loadMachine(state.name);
+				if (current) {
+					const merged = new Set([...(current.packages ?? []), ...installed]);
+					current.packages = [...merged];
+					saveMachine(current);
+				}
+				state.packages = [...new Set([...(state.packages ?? []), ...installed])];
+				// This is quickchr applying a provisioning step, so it belongs in the
+				// record the window reads (#176) — a later `start` passing the same
+				// packages is then a recognised no-op instead of a refusal.
+				recordProvisioningStep(state, "packages");
 
-			// Wait for the instance to come back up.
-			// Pass resolved credentials so waitForBoot can validate the response body
-			// (not just check for a connection), preventing ECONNRESET on the first
-			// real REST call after the reboot completes.
-			const accel = await detectAccel(state.arch);
-			const timeout = defaultBootTimeout(state.arch, true, accel);
-			if (!await waitForBoot(ports.http, timeout, auth.header)) {
-				throw new QuickCHRError(
-					"BOOT_TIMEOUT",
-					`Machine "${state.name}" did not come back up within ${Math.round(timeout / 1000)}s after the package-install reboot. ` +
-					"The packages were uploaded; check the guest before retrying.",
-				);
-			}
-
-			// Persist installed packages to machine.json
-			const current = loadMachine(state.name);
-			if (current) {
-				const merged = new Set([...(current.packages ?? []), ...installed]);
-				current.packages = [...merged];
-				saveMachine(current);
-			}
-			state.packages = [...new Set([...(state.packages ?? []), ...installed])];
-			// This is quickchr applying a provisioning step, so it belongs in the
-			// record the window reads (#176) — a later `start` passing the same
-			// packages is then a recognised no-op instead of a refusal.
-			recordProvisioningStep(state, "packages");
-
-			return installed;
+				return installed;
+			});
 		},
 
 		async upload(localPath: string, remotePath?: string): Promise<void> {
@@ -1809,7 +1795,7 @@ export function refreshMachineState(state: MachineState): void {
  *  `steps` accumulates and `at` moves to now, which is what `ProvisioningRecord`
  *  promises: the last time quickchr applied provisioning to this disk.
  *
- *  It cannot reopen or close a window by accident. The only caller requires a running
+ *  It cannot reopen or close a window by accident. Every caller requires a running
  *  machine, and a running machine has `lastStartedAt`, so the window was already shut
  *  before this wrote anything. */
 function recordProvisioningStep(state: MachineState, step: ProvisioningStep): void {
@@ -1855,8 +1841,11 @@ function assertDeviceModeApplicable(state: MachineState): void {
  *  The same guard `start()` applies to provisioning and `setDeviceMode()` applies
  *  afterwards, moved to the third step that may run post-boot: without it a stopped
  *  machine fails inside SCP with a connection error, and a machine with no user-mode
- *  NIC has no localhost route to REST or SSH at all and never recovers. */
-function assertPackageApplicable(state: MachineState): void {
+ *  NIC has no localhost route to REST or SSH at all and never recovers.
+ *
+ *  Exported so the CLI can refuse before it announces an install that cannot
+ *  happen; `installPackage()` checks again under the machine lock. */
+export function assertPackageApplicable(state: MachineState): void {
 	if (!isMachineRunning(state)) {
 		throw new QuickCHRError(
 			"MACHINE_STOPPED",
@@ -1870,6 +1859,111 @@ function assertPackageApplicable(state: MachineState): void {
 			`Packages are installed over localhost SSH and REST, which need a user-mode network interface — ` +
 			`"${state.name}" has none, so quickchr cannot reach it. ` +
 			"Recreate the machine with a user-mode NIC alongside its other networks.",
+		);
+	}
+}
+
+/** Refuse a package install whose activating reboot could not be observed.
+ *
+ *  REST has to answer *before* the reboot, so the connection drop the reboot
+ *  causes can be attributed to the reboot. The budget is a parameter (not a
+ *  constant) so unit tests can drive the timeout path without waiting out the
+ *  production 30 s; `installPackage()` passes the default. */
+export async function assertRestAnswering(
+	httpPort: number,
+	authHeader: string,
+	machineName: string,
+	budgetMs = 30_000,
+): Promise<void> {
+	if (!await waitForBoot(httpPort, budgetMs, authHeader)) {
+		throw new QuickCHRError(
+			"BOOT_TIMEOUT",
+			`Machine "${machineName}" is running but its REST API did not answer on port ${httpPort} within ${Math.round(budgetMs / 1000)}s, ` +
+			"so packages cannot be installed (the activating reboot goes over REST). " +
+			"Check the guest's firewall and IP services.",
+		);
+	}
+}
+
+/** POST the activating reboot for a package install, confirm the guest went
+ *  down, and wait for REST to come back.
+ *
+ *  A non-2xx from the reboot POST is an answer, not a race: the guest refused
+ *  to reboot, so waiting would pass immediately (the machine never went down)
+ *  and the install would be recorded as a success it was not. Only a transport
+ *  error — the connection dropping — is the expected shape of a reboot taking
+ *  effect, and even that is confirmed by the down-detection below rather than
+ *  assumed: a spurious reset with the guest still up must not read as a reboot.
+ *
+ *  Down-detection polls until a request *fails* (refused, reset, timed out).
+ *  Any status — 2xx, 401, even 500 — means the guest's network stack still
+ *  answers. When the budget expires with REST still up, the reboot did not
+ *  happen and the install must not be recorded.
+ *
+ *  The budgets are parameters so unit tests can drive the failure paths fast;
+ *  `installPackage()` passes the production values. */
+export async function rebootForPackageActivation(
+	httpPort: number,
+	authHeader: string,
+	machineName: string,
+	bootTimeoutMs: number,
+	downBudgetMs = 30_000,
+): Promise<void> {
+	try {
+		const { status, body } = await restPost(
+			`http://127.0.0.1:${httpPort}/rest/system/reboot`,
+			authHeader,
+			{},
+			5000,
+		);
+		// Auth first: 401/403 names the credentials, and the device-mode API
+		// answers the same failure with the same code.
+		if (status === 401 || status === 403) {
+			throw new QuickCHRError(
+				"PROCESS_FAILED",
+				`Machine "${machineName}" refused the package-install reboot: HTTP ${status} — the request was not authorized. ` +
+				"The packages were uploaded but were not activated; check the machine's credentials before retrying.",
+			);
+		}
+		if (status < 200 || status >= 300) {
+			throw new QuickCHRError(
+				"REBOOT_FAILED",
+				`Machine "${machineName}" refused the package-install reboot: HTTP ${status} — ${body.trim() || "(empty body)"}. ` +
+				"The packages were uploaded but were not activated; check the guest before retrying.",
+			);
+		}
+	} catch (e) {
+		if (e instanceof QuickCHRError) throw e;
+		// Transport error — the connection dropped, which is the expected shape
+		// of a reboot taking effect. Confirmed below, not assumed.
+	}
+
+	const resourceUrl = `http://127.0.0.1:${httpPort}/rest/system/resource`;
+	const downDeadline = Date.now() + downBudgetMs;
+	let wentDown = false;
+	while (Date.now() < downDeadline) {
+		try {
+			await restGet(resourceUrl, authHeader, 3000);
+		} catch {
+			wentDown = true;
+			break;
+		}
+		await Bun.sleep(1000);
+	}
+	if (!wentDown) {
+		throw new QuickCHRError(
+			"REBOOT_FAILED",
+			`Machine "${machineName}" did not go down after the package-install reboot was accepted — ` +
+			`its REST API kept answering for ${Math.round(downBudgetMs / 1000)}s. ` +
+			"The packages were uploaded but may not have activated; check the guest before retrying.",
+		);
+	}
+
+	if (!await waitForBoot(httpPort, bootTimeoutMs, authHeader)) {
+		throw new QuickCHRError(
+			"BOOT_TIMEOUT",
+			`Machine "${machineName}" did not come back up within ${Math.round(bootTimeoutMs / 1000)}s after the package-install reboot. ` +
+			"The packages were uploaded; check the guest before retrying.",
 		);
 	}
 }

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { join } from "node:path";
+import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
 
@@ -39,16 +40,27 @@ describe.skipIf(SKIP)("set --package", () => {
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
+			// A user plus disabled admin on purpose: `installPackage()` uploads
+			// over SCP with the machine's own credentials, and the old factory
+			// `admin:` path fails on exactly this shape.
 			instance = await QuickCHR.start({
 				...imageTarget(),
 				arch,
 				background: true,
 				name: "integration-set-pkg-cli",
 				deviceMode: { mode: "skip" },
-				secureLogin: false,
+				user: { name: "lab", password: "lab-pass-1" },
+				disableAdmin: true,
 			});
 
 			expect(instance.state.status).toBe("running");
+
+			// Prove the shape before the CLI runs against it: admin answers 401,
+			// so a pass below cannot have ridden the old `admin:` SCP path.
+			const adminProbe = await chrGet(instance, "/rest/system/resource", basicAuth("admin", ""), {
+				after: "provisioning with disableAdmin",
+			});
+			expect(adminProbe.status).toBe(401);
 
 			// The window is shut, so the same request through start() is refused — and
 			// the refusal names the CLI command that does work.
@@ -80,6 +92,8 @@ describe.skipIf(SKIP)("set --package", () => {
 			expect(output).toContain('quickchr exec integration-set-pkg-cli "/system/package/print"');
 
 			// And the guest agrees — the package is present and active after the reboot.
+			// Read back through the handle, which resolves the machine's own
+			// credentials (admin is disabled, so factory `admin:` 401s here).
 			const systemPkgs = await instance.rest("/system/package") as Array<Record<string, unknown>>;
 			const entry = systemPkgs.find((p) => p.name === "container");
 			expect(entry, 'package "container" should appear in /system/package').toBeDefined();

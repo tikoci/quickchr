@@ -310,7 +310,10 @@ function postBootRoute(ask: ProvisioningAsk, request: ProvisioningRequest, name:
 			// installPackage() has no install-all form — availablePackages() would have
 			// to be enumerated first — so the honest route for that request is a reset.
 			if (request.installAllPackages) return replay;
-			return `quickchr set ${quoted} --package ${(request.packages ?? []).join(",")}   # reboots the machine to activate them`;
+			// Quoted per name, like the machine name above: a pasted route must
+			// address the packages that were asked for. Ordinary names pass through
+			// shellQuote unchanged, so the common case still reads plainly.
+			return `quickchr set ${quoted} --package ${(request.packages ?? []).map(shellQuote).join(",")}   # reboots the machine to activate them`;
 		default:
 			return replay;
 	}

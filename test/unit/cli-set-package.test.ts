@@ -134,6 +134,7 @@ describe("quickchr set --package — what it refuses before touching the guest",
 		expect(exitCode).toBe(1);
 		expect(output).toContain("MACHINE_STOPPED");
 		expect(output).toContain("quickchr start lab");
+		expect(output).not.toContain("Installing packages on");
 	});
 
 	test("a machine with no user-mode NIC is refused — packages go over localhost SSH and REST", async () => {
@@ -142,6 +143,7 @@ describe("quickchr set --package — what it refuses before touching the guest",
 		expect(exitCode).toBe(1);
 		expect(output).toContain("NETWORK_UNAVAILABLE");
 		expect(output).toContain("user-mode network interface");
+		expect(output).not.toContain("Installing packages on");
 	});
 
 	test("an old RouterOS is refused before anything is announced", async () => {
@@ -149,6 +151,7 @@ describe("quickchr set --package — what it refuses before touching the guest",
 		const { output, exitCode } = await runQuickchr(["set", "old", "--package", "container"]);
 		expect(exitCode).toBe(1);
 		expect(output).toContain("PROVISIONING_VERSION_UNSUPPORTED");
+		expect(output).not.toContain("Installing packages on");
 	});
 
 	test("an unknown machine is reported before any of that", async () => {
