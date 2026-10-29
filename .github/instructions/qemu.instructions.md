@@ -233,6 +233,19 @@ deprecated no-op: it only ever chose where the serial console went.
 - Serial: Unix socket, bidirectional byte stream.
 - QGA: Unix socket, JSON protocol. Send `guest-sync-delimited` first, then commands.
 
+## Monitor budgets (#80)
+
+- Fast queries (`info *`, `cont`) keep the 5 s `MONITOR_FAST_QUERY_TIMEOUT_MS` default.
+- Snapshot ops pass explicit budgets: savevm/loadvm 120 s, delvm 60 s
+  (`MONITOR_*_TIMEOUT_MS` in `channels.ts`; the comment there records the
+  Linux/KVM timings they were sized from). Sub-second on a fast host, but
+  intermittently past 5 s on loaded CI hosts (windows-x86 TCG, macos-x86 HVF)
+  with a healthy channel — host disk/load stalls, not emulation speed.
+- Callers needing snapshots must use the `snapshot` API, never raw `monitor()`
+  with the default. Two guards: `test/integration/disk.test.ts` ("monitor
+  savevm/loadvm…") covers the API path end-to-end against live CHR, while the
+  mocked `test/unit/snapshot-budgets.test.ts` pins the budget wiring.
+
 ## Boot Detection
 
 `readinessProbeFor(version)` picks the probe: REST (`waitForBoot()`) everywhere it

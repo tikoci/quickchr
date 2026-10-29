@@ -234,20 +234,25 @@ describe.skipIf(SKIP)("disk support", () => {
 
 			await setIdentityWithRetry(instance, "snapbefore", 30_000);
 
-			await instance.monitor(`savevm ${snapshotName}`);
+			// Via the snapshot API, not raw monitor(): savevm/loadvm need the
+			// operation-sized budgets (#80), not the 5 s fast-query default.
+			await instance.snapshot.save(snapshotName);
 
 			await setIdentityWithRetry(instance, "snapafter", 30_000);
 
-			await instance.monitor(`loadvm ${snapshotName}`);
+			await instance.snapshot.load(snapshotName);
 			const rebootedAfterLoad = await instance.waitForBoot(120_000);
 			expect(rebootedAfterLoad).toBe(true);
 			await waitForIdentity(instance, "snapbefore", 60_000);
 		} finally {
 			if (instance) {
-				try { await instance.monitor(`delvm ${snapshotName}`); } catch { /* ignore */ }
+				try { await instance.snapshot.delete(snapshotName); } catch { /* ignore */ }
 				try { await instance.stop(); } catch { /* ignore */ }
 			}
 			await cleanupMachine("integration-snapshot-savevm");
 		}
-	}, bootTestTimeout());
+	// #80: worst-case monitor waits in this body grew 15 s → 300 s
+	// (save 120 s + load 120 s + delete 60 s); the extra 285 s keeps the
+	// headroom slack exactly what it was under the 5 s default.
+	}, bootTestTimeout({ extraMs: 285_000 }));
 });

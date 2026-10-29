@@ -3,7 +3,15 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { monitorCommand, serialStreams, qgaCommand } from "../../src/lib/channels.ts";
+import {
+	monitorCommand,
+	serialStreams,
+	qgaCommand,
+	MONITOR_FAST_QUERY_TIMEOUT_MS,
+	MONITOR_SAVEVM_TIMEOUT_MS,
+	MONITOR_LOADVM_TIMEOUT_MS,
+	MONITOR_DELVM_TIMEOUT_MS,
+} from "../../src/lib/channels.ts";
 import type { QuickCHRError } from "../../src/lib/types.ts";
 
 // Use tmpdir() because Unix domain sockets don't work on FUSE/sshfs mounts (e.g. Multipass)
@@ -56,6 +64,41 @@ describe("monitorCommand", () => {
 		}
 	});
 
+	test("timeout error carries phase timings and byte count (issue #80 evidence)", async () => {
+		if (process.platform === "win32") return; // named-pipe mock not supported here
+		// Simulate a long-running savevm: QEMU greets, accepts the command,
+		// streams a partial echo, then goes quiet until the client budget fires.
+		// This is the exact shape that separated #80's hypothesis 2 (channel
+		// wedged) from hypothesis 3 (operation genuinely long).
+		const sockPath = join(TMP, "monitor.sock");
+		const server = createServer((sock) => {
+			sock.write("QEMU 11.1.1 monitor\r\n(qemu) ");
+			sock.on("data", () => {
+				sock.write("savevm base"); // partial echo, no closing prompt — then silence
+			});
+		});
+
+		await new Promise<void>((resolve) => server.listen(sockPath, resolve));
+
+		try {
+			const err = await monitorCommand(TMP, "savevm baseline", 300).then(
+				() => null,
+				(e: unknown) => e as QuickCHRError & Error,
+			);
+			expect(err).not.toBeNull();
+			expect(err?.code).toBe("BOOT_TIMEOUT");
+			const msg = String(err?.message);
+			expect(msg).toContain('timed out after 300ms: "savevm baseline"');
+			for (const phase of ["connect=", "first-byte=", "prompt=", "command-written=", "response-first-byte=", "bytes="]) {
+				expect(msg).toContain(phase);
+			}
+			expect(msg).not.toContain("never"); // every phase was reached
+			expect(Number(msg.match(/bytes=(\d+)/)?.[1])).toBeGreaterThan(0);
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	});
+
 	test("resolves with empty string for quit command (socket closed by QEMU after prompt)", async () => {
 		if (process.platform === "win32") return; // named-pipe mock not supported here
 		// Simulate QEMU: send (qemu) prompt, receive command, then close socket.
@@ -78,6 +121,20 @@ describe("monitorCommand", () => {
 		} finally {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
+	});
+});
+
+// --- monitor budget magnitudes (issue #80) ---
+// The wiring half of this contract lives in snapshot-budgets.test.ts: it
+// proves the snapshot ops pass these named constants rather than `undefined`
+// or a hardcoded literal. This half pins the constants' real magnitudes.
+
+describe("monitor budgets", () => {
+	test("fast-query default stays at 5s; snapshot budgets sit well above it", () => {
+		expect(MONITOR_FAST_QUERY_TIMEOUT_MS).toBe(5000);
+		expect(MONITOR_SAVEVM_TIMEOUT_MS).toBe(120_000);
+		expect(MONITOR_LOADVM_TIMEOUT_MS).toBe(120_000);
+		expect(MONITOR_DELVM_TIMEOUT_MS).toBe(60_000);
 	});
 });
 

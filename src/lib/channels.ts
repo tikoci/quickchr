@@ -55,6 +55,22 @@ export function channelFileExists(path: string): boolean {
 	return existsSync(path);
 }
 
+/**
+ * Monitor budgets (issue #80). Fast queries (`info status`, `info snapshots`,
+ * `cont`) answer in milliseconds; snapshot operations write guest RAM plus
+ * disk delta and stall on host disk/load instead. Measured on Linux/KVM x86
+ * CHR 7.25 (512 MiB guest): savevm ~210–280 ms, loadvm ~170 ms, delvm ≤15 ms —
+ * sub-second on a fast host — while loaded CI legs (windows-x86 TCG,
+ * macos-x86 HVF) intermittently blow past 5 s with a healthy channel (command
+ * accepted, partial bytes streamed, final prompt missed). The snapshot
+ * budgets sit 12–24× above that 5 s failure point and inside the 180 s test
+ * body headroom, so a hung op still leaves room for forensics.
+ */
+export const MONITOR_FAST_QUERY_TIMEOUT_MS = 5000;
+export const MONITOR_SAVEVM_TIMEOUT_MS = 120_000;
+export const MONITOR_LOADVM_TIMEOUT_MS = 120_000;
+export const MONITOR_DELVM_TIMEOUT_MS = 60_000;
+
 /** Strip ANSI escapes and the monitor's per-character command echo, leaving
  *  just the response body. The echo hid real errors from callers: QEMU renders
  *  the typed command as incremental `cmd\x1b[K\x1b[D…` fragments before the
@@ -74,7 +90,7 @@ export function cleanMonitorResponse(raw: string): string {
 export async function monitorCommand(
 	machineDir: string,
 	command: string,
-	timeoutMs: number = 5000,
+	timeoutMs: number = MONITOR_FAST_QUERY_TIMEOUT_MS,
 	portBase?: number,
 ): Promise<string> {
 	const socketPath = channelPath(machineDir, "monitor");

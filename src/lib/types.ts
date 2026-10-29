@@ -764,6 +764,14 @@ export interface ChrInstance {
 	/** Stop and permanently delete this instance (disk + state). Equivalent to stop() then remove(). */
 	destroy(): Promise<void>;
 
+	/** Send a raw command to the QEMU monitor and return the cleaned response.
+	 *
+	 *  Budgeted at the 5 s fast-query default (`MONITOR_FAST_QUERY_TIMEOUT_MS`
+	 *  in `channels.ts`) — right for `info *` and `cont`, too short for
+	 *  snapshot work. For `savevm`/`loadvm`/`delvm` use `snapshot.save` /
+	 *  `snapshot.load` / `snapshot.delete`, which pass operation-sized budgets
+	 *  (#80); a raw `monitor("savevm …")` times out on loaded hosts.
+	 */
 	monitor(command: string): Promise<string>;
 	serial(): { readable: ReadableStream; writable: WritableStream };
 	/**
