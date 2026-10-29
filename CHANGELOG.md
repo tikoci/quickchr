@@ -11,6 +11,18 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Fixed
+
+- **`exec` no longer fails hard on a transient post-boot connection reset.**
+  The default `auto` transport retries the REST attempt on `ECONNRESET` (up to
+  3 times, 2 s apart — the same policy `rest()` already used) and now actually
+  falls back to the serial console when REST stays unreachable, as documented.
+  Previously `restExecute` wrapped transport failures in `EXEC_FAILED`, so the
+  auto path's console fallback never fired and a single reset — the shape
+  behind #135's first-`exec`-after-boot failure — exited 1. HTTP errors
+  (401/400/...) still fail immediately with no retry or fallback, and explicit
+  `--via=rest` still sends exactly once. (#135)
+
 ## [0.5.4] — 2026-10-29
 
 ### Fixed
