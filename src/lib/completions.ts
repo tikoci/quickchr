@@ -396,7 +396,7 @@ _quickchr() {
                 'inspect:Print running machine descriptor'
                 'env:Print subprocess environment'
                 'get:Show live machine config (license, device-mode, admin)'
-                'set:Change a booted machine (license, device-mode)'
+                'set:Change a booted machine (license, packages, device-mode)'
                 'remove:Remove instance(s) and disk'
                 'rm:Remove instance(s) (alias)'
                 'clean:Reset instance disk to fresh image'
@@ -501,7 +501,7 @@ complete -c quickchr -n "not __fish_seen_subcommand_from $quickchr_commands" \\
 complete -c quickchr -n "not __fish_seen_subcommand_from $quickchr_commands" \\
     -a "get"         -d "Show live machine config (license, device-mode, admin)"
 complete -c quickchr -n "not __fish_seen_subcommand_from $quickchr_commands" \
-    -a "set"         -d "Change a booted machine (license, device-mode)"
+    -a "set"         -d "Change a booted machine (license, packages, device-mode)"
 complete -c quickchr -n "not __fish_seen_subcommand_from $quickchr_commands" \
     -a "license"     -d "Apply/renew CHR trial license"
 complete -c quickchr -n "not __fish_seen_subcommand_from $quickchr_commands" \\

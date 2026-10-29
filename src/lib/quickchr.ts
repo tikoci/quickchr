@@ -1119,6 +1119,29 @@ function createInstance(state: MachineState): ChrInstance {
 			assertProvisioningSupportedVersion(state.version, "install packages");
 			const names = typeof packages === "string" ? [packages] : packages;
 			if (names.length === 0) return [];
+			// #176's preconditions, inherited: a stopped machine has no guest to reach,
+			// and without a user-mode NIC there is no localhost route to REST or SSH.
+			assertPackageApplicable(state);
+
+			// Post-boot auth, not factory admin: a machine provisioned with
+			// `--disable-admin` answers 401 to `admin:`, and those are exactly the
+			// machines this route exists for.
+			const auth = resolveAuth(state);
+			const creds = resolveCreds(state);
+
+			// REST has to answer *before* the reboot, so the connection drop the
+			// reboot causes can be attributed to the reboot. Without this a machine
+			// whose REST is dead uploads fine over SSH, has its failed reboot POST
+			// swallowed below, burns the whole boot budget in waitForBoot — and then
+			// reports the packages installed although nothing activated them.
+			if (!await waitForBoot(ports.http, 30_000, auth.header)) {
+				throw new QuickCHRError(
+					"BOOT_TIMEOUT",
+					`Machine "${state.name}" is running but its REST API did not answer on port ${ports.http} within 30s, ` +
+					"so packages cannot be installed (the activating reboot goes over REST). " +
+					"Check the guest's firewall and IP services.",
+				);
+			}
 
 			// A booted machine no longer holds its package cache in use, so pin it until the
 			// upload is done: a concurrent eviction must not remove it mid-read.
@@ -1138,25 +1161,22 @@ function createInstance(state: MachineState): ChrInstance {
 				}
 				if (packagePaths.length === 0) return [];
 
-				await uploadPackages(packagePaths, ports.ssh);
+				await uploadPackages(packagePaths, ports.ssh, creds.user, creds.password);
 			} finally {
 				pin.release();
 			}
 
 			// Reboot to activate packages
-			let rebootAuth: string;
 			try {
-				const auth = resolveAuth(state);
-				rebootAuth = auth.header;
 				await restPost(
 					`http://127.0.0.1:${ports.http}/rest/system/reboot`,
-					rebootAuth,
+					auth.header,
 					{},
 					5000,
 				);
 			} catch {
-				// Expected — connection drops during reboot
-				rebootAuth ??= `Basic ${btoa("admin:")}`;
+				// Expected — connection drops during reboot. Attributable to the reboot
+				// only because the pre-flight probe above proved REST answered.
 			}
 
 			// Wait for the instance to come back up.
@@ -1165,7 +1185,13 @@ function createInstance(state: MachineState): ChrInstance {
 			// real REST call after the reboot completes.
 			const accel = await detectAccel(state.arch);
 			const timeout = defaultBootTimeout(state.arch, true, accel);
-			await waitForBoot(ports.http, timeout, rebootAuth);
+			if (!await waitForBoot(ports.http, timeout, auth.header)) {
+				throw new QuickCHRError(
+					"BOOT_TIMEOUT",
+					`Machine "${state.name}" did not come back up within ${Math.round(timeout / 1000)}s after the package-install reboot. ` +
+					"The packages were uploaded; check the guest before retrying.",
+				);
+			}
 
 			// Persist installed packages to machine.json
 			const current = loadMachine(state.name);
@@ -1175,6 +1201,10 @@ function createInstance(state: MachineState): ChrInstance {
 				saveMachine(current);
 			}
 			state.packages = [...new Set([...(state.packages ?? []), ...installed])];
+			// This is quickchr applying a provisioning step, so it belongs in the
+			// record the window reads (#176) — a later `start` passing the same
+			// packages is then a recognised no-op instead of a refusal.
+			recordProvisioningStep(state, "packages");
 
 			return installed;
 		},
@@ -1775,7 +1805,7 @@ export function refreshMachineState(state: MachineState): void {
 /** Add one step to the provisioning record, keeping whatever is already there.
  *
  *  `recordProvisioning()` stamps a whole first-boot run; this is for a step applied on
- *  its own afterwards — `setDeviceMode()` today, `installPackage()` when #24 lands.
+ *  its own afterwards — `setDeviceMode()` and `installPackage()`.
  *  `steps` accumulates and `at` moves to now, which is what `ProvisioningRecord`
  *  promises: the last time quickchr applied provisioning to this disk.
  *
@@ -1815,6 +1845,30 @@ function assertDeviceModeApplicable(state: MachineState): void {
 			"NETWORK_UNAVAILABLE",
 			`Device-mode is applied over localhost REST, which needs a user-mode network interface — ` +
 			`"${state.name}" has none, so quickchr cannot reach its REST API. ` +
+			"Recreate the machine with a user-mode NIC alongside its other networks.",
+		);
+	}
+}
+
+/** Preconditions a post-boot package install inherits from provisioning (#24).
+ *
+ *  The same guard `start()` applies to provisioning and `setDeviceMode()` applies
+ *  afterwards, moved to the third step that may run post-boot: without it a stopped
+ *  machine fails inside SCP with a connection error, and a machine with no user-mode
+ *  NIC has no localhost route to REST or SSH at all and never recovers. */
+function assertPackageApplicable(state: MachineState): void {
+	if (!isMachineRunning(state)) {
+		throw new QuickCHRError(
+			"MACHINE_STOPPED",
+			`Packages are installed through the guest, so "${state.name}" has to be running. ` +
+			`Start it with 'quickchr start ${shellQuote(state.name)}', then install packages.`,
+		);
+	}
+	if (!hasUserModeNetwork(state.networks)) {
+		throw new QuickCHRError(
+			"NETWORK_UNAVAILABLE",
+			`Packages are installed over localhost SSH and REST, which need a user-mode network interface — ` +
+			`"${state.name}" has none, so quickchr cannot reach it. ` +
 			"Recreate the machine with a user-mode NIC alongside its other networks.",
 		);
 	}

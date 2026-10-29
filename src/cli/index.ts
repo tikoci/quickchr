@@ -2191,6 +2191,8 @@ async function applyLicense(argv: string[]) {
  *  is a capability flag — it gates whether a feature *can* run and describes nothing
  *  about how the guest is configured, so applying it later cannot clobber working
  *  config; the config it was blocking could not have been applied while it was off.
+ *  `--package` is additive for the same reason: installing a package cannot rewrite
+ *  config that drifted since boot (#24).
  *
  *  `--add-user`, `--disable-admin` and `--secure-login` are excluded on purpose. They
  *  are working config rather than a capability, they collide with whatever has been
@@ -2203,7 +2205,7 @@ async function cmdSet(argv: string[]) {
 	// --license` printed a usage error while `quickchr license --name lab` worked.
 	const name = positional[0] ?? flag(flags, "name");
 
-	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|unlimited]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>] [--qemu-arg <arg>] [--clear-qemu-args]";
+	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|unlimited]] [--package <pkg>[,<pkg>...]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>] [--qemu-arg <arg>] [--clear-qemu-args]";
 	if (!name) {
 		console.error(usage);
 		process.exit(1);
@@ -2224,6 +2226,7 @@ async function cmdSet(argv: string[]) {
 	}
 
 	const wantsLicense = flagBool(flags, "license");
+	const packages = csvList(flagList(flags, "package"));
 	const deviceMode = deviceModeFromFlags(flags);
 	const qemuArgs = flagList(flags, "qemu-arg");
 	const clearQemuArgs = flagBool(flags, "clear-qemu-args");
@@ -2232,8 +2235,8 @@ async function cmdSet(argv: string[]) {
 		throw new QuickCHRError("INVALID_ARGUMENT", "--qemu-arg and --clear-qemu-args conflict: --qemu-arg already replaces the recorded args wholesale");
 	}
 
-	if (!wantsLicense && !deviceMode && !wantsQemuArgs) {
-		console.error("Nothing to set. Available flags: --license, --device-mode, --device-mode-enable, --device-mode-disable, --qemu-arg, --clear-qemu-args");
+	if (!wantsLicense && !deviceMode && packages.length === 0 && !wantsQemuArgs) {
+		console.error("Nothing to set. Available flags: --license, --package, --device-mode, --device-mode-enable, --device-mode-disable, --qemu-arg, --clear-qemu-args");
 		process.exit(1);
 	}
 
@@ -2241,9 +2244,11 @@ async function cmdSet(argv: string[]) {
 	// keeps a running-machine refusal from racing a device-mode power cycle.
 	if (wantsQemuArgs) await applyQemuArgsChange(name, qemuArgs, clearQemuArgs);
 
-	// Device-mode first: it power-cycles the guest, and a license applied beforehand
-	// would be read back across a reboot it did not expect.
+	// Device-mode next: it power-cycles the guest, and anything applied beforehand
+	// would be read back across a reboot it did not expect. Packages after that — they
+	// reboot too. The license last; it takes effect immediately, no reboot.
 	if (deviceMode) await applyDeviceModeChange(name, deviceMode);
+	if (packages.length > 0) await applyPackageChange(name, packages);
 	if (wantsLicense) {
 		const subcmdArgs = [name, ...Object.entries(flags).flatMap(([k, v]) => v === true ? [`--${k}`] : [`--${k}=${v}`]), ...positional.slice(1)];
 		await applyLicense(subcmdArgs);
@@ -2322,6 +2327,42 @@ async function applyDeviceModeChange(name: string, deviceMode: DeviceModeOptions
 	// Quoted for the same reason the refusal routes are: a legacy machine name can
 	// contain a space, and an unquoted read-back hint would name a different machine.
 	console.log(`Device-mode set. Read it back with: quickchr get ${shellQuote(name)} device-mode`);
+}
+
+/** `set <name> --package …` — the post-boot route the refusal names (#24).
+ *
+ *  Wraps `installPackage()`: uploads the packages over SCP, reboots to activate
+ *  them, and waits for REST to come back. Installed packages are recorded in
+ *  `machine.json`, so a later `start` passing the same packages is a recognised
+ *  no-op instead of a refusal. */
+async function applyPackageChange(name: string, packages: string[]) {
+	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { bold, machineNotFoundMessage } = await import("./format.ts");
+	const { shellQuote } = await import("../lib/names.ts");
+
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+
+	// Before announcing an install that cannot happen (installPackage() refuses it as well).
+	const { assertProvisioningSupportedVersion } = await import("../lib/versions.ts");
+	assertProvisioningSupportedVersion(instance.state.version, "install packages");
+
+	console.log(`Installing packages on ${bold(name)}: ${packages.join(", ")}`);
+	// installPackage() checks the preconditions (running, user-mode NIC, REST
+	// reachable) and warns about names it cannot find in all_packages.
+	const installed = await instance.installPackage(packages);
+	if (installed.length === 0) {
+		console.error(`None of the requested packages were found for RouterOS ${instance.state.version} (${instance.state.arch}): ${packages.join(", ")}`);
+		process.exit(1);
+	}
+	const plural = installed.length === 1 ? "" : "s";
+	console.log(`Installed ${installed.length} package${plural} on ${bold(name)}: ${installed.join(", ")} (machine rebooted to activate).`);
+	// Quoted for the same reason the refusal routes are: a legacy machine name can
+	// contain a space, and an unquoted read-back hint would name a different machine.
+	console.log(`Verify with: quickchr exec ${shellQuote(name)} "/system/package/print"`);
 }
 
 async function cmdLicense(argv: string[]) {
@@ -3294,7 +3335,7 @@ Commands:
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
   get <name> [group]      Show machine config (license, device-mode, admin)
-  set <name> [flags]      Change a booted machine (license, device-mode)
+  set <name> [flags]      Change a booted machine (license, packages, device-mode)
   license <name>          Deprecated — use 'set <name> --license'
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
@@ -3660,7 +3701,7 @@ When no group is given, all properties are shown.
 The machine must be running to query live properties.`);
 			break;
 		case "set":
-			console.log(`quickchr set <name> [--license | --device-mode...] [options]
+			console.log(`quickchr set <name> [--license | --package... | --device-mode...] [options]
 
 Change a property on a machine that has already booted. This is the post-boot
 half of the provisioning flags: 'add'/'start' apply them at first boot, 'set'
@@ -3670,6 +3711,7 @@ applies them now.
 
 Flags:
   --license           Apply or renew a CHR trial license.
+  --package <p>       Install one or more extra packages (e.g. container). Repeatable, comma-separated.
   --device-mode <m>   Set device-mode: rose|advanced|basic|home|auto
   --device-mode-enable <f>   Set one or more device-mode flags to yes (e.g. container)
   --device-mode-disable <f>  Set one or more device-mode flags to no
@@ -3677,6 +3719,11 @@ Flags:
                       space-form only). The machine must be stopped; takes
                       effect on the next start.
   --clear-qemu-args   Drop the recorded QEMU passthrough args. Stopped only.
+
+Packages notes:
+  Installing a package reboots the machine to activate it. The machine must be
+  running with REST reachable, and have a user-mode NIC. Verify with
+  'quickchr exec <name> "/system/package/print"'.
 
 Device-mode notes:
   RouterOS only applies device-mode across a power cycle, so 'set' restarts the

@@ -277,9 +277,8 @@ export function hasProvisioningRequest(request: ProvisioningRequest): boolean {
  *  route — `clean()` resets the disk and reopens the window for all of them — but
  *  the cheaper one is named first where it exists.
  *
- *  **Every route is a line you can paste and run**, with its caveat as a comment in
- *  that line's own language — `#` for a shell command, `//` for the library API. This
- *  is not cosmetic: the caveats used to be parenthetical prose appended to the command
+ *  **Every route is a line you can paste and run**, with its caveat as a `#` comment.
+ *  This is not cosmetic: the caveats used to be parenthetical prose appended to the command
  *  (`quickchr set lab … (power-cycles the machine)`), and `(` opens a subshell, so the
  *  advertised recovery was a bash syntax error. A route that cannot be run as printed
  *  is a route that does not work, which is the whole thing this module exists to stop.
@@ -311,7 +310,7 @@ function postBootRoute(ask: ProvisioningAsk, request: ProvisioningRequest, name:
 			// installPackage() has no install-all form — availablePackages() would have
 			// to be enumerated first — so the honest route for that request is a reset.
 			if (request.installAllPackages) return replay;
-			return `instance.installPackage(${JSON.stringify(request.packages ?? [])})   // library API; no CLI verb yet — tikoci/quickchr#24`;
+			return `quickchr set ${quoted} --package ${(request.packages ?? []).join(",")}   # reboots the machine to activate them`;
 		default:
 			return replay;
 	}

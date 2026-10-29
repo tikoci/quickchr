@@ -11,6 +11,25 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Added
+
+- `quickchr set <name> --package <pkg>[,<pkg>...]` installs extra packages on a
+  running machine: SCP upload, reboot to activate, wait for REST. Repeatable and
+  comma-separated like `--add-package`. The `PROVISIONING_WINDOW_CLOSED` refusal
+  for `--add-package` now names this command instead of the library API. (#24)
+
+### Fixed
+
+- `installPackage()` enforces the post-boot preconditions instead of failing
+  mid-operation: a stopped machine is refused with `MACHINE_STOPPED`, a machine
+  with no user-mode NIC with `NETWORK_UNAVAILABLE`, and a machine whose REST API
+  does not answer with `BOOT_TIMEOUT` — before anything is uploaded. It also
+  throws when the guest does not come back after the activating reboot (it used
+  to report success), uploads over SSH with the machine's own credentials
+  instead of factory `admin:` (so `--disable-admin` machines work), and records
+  the `packages` provisioning step so a later `start` with the same packages is
+  a no-op. (#24)
+
 ## [0.5.4] — 2026-10-29
 
 ### Fixed

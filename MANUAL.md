@@ -560,7 +560,7 @@ Apply or renew a CHR trial license on a running instance. Resolves
 MikroTik.com credentials from `--license-account`/`--license-password`,
 the env vars, or the secret store. Requires RouterOS ≥ 7.20.8.
 
-#### `set <name> [--license | --device-mode <m>] [--device-mode-enable <f>] [--device-mode-disable <f>]`
+#### `set <name> [--license | --package <p>] [--device-mode <m>] [--device-mode-enable <f>] [--device-mode-disable <f>]`
 
 Change a property on a machine that has **already booted** — the post-boot half
 of the provisioning flags. `add`/`start` apply them at first boot; `set` applies
@@ -570,6 +570,7 @@ flags that were asked for so it can be run as given.
 | flag | what it does |
 |---|---|
 | `--license` | Apply or renew a CHR trial license (§ `license` above for credential resolution). |
+| `--package <p,…>` | Install one or more extra packages. Repeatable, comma-separated. Reboots to activate. |
 | `--device-mode <m>` | `rose`, `advanced`, `basic`, `home`, `auto`. |
 | `--device-mode-enable <f,…>` | Set one or more device-mode flags to yes. Repeatable, comma-separated. |
 | `--device-mode-disable <f,…>` | Set one or more to no. |
@@ -588,7 +589,9 @@ Naming a feature without a mode resolves the mode to `rose` — so
 before it happens, not discovered afterwards.
 
 Preconditions: the machine must be **running** and have a **user-mode NIC**
-(device-mode is applied over localhost REST), on RouterOS ≥ 7.20.8. Each is a
+(device-mode goes over localhost REST; packages over localhost SSH and REST), on
+RouterOS ≥ 7.20.8. Package installs also probe that REST answers before
+uploading, so a dead REST API fails fast instead of after the reboot. Each is a
 named refusal rather than a timeout.
 
 The change is folded into `machine.json` rather than overwriting it — device-mode
@@ -1223,7 +1226,7 @@ Routes that still work after the window has closed:
 |---|---|
 | license | `quickchr set <name> --license` |
 | device-mode | `quickchr set <name> --device-mode…` / `instance.setDeviceMode()` (power-cycles the VM) |
-| packages | `instance.installPackage()` (library; reboots the guest) |
+| packages | `quickchr set <name> --package …` / `instance.installPackage()` (reboots the guest) |
 | anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window, at first-boot cost |
 
 `clean()` retains provisioning *intent* — packages, device-mode, managed login — so the

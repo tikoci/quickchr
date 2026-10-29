@@ -151,14 +151,16 @@ describe("assertProvisioningWindow", () => {
 	});
 
 	test("the packages route names the packages, and sends install-all through clean()", () => {
-		// installPackage() takes names and has no install-all form, so naming it for
-		// `--install-all-packages` would point at an API that cannot do the job.
-		expect(refusal(booted(), { packages: ["container", "ups"] }).message)
-			.toContain('instance.installPackage(["container","ups"])');
+		// installPackage() takes names and has no install-all form, so naming the
+		// CLI route for `--install-all-packages` would point at a command that
+		// cannot do the job.
+		const packages = refusal(booted(), { packages: ["container", "ups"] }).message;
+		expect(packages).toContain("quickchr set pw-test --package container,ups");
+		expect(packages).toContain("reboots the machine");
 
 		const installAll = refusal(booted(), { installAllPackages: true }).message;
 		expect(installAll).toContain("repeat the original start command");
-		expect(installAll).not.toContain("installPackage(");
+		expect(installAll).not.toContain("--package");
 	});
 
 	test("license names the CLI route that already ships", () => {
