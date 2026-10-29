@@ -2461,5 +2461,25 @@
 		"planned": 2,
 		"sha": "d51e941fc895ed720fc5cbaedd7d12c11c4596a7",
 		"ts": "2026-10-29T00:47:10.731Z"
+	},
+	"40908671782": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"linux-x86|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 184,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			}
+		},
+		"planned": 1,
+		"sha": "615ec0b3ab0dfd48467228d28d6a3bb42beeff7f",
+		"ts": "2026-10-29T16:12:24.006Z"
 	}
 }
