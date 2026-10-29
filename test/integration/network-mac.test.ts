@@ -29,13 +29,13 @@ const SPOKE = "integration-mac-spoke";
 const LINK_PORT = 5473;
 const ADMIN = basicAuth("admin", "");
 
-/** How long to wait for the first reply before the segment is declared dead.
+/** Deadline for each ping wait below: convergence first, then retry-to-clean.
  *
- *  Deliberately generous, because the cost is asymmetric: the wait returns the
- *  moment the first reply lands, so a healthy link pays ~one round-trip, while
+ *  Deliberately generous, because the cost is asymmetric: each wait returns the
+ *  moment its condition lands, so a healthy link pays ~one round-trip, while
  *  a budget too tight for a loaded TCG runner reintroduces the exact flake this
- *  exists to remove. It only runs to expiry when the segment genuinely does not
- *  forward — a hard failure worth waiting to be sure of. */
+ *  exists to remove. A wait only runs to expiry on persistent loss — a hard
+ *  failure worth waiting to be sure of. */
 const PING_CONVERGENCE_MS = 60_000;
 
 async function cleanupMachine(name: string): Promise<void> {
@@ -118,16 +118,18 @@ describe.skipIf(SKIP)("NIC MAC addressing across a shared L2 segment", () => {
 			await spoke.exec("/ip/address/add interface=ether2 address=10.73.0.2/24");
 
 			// Converge first, then assert. The wait proves the segment forwards —
-			// it returns the moment one echo succeeds — and the ping below proves
-			// it keeps forwarding. The bar there is a received count, not zero
-			// loss, deliberately (#163): on a loaded host the first echo of the
-			// `count=3` still times out while seq 1–2 reply in ~1 ms, one REST
-			// round trip after the `count=1` probe reported 0% loss with the
-			// neighbor freshly resolved. RouterOS counts any echo delayed past
-			// 1 s as lost, so that seq 0 is a >1 s scheduling stall, not a drop
-			// on a segment that does not forward — and `packet-loss=0%` would
-			// assert host scheduling, not the link. Two replies at ~1 ms already
-			// prove the property under test.
+			// it returns the moment one echo succeeds — and the retry below proves
+			// it keeps forwarding, still at a zero-loss bar (#163): on a loaded
+			// host an echo of the `count=3` ping can still time out while its
+			// neighbors reply in ~1 ms — observed twice, both times seq 0 lost
+			// with seq 1–2 at ~1 ms, one REST round trip after the `count=1`
+			// probe above reported 0% loss with the neighbor freshly resolved.
+			// Replies at ~1 ms next to a timeout indicate a transient stall, not
+			// a drop on a segment that does not forward — and the duplicate-MAC
+			// faults this test guards (#154) half-work rather than failing
+			// totally, so the bar must stay at zero loss to keep its detection
+			// power. Retrying to clean within a deadline lets a transient stall
+			// pass on retry while persistent loss still fails at zero loss.
 			const from = hub;
 			const reachable = await from.waitFor(async () => {
 				const probe = await from.exec("/ping 10.73.0.2 count=1");
@@ -135,11 +137,14 @@ describe.skipIf(SKIP)("NIC MAC addressing across a shared L2 segment", () => {
 			}, PING_CONVERGENCE_MS);
 			expect(reachable).toBe(true);
 
-			// Now the link is warm, traffic is the thing under test: all three
-			// echoes ran, and at least two answered. A genuinely dead segment
-			// answers none, so this still fails closed.
-			const ping = await hub.exec("/ping 10.73.0.2 count=3");
-			expect(ping.output).toMatch(/sent=3 received=[23]/);
+			// Now the link is warm, loss is the thing under test: repeat the
+			// `count=3` ping until one lands fully clean. A transient stall
+			// passes on retry; persistent loss never lands clean and fails.
+			const clean = await from.waitFor(async () => {
+				const ping = await from.exec("/ping 10.73.0.2 count=3");
+				return ping.output.includes("packet-loss=0%");
+			}, PING_CONVERGENCE_MS);
+			expect(clean).toBe(true);
 
 			// 4. Addresses survive a restart — they are read from machine.json, not
 			//    re-derived, so a derivation change cannot move an existing machine.
