@@ -356,14 +356,14 @@
 	},
 	"7.25": {
 		"linux-arm64": {
-			"conclusion": "pass",
-			"date": "2026-10-28T23:10:31.740Z",
-			"run_id": "40779320727"
+			"conclusion": "fail",
+			"date": "2026-10-29T00:46:53.394Z",
+			"run_id": "40789302291"
 		},
 		"linux-x86": {
-			"conclusion": "pass",
-			"date": "2026-10-28T22:56:04.135Z",
-			"run_id": "40779320727"
+			"conclusion": "fail",
+			"date": "2026-10-29T00:31:00.914Z",
+			"run_id": "40789302291"
 		},
 		"macos-arm64": {
 			"conclusion": "pass",
