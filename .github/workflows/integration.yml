@@ -1142,7 +1142,7 @@ jobs:
       # this rule — which is why only that leg ever shipped a boot-log.
       - name: Upload integration logs (POSIX)
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
@@ -1167,7 +1167,7 @@ jobs:
 
       - name: Upload integration logs (Windows)
         if: ${{ always() && runner.os == 'Windows' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
@@ -1636,7 +1636,7 @@ jobs:
       # (see the integration job's upload step).
       - name: Upload smoke logs (POSIX)
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-smoke-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
@@ -1649,7 +1649,7 @@ jobs:
 
       - name: Upload smoke logs (Windows)
         if: ${{ always() && runner.os == 'Windows' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-smoke-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
