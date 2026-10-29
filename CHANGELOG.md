@@ -11,6 +11,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+## [0.5.4] — 2026-10-29
+
 ### Fixed
 
 - `start <name>` on an existing machine no longer resolves the stable channel over
@@ -25,6 +27,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 - MANUAL: new "Claude Code cloud sessions and other proxied sandboxes" section,
   covering the environment network access to allow, a setup script that installs
   QEMU and pre-fetches a CHR image, and measured TCG boot times. (#210)
+- MANUAL: `exec` output uses CRLF line endings (RouterOS console style); strip
+  `\r` before hashing or diffing. (#212)
 
 ## [0.5.3] — 2026-10-28
 
