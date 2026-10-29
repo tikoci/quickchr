@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, afterAll, mock } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { saveMachine } from "../../src/lib/state.ts";
@@ -28,6 +28,14 @@ const LISTING = "1       snap1             113 MiB 2026-04-14 00:47:19  00:01:17
 const notStubbed = (name: string) => (..._args: unknown[]): never => {
 	throw new Error(`channels mock: ${name} is not stubbed`);
 };
+
+// mock.module() is process-wide and mock.restore() does not undo it (Bun 1.4.4):
+// snapshot the real exports first and re-register them in afterAll, or every
+// test file that runs after this one in the same `bun test` process gets the stub.
+const realChannels = { ...(await import("../../src/lib/channels.ts")) };
+afterAll(() => {
+	mock.module("../../src/lib/channels.ts", () => realChannels);
+});
 
 mock.module("../../src/lib/channels.ts", () => ({
 	// Distinctive stand-ins for the real MONITOR_*_TIMEOUT_MS constants.

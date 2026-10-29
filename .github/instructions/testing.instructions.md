@@ -237,6 +237,26 @@ trip through CI, force the branch in a scratch file — `Object.defineProperty(p
 { value: "win32", configurable: true })` before the call, restored in `afterEach` — which
 reproduces both the failure and the fix on a POSIX host in about two seconds.
 
+## A top-level `mock.module()` of a source module leaks into every later test file
+
+`bun test test/unit/` runs all files in one process, and `mock.module()` replaces the module for
+the whole process. `mock.restore()` does **not** undo it (Bun 1.4.4: an `afterAll(mock.restore)`
+in `snapshot-budgets.test.ts` left the same 28 failures). When `snapshot-budgets.test.ts` first
+stubbed `channels.ts`, 28 tests in other files failed in the full suite (consoleExec,
+monitorCommand, qgaCommand, cleanMonitorResponse, …). They passed file by file, and on the PR the
+unit job never ran on that head because the branch was conflicting (#224).
+
+Either isolate the mock in a worker subprocess (`test/unit/helpers/*-worker.ts`, spawned by the
+test), or snapshot the real exports before mocking and re-register them afterwards:
+
+```ts
+const real = { ...(await import("../../src/lib/channels.ts")) };
+afterAll(() => { mock.module("../../src/lib/channels.ts", () => real); });
+```
+
+Before calling a change that adds a module mock done, run the **full** `bun test test/unit/`, not
+just the file you changed.
+
 ## CHR-Interacting Features Must Be Integration-Tested Before "Done"
 
 **A feature is NOT done until its integration test passes against a real running CHR.**
