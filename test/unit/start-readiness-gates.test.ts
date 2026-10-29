@@ -170,6 +170,30 @@ describe("RouterOS 6 refusals happen before download (#182)", () => {
 		expect(instance.state.arch).toBe("x86");
 	});
 
+	test("starting an existing machine by name never resolves a channel over the network", async () => {
+		// enbeep hit this: `quickchr start <name>` fetched upgrade.mikrotik.com for
+		// the stable channel before loading the machine, and hung when it was slow.
+		seed(addedRecord("lab7", "7.25", { status: "running", pid: process.pid }));
+		const originalFetch = globalThis.fetch;
+		let fetches = 0;
+		globalThis.fetch = Object.assign(
+			async () => {
+				fetches++;
+				throw new Error("network blocked in this test");
+			},
+			{ preconnect: originalFetch.preconnect },
+		) as typeof fetch;
+		try {
+			const instance = await QuickCHR.start({ name: "lab7" });
+			expect(instance.state.version).toBe("7.25");
+			const viaChannel = await QuickCHR.start({ name: "lab7", channel: "testing" });
+			expect(viaChannel.state.version).toBe("7.25");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+		expect(fetches).toBe(0);
+	});
+
 	test("an existing 6.x machine given provisioning options is refused before it boots", async () => {
 		seed(addedRecord("lab6", "6.49.23"));
 		const result = await codeOf(QuickCHR.start({ name: "lab6", packages: ["container"] }));

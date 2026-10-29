@@ -11,6 +11,12 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Fixed
+
+- `start <name>` on an existing machine no longer resolves the stable channel over
+  the network first — it boots the machine's recorded version, so restarting works
+  offline and no longer hangs when `upgrade.mikrotik.com` is slow. (#233)
+
 ### Documentation
 
 - MANUAL: new "Claude Code cloud sessions and other proxied sandboxes" section,

@@ -2280,6 +2280,12 @@ export class QuickCHR {
 		}
 		const hasDeviceModeProvisioning = shouldApplyDeviceMode(resolvedDeviceMode);
 
+		// An existing machine boots its recorded version, so resolving a channel for
+		// it is only a network round trip that can hang or fail offline. Looked up by
+		// listed name only: a new name is validated below before it touches the disk.
+		const existingNames = listMachineNames();
+		const existingByName = opts.name && existingNames.includes(opts.name) ? loadMachine(opts.name) : undefined;
+
 		// Resolve version
 		warnVersionWithChannel(opts, logger);
 		let version: string;
@@ -2294,6 +2300,8 @@ export class QuickCHR {
 			} else {
 				version = opts.version;
 			}
+		} else if (existingByName) {
+			version = existingByName.version;
 		} else {
 			const channel = opts.channel ?? "stable";
 			version = await resolveVersion(channel);
@@ -2324,13 +2332,12 @@ export class QuickCHR {
 		};
 
 		// Resolve name
-		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
 		// Only a *new* name has to satisfy the current rules — see the guard at the top.
 		if (!existingNames.includes(name)) assertValidResourceName(name, "machine");
 
 		// Check if machine already exists
-		const existing = loadMachine(name);
+		const existing = existingByName ?? loadMachine(name);
 		if (existing) {
 			// Both paths below re-launch a guest quickchr did not just create, so neither
 			// can run provisioning. Refuse before either of them: dropping the options in
