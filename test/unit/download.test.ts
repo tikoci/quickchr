@@ -161,6 +161,37 @@ async function expectQuickCHRError(p: Promise<unknown>): Promise<QuickCHRError> 
 	throw new Error("expected the download to throw, but it resolved");
 }
 
+// Every variable the proxy verdict reads. Tests that touch the verdict swap
+// the whole set — the developer's own shell may export any of them — and
+// restore it in a finally.
+const PROXY_ENV_KEYS = [
+	"HTTPS_PROXY",
+	"https_proxy",
+	"HTTP_PROXY",
+	"http_proxy",
+	"ALL_PROXY",
+	"all_proxy",
+	"NO_PROXY",
+	"no_proxy",
+];
+
+function swapProxyEnv(next: Record<string, string | undefined>): Record<string, string | undefined> {
+	const prev: Record<string, string | undefined> = {};
+	for (const key of PROXY_ENV_KEYS) {
+		prev[key] = process.env[key];
+		if (next[key] === undefined) delete process.env[key];
+		else process.env[key] = next[key];
+	}
+	return prev;
+}
+
+function restoreProxyEnv(prev: Record<string, string | undefined>): void {
+	for (const key of PROXY_ENV_KEYS) {
+		if (prev[key] === undefined) delete process.env[key];
+		else process.env[key] = prev[key];
+	}
+}
+
 describe("transferBudgetMs", () => {
 	test("derives the budget from size and the named floor throughput", () => {
 		const arm64Zip = 52_216_933;
@@ -392,21 +423,63 @@ describe("downloadToFile — HTTP outcomes", () => {
 		expect(leftoverParts(dest)).toEqual([]);
 	}, 30_000);
 
-	test("a 403 names the refused host and hints at the proxy allowlist", async () => {
-		// Sandboxed cloud sessions answer 403 to CONNECT for hosts off the
-		// allowlist (#210) — a policy refusal, not a missing artifact.
-		const { url, attempts } = startStub({ size: 0, status: 403 });
-		const dest = join(tempDir(), "artifact.zip");
+	test("a 403 with no proxy configured keeps the generic origin verdict", async () => {
+		// On the pinned Bun a proxy CONNECT refusal always throws, so a 403
+		// Response came from the origin — blaming the proxy would misdirect
+		// (WAF/rate-limit, removed artifact, AccessDenied). Proxy env is cleared:
+		// the developer's own shell may export it.
+		const prevEnv = swapProxyEnv({});
+		try {
+			const { url, attempts } = startStub({ size: 0, status: 403 });
+			const dest = join(tempDir(), "artifact.zip");
 
-		const err = await expectQuickCHRError(
-			downloadToFile(url, dest, { logger: silentLogger, maxAttempts: 3 }),
-		);
+			const err = await expectQuickCHRError(
+				downloadToFile(url, dest, { logger: silentLogger, maxAttempts: 3 }),
+			);
 
-		expect(err.code).toBe("DOWNLOAD_FAILED");
-		expect(err.message).toContain("403");
-		expect(err.message).toContain(new URL(url).hostname);
-		expect(err.installHint).toContain("*.mikrotik.com");
-		expect(attempts()).toBe(1);
+			expect(err.code).toBe("DOWNLOAD_FAILED");
+			expect(err.message).toContain("403");
+			expect(err.message).toContain(url);
+			expect(err.message).not.toContain("egress proxy");
+			expect(err.installHint).toBeUndefined();
+			expect(attempts()).toBe(1);
+		} finally {
+			restoreProxyEnv(prevEnv);
+		}
+	});
+
+	test("a 403 with a proxy configured hedges and keeps the allowlist fix", async () => {
+		// The stub is the origin and cannot sit behind a proxy — mock fetch to
+		// resolve the 403 the way a proxied response arrives.
+		const originalFetch = globalThis.fetch;
+		let calls = 0;
+		globalThis.fetch = Object.assign(
+			() => {
+				calls++;
+				return Promise.resolve(new Response("nope", { status: 403 }));
+			},
+			{ preconnect: (_url: string | URL) => {} },
+		) as typeof fetch;
+		const prevEnv = swapProxyEnv({ HTTPS_PROXY: "http://proxy.example:8080" });
+		try {
+			const dest = join(tempDir(), "artifact.zip");
+			const err = await expectQuickCHRError(
+				downloadToFile("https://download.mikrotik.com/routeros/artifact.zip", dest, {
+					logger: silentLogger,
+					maxAttempts: 3,
+				}),
+			);
+
+			expect(err.code).toBe("DOWNLOAD_FAILED");
+			expect(err.message).toContain("403");
+			expect(err.message).toContain("via the egress proxy");
+			expect(err.message).toContain("download.mikrotik.com");
+			expect(err.installHint).toContain("*.mikrotik.com");
+			expect(calls).toBe(1);
+		} finally {
+			globalThis.fetch = originalFetch;
+			restoreProxyEnv(prevEnv);
+		}
 	});
 
 	test("a thrown proxy refusal is terminal and names the refused host", async () => {
@@ -443,6 +516,78 @@ describe("downloadToFile — HTTP outcomes", () => {
 			globalThis.fetch = originalFetch;
 		}
 	});
+
+	test("a thrown 407 names the credentials fix instead of the allowlist", async () => {
+		const originalFetch = globalThis.fetch;
+		let calls = 0;
+		globalThis.fetch = Object.assign(
+			() => {
+				calls++;
+				return Promise.reject(
+					Object.assign(new Error("Proxy refused to open a tunnel: 407 Proxy Authentication Required"), {
+						code: "ERR_PROXY_TUNNEL",
+						status: 407,
+						statusText: "Proxy Authentication Required",
+					}),
+				);
+			},
+			{ preconnect: (_url: string | URL) => {} },
+		) as typeof fetch;
+		try {
+			const dest = join(tempDir(), "artifact.zip");
+			const err = await expectQuickCHRError(
+				downloadToFile("https://download.mikrotik.com/routeros/artifact.zip", dest, {
+					logger: silentLogger,
+					maxAttempts: 3,
+				}),
+			);
+
+			expect(err.code).toBe("DOWNLOAD_FAILED");
+			expect(err.message).toContain("download.mikrotik.com");
+			expect(err.installHint).toContain("407");
+			expect(err.installHint).not.toContain("*.mikrotik.com");
+			expect(calls).toBe(1);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("a thrown proxy 5xx is retried like the transient failure it is", async () => {
+		// Bun rejects every non-2xx CONNECT answer with ERR_PROXY_TUNNEL — but a
+		// 503 is the proxy failing, not refusing, so it must keep the retries a
+		// 503 Response gets rather than turning terminal.
+		const originalFetch = globalThis.fetch;
+		let calls = 0;
+		globalThis.fetch = Object.assign(
+			() => {
+				calls++;
+				return Promise.reject(
+					Object.assign(new Error("Proxy refused to open a tunnel: 503 Service Unavailable"), {
+						code: "ERR_PROXY_TUNNEL",
+						status: 503,
+						statusText: "Service Unavailable",
+					}),
+				);
+			},
+			{ preconnect: (_url: string | URL) => {} },
+		) as typeof fetch;
+		try {
+			const dest = join(tempDir(), "artifact.zip");
+			const err = await expectQuickCHRError(
+				downloadToFile("https://download.mikrotik.com/routeros/artifact.zip", dest, {
+					logger: silentLogger,
+					maxAttempts: 3,
+				}),
+			);
+
+			expect(err.code).toBe("DOWNLOAD_FAILED");
+			expect(err.message).toContain("all 3 attempts");
+			expect(err.installHint).toBeUndefined();
+			expect(calls).toBe(3);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	}, 30_000);
 
 	test("a body with no content-length still downloads, under the stated fallback", async () => {
 		const { url } = startStub({ size: 8_192, chunk: 2_048, declareLength: null });

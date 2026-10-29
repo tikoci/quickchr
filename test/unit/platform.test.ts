@@ -626,10 +626,19 @@ describe("accelDoctorCheck", () => {
 		expect(accelDoctorCheck(["hvf", "tcg"], "arm64", suffix).detail).toContain("QUICKCHR_ACCEL");
 	});
 
-	test("no detected accelerator stays a warning", () => {
+	test("an override does not double the verdict with the TCG-only note", () => {
+		// Under an override the row names the forced mode, not host capability —
+		// appending the TCG-only capability note would say TCG twice.
+		const check = accelDoctorCheck(["tcg"], "x64", " — configured override via QUICKCHR_ACCEL");
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("configured override");
+		expect(check.detail).not.toContain("software emulation only");
+	});
+
+	test("no detected accelerator stays a warning without claiming TCG", () => {
 		const check = accelDoctorCheck([], "x64");
 		expect(check.status).toBe("warn");
-		expect(check.detail).toContain("TCG only");
+		expect(check.detail).toContain("none detected");
 	});
 });
 
@@ -652,6 +661,40 @@ describe("proxyDoctorCheck", () => {
 		const check = proxyDoctorCheck({ https_proxy: "http://proxy.example:8080" });
 		expect(check.status).toBe("warn");
 		expect(check.detail).toContain("http://proxy.example:8080");
+	});
+
+	test("falls back to ALL_PROXY, either case", () => {
+		const upper = proxyDoctorCheck({ ALL_PROXY: "http://proxy.example:8080" });
+		expect(upper.status).toBe("warn");
+		expect(upper.detail).toContain("http://proxy.example:8080");
+		const lower = proxyDoctorCheck({ all_proxy: "http://proxy.example:8080" });
+		expect(lower.status).toBe("warn");
+		expect(lower.detail).toContain("http://proxy.example:8080");
+	});
+
+	test("the scheme-specific variable wins over ALL_PROXY for display", () => {
+		const check = proxyDoctorCheck({
+			HTTPS_PROXY: "http://specific.example:8080",
+			ALL_PROXY: "http://fallback.example:8080",
+		});
+		expect(check.detail).toContain("specific.example");
+		expect(check.detail).not.toContain("fallback.example");
+	});
+
+	test("a non-HTTP scheme is reported as ignored, not as an active proxy", () => {
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "socks5://proxy.example:1080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("socks5://proxy.example:1080");
+		expect(check.detail).toContain("ignored");
+		expect(check.detail).not.toContain("egress via proxy");
+	});
+
+	test("a scheme-less host:port reads as the active http proxy", () => {
+		// Bun defaults scheme-less values to http (probed) — not unparseable.
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "proxy.example:8080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("http://proxy.example:8080");
+		expect(check.detail).toContain("egress via proxy");
 	});
 
 	test("credentials in the proxy URL are never echoed", () => {

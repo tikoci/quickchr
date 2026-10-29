@@ -120,13 +120,34 @@ describe("CLI doctor --json", () => {
 	});
 
 	test("reports an unset proxy as direct egress", async () => {
-		// Forced empty: the developer's own shell may export a proxy.
-		const result = await runQuickchr(["doctor", "--json"], { HTTPS_PROXY: "" });
+		// Forced empty: the developer's own shell may export a proxy. Every
+		// variable the row reads must be cleared, not just the uppercase one.
+		const result = await runQuickchr(["doctor", "--json"], {
+			HTTPS_PROXY: "",
+			https_proxy: "",
+			ALL_PROXY: "",
+			all_proxy: "",
+		});
 
 		const parsed = JSON.parse(result.stdout);
 		const proxy = parsed.checks.find((c: { label: string }) => c.label === "HTTPS proxy");
 		expect(proxy).toBeDefined();
 		expect(proxy.status).toBe("ok");
 		expect(proxy.detail).toContain("not set");
+	});
+
+	test("reports ALL_PROXY as the egress proxy end to end", async () => {
+		const result = await runQuickchr(["doctor", "--json"], {
+			HTTPS_PROXY: "",
+			https_proxy: "",
+			ALL_PROXY: "http://proxy.example:8080",
+			all_proxy: "",
+		});
+
+		const parsed = JSON.parse(result.stdout);
+		const proxy = parsed.checks.find((c: { label: string }) => c.label === "HTTPS proxy");
+		expect(proxy).toBeDefined();
+		expect(proxy.status).toBe("warn");
+		expect(proxy.detail).toContain("http://proxy.example:8080");
 	});
 });

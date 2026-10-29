@@ -229,6 +229,37 @@ function makeMockFetch(fn: (url: string | URL | Request, init?: RequestInit) => 
 	return Object.assign(fn, { preconnect: (_url: string | URL) => {} }) as typeof fetch;
 }
 
+// Every variable the proxy verdict reads. Tests that touch the verdict swap
+// the whole set — the developer's own shell may export any of them — and
+// restore it in a finally.
+const PROXY_ENV_KEYS = [
+	"HTTPS_PROXY",
+	"https_proxy",
+	"HTTP_PROXY",
+	"http_proxy",
+	"ALL_PROXY",
+	"all_proxy",
+	"NO_PROXY",
+	"no_proxy",
+];
+
+function swapProxyEnv(next: Record<string, string | undefined>): Record<string, string | undefined> {
+	const prev: Record<string, string | undefined> = {};
+	for (const key of PROXY_ENV_KEYS) {
+		prev[key] = process.env[key];
+		if (next[key] === undefined) delete process.env[key];
+		else process.env[key] = next[key];
+	}
+	return prev;
+}
+
+function restoreProxyEnv(prev: Record<string, string | undefined>): void {
+	for (const key of PROXY_ENV_KEYS) {
+		if (prev[key] === undefined) delete process.env[key];
+		else process.env[key] = prev[key];
+	}
+}
+
 describe("resolveVersion", () => {
 	const originalFetch = globalThis.fetch;
 
@@ -390,8 +421,10 @@ describe("resolveVersion", () => {
 	// --- Proxy refusals (#210) ---
 	//
 	// Sandboxed cloud sessions answer 403 to CONNECT for hosts off the allowlist.
-	// Both shapes — a thrown tunnel error and an HTTP 403 verdict — must name the
-	// refused host and point at the allowlist fix.
+	// A thrown tunnel error names the refused host and points at the allowlist
+	// fix (or the credentials fix for a 407); an HTTP 403 verdict does the same
+	// only when a proxy is actually configured, and keeps the generic origin
+	// verdict otherwise.
 
 	test("maps a thrown proxy refusal to a DOWNLOAD_FAILED naming the host and the fix", async () => {
 		let calls = 0;
@@ -410,17 +443,83 @@ describe("resolveVersion", () => {
 		expect(calls).toBe(1);
 	});
 
-	test("a 403 verdict names the refused host and hints at the allowlist", async () => {
+	test("a 403 verdict with no proxy configured keeps the generic message", async () => {
+		// On the pinned Bun a proxy CONNECT refusal always throws, so a 403
+		// Response came from the origin through no proxy at all.
+		const prevEnv = swapProxyEnv({});
+		try {
+			let calls = 0;
+			globalThis.fetch = makeMockFetch(() => {
+				calls++;
+				return Promise.resolve(new Response("Forbidden", { status: 403 }));
+			});
+			const err = await resolveVersion("stable", { retryDelayMs: 1 }).catch((e) => e);
+			expect(err.code).toBe("DOWNLOAD_FAILED");
+			expect(err.message).toContain("403");
+			expect(err.message).not.toContain("egress proxy");
+			expect(err.installHint).toBeUndefined();
+			expect(calls).toBe(1);
+		} finally {
+			restoreProxyEnv(prevEnv);
+		}
+	});
+
+	test("a 403 verdict with a proxy configured hedges and keeps the allowlist fix", async () => {
+		const prevEnv = swapProxyEnv({ HTTPS_PROXY: "http://proxy.example:8080" });
+		try {
+			let calls = 0;
+			globalThis.fetch = makeMockFetch(() => {
+				calls++;
+				return Promise.resolve(new Response("Forbidden", { status: 403 }));
+			});
+			await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toMatchObject({
+				code: "DOWNLOAD_FAILED",
+				message: expect.stringContaining("via the egress proxy"),
+				installHint: expect.stringContaining("*.mikrotik.com"),
+			});
+			expect(calls).toBe(1);
+		} finally {
+			restoreProxyEnv(prevEnv);
+		}
+	});
+
+	test("a thrown 407 names the credentials fix instead of the allowlist", async () => {
 		let calls = 0;
 		globalThis.fetch = makeMockFetch(() => {
 			calls++;
-			return Promise.resolve(new Response("Forbidden", { status: 403 }));
+			return Promise.reject(
+				Object.assign(new Error("Proxy refused to open a tunnel: 407 Proxy Authentication Required"), {
+					code: "ERR_PROXY_TUNNEL",
+					status: 407,
+					statusText: "Proxy Authentication Required",
+				}),
+			);
 		});
-		await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toMatchObject({
-			code: "DOWNLOAD_FAILED",
-			message: expect.stringContaining("upgrade.mikrotik.com"),
-			installHint: expect.stringContaining("*.mikrotik.com"),
+		const err = await resolveVersion("stable", { retryDelayMs: 1 }).catch((e) => e);
+		expect(err.code).toBe("DOWNLOAD_FAILED");
+		expect(err.message).toContain("upgrade.mikrotik.com");
+		expect(err.installHint).toContain("407");
+		expect(err.installHint).not.toContain("*.mikrotik.com");
+		// Terminal: a policy refusal cannot clear on retry.
+		expect(calls).toBe(1);
+	});
+
+	test("a thrown proxy 5xx is not mapped to a refusal verdict", async () => {
+		// Not a refusal, so no allowlist mapping — and not a connection failure
+		// either, so this loop's policy surfaces it as-is on the first attempt
+		// (it never retried this shape).
+		let calls = 0;
+		const sick = Object.assign(new Error("Proxy refused to open a tunnel: 503 Service Unavailable"), {
+			code: "ERR_PROXY_TUNNEL",
+			status: 503,
+			statusText: "Service Unavailable",
 		});
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.reject(sick);
+		});
+		const err = await resolveVersion("stable", { retryDelayMs: 1 }).catch((e) => e);
+		expect(err).toBe(sick);
 		expect(calls).toBe(1);
 	});
 

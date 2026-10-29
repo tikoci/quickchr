@@ -3,7 +3,12 @@ import { promises as dns } from "node:dns";
 import {
 	fetchResilient,
 	isConnectionFailure,
+	isProxyConfiguredFor,
 	isProxyRefusal,
+	PROXY_ALLOWLIST_HINT,
+	PROXY_CREDENTIALS_HINT,
+	proxyRefusalHint,
+	proxyTunnelStatus,
 	ResilientFetchError,
 	toIpv4Url,
 } from "../../src/lib/net.ts";
@@ -204,6 +209,23 @@ describe("fetchResilient", () => {
 		expect(fetchSpy).toHaveBeenCalledTimes(1);
 		expect(resolveSpy).toHaveBeenCalledTimes(0);
 	});
+
+	test("still skips the fallback for a refusal that also reads as a connection failure", async () => {
+		// The no-fallback guarantee is explicit, not emergent from the predicates
+		// never overlapping: this shape matches both, and the refusal wins.
+		const resolveSpy = mockResolve4({ reject: new Error("resolve4 must not be called") });
+		const both = Object.assign(new Error("proxy CONNECT refused: 403"), {
+			code: "ConnectionRefused",
+		});
+		expect(isProxyRefusal(both)).toBe(true);
+		expect(isConnectionFailure(both)).toBe(true);
+		spyOn(globalThis, "fetch").mockImplementation((async () => {
+			throw both;
+		}) as unknown as typeof fetch);
+		const err = await fetchResilient("https://upgrade.mikrotik.com/x").catch((e) => e);
+		expect(err).toBe(both); // unchanged, not wrapped in a ResilientFetchError
+		expect(resolveSpy).toHaveBeenCalledTimes(0);
+	});
 });
 
 describe("isProxyRefusal", () => {
@@ -225,6 +247,29 @@ describe("isProxyRefusal", () => {
 		expect(isProxyRefusal(new Error("CONNECT tunnel failed: 403"))).toBe(true);
 	});
 
+	test("true for a 407 tunnel failure — refused for credentials, still terminal", () => {
+		// Bun's exact shape (probed): the code alone cannot tell 407 from 403.
+		const auth = Object.assign(
+			new Error("Proxy refused to open a tunnel: 407 Proxy Authentication Required"),
+			{ code: "ERR_PROXY_TUNNEL", status: 407, statusText: "Proxy Authentication Required" },
+		);
+		expect(isProxyRefusal(auth)).toBe(true);
+		const wrapped = new Error("fetch failed", { cause: auth });
+		expect(isProxyRefusal(wrapped)).toBe(true);
+	});
+
+	test("false for a 5xx tunnel failure — the proxy is sick, not refusing", () => {
+		// A 5xx CONNECT answer must keep the retries it had before proxy mapping
+		// existed: classifying it as a refusal would make it terminal (#210).
+		const sick = Object.assign(
+			new Error("Proxy refused to open a tunnel: 503 Service Unavailable"),
+			{ code: "ERR_PROXY_TUNNEL", status: 503, statusText: "Service Unavailable" },
+		);
+		expect(isProxyRefusal(sick)).toBe(false);
+		const wrapped = new Error("fetch failed", { cause: sick });
+		expect(isProxyRefusal(wrapped)).toBe(false);
+	});
+
 	test("false for connection failures, aborts, and unrelated errors", () => {
 		// A proxy refusal must never read as a connection failure — that is what
 		// would send it down the public-DNS fallback and the retry loops.
@@ -239,8 +284,161 @@ describe("isProxyRefusal", () => {
 		expect(isProxyRefusal(abort)).toBe(false);
 		expect(isProxyRefusal(new TypeError("x is not a function"))).toBe(false);
 		expect(isProxyRefusal(null)).toBe(false);
-		// Proxy auth (407) is a credentials problem, not an allowlist refusal —
-		// the *.mikrotik.com hint would mislead.
+		// A bare 407 message with no tunnel code is not attributable to the
+		// proxy — the *.mikrotik.com hint would mislead.
 		expect(isProxyRefusal(new Error("Proxy Authentication Required"))).toBe(false);
+	});
+
+	test("false for failures that merely mention tunnels or connecting", () => {
+		// No bare "tunnel": a DNS failure for a host with "tunnel" in its name
+		// is not a proxy refusal.
+		expect(isProxyRefusal(new Error("getaddrinfo ENOTFOUND proxy-tunnel-01.example.com"))).toBe(
+			false,
+		);
+		expect(isProxyRefusal(new Error("getaddrinfo ENOTFOUND tunnel.internal"))).toBe(false);
+		// CONNECT matches case-sensitively: the HTTP method is uppercase, while
+		// "Unable to connect" (a connection failure) is not.
+		expect(isProxyRefusal(new Error("Unable to connect to host: connection refused"))).toBe(
+			false,
+		);
+	});
+});
+
+describe("proxyTunnelStatus", () => {
+	test("reads the CONNECT status through the cause chain", () => {
+		expect(
+			proxyTunnelStatus(Object.assign(new Error("tunnel"), { code: "ERR_PROXY_TUNNEL", status: 407 })),
+		).toBe(407);
+		const wrapped = new Error("fetch failed", {
+			cause: Object.assign(new Error("tunnel"), { code: "ERR_PROXY_TUNNEL", status: 503 }),
+		});
+		expect(proxyTunnelStatus(wrapped)).toBe(503);
+	});
+
+	test("undefined without a tunnel failure or without a numeric status", () => {
+		// Shapes with no status keep the historical allowlist reading.
+		expect(
+			proxyTunnelStatus(Object.assign(new Error("tunnel"), { code: "ERR_PROXY_TUNNEL" })),
+		).toBeUndefined();
+		// A bare status with no tunnel code is not a tunnel failure.
+		expect(proxyTunnelStatus(Object.assign(new Error("x"), { status: 503 }))).toBeUndefined();
+		expect(
+			proxyTunnelStatus(Object.assign(new Error("x"), { code: "ERR_PROXY_TUNNEL", status: "503" })),
+		).toBeUndefined();
+		expect(proxyTunnelStatus(new Error("nope"))).toBeUndefined();
+		expect(proxyTunnelStatus(null)).toBeUndefined();
+	});
+});
+
+describe("proxyRefusalHint", () => {
+	test("407 names the credentials fix, 403 and status-less shapes the allowlist", () => {
+		expect(
+			proxyRefusalHint(
+				Object.assign(new Error("tunnel"), { code: "ERR_PROXY_TUNNEL", status: 407 }),
+			),
+		).toBe(PROXY_CREDENTIALS_HINT);
+		expect(
+			proxyRefusalHint(
+				Object.assign(new Error("tunnel"), { code: "ERR_PROXY_TUNNEL", status: 403 }),
+			),
+		).toBe(PROXY_ALLOWLIST_HINT);
+		expect(
+			proxyRefusalHint(Object.assign(new Error("tunnel"), { code: "ERR_PROXY_TUNNEL" })),
+		).toBe(PROXY_ALLOWLIST_HINT);
+	});
+});
+
+describe("isProxyConfiguredFor", () => {
+	const HTTPS_URL = "https://upgrade.mikrotik.com/routeros/NEWESTa7.stable";
+	const HTTP_URL = "http://127.0.0.1:8080/x";
+	const PROXY = "http://proxy.example:8080";
+
+	test("scheme-specific variables apply to their scheme only, either case", () => {
+		expect(isProxyConfiguredFor(HTTPS_URL, { HTTPS_PROXY: PROXY })).toBe(true);
+		expect(isProxyConfiguredFor(HTTPS_URL, { https_proxy: PROXY })).toBe(true);
+		expect(isProxyConfiguredFor(HTTPS_URL, { HTTP_PROXY: PROXY })).toBe(false);
+		expect(isProxyConfiguredFor(HTTP_URL, { HTTP_PROXY: PROXY })).toBe(true);
+		expect(isProxyConfiguredFor(HTTP_URL, { http_proxy: PROXY })).toBe(true);
+		expect(isProxyConfiguredFor(HTTP_URL, { HTTPS_PROXY: PROXY })).toBe(false);
+		expect(isProxyConfiguredFor(HTTPS_URL, {})).toBe(false);
+	});
+
+	test("ALL_PROXY covers both schemes when the scheme-specific variable is unset", () => {
+		expect(isProxyConfiguredFor(HTTPS_URL, { ALL_PROXY: PROXY })).toBe(true);
+		expect(isProxyConfiguredFor(HTTPS_URL, { all_proxy: PROXY })).toBe(true);
+		expect(isProxyConfiguredFor(HTTP_URL, { ALL_PROXY: PROXY })).toBe(true);
+		// Empty string counts as unset and falls through to ALL_PROXY (probed).
+		expect(isProxyConfiguredFor(HTTPS_URL, { HTTPS_PROXY: "", ALL_PROXY: PROXY })).toBe(true);
+		expect(isProxyConfiguredFor(HTTPS_URL, { HTTPS_PROXY: "" })).toBe(false);
+	});
+
+	test("values naming another kind of proxy never count as configured", () => {
+		expect(isProxyConfiguredFor(HTTPS_URL, { HTTPS_PROXY: "socks5://proxy.example:1080" })).toBe(
+			false,
+		);
+		expect(isProxyConfiguredFor(HTTPS_URL, { ALL_PROXY: "socks5://proxy.example:1080" })).toBe(
+			false,
+		);
+		// Scheme-less host[:port] is used as an http proxy (probed).
+		expect(isProxyConfiguredFor(HTTPS_URL, { HTTPS_PROXY: "proxy.example:8080" })).toBe(true);
+		expect(isProxyConfiguredFor("not a url", { HTTPS_PROXY: PROXY })).toBe(false);
+		expect(isProxyConfiguredFor("ftp://h.example/x", { ALL_PROXY: PROXY })).toBe(false);
+	});
+
+	test("NO_PROXY bypasses by host, subdomain, wildcard, and list", () => {
+		const proxy = { HTTPS_PROXY: PROXY };
+		expect(
+			isProxyConfiguredFor(HTTPS_URL, { ...proxy, NO_PROXY: "upgrade.mikrotik.com" }),
+		).toBe(false);
+		// A parent domain bypasses the host and its subdomains.
+		expect(isProxyConfiguredFor(HTTPS_URL, { ...proxy, NO_PROXY: "mikrotik.com" })).toBe(false);
+		expect(isProxyConfiguredFor(HTTPS_URL, { ...proxy, NO_PROXY: ".mikrotik.com" })).toBe(false);
+		expect(isProxyConfiguredFor(HTTPS_URL, { ...proxy, NO_PROXY: "*.mikrotik.com" })).toBe(false);
+		expect(isProxyConfiguredFor(HTTPS_URL, { ...proxy, NO_PROXY: "*" })).toBe(false);
+		expect(isProxyConfiguredFor(HTTPS_URL, { ...proxy, NO_PROXY: "other.com, mikrotik.com" })).toBe(
+			false,
+		);
+		expect(isProxyConfiguredFor(HTTPS_URL, { ...proxy, NO_PROXY: "other.com" })).toBe(true);
+		// Substring hosts must not bypass by suffix: "evil-mikrotik.com" is not
+		// under "mikrotik.com".
+		expect(
+			isProxyConfiguredFor("https://evil-mikrotik.com/x", { ...proxy, NO_PROXY: "mikrotik.com" }),
+		).toBe(true);
+		// Lowercase wins; uppercase is the fallback when it is unset or empty.
+		expect(isProxyConfiguredFor(HTTPS_URL, { ...proxy, no_proxy: "mikrotik.com" })).toBe(false);
+		expect(
+			isProxyConfiguredFor(HTTPS_URL, { ...proxy, no_proxy: "other.com", NO_PROXY: "*" }),
+		).toBe(true);
+		expect(isProxyConfiguredFor(HTTPS_URL, { ...proxy, no_proxy: "", NO_PROXY: "*" })).toBe(false);
+	});
+
+	test("NO_PROXY matches IP literals, CIDR blocks, and host:port", () => {
+		const proxy = { HTTP_PROXY: PROXY };
+		expect(isProxyConfiguredFor(HTTP_URL, { ...proxy, NO_PROXY: "127.0.0.1" })).toBe(false);
+		expect(isProxyConfiguredFor(HTTP_URL, { ...proxy, NO_PROXY: "127.0.0.0/8" })).toBe(false);
+		expect(isProxyConfiguredFor(HTTP_URL, { ...proxy, NO_PROXY: "10.0.0.0/8" })).toBe(true);
+		// An IP entry matches only that address, never by domain suffix.
+		expect(isProxyConfiguredFor(HTTP_URL, { ...proxy, NO_PROXY: "127.0.0.2" })).toBe(true);
+		// Port-qualified entries bypass that host on that port only.
+		expect(isProxyConfiguredFor(HTTP_URL, { ...proxy, NO_PROXY: "127.0.0.1:8080" })).toBe(false);
+		expect(isProxyConfiguredFor(HTTP_URL, { ...proxy, NO_PROXY: "127.0.0.1:9090" })).toBe(true);
+		// Default ports count: 443 for https.
+		expect(isProxyConfiguredFor(HTTPS_URL, { HTTPS_PROXY: PROXY, NO_PROXY: "mikrotik.com:443" })).toBe(
+			false,
+		);
+		expect(isProxyConfiguredFor(HTTPS_URL, { HTTPS_PROXY: PROXY, NO_PROXY: "mikrotik.com:8443" })).toBe(
+			true,
+		);
+		expect(
+			isProxyConfiguredFor("http://[fd00::1]/x", { ...proxy, NO_PROXY: "fd00::/8" }),
+		).toBe(false);
+		expect(isProxyConfiguredFor("http://[fd00::1]/x", { ...proxy, NO_PROXY: "[fd00::1]" })).toBe(
+			false,
+		);
+		expect(isProxyConfiguredFor("http://[fd00::1]/x", { ...proxy, NO_PROXY: "::1" })).toBe(true);
+		// Form variants match numerically, not textually.
+		expect(
+			isProxyConfiguredFor("http://[0:0:0:0:0:0:0:1]/x", { ...proxy, NO_PROXY: "::1" }),
+		).toBe(false);
 	});
 });

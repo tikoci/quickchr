@@ -8,6 +8,8 @@ import { QuickCHRError as QError, parseAccelMode } from "./types.ts";
 // settings-file.ts, not settings.ts: the latter's graph (cache → state → network
 // → platform) is a cycle that would load eagerly on every CLI start.
 import { loadSettingsFileDefaults } from "./settings-file.ts";
+// net.ts imports only node:dns, so this cannot cycle.
+import { httpsProxyEnvValue, isUsableProxyValue } from "./net.ts";
 
 /** UEFI firmware search paths by platform. */
 const EFI_CODE_PATHS = [
@@ -598,14 +600,18 @@ export function resolveInterfaceAlias(
  * configured-override note the caller already computed (empty when auto).
  */
 export function accelDoctorCheck(accelAvailable: string[], hostArch: string, suffix = ""): DoctorCheck {
-	if (accelAvailable.length === 0) {
-		return { label: "Acceleration", status: "warn", detail: "TCG only (software emulation)" };
-	}
-	const onlyTcg = accelAvailable.every((a) => a === "tcg");
+	// detectAllAccel always yields at least one entry ("tcg" worst case), so an
+	// empty list only arrives from direct callers — still a warning, never ok.
+	const onlyTcg = accelAvailable.length > 0 && accelAvailable.every((a) => a === "tcg");
+	const list = accelAvailable.length > 0 ? accelAvailable.join(", ") : "none detected";
+	// The TCG-only note is a capability verdict. Under an override the row names
+	// the forced mode instead, so appending both would double the verdict.
+	const capabilityNote =
+		onlyTcg && suffix === "" ? " — TCG software emulation only (no KVM/HVF); expect slow boots" : "";
 	return {
 		label: "Acceleration",
-		status: onlyTcg ? "warn" : "ok",
-		detail: `${accelAvailable.join(", ")} (host: ${hostArch})${suffix}${onlyTcg ? " — TCG software emulation only (no KVM/HVF); expect slow boots" : ""}`,
+		status: accelAvailable.length === 0 || onlyTcg ? "warn" : "ok",
+		detail: `${list} (host: ${hostArch})${suffix}${capabilityNote}`,
 	};
 }
 
@@ -613,19 +619,30 @@ export function accelDoctorCheck(accelAvailable: string[], hostArch: string, suf
  * The HTTPS-proxy row for `doctor`. In proxied sandboxes all egress goes
  * through it, and a host off its allowlist fails downloads (#210) — an agent
  * should see that constraint up front. Credentials in the URL are never echoed:
- * only scheme://host is shown.
+ * only scheme://host is shown. A set-but-unusable value (a non-http(s) scheme
+ * Bun never proxies) is reported as ignored, not as an active proxy.
  */
 export function proxyDoctorCheck(env: NodeJS.ProcessEnv = process.env): DoctorCheck {
-	const raw = env.HTTPS_PROXY ?? env.https_proxy;
-	if (!raw) {
+	const raw = httpsProxyEnvValue(env);
+	if (raw === undefined) {
 		return { label: "HTTPS proxy", status: "ok", detail: "not set (direct egress)" };
 	}
+	// Scheme-less host[:port] values are used as http proxies (probed), so give
+	// them a scheme before parsing — otherwise every one reads as unparseable.
+	const withScheme = raw.includes("://") ? raw : `http://${raw}`;
 	let shown: string;
 	try {
-		const u = new URL(raw);
+		const u = new URL(withScheme);
 		shown = `${u.protocol}//${u.host}`;
 	} catch {
 		shown = "(unparseable value, not shown)";
+	}
+	if (!isUsableProxyValue(raw)) {
+		return {
+			label: "HTTPS proxy",
+			status: "warn",
+			detail: `${shown} — ignored (Bun only proxies http/https); effective direct egress`,
+		};
 	}
 	return {
 		label: "HTTPS proxy",

@@ -3,6 +3,7 @@
 import { join } from "node:path";
 import { ensureCachedImage, isUsableCachedImage } from "./images.ts";
 import type { ProgressLogger } from "./log.ts";
+import { PROXY_ALLOWLIST_HINT, PROXY_CREDENTIALS_HINT } from "./net.ts";
 import { getCacheDir } from "./state.ts";
 import { ARCHES, CHANNELS, QuickCHRError, type Arch, type Channel } from "./types.ts";
 import { chrImageBasename, isValidVersion, resolveVersion } from "./versions.ts";
@@ -85,7 +86,8 @@ function concreteArch(arch: Arch | "auto" | undefined): Arch {
  *
  * An explicit version is validated and returned without a network call. A
  * channel resolution failure degrades to the stable `unresolved` sentinel so
- * cache lookup cannot make an otherwise useful offline job fail.
+ * cache lookup cannot make an otherwise useful offline job fail — except a
+ * proxy-attributed failure, which is rethrown with its remediation hint.
  */
 export async function cacheKey(
 	options: CacheTargetOptions = {},
@@ -110,6 +112,14 @@ export async function cacheKey(
 		};
 	} catch (error) {
 		if (error instanceof QuickCHRError && error.code === "DOWNLOAD_FAILED") {
+			// A proxy verdict is actionable, not offline: degrading it to
+			// `unresolved` would bury the remediation the hint carries (#210).
+			if (
+				error.installHint === PROXY_ALLOWLIST_HINT ||
+				error.installHint === PROXY_CREDENTIALS_HINT
+			) {
+				throw error;
+			}
 			return { dir, version: CACHE_VERSION_UNRESOLVED, arch };
 		}
 		throw error;

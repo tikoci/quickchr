@@ -11,6 +11,22 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Added
+
+- `doctor` reports the configured HTTPS egress proxy (`HTTPS_PROXY`/`https_proxy`,
+  `ALL_PROXY`/`all_proxy`, credentials redacted) or direct egress, and warns when
+  acceleration is TCG-only. (#210)
+
+### Fixed
+
+- In sandboxed cloud sessions whose egress proxy refuses a MikroTik host,
+  downloads and channel resolution fail fast naming the refused host and the
+  allowlist fix, instead of retrying or blaming the network. (#210)
+- A proxy 407 (missing credentials) gets its own hint; a proxy 5xx keeps its
+  retries as the transient failure it is. (#210)
+- HTTP 403 verdicts blame the egress proxy only when a proxy is actually
+  configured for the URL; direct 403s keep the generic origin verdict. (#210)
+
 ## [0.5.4] — 2026-10-29
 
 ### Fixed
