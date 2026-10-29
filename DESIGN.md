@@ -1176,3 +1176,39 @@ before acting, and uses shared stopped-state cleanup without recursively taking
 the non-reentrant stop lock. It confirms QEMU exit before clearing the PID or
 releasing named-network membership. Lock wait, hard-stop escalation and final
 exit verification are separate bounded phases outside the guest grace budget.
+
+## Frozen boot + continue (#214)
+
+Some lab workflows must touch the guest before RouterOS init runs. The driver:
+CHR's `:beep` speaker driver is skipped when CPUID reports a hypervisor, and
+patching the 2-byte gate in guest RAM via gdbstub before sys2 init unlocks
+PC-speaker capture for acoustic testing (verified on CHR 7.25, QEMU 11.1.2).
+`start --frozen` boots held at reset (`-S`) with a gdbstub; `quickchr continue`
+resumes. The RAM patch itself stays in the harness, not quickchr.
+
+The gdbstub is a unix socket (`-gdb unix:<machineDir>/gdb.sock,server=on,
+wait=off`), not `-s` (TCP :1234): no port bookkeeping, no parallel-VM
+collisions. `wait=off` is required so the spawn never blocks waiting for a
+client. Measured: `info status` reads `paused (prelaunch)`; gdb attaches with
+the CPU at the reset vector `0xfff0`. POSIX-first by scope — a Windows TCP
+fallback (e.g. `portBase+9`) is parked as a follow-up, and the integration test
+is gated off win32 until it lands.
+
+`frozen` is per-boot intent, like `--no-wait`, not persisted config: stopping
+clears the marker and a later plain `start` boots normally. `status` stays
+`"running"` while frozen — without a third status value — so `isMachineRunning()`,
+`stop`/`remove` (host-side SIGTERM works on frozen QEMU unchanged), and the
+`--all` filters keep working untouched. A never-continued frozen machine can
+never produce `BOOT_TIMEOUT`, by construction: the boot wait is skipped
+entirely, and `start` returns after the spawn early-exit check.
+
+`continue` is one existing primitive — `monitorCommand("cont")` — plus the
+promise `start` makes: REST-ready by default, `--no-wait` to return
+immediately, `--timeout-extra` extending the resume wait like `start`. It
+checks `info status` first, so a guest gdb already resumed just clears the
+marker (idempotent); a QEMU-level `cont` error throws `PROCESS_FAILED` before
+the marker is touched (same `/^error/i` contract as savevm/loadvm); a dead pid
+is `MACHINE_STOPPED`; a wait that never reaches REST is a genuine
+`BOOT_TIMEOUT` with `preserve-existing` cleanup. Deliberately out: no frozen-specific hint on `exec`/`get` failures,
+and no `savevm` refusal on prelaunch VMs (snapshot is already tricky business;
+QEMU accepts or errors on its own).

@@ -38,6 +38,13 @@ export interface QemuLaunchConfig {
 	 * can be used for both QEMU args and boot timeout calculation.
 	 */
 	accel?: string;
+	/** Extra argv elements (`StartOptions.qemuArgs`), appended verbatim after
+	 *  quickchr's own args. Ordering is load-bearing: last-wins on conflicts. */
+	qemuArgs?: string[];
+	/** Hold the guest at reset (`-S`) with a gdbstub on `<machineDir>/gdb.sock`
+	 *  (`start --frozen`). Unix socket, `server=on,wait=off` so the spawn never
+	 *  blocks waiting for a client. */
+	frozen?: boolean;
 }
 
 /** Build the full QEMU command-line arguments array. */
@@ -135,6 +142,15 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 
 	// Serial, monitor, QGA channels
 	buildChannelArgs(args, arch, machineDir, background, portBase);
+
+	// Frozen boot (#214): hold at reset with a gdbstub. Before the passthrough
+	// below, which is always last.
+	if (config.frozen) {
+		args.push("-S", "-gdb", `unix:${join(machineDir, "gdb.sock")},server=on,wait=off`);
+	}
+
+	// Lab escape hatch (#213): verbatim passthrough, always last so it wins conflicts.
+	if (config.qemuArgs) args.push(...config.qemuArgs);
 
 	return args;
 }
@@ -471,8 +487,17 @@ export async function spawnQemu(
 
 	const pid = proc.pid;
 	writeFileSync(pidPath, String(pid));
-	await proc.exited;
+	const exitCode = await proc.exited;
 	try { unlinkSync(pidPath); } catch { /* ignore */ }
+	// A bad argv element (e.g. --qemu-arg) fails fast here with a QEMU error on
+	// the terminal — but without this check the caller reports a clean stop.
+	// Only a numeric non-zero code throws: a signal kill (null) is a user quit.
+	if (typeof exitCode === "number" && exitCode !== 0) {
+		throw new QuickCHRError(
+			"SPAWN_FAILED",
+			`QEMU exited with status ${exitCode} — see the QEMU error output above (often a bad --qemu-arg value).`,
+		);
+	}
 	return { pid };
 }
 
@@ -505,11 +530,13 @@ export async function stopQemu(pid: number): Promise<boolean> {
 	return true;
 }
 
-/** Remove the listening unix-socket files QEMU binds (monitor/serial/qga).
+/** Remove the listening unix-socket files QEMU binds (monitor/serial/qga/gdb).
  *  A SIGKILLed QEMU leaves these behind; a respawn with `server=on` then fails
- *  to bind ("Address already in use"). Call before re-spawning into the same dir. */
+ *  to bind ("Address already in use"). Call before re-spawning into the same dir.
+ *  `gdb.sock` is included: a stale one from a frozen boot would otherwise linger
+ *  after stop and refuse a harness attach on a later non-frozen boot. */
 export function cleanupQemuSockets(machineDir: string): void {
-	for (const sock of ["monitor.sock", "serial.sock", "qga.sock"]) {
+	for (const sock of ["monitor.sock", "serial.sock", "qga.sock", "gdb.sock"]) {
 		const path = join(machineDir, sock);
 		try {
 			if (existsSync(path)) unlinkSync(path);

@@ -12,6 +12,7 @@ import {
 	type QemuLaunchConfig,
 } from "../../src/lib/qemu.ts";
 import type { MachineState, PortMapping } from "../../src/lib/types.ts";
+import { requireQemu } from "../../src/lib/platform.ts";
 
 // These tests verify QEMU arg generation without spawning QEMU.
 // They depend on QEMU being installed (for binary path resolution).
@@ -610,6 +611,93 @@ describe("buildQemuArgs — network modes", () => {
 	});
 });
 
+describe("buildQemuArgs — qemuArgs passthrough (#213)", () => {
+	const PASSTHROUGH = ["-M", "pc,pcspk-audiodev=cap", "-audiodev", "wav,id=cap,path=/tmp/cap.wav"];
+
+	function skipOrThrow(e: unknown): void {
+		if (e && typeof e === "object" && "code" in e &&
+			((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+			console.log("Skipping: QEMU/firmware not installed");
+			return;
+		}
+		throw e;
+	}
+
+	test("appends passthrough verbatim after quickchr's own args", async () => {
+		try {
+			const base = await buildQemuArgs(makeConfig({ arch: "x86" }));
+			const args = await buildQemuArgs(makeConfig({ arch: "x86", qemuArgs: PASSTHROUGH }));
+			expect(args.slice(-PASSTHROUGH.length)).toEqual(PASSTHROUGH);
+			expect(args.slice(0, -PASSTHROUGH.length)).toEqual(base);
+		} catch (e: unknown) {
+			skipOrThrow(e);
+		}
+	});
+
+	test("argv is byte-identical when passthrough is absent", async () => {
+		try {
+			const base = await buildQemuArgs(makeConfig({ arch: "x86" }));
+			expect(await buildQemuArgs(makeConfig({ arch: "x86", qemuArgs: [] }))).toEqual(base);
+			expect(await buildQemuArgs(makeConfig({ arch: "x86", qemuArgs: undefined }))).toEqual(base);
+		} catch (e: unknown) {
+			skipOrThrow(e);
+		}
+	});
+
+	test("does not split or validate elements", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({ arch: "x86", qemuArgs: ["-audiodev", "wav,id=cap,path=/tmp/a b.wav"] }));
+			expect(args.at(-1)).toBe("wav,id=cap,path=/tmp/a b.wav");
+		} catch (e: unknown) {
+			skipOrThrow(e);
+		}
+	});
+});
+
+describe("buildQemuArgs — frozen boot (#214)", () => {
+	function skipOrThrow(e: unknown): void {
+		if (e && typeof e === "object" && "code" in e &&
+			((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
+			console.log("Skipping: QEMU/firmware not installed");
+			return;
+		}
+		throw e;
+	}
+
+	test("emits -S plus a unix-socket gdbstub with server=on,wait=off", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({ arch: "x86", machineDir: "/tmp/frozen-test", frozen: true }));
+			expect(args).toContain("-S");
+			const gdbIdx = args.indexOf("-gdb");
+			expect(gdbIdx).toBeGreaterThan(-1);
+			expect(args[gdbIdx + 1]).toBe("unix:/tmp/frozen-test/gdb.sock,server=on,wait=off");
+		} catch (e: unknown) {
+			skipOrThrow(e);
+		}
+	});
+
+	test("no -S or -gdb without frozen", async () => {
+		try {
+			const args = await buildQemuArgs(makeConfig({ arch: "x86" }));
+			expect(args).not.toContain("-S");
+			expect(args).not.toContain("-gdb");
+		} catch (e: unknown) {
+			skipOrThrow(e);
+		}
+	});
+
+	test("frozen flags come before qemuArgs passthrough, which stays last", async () => {
+		try {
+			const extra = ["-audiodev", "wav,id=cap,path=/tmp/cap.wav"];
+			const args = await buildQemuArgs(makeConfig({ arch: "x86", frozen: true, qemuArgs: extra }));
+			expect(args.slice(-extra.length)).toEqual(extra);
+			expect(args.indexOf("-S")).toBeLessThan(args.length - extra.length);
+		} catch (e: unknown) {
+			skipOrThrow(e);
+		}
+	});
+});
+
 // --- spawnQemu ---
 
 describe("spawnQemu", () => {
@@ -617,6 +705,26 @@ describe("spawnQemu", () => {
 		await expect(spawnQemu([], "/tmp/quickchr-test", true)).rejects.toMatchObject({
 			code: "SPAWN_FAILED",
 			message: expect.stringContaining("Empty QEMU args"),
+		});
+	});
+
+	test("foreground QEMU failing fast (e.g. bad --qemu-arg) throws SPAWN_FAILED", async () => {
+		// Needs a real binary: the failure under test is QEMU's own nonzero
+		// exit, not the empty-argv guard above.
+		let bin: string;
+		try {
+			bin = requireQemu("x86");
+		} catch (e: unknown) {
+			if (e && typeof e === "object" && (e as { code: string }).code === "MISSING_QEMU") {
+				console.log("Skipping: QEMU not installed");
+				return;
+			}
+			throw e;
+		}
+		const dir = join("/tmp", `quickchr-fg-spawn-test-${process.pid}`);
+		await expect(spawnQemu([bin, "--bogus-quickchr-test-flag"], dir, false)).rejects.toMatchObject({
+			code: "SPAWN_FAILED",
+			message: expect.stringContaining("--qemu-arg"),
 		});
 	});
 });
@@ -758,10 +866,11 @@ describe("cleanupQemuSockets", () => {
 	beforeEach(() => { mkdirSync(dir, { recursive: true }); });
 	afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-	test("removes monitor/serial/qga socket files left by a killed QEMU", () => {
+	test("removes monitor/serial/qga/gdb socket files left by a killed QEMU", () => {
 		// A SIGKILLed QEMU leaves its server=on sockets behind; the respawn in
-		// start() must clear them or the new process fails to bind.
-		for (const s of ["monitor.sock", "serial.sock", "qga.sock"]) {
+		// start() must clear them or the new process fails to bind. gdb.sock
+		// joins the list so a frozen boot leaves nothing a later boot trips on.
+		for (const s of ["monitor.sock", "serial.sock", "qga.sock", "gdb.sock"]) {
 			writeFileSync(join(dir, s), "");
 		}
 		// An unrelated file in the same dir must be preserved.
@@ -772,6 +881,7 @@ describe("cleanupQemuSockets", () => {
 		expect(existsSync(join(dir, "monitor.sock"))).toBe(false);
 		expect(existsSync(join(dir, "serial.sock"))).toBe(false);
 		expect(existsSync(join(dir, "qga.sock"))).toBe(false);
+		expect(existsSync(join(dir, "gdb.sock"))).toBe(false);
 		expect(existsSync(join(dir, "qemu.log"))).toBe(true);
 	});
 

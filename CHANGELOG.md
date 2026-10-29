@@ -17,6 +17,27 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   covering the environment network access to allow, a setup script that installs
   QEMU and pre-fetches a CHR image, and measured TCG boot times. (#210)
 
+## [0.5.3] — 2026-10-28
+
+### Added
+
+- **`add`/`start --qemu-arg <argv-element>` passthrough.** Repeatable, one QEMU
+  argv element per occurrence (space form only), appended verbatim after
+  quickchr's own args — a lab escape hatch for QEMU surface quickchr does not
+  model, e.g. `-M pc,pcspk-audiodev=cap -audiodev wav,id=cap,path=...` to
+  capture the CHR PC speaker on x86. `add` records the args to `machine.json`
+  for every boot; `start` takes session args that replace the stored ones for
+  that boot only. Library: `StartOptions.qemuArgs`. (#213)
+- **`start --frozen` + `quickchr continue` for pre-init lab workflows.**
+  `--frozen` boots held at reset (`-S`) with a gdbstub on
+  `<machineDir>/gdb.sock`, skipping the boot wait; `continue` resumes with one
+  monitor `cont` and waits for REST-ready by default (`--no-wait` to return
+  immediately, `--timeout-extra` to extend the wait). Frozen is per-boot
+  intent, not config — `stop` clears it and `list` marks frozen machines.
+  `set` can replace or clear recorded `--qemu-arg` passthrough on a stopped
+  machine. Library: `StartOptions.frozen`, `instance.continue()`. (#214)
+>>>>>>> origin/main
+
 ## [0.5.2] — 2026-10-23
 
 ### Fixed

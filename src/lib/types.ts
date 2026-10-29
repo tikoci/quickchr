@@ -249,6 +249,10 @@ export interface MachineConfig {
 	extraDisks?: string[];
 	/** Format of the boot disk — raw by default, qcow2 when resized. */
 	bootDiskFormat?: BootDiskFormat;
+	/** Extra QEMU argv elements recorded by `add --qemu-arg`, reused on every boot
+	 *  unless a `start` call passes its own `qemuArgs` for that session (session
+	 *  replaces stored for that boot). Appended verbatim after quickchr's own args. */
+	qemuArgs?: string[];
 }
 
 /** One provisioning step, as recorded on {@link ProvisioningRecord.steps}. */
@@ -311,6 +315,11 @@ export interface MachineState extends MachineConfig {
 	cleanedAt?: string;
 	status: "stopped" | "running" | "error";
 	pid?: number;
+	/** Live marker: QEMU was started with `frozen: true` (`start --frozen`) and is
+	 *  held at reset (`-S`), awaiting `continue()`. Per-boot intent like
+	 *  `wait: false`, not persisted config — stopping clears it, and a later
+	 *  plain `start` boots normally. `status` stays `"running"` while frozen. */
+	frozen?: boolean;
 	/** Path to the machine directory. */
 	machineDir: string;
 	/** Accelerator resolved for the most recent boot ("kvm" | "hvf" | "tcg"). */
@@ -457,10 +466,31 @@ export interface StartOptions {
 	/** Extra milliseconds added to the computed boot timeout.
 	 *  Useful on slow hosts where `defaultBootTimeout` underestimates actual boot time. */
 	timeoutExtra?: number;
+	/** Extra QEMU argv elements, one array entry per argv element, appended verbatim
+	 *  (no splitting, no validation) after quickchr's own args.
+	 *
+	 *  On `add()` this is recorded to `machine.json` and reused every boot. On
+	 *  `start()` of an existing machine it applies to that session only: when both
+	 *  stored and session args exist, the session value replaces the stored one for
+	 *  that boot (predictable; avoids duplicate-ID errors like two `-audiodev`
+	 *  with the same id). When `start()` creates the machine, the value is both
+	 *  used for that boot and recorded, like every other creation option.
+	 *
+	 *  Ordering is load-bearing: passthrough goes last, so conflicting QEMU options
+	 *  resolve last-wins (e.g. a duplicate `-M pc,...` merges over quickchr's `-M pc`).
+	 *  A bad element surfaces as `SPAWN_FAILED` with the QEMU log tail. */
+	qemuArgs?: string[];
 	/** Progress callback for status messages during start.
 	 *  If not provided, messages go to console.log.
 	 *  Debug-level messages (prefixed [debug]) are only emitted when QUICKCHR_DEBUG=1. */
 	onProgress?: (message: string) => void;
+	/** Boot frozen at reset (`-S`) with a gdbstub on `<machineDir>/gdb.sock`,
+	 *  for harnesses that must touch the guest before RouterOS init runs (e.g.
+	 *  RAM patching via gdb). Skips the boot wait entirely and resolves after
+	 *  the spawn early-exit check, like `wait: false` — resume with
+	 *  `continue()`. Refused with provisioning and with `background: false`.
+	 *  Per-boot intent: never persisted, so a later plain `start` boots normally. */
+	frozen?: boolean;
 }
 
 // --- Instance (runtime handle) ---
@@ -631,6 +661,18 @@ export interface ShutdownResult {
 	requestError?: string;
 }
 
+/** Options for {@link ChrInstance.continue}. */
+export interface ContinueOptions {
+	/** Wait for REST-ready before resolving (true, default), mirroring `start()`'s
+	 *  promise. `false` returns right after the monitor `cont`, leaving readiness
+	 *  to the caller. A wait that never reaches REST is a genuine `BOOT_TIMEOUT`. */
+	wait?: boolean;
+	/** Extra milliseconds added to the computed boot timeout — the same knob as
+	 *  `StartOptions.timeoutExtra`, for slow hosts where the default underestimates
+	 *  the resume-to-ready time. */
+	timeoutExtra?: number;
+}
+
 /**
  * Runtime handle for a CHR virtual machine.
  *
@@ -640,7 +682,7 @@ export interface ShutdownResult {
  *
  * After `QuickCHR.start()` resolves, the instance is REST-ready — all requested
  * provisioning (packages, license, device-mode, user creation) has completed —
- * unless it was started with `wait: false`, or is a RouterOS 6 guest (no REST:
+ * unless it was started with `wait: false` or `frozen: true`, or is a RouterOS 6 guest (no REST:
  * `rest()` and REST `exec()` throw `REST_UNAVAILABLE`).
  */
 export interface ChrInstance {
@@ -712,6 +754,11 @@ export interface ChrInstance {
 	/** Request /system/shutdown once over REST, wait for QEMU exit, then hard-stop
 	 * if needed. Reports forced fallback explicitly; preserves disks and credentials. */
 	shutdown(options?: ShutdownOptions): Promise<ShutdownResult>;
+	/** Resume a machine started with `frozen: true` (`start --frozen`): one monitor
+	 *  `cont`, then REST-ready by default. Idempotent — when the guest is already
+	 *  running (e.g. gdb continued it) this just clears the frozen marker. Throws
+	 *  `MACHINE_STOPPED` when QEMU is gone. */
+	continue(options?: ContinueOptions): Promise<void>;
 	remove(): Promise<void>;
 	clean(): Promise<void>;
 	/** Stop and permanently delete this instance (disk + state). Equivalent to stop() then remove(). */

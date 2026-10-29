@@ -24,6 +24,11 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 - No firmware needed (SeaBIOS built in)
 - Disk: `-drive file=...,format=raw,if=virtio` (fine on q35/pc — maps to PCI)
 - QGA available via `virtio-serial-pci` + `virtserialport`
+- **Duplicate `-M` merges, last-wins** (measured on QEMU 11.1.2 — do not
+  re-derive): `-M pc -M pc,pcspk-audiodev=cap` is accepted, qtree shows
+  `audiodev = "cap"` on `isa-pcspk`, and conflicting machine props resolve to
+  the last occurrence. This is what lets `--qemu-arg` passthrough (#213) go
+  last with no machine-prop merging code — quickchr keeps emitting `-M pc`.
 
 ## Acceleration
 
