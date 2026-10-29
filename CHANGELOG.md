@@ -11,6 +11,12 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Documentation
+
+- MANUAL: new "Claude Code cloud sessions and other proxied sandboxes" section,
+  covering the environment network access to allow, a setup script that installs
+  QEMU and pre-fetches a CHR image, and measured TCG boot times. (#210)
+
 ## [0.5.3] — 2026-10-28
 
 ### Added
