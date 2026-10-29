@@ -127,6 +127,7 @@ eintr
 eio
 elif
 emerg
+enbeep
 endgroup
 enoent
 enoexec
