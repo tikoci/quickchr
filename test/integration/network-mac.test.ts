@@ -29,7 +29,7 @@ const SPOKE = "integration-mac-spoke";
 const LINK_PORT = 5473;
 const ADMIN = basicAuth("admin", "");
 
-/** How long to let ARP settle before loss becomes the thing under test.
+/** How long to wait for the first reply before the segment is declared dead.
  *
  *  Deliberately generous, because the cost is asymmetric: the wait returns the
  *  moment the first reply lands, so a healthy link pays ~one round-trip, while
@@ -117,12 +117,17 @@ describe.skipIf(SKIP)("NIC MAC addressing across a shared L2 segment", () => {
 			await hub.exec("/ip/address/add interface=ether2 address=10.73.0.1/24");
 			await spoke.exec("/ip/address/add interface=ether2 address=10.73.0.2/24");
 
-			// Converge first, then assert. The first echo after an address is added
-			// is consumed by ARP resolution, so a bare `count=3` sees 33% loss on a
-			// perfectly healthy link — observed once in review at this exact head,
-			// passing on the immediate rerun. Waiting for the *first* reply separates
-			// "neighbor not resolved yet" from "the segment does not forward", and
-			// keeps the real assertion below at zero loss rather than relaxing it.
+			// Converge first, then assert. The wait proves the segment forwards —
+			// it returns the moment one echo succeeds — and the ping below proves
+			// it keeps forwarding. The bar there is a received count, not zero
+			// loss, deliberately (#163): on a loaded host the first echo of the
+			// `count=3` still times out while seq 1–2 reply in ~1 ms, one REST
+			// round trip after the `count=1` probe reported 0% loss with the
+			// neighbor freshly resolved. RouterOS counts any echo delayed past
+			// 1 s as lost, so that seq 0 is a >1 s scheduling stall, not a drop
+			// on a segment that does not forward — and `packet-loss=0%` would
+			// assert host scheduling, not the link. Two replies at ~1 ms already
+			// prove the property under test.
 			const from = hub;
 			const reachable = await from.waitFor(async () => {
 				const probe = await from.exec("/ping 10.73.0.2 count=1");
@@ -130,9 +135,11 @@ describe.skipIf(SKIP)("NIC MAC addressing across a shared L2 segment", () => {
 			}, PING_CONVERGENCE_MS);
 			expect(reachable).toBe(true);
 
-			// Now the link is warm, loss is the thing under test.
+			// Now the link is warm, traffic is the thing under test: all three
+			// echoes ran, and at least two answered. A genuinely dead segment
+			// answers none, so this still fails closed.
 			const ping = await hub.exec("/ping 10.73.0.2 count=3");
-			expect(ping.output).toContain("packet-loss=0%");
+			expect(ping.output).toMatch(/sent=3 received=[23]/);
 
 			// 4. Addresses survive a restart — they are read from machine.json, not
 			//    re-derived, so a derivation change cannot move an existing machine.
