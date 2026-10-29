@@ -251,5 +251,8 @@ describe.skipIf(SKIP)("disk support", () => {
 			}
 			await cleanupMachine("integration-snapshot-savevm");
 		}
-	}, bootTestTimeout());
+	// #80: worst-case monitor waits in this body grew 15 s → 300 s
+	// (save 120 s + load 120 s + delete 60 s); the extra 285 s keeps the
+	// headroom slack exactly what it was under the 5 s default.
+	}, bootTestTimeout({ extraMs: 285_000 }));
 });

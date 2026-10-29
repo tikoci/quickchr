@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { saveMachine } from "../../src/lib/state.ts";
+import { QuickCHRError } from "../../src/lib/types.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
 // Pins issue #80's wiring: the snapshot ops pass explicit, operation-sized
@@ -16,6 +17,10 @@ import type { MachineState } from "../../src/lib/types.ts";
 
 // Recorded (command, timeout) pairs seen by the stubbed monitor.
 const calls: Array<{ command: string; timeoutMs: number | undefined }> = [];
+
+// One-shot rejection plan: the next stubbed call for this command throws
+// instead of answering. Powers the timeout-surfacing case below.
+let rejectPlan: { command: string; error: Error } | null = null;
 
 // Canned `info snapshots` listing containing the snapshot save() reads back.
 const LISTING = "1       snap1             113 MiB 2026-04-14 00:47:19  00:01:17.163";
@@ -33,6 +38,11 @@ mock.module("../../src/lib/channels.ts", () => ({
 	monitorCommand: async (machineDir: string, command: string, timeoutMs?: number) => {
 		void machineDir;
 		calls.push({ command, timeoutMs });
+		if (rejectPlan !== null && command === rejectPlan.command) {
+			const error = rejectPlan.error;
+			rejectPlan = null;
+			throw error;
+		}
 		if (command === "info snapshots") return LISTING;
 		return "";
 	},
@@ -48,6 +58,7 @@ mock.module("../../src/lib/channels.ts", () => ({
 // Dynamic imports: mock.module() only applies to modules first loaded after it.
 const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 const {
+	MONITOR_FAST_QUERY_TIMEOUT_MS,
 	MONITOR_SAVEVM_TIMEOUT_MS,
 	MONITOR_LOADVM_TIMEOUT_MS,
 	MONITOR_DELVM_TIMEOUT_MS,
@@ -82,6 +93,7 @@ beforeEach(() => {
 	mkdirSync(TEST_DIR, { recursive: true });
 	process.env.QUICKCHR_DATA_DIR = TEST_DIR;
 	calls.length = 0;
+	rejectPlan = null;
 	saveMachine(makeRunningMachine());
 });
 
@@ -111,7 +123,34 @@ describe("snapshot monitor budgets (issue #80)", () => {
 		await instance.snapshot.list();
 		expect(calls.find((c) => c.command === "loadvm snap1")?.timeoutMs).toBe(MONITOR_LOADVM_TIMEOUT_MS);
 		expect(calls.find((c) => c.command === "delvm snap1")?.timeoutMs).toBe(MONITOR_DELVM_TIMEOUT_MS);
-		// list() passes undefined and inherits the fast-query default.
-		expect(calls.find((c) => c.command === "info snapshots")?.timeoutMs).toBeUndefined();
+		// list() inherits the fast-query default — explicitly or by passing
+		// undefined. Either way it must not take a snapshot-sized budget.
+		expect([undefined, MONITOR_FAST_QUERY_TIMEOUT_MS]).toContain(
+			calls.find((c) => c.command === "info snapshots")?.timeoutMs,
+		);
+	});
+
+	test("save() surfaces a monitor timeout (BOOT_TIMEOUT with phase evidence) unchanged", async () => {
+		const instance = QuickCHR.get("budget-probe");
+		if (instance === null) throw new Error("expected fabricated machine to load");
+		rejectPlan = {
+			command: "savevm snap1",
+			error: new QuickCHRError(
+				"BOOT_TIMEOUT",
+				`Monitor command timed out after ${MONITOR_SAVEVM_TIMEOUT_MS}ms: "savevm snap1" — ` +
+					"connect=1ms first-byte=2ms prompt=3ms command-written=4ms response-first-byte=never bytes=10",
+			),
+		};
+		const err = await instance.snapshot.save("snap1").then(
+			() => null,
+			(e: unknown) => e as QuickCHRError & Error,
+		);
+		expect(err).not.toBeNull();
+		expect(err?.code).toBe("BOOT_TIMEOUT");
+		// save() neither wraps nor strips the timeout: command and phase
+		// evidence reach the caller intact (the phase shape itself is pinned
+		// against the real monitor in channels.test.ts).
+		expect(String(err?.message)).toContain('"savevm snap1"');
+		expect(String(err?.message)).toContain("bytes=10");
 	});
 });
