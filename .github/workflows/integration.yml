@@ -202,7 +202,7 @@ jobs:
     outputs:
       matrix: ${{ steps.gen.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
         with:
           bun-version-file: .bun-version
@@ -517,7 +517,7 @@ jobs:
       # cascade into unrelated red files and obscure the very failure we are
       # chasing. The flag stays for local debugging (see testing.instructions.md).
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
         with:
           bun-version-file: .bun-version
@@ -804,7 +804,7 @@ jobs:
 
       - name: Restore CHR artifacts
         id: restore
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ steps.cache.outputs.path }}
           key: ${{ steps.cache.outputs.key }}
@@ -834,7 +834,7 @@ jobs:
 
       - name: Save verified CHR artifacts (owner)
         if: ${{ steps.cache.outputs.owner == 'true' && steps.restore.outputs.cache-hit != 'true' && steps.prefetch.outputs.matches == 'true' }}
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ steps.cache.outputs.path }}
           key: ${{ steps.cache.outputs.key }}
@@ -1142,7 +1142,7 @@ jobs:
       # this rule — which is why only that leg ever shipped a boot-log.
       - name: Upload integration logs (POSIX)
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
@@ -1167,7 +1167,7 @@ jobs:
 
       - name: Upload integration logs (Windows)
         if: ${{ always() && runner.os == 'Windows' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-logs-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
@@ -1217,8 +1217,8 @@ jobs:
       # from a leg that failed early in setup.
       actions: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ci-data
           path: ci-data
@@ -1228,7 +1228,7 @@ jobs:
       - run: bun install --frozen-lockfile
 
       - name: Download metrics artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           pattern: ${{ inputs.artifact-prefix || 'integration' }}-logs-*
           path: artifacts
@@ -1421,7 +1421,7 @@ jobs:
       # QUICKCHR_PRESERVE_ON_FAILURE is not.
       QUICKCHR_SERIAL_LOG: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
         with:
           bun-version-file: .bun-version
@@ -1567,7 +1567,7 @@ jobs:
           bun scripts/ci-cache-key.ts leg --version "$RESOLVED" --platform "$PLATFORM" --owner false
 
       - name: Restore CHR images (reader)
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ steps.cache.outputs.path }}
           key: ${{ steps.cache.outputs.key }}
@@ -1636,7 +1636,7 @@ jobs:
       # (see the integration job's upload step).
       - name: Upload smoke logs (POSIX)
         if: ${{ always() && runner.os != 'Windows' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-smoke-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
@@ -1649,7 +1649,7 @@ jobs:
 
       - name: Upload smoke logs (Windows)
         if: ${{ always() && runner.os == 'Windows' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ${{ inputs.artifact-prefix || 'integration' }}-smoke-${{ matrix.id }}-${{ matrix.target }}
           if-no-files-found: warn
