@@ -27,6 +27,7 @@ apkindex
 argjson
 armv
 armvirt
+artipacked
 askpass
 authless
 awk
@@ -352,6 +353,7 @@ readback
 readconfig
 recvfrom
 redists
+repointed
 rescan
 resolv
 respawn
@@ -514,5 +516,6 @@ wsl
 xdg
 xzf
 zerotier
+zizmor
 EACCES
 EBUSY

@@ -34,6 +34,26 @@ arrive as a reviewable diff whose compatibility results are visible in the same 
 goes red, that PR owns the incompatibility. Do not pin backwards to dodge a failure — an
 old runtime is a debt that compounds silently, which is how #148 happened.
 
+## Action refs are pinned to SHAs (except the toolchain)
+
+Every third-party `uses:` ref is pinned to an immutable commit SHA with the major version
+in a trailing comment — `actions/checkout@<sha> # v5` — following the pre-existing
+`oven-sh/setup-bun` style (#103, #118). A mutable `@v5` tag can be repointed after review,
+and these workflows hold `contents: write` plus secrets, so action updates must arrive as
+reviewable diffs. Dependabot (`github-actions` ecosystem, weekly) files the pin-update PRs,
+so pinned refs still track latest instead of rotting.
+
+**Toolchain exception.** `actions/setup-node` (2 refs in `release.yml`) intentionally stays
+floating (`@v5`) — maintainer decision on PR #223, so the Node toolchain tracks latest
+directly rather than through pin-update PRs. `oven-sh/setup-bun` stays pinned (10 refs,
+untouched by #103); the Bun *version it installs* is managed separately via `.bun-version`
+(see above).
+
+**zizmor is not a CI gate.** A default zizmor run reports ~33 findings — 31 pre-existing
+(template-injection, artipacked, and others out of scope for #103) plus the 2 intentional
+setup-node floats — so gating was deferred pending triage (#228). Do not re-litigate
+adoption until that triage lands.
+
 ## Workflow Overview
 
 The repo has several workflows, each with a distinct purpose:
