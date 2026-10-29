@@ -68,7 +68,7 @@ import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
-import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath } from "./channels.ts";
+import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { provision } from "./provision.ts";
@@ -1274,7 +1274,7 @@ function createInstance(state: MachineState): ChrInstance {
 				}
 
 				const snapName = name ?? new Date().toISOString().replace(/:/g, "-").replace(/\..+$/, "Z");
-				const out = await monitorCommand(state.machineDir, `savevm ${snapName}`, undefined, state.portBase);
+				const out = await monitorCommand(state.machineDir, `savevm ${snapName}`, MONITOR_SAVEVM_TIMEOUT_MS, state.portBase);
 				if (/^error[:\s]/i.test(out)) {
 					throw new QuickCHRError("PROCESS_FAILED", `savevm failed: ${out.trim()}`);
 				}
@@ -1310,7 +1310,7 @@ function createInstance(state: MachineState): ChrInstance {
 					throw new QuickCHRError("MACHINE_STOPPED", `Machine "${state.name}" must be running to load a snapshot.`);
 				}
 
-				const out = await monitorCommand(state.machineDir, `loadvm ${name}`, undefined, state.portBase);
+				const out = await monitorCommand(state.machineDir, `loadvm ${name}`, MONITOR_LOADVM_TIMEOUT_MS, state.portBase);
 				if (/^error[:\s]/i.test(out)) {
 					// A failed loadvm leaves the VM in "paused (restore-vm)" — resume
 					// it so the guest isn't wedged (REST dead) on top of the error.
@@ -1336,7 +1336,7 @@ function createInstance(state: MachineState): ChrInstance {
 					throw new QuickCHRError("MACHINE_STOPPED", `Machine "${state.name}" must be running to delete a snapshot.`);
 				}
 
-				const out = await monitorCommand(state.machineDir, `delvm ${name}`, undefined, state.portBase);
+				const out = await monitorCommand(state.machineDir, `delvm ${name}`, MONITOR_DELVM_TIMEOUT_MS, state.portBase);
 				if (/^error[:\s]/i.test(out)) {
 					throw new QuickCHRError("PROCESS_FAILED", `delvm failed: ${out.trim()}`);
 				}

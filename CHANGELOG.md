@@ -16,6 +16,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 - `start <name>` on an existing machine no longer resolves the stable channel over
   the network first — it boots the machine's recorded version, so restarting works
   offline and no longer hangs when `upgrade.mikrotik.com` is slow. (#233)
+- Snapshot operations use operation-sized QEMU monitor budgets (savevm/loadvm
+  120 s, delvm 60 s) instead of inheriting the 5 s fast-query default, fixing
+  intermittent `savevm` timeouts on loaded hosts. (#80)
 
 ### Documentation
 
