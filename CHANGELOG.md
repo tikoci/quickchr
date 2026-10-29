@@ -36,7 +36,6 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   intent, not config — `stop` clears it and `list` marks frozen machines.
   `set` can replace or clear recorded `--qemu-arg` passthrough on a stopped
   machine. Library: `StartOptions.frozen`, `instance.continue()`. (#214)
->>>>>>> origin/main
 
 ## [0.5.2] — 2026-10-23
 
