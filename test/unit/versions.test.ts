@@ -386,6 +386,53 @@ describe("resolveVersion", () => {
 		);
 		expect(calls).toBe(1);
 	});
+
+	// --- Proxy refusals (#210) ---
+	//
+	// Sandboxed cloud sessions answer 403 to CONNECT for hosts off the allowlist.
+	// Both shapes — a thrown tunnel error and an HTTP 403 verdict — must name the
+	// refused host and point at the allowlist fix.
+
+	test("maps a thrown proxy refusal to a DOWNLOAD_FAILED naming the host and the fix", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.reject(
+				Object.assign(new Error("proxy CONNECT refused: 403"), { code: "ERR_PROXY_TUNNEL" }),
+			);
+		});
+		await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+			message: expect.stringContaining("upgrade.mikrotik.com"),
+			installHint: expect.stringContaining("*.mikrotik.com"),
+		});
+		// Terminal: a policy refusal cannot clear on retry.
+		expect(calls).toBe(1);
+	});
+
+	test("a 403 verdict names the refused host and hints at the allowlist", async () => {
+		let calls = 0;
+		globalThis.fetch = makeMockFetch(() => {
+			calls++;
+			return Promise.resolve(new Response("Forbidden", { status: 403 }));
+		});
+		await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toMatchObject({
+			code: "DOWNLOAD_FAILED",
+			message: expect.stringContaining("upgrade.mikrotik.com"),
+			installHint: expect.stringContaining("*.mikrotik.com"),
+		});
+		expect(calls).toBe(1);
+	});
+
+	test("a non-403 verdict keeps the generic message with no allowlist hint", async () => {
+		globalThis.fetch = makeMockFetch(() =>
+			Promise.resolve(new Response("Not Found", { status: 404 })),
+		);
+		const err = await resolveVersion("stable").catch((e) => e);
+		expect(err.code).toBe("DOWNLOAD_FAILED");
+		expect(err.message).toContain("404");
+		expect(err.installHint).toBeUndefined();
+	});
 });
 
 describe("resolveAllVersions", () => {

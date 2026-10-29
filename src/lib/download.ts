@@ -49,7 +49,7 @@
 import { unlinkSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { QuickCHRError } from "./types.ts";
-import { fetchResilient } from "./net.ts";
+import { fetchResilient, isProxyRefusal, PROXY_ALLOWLIST_HINT } from "./net.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { renameWithRetry } from "./rename.ts";
 
@@ -267,6 +267,15 @@ export async function downloadToFile(
 			// throughput we have ever measured. Retrying either just spends the
 			// budget again — see the retry-policy note at the top of this file.
 			if (e instanceof QuickCHRError) throw e;
+			// Terminal like a client error: a proxy policy refusal will fail every
+			// attempt identically, so say which host was refused instead (#210).
+			if (isProxyRefusal(e)) {
+				throw new QuickCHRError(
+					"DOWNLOAD_FAILED",
+					`Download failed: the egress proxy refused ${new URL(url).hostname} — ${e instanceof Error ? e.message : String(e)}`,
+					PROXY_ALLOWLIST_HINT,
+				);
+			}
 			if (e instanceof DownloadDeadlineError && e.outcome.deadline === "transfer-budget") {
 				throw new QuickCHRError("DOWNLOAD_TOO_SLOW", e.message);
 			}
@@ -340,8 +349,17 @@ async function attemptDownload(
 			// retriable branch would otherwise repeat that once per attempt.
 			await response.body?.cancel().catch(() => {});
 			// Non-retriable client errors are the server telling us the request is
-			// wrong; a retry cannot change that. Surface immediately.
+			// wrong; a retry cannot change that. Surface immediately. A 403 is the
+			// special case: usually a sandbox egress proxy refusing CONNECT for a
+			// host off its allowlist, so name the host and the fix (#210).
 			if (!isRetriableStatus(response.status)) {
+				if (response.status === 403) {
+					throw new QuickCHRError(
+						"DOWNLOAD_FAILED",
+						`Download failed: HTTP 403 for ${url} — the egress proxy refused ${new URL(url).hostname}`,
+						PROXY_ALLOWLIST_HINT,
+					);
+				}
 				throw new QuickCHRError(
 					"DOWNLOAD_FAILED",
 					`Download failed: HTTP ${response.status} for ${url}`,

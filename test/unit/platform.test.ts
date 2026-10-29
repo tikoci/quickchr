@@ -19,6 +19,8 @@ import {
 	requireFirmware,
 	resolveInterfaceAlias,
 	isCrossArchEmulation,
+	accelDoctorCheck,
+	proxyDoctorCheck,
 } from "../../src/lib/platform.ts";
 
 const originalSpawnSync = Bun.spawnSync;
@@ -598,5 +600,71 @@ describe("resolveInterfaceAlias", () => {
 				message: expect.stringContaining("ethernet"),
 			}),
 		);
+	});
+});
+
+describe("accelDoctorCheck", () => {
+	test("TCG-only is a warning, not a success check", () => {
+		// Cloud sessions have no /dev/kvm, so this is the row they see (#210).
+		const check = accelDoctorCheck(["tcg"], "x64");
+		expect(check.label).toBe("Acceleration");
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("tcg");
+		expect(check.detail).toContain("no KVM/HVF");
+	});
+
+	test("hardware acceleration present reads ok and says nothing about TCG-only", () => {
+		const check = accelDoctorCheck(["kvm", "tcg"], "x64");
+		expect(check.status).toBe("ok");
+		expect(check.detail).toContain("kvm, tcg");
+		expect(check.detail).not.toContain("software emulation only");
+	});
+
+	test("a configured override suffix is preserved on either status", () => {
+		const suffix = " — configured override via QUICKCHR_ACCEL";
+		expect(accelDoctorCheck(["tcg"], "x64", suffix).detail).toContain("QUICKCHR_ACCEL");
+		expect(accelDoctorCheck(["hvf", "tcg"], "arm64", suffix).detail).toContain("QUICKCHR_ACCEL");
+	});
+
+	test("no detected accelerator stays a warning", () => {
+		const check = accelDoctorCheck([], "x64");
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("TCG only");
+	});
+});
+
+describe("proxyDoctorCheck", () => {
+	test("unset proxy reads ok", () => {
+		const check = proxyDoctorCheck({} as NodeJS.ProcessEnv);
+		expect(check.label).toBe("HTTPS proxy");
+		expect(check.status).toBe("ok");
+		expect(check.detail).toContain("not set");
+	});
+
+	test("a set proxy is reported as a warning with the endpoint shown", () => {
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "http://proxy.example:8080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("http://proxy.example:8080");
+		expect(check.detail).toContain("*.mikrotik.com");
+	});
+
+	test("honors the lowercase spelling", () => {
+		const check = proxyDoctorCheck({ https_proxy: "http://proxy.example:8080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("http://proxy.example:8080");
+	});
+
+	test("credentials in the proxy URL are never echoed", () => {
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "http://user:secret@proxy.example:8080" });
+		expect(check.detail).toContain("http://proxy.example:8080");
+		expect(check.detail).not.toContain("user");
+		expect(check.detail).not.toContain("secret");
+	});
+
+	test("an unparseable value is not echoed raw", () => {
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "not a url {{{" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("unparseable");
+		expect(check.detail).not.toContain("{{{");
 	});
 });

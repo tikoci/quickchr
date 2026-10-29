@@ -392,6 +392,58 @@ describe("downloadToFile — HTTP outcomes", () => {
 		expect(leftoverParts(dest)).toEqual([]);
 	}, 30_000);
 
+	test("a 403 names the refused host and hints at the proxy allowlist", async () => {
+		// Sandboxed cloud sessions answer 403 to CONNECT for hosts off the
+		// allowlist (#210) — a policy refusal, not a missing artifact.
+		const { url, attempts } = startStub({ size: 0, status: 403 });
+		const dest = join(tempDir(), "artifact.zip");
+
+		const err = await expectQuickCHRError(
+			downloadToFile(url, dest, { logger: silentLogger, maxAttempts: 3 }),
+		);
+
+		expect(err.code).toBe("DOWNLOAD_FAILED");
+		expect(err.message).toContain("403");
+		expect(err.message).toContain(new URL(url).hostname);
+		expect(err.installHint).toContain("*.mikrotik.com");
+		expect(attempts()).toBe(1);
+	});
+
+	test("a thrown proxy refusal is terminal and names the refused host", async () => {
+		// The ERR_PROXY_TUNNEL shape: fetch itself throws, so the raw stub cannot
+		// produce it — mock fetch to reject the way a refusing proxy does.
+		const originalFetch = globalThis.fetch;
+		let calls = 0;
+		globalThis.fetch = Object.assign(
+			() => {
+				calls++;
+				return Promise.reject(
+					Object.assign(new Error("proxy CONNECT refused: 403"), {
+						code: "ERR_PROXY_TUNNEL",
+					}),
+				);
+			},
+			{ preconnect: (_url: string | URL) => {} },
+		) as typeof fetch;
+		try {
+			const dest = join(tempDir(), "artifact.zip");
+			const err = await expectQuickCHRError(
+				downloadToFile("https://download.mikrotik.com/routeros/artifact.zip", dest, {
+					logger: silentLogger,
+					maxAttempts: 3,
+				}),
+			);
+
+			expect(err.code).toBe("DOWNLOAD_FAILED");
+			expect(err.message).toContain("download.mikrotik.com");
+			expect(err.installHint).toContain("*.mikrotik.com");
+			// Terminal like a client error — every retry would be refused identically.
+			expect(calls).toBe(1);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	test("a body with no content-length still downloads, under the stated fallback", async () => {
 		const { url } = startStub({ size: 8_192, chunk: 2_048, declareLength: null });
 		const dest = join(tempDir(), "artifact.zip");

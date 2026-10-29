@@ -3,6 +3,7 @@ import { promises as dns } from "node:dns";
 import {
 	fetchResilient,
 	isConnectionFailure,
+	isProxyRefusal,
 	ResilientFetchError,
 	toIpv4Url,
 } from "../../src/lib/net.ts";
@@ -185,5 +186,61 @@ describe("fetchResilient", () => {
 		await expect(fetchResilient("https://h.example/x")).rejects.toThrow("x is not a function");
 		expect(fetchSpy).toHaveBeenCalledTimes(1); // surfaced immediately; no public-DNS retry
 		expect(resolveSpy).toHaveBeenCalledTimes(0);
+	});
+
+	test("lets a proxy refusal through without a fallback — no resolver can clear a policy", async () => {
+		// Sandboxed cloud sessions answer 403 to CONNECT for hosts off the
+		// allowlist (#210). The public-DNS/IPv4 fallback must not run: there is
+		// no direct egress for it to use, and its error would only confuse the log.
+		const resolveSpy = mockResolve4({ reject: new Error("resolve4 must not be called") });
+		const refusal = Object.assign(new Error("proxy CONNECT refused: 403"), {
+			code: "ERR_PROXY_TUNNEL",
+		});
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => {
+			throw refusal;
+		}) as unknown as typeof fetch);
+		const err = await fetchResilient("https://upgrade.mikrotik.com/x").catch((e) => e);
+		expect(err).toBe(refusal); // unchanged, not wrapped in a ResilientFetchError
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+		expect(resolveSpy).toHaveBeenCalledTimes(0);
+	});
+});
+
+describe("isProxyRefusal", () => {
+	test("true for ERR_PROXY_TUNNEL by code, including through a cause chain", () => {
+		expect(isProxyRefusal(Object.assign(new Error("nope"), { code: "ERR_PROXY_TUNNEL" }))).toBe(
+			true,
+		);
+		const wrapped = new Error("fetch failed", {
+			cause: Object.assign(new Error("proxy CONNECT refused"), { code: "ERR_PROXY_TUNNEL" }),
+		});
+		expect(isProxyRefusal(wrapped)).toBe(true);
+	});
+
+	test("true for messages naming a refused proxy tunnel", () => {
+		expect(isProxyRefusal(new Error("proxy CONNECT refused: 403"))).toBe(true);
+		expect(isProxyRefusal(new Error("Proxy tunnel creation failed with 403 Forbidden"))).toBe(
+			true,
+		);
+		expect(isProxyRefusal(new Error("CONNECT tunnel failed: 403"))).toBe(true);
+	});
+
+	test("false for connection failures, aborts, and unrelated errors", () => {
+		// A proxy refusal must never read as a connection failure — that is what
+		// would send it down the public-DNS fallback and the retry loops.
+		expect(isConnectionFailure(Object.assign(new Error("x"), { code: "ERR_PROXY_TUNNEL" }))).toBe(
+			false,
+		);
+		expect(isProxyRefusal(Object.assign(new Error("Unable to connect"), { code: "ECONNREFUSED" }))).toBe(
+			false,
+		);
+		const abort = new Error("The operation timed out.");
+		abort.name = "AbortError";
+		expect(isProxyRefusal(abort)).toBe(false);
+		expect(isProxyRefusal(new TypeError("x is not a function"))).toBe(false);
+		expect(isProxyRefusal(null)).toBe(false);
+		// Proxy auth (407) is a credentials problem, not an allowlist refusal —
+		// the *.mikrotik.com hint would mislead.
+		expect(isProxyRefusal(new Error("Proxy Authentication Required"))).toBe(false);
 	});
 });

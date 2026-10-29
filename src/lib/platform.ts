@@ -591,6 +591,49 @@ export function resolveInterfaceAlias(
 	);
 }
 
+/**
+ * The Acceleration row for `doctor`. TCG-only is a warning, not a clean bill:
+ * software emulation boots CHR several times slower than KVM/HVF, and on Linux
+ * it usually means /dev/kvm is missing or inaccessible (#210). `suffix` is the
+ * configured-override note the caller already computed (empty when auto).
+ */
+export function accelDoctorCheck(accelAvailable: string[], hostArch: string, suffix = ""): DoctorCheck {
+	if (accelAvailable.length === 0) {
+		return { label: "Acceleration", status: "warn", detail: "TCG only (software emulation)" };
+	}
+	const onlyTcg = accelAvailable.every((a) => a === "tcg");
+	return {
+		label: "Acceleration",
+		status: onlyTcg ? "warn" : "ok",
+		detail: `${accelAvailable.join(", ")} (host: ${hostArch})${suffix}${onlyTcg ? " — TCG software emulation only (no KVM/HVF); expect slow boots" : ""}`,
+	};
+}
+
+/**
+ * The HTTPS-proxy row for `doctor`. In proxied sandboxes all egress goes
+ * through it, and a host off its allowlist fails downloads (#210) — an agent
+ * should see that constraint up front. Credentials in the URL are never echoed:
+ * only scheme://host is shown.
+ */
+export function proxyDoctorCheck(env: NodeJS.ProcessEnv = process.env): DoctorCheck {
+	const raw = env.HTTPS_PROXY ?? env.https_proxy;
+	if (!raw) {
+		return { label: "HTTPS proxy", status: "ok", detail: "not set (direct egress)" };
+	}
+	let shown: string;
+	try {
+		const u = new URL(raw);
+		shown = `${u.protocol}//${u.host}`;
+	} catch {
+		shown = "(unparseable value, not shown)";
+	}
+	return {
+		label: "HTTPS proxy",
+		status: "warn",
+		detail: `${shown} — egress via proxy; downloads need *.mikrotik.com allowed`,
+	};
+}
+
 /** Compare the running Bun against the same pin CI installs. */
 export async function bunRuntimeCheck(version = Bun.version): Promise<DoctorCheck> {
 	const pin = (await Bun.file(new URL("../../.bun-version", import.meta.url)).text()).trim();

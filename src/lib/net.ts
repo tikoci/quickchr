@@ -116,6 +116,40 @@ export function isConnectionFailure(err: unknown): boolean {
 	return e.name === "TypeError" && e.errno === 0;
 }
 
+/**
+ * Hint attached when an egress proxy refuses a MikroTik host. Sandboxed cloud
+ * sessions answer 403 to CONNECT for hosts off their allowlist (#210) — the
+ * error message names the refused host, this says what to do about it.
+ */
+export const PROXY_ALLOWLIST_HINT =
+	"Allow *.mikrotik.com in the proxy or sandbox allowed-domains list (or switch to full network access), then retry in a new session — allowlist changes do not apply to a running session.";
+
+/**
+ * True when a fetch threw because an egress proxy refused the CONNECT tunnel —
+ * a policy refusal, not a network failure. Matched on the `ERR_PROXY_TUNNEL`
+ * code or on a message naming a refused proxy tunnel, following the cause
+ * chain since runtimes wrap the original failure.
+ *
+ * Deliberately NOT a connection failure: no resolver or address fallback can
+ * help when the proxy's policy refused the host — and in a proxied sandbox
+ * there is no direct egress for the public-DNS/IPv4 fallback to use anyway —
+ * so fetchResilient lets this through without a fallback attempt.
+ */
+export function isProxyRefusal(err: unknown): boolean {
+	let current: unknown = err;
+	for (let depth = 0; depth < 3 && current && typeof current === "object"; depth++) {
+		const e = current as { name?: string; message?: string; code?: string; cause?: unknown };
+		if (e.code === "ERR_PROXY_TUNNEL") return true;
+		const text = `${e.name ?? ""} ${e.message ?? ""}`;
+		if (/ERR_PROXY_TUNNEL/i.test(text)) return true;
+		if (/proxy/i.test(text) && /(403|forbidden|tunnel|refused|refuses|refusal)/i.test(text))
+			return true;
+		if (/\btunnel\b/i.test(text) && /(403|forbidden)/i.test(text)) return true;
+		current = e.cause;
+	}
+	return false;
+}
+
 /** Rewrite a URL to target an explicit IPv4 literal, preserving port/path/query. */
 export function toIpv4Url(url: string, address: string): string {
 	const u = new URL(url);

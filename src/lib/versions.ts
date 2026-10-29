@@ -4,7 +4,7 @@
 
 import type { Arch, Channel } from "./types.ts";
 import { CHANNELS, QuickCHRError } from "./types.ts";
-import { fetchResilient, isConnectionFailure } from "./net.ts";
+import { fetchResilient, isConnectionFailure, isProxyRefusal, PROXY_ALLOWLIST_HINT } from "./net.ts";
 
 const UPGRADE_BASE = "https://upgrade.mikrotik.com/routeros/NEWESTa7";
 const DOWNLOAD_BASE = "https://download.mikrotik.com/routeros";
@@ -125,6 +125,16 @@ export async function resolveVersion(
 		try {
 			const response = await fetchResilient(url);
 			if (!response.ok) {
+				// A 403 here is usually not MikroTik refusing us — it is a sandbox
+				// egress proxy refusing CONNECT for a host off its allowlist (#210).
+				// Name the host and the fix; other statuses keep the generic verdict.
+				if (response.status === 403) {
+					throw new QuickCHRError(
+						"DOWNLOAD_FAILED",
+						`Failed to fetch version for channel "${channel}": HTTP 403 — the egress proxy refused ${new URL(url).hostname}`,
+						PROXY_ALLOWLIST_HINT,
+					);
+				}
 				// An HTTP answer is the server's verdict. Thrown as a QuickCHRError so
 				// the catch below can tell it from a transport failure and let it out.
 				throw new QuickCHRError(
@@ -140,6 +150,16 @@ export async function resolveVersion(
 			// Only "could not reach the host at all" is retried. An HTTP verdict, an
 			// abort (the caller gave up) or a real bug surfaces immediately.
 			if (err instanceof QuickCHRError) throw err;
+			// A proxy policy refusal is terminal, not retriable: no retry can clear
+			// it — allowlist changes do not even apply to a running session — so
+			// map it to a DOWNLOAD_FAILED that names the refused host (#210).
+			if (isProxyRefusal(err)) {
+				throw new QuickCHRError(
+					"DOWNLOAD_FAILED",
+					`Failed to fetch version for channel "${channel}": the egress proxy refused ${new URL(url).hostname} (${err instanceof Error ? err.message : String(err)})`,
+					PROXY_ALLOWLIST_HINT,
+				);
+			}
 			if (!isConnectionFailure(err)) throw err;
 			lastError = err;
 			if (attempt < maxAttempts) await Bun.sleep(attempt * retryDelayMs);
