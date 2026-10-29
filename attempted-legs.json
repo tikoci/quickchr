@@ -2511,5 +2511,35 @@
 		"planned": 2,
 		"sha": "a5688d8de8f6b12c8f371258481da6d24ad15d1d",
 		"ts": "2026-10-29T16:50:08.008Z"
+	},
+	"40914465244": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"macos-x86|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 346,
+				"job_matched": true,
+				"platform": "macos-x86",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"windows-x86|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 313,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			}
+		},
+		"planned": 2,
+		"sha": "a5688d8de8f6b12c8f371258481da6d24ad15d1d",
+		"ts": "2026-10-29T16:50:18.931Z"
 	}
 }
