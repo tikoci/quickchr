@@ -52,6 +52,22 @@ POST /rest/execute  { "script": ":put hello", "as-string": "" }    → { "ret": 
 
 Our `exec.ts` always sends `"as-string": ""` for synchronous execution.
 
+## Transport failures vs HTTP errors (exec retry contract)
+
+A connection-level failure — reset, refused, timeout, anything where **no HTTP
+response was received** — is not covered by the liveness ladder above, which is
+about responses. `ChrInstance.rest()` and the exec `auto` transport retry
+`ECONNRESET` (3 attempts, 2 s backoff) for the brief post-boot window in which
+RouterOS resets early connections; exec `auto` then falls back to the serial
+console when REST stays unreachable. An HTTP error (401/400/500) is never
+retried and never falls back: a response is an answer. Explicit `via: "rest"`
+sends exactly once.
+
+Grounded 2026-10-29 (#135): disabling www makes the forwarded REST port reset
+connections immediately (`read ECONNRESET`, ~16 ms, not refused or timed out);
+serial-console exec keeps working with www down and can re-enable it. The
+`exec — auto transport fallback` integration test pins this round-trip.
+
 ## Guest shutdown through exec
 
 On CHR 7.24.5, `/system/shutdown` through synchronous `/rest/execute` returned

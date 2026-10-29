@@ -335,3 +335,71 @@ describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
 		expect(result.output.trim()).toBe("credtest");
 	}, 30_000);
 });
+
+// Own machine: this block kills www mid-test, so it must not share a CHR with
+// the suites above.
+describe.skipIf(SKIP)("exec — auto transport fallback", () => {
+	const MACHINE = "integration-exec-fallback";
+	let instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>> | undefined;
+
+	beforeAll(async () => {
+		await cleanupMachine(MACHINE);
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		instance = await QuickCHR.start({
+			...imageTarget(),
+			background: true,
+			name: MACHINE,
+		});
+		expect(instance).toBeDefined();
+		if (!instance) {
+			throw new Error("Failed to start integration CHR instance");
+		}
+		const booted = await instance.waitForBoot(120_000);
+		expect(booted).toBe(true);
+		await waitForExecReady(instance, 60_000);
+	}, bootTestTimeout());
+
+	afterAll(async () => {
+		if (instance) {
+			try { await instance.stop(); } catch { /* ignore */ }
+			try { await instance.remove(); } catch { /* ignore */ }
+		}
+	});
+
+	test("auto falls back to console while www is down, returns to REST after (#135)", async () => {
+		expect(instance).toBeDefined();
+		// biome-ignore lint/style/noNonNullAssertion: guarded by expect above
+		const chr = instance!;
+
+		// Baseline: REST serves.
+		const baseline = await chr.exec(":put baseline");
+		expect(baseline.via).toBe("rest");
+
+		// With www disabled, the forwarded REST port resets connections
+		// (ECONNRESET, no HTTP response) instead of answering.
+		await chr.exec("/ip/service/disable www");
+		try {
+			const fallback = await chr.exec(":put fallback-ok");
+			expect(fallback.via).toBe("console");
+			expect(fallback.output.trim()).toBe("fallback-ok");
+		} finally {
+			// Serial console does not need www: restore even on failure so the
+			// machine is left healthy.
+			await chr.exec("/ip/service/enable www", { via: "console", timeout: 60_000 });
+		}
+
+		// www takes a moment to serve again — poll until REST answers.
+		const deadline = Date.now() + 60_000;
+		for (;;) {
+			const recovered = await chr.exec(":put rest-ok");
+			if (recovered.via === "rest") {
+				expect(recovered.output.trim()).toBe("rest-ok");
+				return;
+			}
+			if (Date.now() > deadline) {
+				throw new Error("REST did not recover within 60s of re-enabling www");
+			}
+			await Bun.sleep(2000);
+		}
+	}, 180_000);
+});

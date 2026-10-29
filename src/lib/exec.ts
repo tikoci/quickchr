@@ -55,10 +55,15 @@ export async function restExecute(
 		status = resp.status;
 		data = resp.body;
 	} catch (e) {
-		throw new QuickCHRError(
+		const err = new QuickCHRError(
 			"EXEC_FAILED",
 			`exec timed out or failed: ${e instanceof Error ? e.message : String(e)}`,
 		);
+		// Preserve the transport failure for callers that ride out resets (the
+		// auto transport). HTTP errors below never carry a cause: a response —
+		// even a 401 or 500 — is an answer, not a transient.
+		err.cause = e;
+		throw err;
 	}
 
 	if (status < 200 || status >= 300) {
@@ -78,6 +83,59 @@ export async function restExecute(
 	}
 
 	return { output, via: "rest" as ExecTransport };
+}
+
+/**
+ * True when an exec failure was a connection-level transport failure — the
+ * request got no HTTP response at all (reset, refused, timeout) — rather than
+ * an HTTP error or command failure. Only transport failures are ever retried
+ * or fall back to another transport.
+ */
+export function isExecTransportFailure(e: unknown): boolean {
+	return e instanceof QuickCHRError && e.code === "EXEC_FAILED" && e.cause instanceof Error;
+}
+
+function isTransportReset(e: unknown): boolean {
+	return (
+		isExecTransportFailure(e) &&
+		((e as QuickCHRError).cause as { code?: unknown }).code === "ECONNRESET"
+	);
+}
+
+/**
+ * Execute via REST, riding out the brief post-boot window in which RouterOS
+ * resets connections that arrive before www is fully settled — the same
+ * transient `ChrInstance.rest()` already retries (3 attempts, 2 s backoff),
+ * and the shape behind #135's first-exec-after-boot failure and #69's
+ * first-request resets on linux-arm64.
+ *
+ * Only connection resets are retried, and only when no HTTP response was
+ * received. HTTP errors, auth failures, and timeouts throw immediately: a
+ * response is an answer, and a timeout means the server may still be running
+ * the script, so replaying it could double-execute a non-idempotent command.
+ *
+ * This is the auto transport's REST attempt, not a general policy:
+ * `via: "rest"` still sends exactly once (guest shutdown depends on
+ * no-replay), and the auto path falls back to console when REST stays
+ * unreachable after the retries.
+ */
+export async function restExecuteWithRetry(
+	restUrl: string,
+	auth: ResolvedAuth,
+	command: string,
+	opts?: Pick<ExecOptions, "timeout"> & { retries?: number; retryDelayMs?: number },
+): Promise<ExecResult> {
+	const maxRetries = opts?.retries ?? 3;
+	const delayMs = opts?.retryDelayMs ?? 2000;
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await restExecute(restUrl, auth, command, opts);
+		} catch (e) {
+			if (attempt >= maxRetries || !isTransportReset(e)) throw e;
+			console.warn(`exec: ECONNRESET on REST attempt ${attempt + 1}, retrying...`);
+			await Bun.sleep(delayMs);
+		}
+	}
 }
 
 /**

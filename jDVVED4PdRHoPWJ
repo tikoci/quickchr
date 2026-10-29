@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MikroTik File Sharing</title>
+    <!-- relay reachability test depends on previous line -->
+    <link rel="icon" type="image/png" href="https://cdn.mikrotik.com/marketing/bth/favicon.ico" />
+
+    <meta property="og:site_name" content="Back To Home" />
+    <meta property="og:title" content="MikroTik File Sharing" />
+    <meta property="og:description" content="Somebody has shared a file with you, using the MikroTik BTH service" />
+    <meta property="og:image" content="https://cdn.mikrotik.com/marketing/bth/bth-192x192.png" />
+
+    <script type="text/javascript">
+const iconSvgDl='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><g style="fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:2px;"><path d="M7,11l5,5,5-5"/><path d="M12,4v12"/><path d="M20,16v2c0,1.1-.9,2-2,2H6c-1.1,0-2-.9-2-2v-2"/></g></svg>';const iconSvgCancel='<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24"><g style="fill:currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></g></svg>';const iconSrcDir='https://cdn.mikrotik.com/marketing/bth/folder.svg';const iconSrcFile='https://cdn.mikrotik.com/marketing/bth/file.svg';const iconMissing='https://cdn.mikrotik.com/marketing/bth/missing.svg';HTMLElement.prototype.show=function(){this.classList.remove('hide')};HTMLElement.prototype.hide=function(){this.classList.add('hide')};function q(q){return document.getElementById(q);}
+function el(t,p=undefined,k=''){let c=document.createElement(t);c.classList=k;if(p)p.append(c);return c;}
+class UploadTask{constructor(onFileUpload){this.dirs=[];this.files=[];this.status=0;this.total=0;this.onFileUpload=onFileUpload;this.uploading=false;this.xhr=undefined;this.stat=q('stat');let box=el('div',this.stat,'ulb');el('img',box,'uic').src=iconSrcFile;let bdy=el('div',box,'bdy');let lbl=el('div',bdy,'lbl');let prg=el('progress',bdy,'pr');let sta=el('div',bdy,'sta');let spd=el('span',sta,'spd');let prc=el('span',sta,'prc');let cnc=el('a',box,'ptr cnc');cnc.innerHTML=iconSvgCancel;cnc.onclick=()=>this.cancelUpload();this.dom={box,lbl,spd,prg,sta,prc};}
+cancelUpload(force=false){if(this.uploading&&!force&&!confirm('Some files are still uploading. Cancel upload?'))return;if(this.xhr)this.xhr.abort();this.uploading=false;this.dom.box.style.opacity=0;setTimeout(()=>this.dom.box.remove(),300);}
+update(){const tdelta=new Date().valueOf()-this.tstart;let sum=0,cnt=0;for(let f of this.files){if(f.loaded)cnt++;sum+=f.loaded;}
+let prc=Math.round((sum/this.total)*100);this.dom.prg.value=sum;this.dom.lbl.innerText=`Uploading ${this.current.file.name}`;this.dom.spd.innerText=`${formatBytes(sum / (tdelta / 1000.0))}/s`;this.dom.prc.innerText=`${prc} %`;}
+async addFiles(files){for(let f of files){this.files.push({dir:'',loaded:0,file:f});this.total+=f.size;}
+this.dom.prg.max=this.total;}
+async addWebkitFiles(items,path=''){for(let itm of items){if(itm.isDirectory){this.dirs.push({path:itm.fullPath,created:false});const reader=itm.createReader();const entries=await new Promise((r)=>{reader.readEntries(r);});await this.addWebkitFiles(entries,itm.fullPath);}else if(this.isValidFile(itm)){let f=await new Promise(r=>itm.file(r));this.total+=f.size;this.files.push({dir:path,loaded:0,file:f});}}
+this.dom.prg.max=this.total;}
+isValidFile(f){return f.isFile&&!f.name.startsWith('.');}
+inDir(file){return pathJoin(file.split('/').slice(0,-1)).length==0;}
+async start(){this.uploading=true;this.dom.lbl.innerText=`Uplaoding ${this.files.length} files...`;this.dom.prg.max=this.total;let base=decodeURI(window.location.hash.slice(1));for(let dir of this.dirs){if(!this.uploading)break;if(tree[pathJoin([base,...dir.path.split('/')])])await loadDir(dir.path);let result=await this.mkdir(dir.path);if(result.status<200||result.status>=400||!result.file)return this.error(`Failed to create directory ${dir.path}`);this.onFileUpload(result.file,this.inDir(dir.path));}
+let r=[];for(let f of this.files){let p=pathJoin([base,f.dir]);if(treeContains(p,f.file.name)){r.push(pathJoin([p,f.file.name]));}}
+if(r.length>0){if(!confirm(`Replace ${r.length} file(s)?\n\n${r.join('\n')}`)){this.cancelUpload(true);return;}}
+this.tstart=new Date().valueOf();for(let f of this.files){if(!this.uploading)break;this.current=f;let result=await this.upload(f);if(result.status<200||result.status>=400||!result.file)return this.error(`Failed to upload ${f.file.name}`);this.onFileUpload(result.file,this.inDir(pathJoin([f.dir,f.file.name])));}
+this.dom.sta.innerText='Upload completed';this.dom.lbl.innerText=`${this.files.length} file(s) uploaded.`;this.dom.spd.hide();this.uploading=false;}
+upload(itm){let self=this;let path=itm.dir;let file=itm.file;if(file.webkitRelativePath)path='';this.xhr=new XMLHttpRequest();const subdir=pathJoin([window.location.hash.slice(1),encodeURI(path)]);const formdata=new FormData();formdata.append('file',file);return new Promise(resolve=>{self.xhr.upload.addEventListener('progress',function(e){itm.loaded=e.loaded;self.update();});let evt=(e)=>{resolve({status:self.xhr.status,response:self.xhr.responseText,file:{path:pathJoin([subdir,itm.dir,file.name]),size:file.size,time:file.lastModified,type:'file'}});self.update();}
+self.xhr.onload=evt;self.xhr.onerror=evt;self.xhr.open('post',`${window.location.pathname}/${subdir}`);self.xhr.send(formdata);});}
+error(err){this.uploading=false;this.dom.sta.innerText='Upload failed';this.dom.lbl.classList.add('err');this.dom.spd.hide();this.dom.prg.hide();this.dom.lbl.innerText=err;if(!err)this.dom.lbl.hide();}
+async mkdir(path){const self=this;const filepath=pathJoin([window.location.hash.slice(1),encodeURI(path)]);const fullpath=pathJoin([window.location.pathname,filepath]);this.xhr=new XMLHttpRequest();return new Promise(resolve=>{let evt=(e)=>{resolve({status:self.xhr.status,response:self.xhr.responseText,file:{path:path,size:0,time:0,type:'dir'}});}
+self.xhr.onload=evt;self.xhr.onerror=evt;self.xhr.open('put',fullpath);self.xhr.send();});}}
+function treeContains(dir,name){if(tree[dir]){return Boolean(tree[dir].find(i=>i.name==name));}
+return false;}
+function addTree(files,path){for(let f of files){f.name=f.path.split('/').pop();}
+tree[path]=files;}
+function pushTree(file){file.path=pathJoin(file.path.split('/'));let path=file.path.split('/');let name=path.pop();path=pathJoin(path);file.name=name;if(!tree.hasOwnProperty(path)){tree[path]=[file];}else{tree[path]=tree[path].filter(i=>i.path!=file.path);tree[path].push(file);}}
+function setPath(path){window.location.hash=encodeURI(path);}
+function pathJoin(parts,separator='/'){const replace=new RegExp(separator+'{1,}','g');return parts.filter(Boolean).join(separator).replace(replace,separator);}
+function addRow(table,file){message('');let name=file['path'].split('/').pop();let isdir=file['type']=='dir';for(let r of table.rows){if(r.dataset.name==name)return;}
+const baseurl=window.location.pathname;let row=table.insertRow();row.dataset.name=name;row.dataset.isdir=isdir;let c1=row.insertCell();let c2=row.insertCell();let c3=row.insertCell();let c4=row.insertCell();let img=document.createElement('img');let adl=document.createElement('a');c1.append(img);row.classList='hvr';c1.classList='fi';c2.classList='ft';c3.classList='fs';c4.classList='fd';adl.onclick=(e)=>{e.stopPropagation();}
+c2.innerText=name;if(isdir){img.src=iconSrcDir;c3.innerText=file['size']+' files';adl.href=`${baseurl}/${encodeURI(file['path'])}?dl`;adl.innerHTML=iconSvgDl;c4.append(adl);row.onclick=(e)=>{setPath(file['path']);}}else{img.src=iconSrcFile;c3.innerText=formatBytes(file['size']);adl.download=name;adl.href=`${baseurl}/${encodeURI(file['path'])}`;adl.innerHTML=iconSvgDl;c4.append(adl);row.onclick=(e)=>{let newTab=document.createElement('a');newTab.href=pathJoin([baseurl,`${encodeURI(file['path'])}`]);newTab.target='_blank';newTab.click();e.stopPropagation();}}}
+function message(str){let msg=q('msg');msg.innerText=str;if(str){msg.show();}else{msg.hide();}}
+function reload(dom,error,seconds){dom.innerText=error;el('div',dom,'mt1').innerText=`Page will reload in ${seconds} seconds...`;if(seconds<=0){location.reload();}else{setTimeout(()=>{reload(dom,error,seconds-1);},1000);}}
+async function loadDir(path=''){const baseurl=window.location.pathname;if(!baseurl.startsWith('/s/')){tls.hide();sgl.show();return{error:'Invalid request'};}
+let url=baseurl+'?list';if(path)url=pathJoin([baseurl,`${encodeURI(path)}?list`]);let obj={error:'Unknown error'};try{const response=await fetch(url,{headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(10000)});obj=await response.json();}catch(error){obj={error:error.message,reload:true};}
+if(!obj.error&&obj.files)addTree(obj.files,path);return obj;}
+async function showDir(path=''){const baseurl=window.location.pathname;let sgl=q('sgl');let rsl=q('rsl');let fi=q('fi');let ft=q('ft');let fs=q('fs');let fd=q('fd');let dl=q('dl');let fl=q('fl');let ild=q('ild');let ilu=q('ilu');let ilb=q('ilb');let tls=q('tls');ft.innerText='Loading files...';fs.hidden=true;fd.hidden=true;dl.hidden=true;ild.onclick=(e)=>{e.stopPropagation();}
+for(let i=0;i<fl.rows.length;i++){fl.rows[i].style.opacity=0;}
+let obj=await loadDir(path);ilb.hide();ilu.hide();if(obj.error){message('');fi.src=iconMissing;ft.innerText=obj.error;fs.hidden=true;fd.hidden=true;fl.innerHTML='';sgl.show();tls.hide();rsl.hide();if(obj.reload){reload(ft,obj.error,5);}
+return;}
+if(obj.edit){ilu.show();ilu.onclick=(e)=>{e.stopPropagation();let input=document.createElement('input');input.type='file';input.multiple=true;input.onchange=e=>{handleFiles(e.target.files);}
+input.click();}}
+let ident=obj.identity||obj.board||'MikroTik';document.title=`${obj.name ? obj.name + ' - ' : ''}${ident} File Sharing`;canUpload=obj.dir&&obj.edit;const files=obj.files.sort(function(a,b){let an=(a.type=='dir'?'A':'Z')+a.path;let bn=(b.type=='dir'?'A':'Z')+b.path;return an.localeCompare(bn);});if(obj.dir){sgl.hide();tls.show();rsl.show();ild.href=`${baseurl}?dl`;if(path){ild.href=pathJoin([baseurl,`${encodeURI(path)}?dl`]);const index=path.lastIndexOf('/');let back=index>0?path.slice(0,index):'';ilb.show();ilb.href='#'+encodeURI(back);ilb.onclick=(e)=>{setPath(back);}}
+fl.innerHTML='';if(files.length<1){message('No files in here');}else{for(let i=0;i<files.length;i++){addRow(fl,files[i]);}}}else{const path=files[0]['path'];let name=path.split('/').pop();fi.src=iconSrcFile;ft.innerText=path;fs.innerText=formatBytes(files[0]['size']);dl.href=pathJoin([baseurl,path]);dl.download=name;fs.hidden=false;fd.hidden=false;tls.hide();rsl.hide();sgl.show();}}
+function formatBytes(count,bits=false){const units=bits?[[' bit',0],[' kbit',0],[' Mbit',1],[' Gbit',1],[' Tbit',1]]:[[' bytes',0],[' KB',0],[' MB',1],[' GB',1],[' TB',1]];let unit=0;count*=bits?8:1;while(count>1024&&unit<(units.length-1)){count/=1024;unit++;}
+return count.toFixed(units[unit][1])+units[unit][0];}
+function handleFiles(files){let u=new UploadTask((f,cd)=>{pushTree(f);if(cd)addRow(q('fl'),f)});uploaders.push(u);u.addFiles(files);u.start();}
+async function dragDrop(e){let items=[];for(let i of e.dataTransfer.items){items.push(i.webkitGetAsEntry());}
+let u=new UploadTask((f,cd)=>{pushTree(f);if(cd)addRow(q('fl'),f)});uploaders.push(u);await u.addWebkitFiles(items);u.start();}
+const tree={};const uploaders=[];var canUpload=false;var lastTarget=null;window.onbeforeunload=function(e){for(let u of uploaders){if(u.uploading){e.preventDefault();e.returnValue='Upload in progress...';return e.returnValue;}}};window.onload=function(e){showDir(decodeURI(window.location.hash.slice(1)));};window.onhashchange=window.onload;window.ondragenter=function(e){if(!canUpload)return;for(let i of e.dataTransfer.items){if(i.kind!='file')return;}
+lastTarget=e.target;q('dpz').show();};window.ondragover=function(e){e.preventDefault();};window.ondragleave=function(e){if(e.target===lastTarget||e.target===document)q('dpz').hide();};window.ondrop=function(e){e.preventDefault();if(!canUpload)return;for(let i of e.dataTransfer.items){if(i.kind!='file')return;}
+q('dpz').hide();dragDrop(e);};    </script>
+    <style>
+@font-face{font-display:swap;font-family:"Manrope";font-style:normal;font-weight:400;src:url("https://cdn.mikrotik.com/marketing/bth/font-regular.woff2") format("woff2");} *,*:before,*:after{box-sizing:inherit;} html,body{box-sizing:border-box;font-size:0.9375rem;font-weight:300;font-weight:normal;line-height:1.25;margin:0;padding:0;height:100%;color:#ffffff;font-family:"Manrope",sans-serif;} body{background-color:#1c272e;background-size:cover;background-position:center;background-repeat:no-repeat;padding:0 0.75rem 0.75rem 0.75rem;} .container{flex-grow:1;display:flex;flex-direction:column;justify-content:center;align-items:center;width:100%;} a{text-decoration:none;color:inherit;} a:hover{text-decoration:none;color:#01ae7a;} .logo{display:flex;justify-content:center;padding:1rem;} .logo > img{height:1.5rem;} #rsl,#drg,#msg,.ulb{background-color:rgb(42,55,61,0.75);border-radius:0.5rem;} #rsl,#stat,#drg,#tls,#msg{width:100%;max-width:900px;margin-bottom:0.875rem;} #msg{padding:2rem;text-align:center;color:#8e9396;} #drg{border:dashed 2px #007B64;padding:3rem;font-size:1.1em;text-align:center;color:#ffffff;} #rsl table{width:100%;border-collapse:collapse;text-align:left;font-size:1rem;} #rsl tr{transition:background-color linear 0.25s;} #rsl td,#rsl th{padding:0.875rem 0.25rem;vertical-align:top;white-space:nowrap;border-bottom:1px solid #1c272e;} #rsl tr:last-child td{border-bottom:none;} #rsl td:first-child,#rsl th:first-child{padding-left:1rem;} #rsl td:last-child,#rsl th:last-child{padding-right:1rem;} #rsl .fi{width:1px;} #rsl .ft{word-wrap:anywhere;white-space:wrap;} #rsl .fi > img{width:1.25rem;height:1.25rem;} #rsl .fs{width:1px;font-size:0.875rem;padding-top:1.04rem;padding-bottom:1.04rem;text-align:right;color:#93999d;} #rsl .fd{width:1px;color:#93999d;line-height:1;} #rsl .fd > a{display:inline-block;} #rsl .fd > a > svg{width:1.25rem;height:1.25rem;} @media (min-width:600px){#rsl td.fd > a{padding:0 0.25rem;} } @media (hover:hover){#rsl tr.hvr:hover{background-color:#214847;cursor:pointer;} #rsl tr.hvr:hover td.fd > a{color:#01ae7a;} } #sgl{display:flex;flex-direction:column;gap:1rem;justify-content:center;align-items:center;padding:1.5rem;width:100%;max-width:360px;min-height:320px;overflow:hidden;border-radius:0.375rem;background-color:rgba(40,52,58,0.75);transition:background-color linear 0.25s;cursor:pointer;text-align:center;} @media (hover:hover){#sgl:hover .fd > a{color:#01ae7a;border-color:transparent;background-color:#214847;} } #sgl .fi > img{width:2rem;height:2rem;} #sgl .fs{font-size:0.875rem;color:#93999d;} #sgl .fd{color:#93999d;} #sgl .fd a{display:flex;justify-content:center;align-items:center;width:4rem;height:4rem;border-radius:50%;border:1px solid rgba(255,255,255,0.1);transition:border linear 0.25s,background-color linear 0.25s;} #sgl .fd svg{width:1.5rem;height:1.5rem;} .hide{display:none !important;visibility:hidden !important;} #ilu{margin-right:24px;} #tls{display:flex;justify-content:space-between;width:100%;align-items:center;gap:0.5rem;} .il{display:inline-flex;justify-content:flex-start;align-items:center;gap:0.5rem;font-size:0.875rem;color:#8e9396;} @media (hover:hover){.il:hover{color:white;} } .il svg{width:1.25rem;height:1.25rem;} .err{color:#ff6355;} .ulb{opacity:1;-webkit-transition:opacity 300ms linear;transition:opacity 300ms linear;display:flex;align-items:start;margin-bottom:0.875rem;} .ulb > *{margin:0.875rem 0.25rem;} .bdy{flex-grow:1;} .sta{display:flex;} .sta > .spd{flex-grow:1;} .sta > .prc{color:#01ae7a;} .sta,.cnc{color:#93999d;} .ptr:hover{cursor:pointer;} .uic{margin-left:1rem;} .cnc{margin-right:1rem;} .cnc > svg,.fi img,.uic{width:1.25rem;} .pr{width:100%;background-color:#343e45;border:none;border-radius:100px;height:0.375rem;color:#007b64;margin:0.3rem 0;&::-moz-progress-bar,&::-webkit-progress-value{background:#007b64;} } #dpz{position:fixed;z-index:99999;inset:1rem;border-radius:0.75rem;border:2px dashed #01ae7a;background-color:#343e45;display:flex;flex-direction:column;justify-content:center;align-items:center;h3{font-weight:normal;font-size:1.5rem;margin:0;} p{color:#8e9396;margin:0.25rem 0 0 0;} .ilg{margin-top:1rem;color:#01ae7a;;} } .ilg{display:flex;justify-content:center;align-items:center;width:4rem;height:4rem;border-radius:50%;border:1px solid rgba(255,255,255,0.1);transition:border linear 0.25s,background-color linear 0.25s;} .ilg svg{width:1.5rem;height:1.5rem;} .mt1{margin-top:1rem;}    </style>
+  </head>
+  <body style="background-image: url('https://cdn.mikrotik.com/marketing/bth/bg.jpg')">
+    <div class="container">
+      <div class="logo">
+        <img src="https://cdn.mikrotik.com/marketing/bth/MT_White.svg" alt="">
+      </div>
+      <div id="sgl" class="hide">
+        <div id="fi" class="fi"><img src="https://cdn.mikrotik.com/marketing/bth/missing.svg"></div>
+        <div id="ft" class="ft">Loading files...</div>
+        <div id="fs" class="fs" hidden=""></div>
+        <div id="fd" class="fd" hidden="">
+          <a id="dl" class="dl" href="">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <g style="fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:2px;">
+                <path d="M7,11l5,5,5-5"></path>
+                <path d="M12,4v12"></path>
+                <path d="M20,16v2c0,1.1-.9,2-2,2H6c-1.1,0-2-.9-2-2v-2"></path>
+              </g>
+            </svg>
+          </a>
+        </div>
+      </div>
+      <div id="stat"></div>
+      <div id="tls">
+        <div>
+          <a class="il hide" href="#" id="ilb">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+              <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5">
+                <polyline points="10 4 6 8 10 12"></polyline>
+              </g>
+            </svg>
+            <span>Back</span>
+          </a>
+        </div>
+        <div>
+          <a class="il ptr" id="ilu">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M0 0h24v24H0z" stroke="none"/>
+              <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 9l5-5 5 5M12 4v12"/>
+            </svg>
+            <span>Upload files</span>
+          </a>
+          <a class="il ptr" id="ild" href="/s/MqHC2b6VwA1Rj0Y?dl">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+              <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+                <path d="m14 16 5-5M14 4v12M10 4v5M4 17v2c0 .5.2 1 .6 1.4.4.4.9.6 1.4.6h12c.5 0 1-.2 1.4-.6s.6-.9.6-1.4v-2M5 11l5 5"></path>
+              </g>
+            </svg>
+            <span>Download all</span>
+          </a>
+        </div>
+      </div>
+      <div id="msg" class="hide"></div>
+      <div id="rsl" class="">
+        <table>
+          <tbody id="fl"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="dpz" class="hide">
+      <h3>Drop files to upload</h3>
+      <div>
+        <span class="ilg">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><g style="fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:2px;"><path d="M7,11l5,5,5-5"/><path d="M12,4v12"/><path d="M20,16v2c0,1.1-.9,2-2,2H6c-1.1,0-2-.9-2-2v-2"/></g></svg>
+        </span>
+      </div>
+    </div>
+</body>
+</html>
