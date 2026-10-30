@@ -36,9 +36,9 @@ old runtime is a debt that compounds silently, which is how #148 happened.
 
 ## Action refs are pinned to SHAs (except the toolchain)
 
-Every third-party `uses:` ref is pinned to an immutable commit SHA with the major version
-in a trailing comment — `actions/checkout@<sha> # v5` — following the pre-existing
-`oven-sh/setup-bun` style (#103, #118). A mutable `@v5` tag can be repointed after review,
+Every third-party `uses:` ref is pinned to an immutable commit SHA with the release version
+in a trailing comment — `actions/checkout@<sha> # v7.0.1`, the form Dependabot writes —
+following the pre-existing `oven-sh/setup-bun` style (#103, #118). A mutable `@v5` tag can be repointed after review,
 and these workflows hold `contents: write` plus secrets, so action updates must arrive as
 reviewable diffs. Dependabot (`github-actions` ecosystem, weekly) files the pin-update PRs,
 so pinned refs still track latest instead of rotting.
