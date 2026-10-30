@@ -2863,5 +2863,45 @@
 		"planned": 3,
 		"sha": "16719765b10a91958ebf5cd53df11ce6dc3c8cec",
 		"ts": "2026-10-30T21:26:27.071Z"
+	},
+	"41131976472": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"linux-arm64|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 3017,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-x86|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2030,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"macos-arm64|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2989,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			}
+		},
+		"planned": 3,
+		"sha": "3dd9a3a894d25a1d98f628e5f4e9597febaf5cc5",
+		"ts": "2026-10-30T22:24:40.157Z"
 	}
 }
