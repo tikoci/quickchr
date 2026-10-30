@@ -13,12 +13,33 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Added
 
+- `quickchr set <name> --package <pkg>[,<pkg>...]` installs extra packages on a
+  running machine: SCP upload, reboot to activate, wait for REST. Repeatable and
+  comma-separated like `--add-package`. The `PROVISIONING_WINDOW_CLOSED` refusal
+  for `--add-package` now names this command instead of the library API. (#24)
 - `doctor` reports the configured HTTPS egress proxy (`HTTPS_PROXY`/`https_proxy`,
   `ALL_PROXY`/`all_proxy`, credentials redacted) or direct egress, and warns when
   acceleration is TCG-only. (#210)
 
 ### Fixed
 
+- `installPackage()` enforces the post-boot preconditions instead of failing
+  mid-operation: a stopped machine is refused with `MACHINE_STOPPED`, a machine
+  with no user-mode NIC with `NETWORK_UNAVAILABLE`, and a machine whose REST API
+  does not answer with `BOOT_TIMEOUT` — before anything is uploaded. It also
+  throws when the guest rejects the activating reboot (`PROCESS_FAILED` on
+  401/403, `REBOOT_FAILED` otherwise), when the guest never goes down for it,
+  and when the guest does not come back afterwards (all three used to report
+  success) — always before anything is recorded, so a failed install never
+  reads as applied later. It uploads over SSH with the machine's own
+  credentials instead of factory `admin:` (so `--disable-admin` machines work),
+  and records the `packages` provisioning step so a later `start` with the same
+  packages is a no-op. (#24)
+- SCP transfers with a non-empty password (`upload()`, `download()`,
+  `installPackage()` on a machine with a provisioned user) failed with
+  "Permission denied": `SSH_ASKPASS_REQUIRE=prefer` skips askpass when DISPLAY
+  is empty, so ssh fell back to stdin and submitted an empty password. Now
+  `force`, which runs askpass regardless of DISPLAY.
 - In sandboxed cloud sessions whose egress proxy refuses a MikroTik host,
   downloads and channel resolution fail fast naming the refused host and the
   allowlist fix, instead of retrying or blaming the network. (#210)

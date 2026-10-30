@@ -41,12 +41,13 @@ Expected time: ~50–90 s (the install downloads the package and reboots once).
 
 ## Friction found
 
-The **library** can install a package on a *running* machine
-(`ChrInstance.installPackage("dude")`), but the **CLI** can only install at first
-boot (`--add-package`) — there's no `quickchr install <name> <pkg>` for a running
-instance. That's why `dude.ts` and `dude.sh` take slightly different paths to the
-same end state. Tracked in
+None open. The **library** installs a package on a *running* machine
+(`ChrInstance.installPackage("dude")`), and the **CLI** now matches it with
+`quickchr set <name> --package dude` (reboots to activate) — the gap this
+section used to record closed with
 [tikoci/quickchr#24](https://github.com/tikoci/quickchr/issues/24).
+`dude.sh` and `dude.ps1` still install at first boot via `--add-package`, which
+remains the cheaper path when the machine does not exist yet.
 
 ## See also
 

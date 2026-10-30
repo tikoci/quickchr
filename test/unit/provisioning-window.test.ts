@@ -151,14 +151,24 @@ describe("assertProvisioningWindow", () => {
 	});
 
 	test("the packages route names the packages, and sends install-all through clean()", () => {
-		// installPackage() takes names and has no install-all form, so naming it for
-		// `--install-all-packages` would point at an API that cannot do the job.
-		expect(refusal(booted(), { packages: ["container", "ups"] }).message)
-			.toContain('instance.installPackage(["container","ups"])');
+		// installPackage() takes names and has no install-all form, so naming the
+		// CLI route for `--install-all-packages` would point at a command that
+		// cannot do the job.
+		const packages = refusal(booted(), { packages: ["container", "ups"] }).message;
+		expect(packages).toContain("quickchr set pw-test --package container,ups");
+		expect(packages).toContain("reboots the machine");
 
 		const installAll = refusal(booted(), { installAllPackages: true }).message;
 		expect(installAll).toContain("repeat the original start command");
-		expect(installAll).not.toContain("installPackage(");
+		expect(installAll).not.toContain("--package");
+	});
+
+	test("a package name needing quotes is quoted — the route must paste", () => {
+		// Same rule as the machine name and the device-mode values: the route is
+		// a line you can paste and run. Per-name quoting keeps the comma join
+		// intact (`--package 'my pkg',ups` still splits into two requests).
+		const { message } = refusal(booted(), { packages: ["my pkg", "ups"] });
+		expect(message).toContain("--package 'my pkg',ups");
 	});
 
 	test("license names the CLI route that already ships", () => {

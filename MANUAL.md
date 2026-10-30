@@ -560,7 +560,7 @@ Apply or renew a CHR trial license on a running instance. Resolves
 MikroTik.com credentials from `--license-account`/`--license-password`,
 the env vars, or the secret store. Requires RouterOS ≥ 7.20.8.
 
-#### `set <name> [--license | --device-mode <m>] [--device-mode-enable <f>] [--device-mode-disable <f>]`
+#### `set <name> [--license | --package <p>] [--device-mode <m>] [--device-mode-enable <f>] [--device-mode-disable <f>]`
 
 Change a property on a machine that has **already booted** — the post-boot half
 of the provisioning flags. `add`/`start` apply them at first boot; `set` applies
@@ -570,6 +570,7 @@ flags that were asked for so it can be run as given.
 | flag | what it does |
 |---|---|
 | `--license` | Apply or renew a CHR trial license (§ `license` above for credential resolution). |
+| `--package <p,…>` | Install one or more extra packages. Repeatable, comma-separated. Reboots to activate. |
 | `--device-mode <m>` | `rose`, `advanced`, `basic`, `home`, `auto`. |
 | `--device-mode-enable <f,…>` | Set one or more device-mode flags to yes. Repeatable, comma-separated. |
 | `--device-mode-disable <f,…>` | Set one or more to no. |
@@ -588,13 +589,27 @@ Naming a feature without a mode resolves the mode to `rose` — so
 before it happens, not discovered afterwards.
 
 Preconditions: the machine must be **running** and have a **user-mode NIC**
-(device-mode is applied over localhost REST), on RouterOS ≥ 7.20.8. Each is a
-named refusal rather than a timeout.
+(device-mode goes over localhost REST; packages over localhost SSH and REST), on
+RouterOS ≥ 7.20.8. Those three are named refusals (`MACHINE_STOPPED`,
+`NETWORK_UNAVAILABLE`, `PROVISIONING_VERSION_UNSUPPORTED`). Package installs
+additionally probe that REST answers before uploading, and that the guest comes
+back after the activating reboot — those two surface as `BOOT_TIMEOUT`, since a
+guest that never answers is a timeout whatever the cause.
+
+Names missing from all_packages are skipped with a warning (the CLI errors when
+*none* match), without probing the guest: REST is only contacted once something
+would be uploaded. A reboot the guest rejects throws before anything is
+recorded, so a failed install never reads as applied later.
 
 The change is folded into `machine.json` rather than overwriting it — device-mode
-updates move only the settings they name, so the record stays cumulative — and
-recorded in `provisioning.steps`, which makes a later `start` passing the same
-device-mode a recognised no-op instead of a refusal.
+updates move only the settings they name, installed packages merge into the
+package list — and recorded in `provisioning.steps`, which makes a later `start`
+passing the same device-mode or packages a recognised no-op instead of a refusal.
+
+**Package installs always reboot.** Unlike device-mode, `set --package` does not
+read the guest back to skip work it already did: every invocation re-uploads the
+packages and reboots to activate them, even when the guest already has them. A
+guest read-back that skips redundant installs is follow-up work.
 
 **Not available here:** `--add-user`, `--disable-admin`, `--secure-login`. Those
 rewrite working config rather than unlock a capability, and they are the steps that
@@ -1225,7 +1240,7 @@ Routes that still work after the window has closed:
 |---|---|
 | license | `quickchr set <name> --license` |
 | device-mode | `quickchr set <name> --device-mode…` / `instance.setDeviceMode()` (power-cycles the VM) |
-| packages | `instance.installPackage()` (library; reboots the guest) |
+| packages | `quickchr set <name> --package …` / `instance.installPackage()` (reboots the guest) |
 | anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window, at first-boot cost |
 
 `clean()` retains provisioning *intent* — packages, device-mode, managed login — so the
