@@ -2593,5 +2593,135 @@
 		"planned": 2,
 		"sha": "b0ebef0967ffdd75573e37dddb8bfa70b09cf415",
 		"ts": "2026-10-29T19:52:54.313Z"
+	},
+	"41025051328": {
+		"attempt": "1",
+		"complete": 0,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"linux-arm64|development": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2888,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.26beta4",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-arm64|long-term": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2928,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.23.8",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-arm64|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2920,
+				"job_matched": true,
+				"platform": "linux-arm64",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-x86|development": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 1957,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.26beta4",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-x86|long-term": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2011,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.23.8",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"linux-x86|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2012,
+				"job_matched": true,
+				"platform": "linux-x86",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"macos-arm64|development": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2582,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.26beta4",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"macos-arm64|long-term": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2679,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.23.8",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"macos-arm64|stable": {
+				"job_conclusion": "success",
+				"job_elapsed_s": 2578,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'success' before the suite could instrument itself"
+			},
+			"windows-x86|development": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 2993,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.26beta4",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'failure' before the suite could instrument itself"
+			},
+			"windows-x86|long-term": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 2737,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.23.8",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'failure' before the suite could instrument itself"
+			},
+			"windows-x86|stable": {
+				"job_conclusion": "failure",
+				"job_elapsed_s": 2988,
+				"job_matched": true,
+				"platform": "windows-x86",
+				"resolved": "7.25",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'failure' before the suite could instrument itself"
+			}
+		},
+		"planned": 12,
+		"sha": "b0ebef0967ffdd75573e37dddb8bfa70b09cf415",
+		"ts": "2026-10-30T09:06:12.366Z"
 	}
 }
