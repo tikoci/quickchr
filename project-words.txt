@@ -62,6 +62,7 @@ centrs
 chardev
 checkpointed
 choco
+cidr
 cifs
 cleanuser
 cli

@@ -4,7 +4,14 @@
 
 import type { Arch, Channel } from "./types.ts";
 import { CHANNELS, QuickCHRError } from "./types.ts";
-import { fetchResilient, isConnectionFailure } from "./net.ts";
+import {
+	fetchResilient,
+	isConnectionFailure,
+	isProxyConfiguredFor,
+	isProxyRefusal,
+	PROXY_ALLOWLIST_HINT,
+	proxyRefusalHint,
+} from "./net.ts";
 
 const UPGRADE_BASE = "https://upgrade.mikrotik.com/routeros/NEWESTa7";
 const DOWNLOAD_BASE = "https://download.mikrotik.com/routeros";
@@ -113,6 +120,9 @@ export async function resolveVersion(
 	opts: ResolveVersionOptions = {},
 ): Promise<string> {
 	const url = `${UPGRADE_BASE}.${channel}`;
+	// Parsed once, up front: the verdicts below name this host, and a parse
+	// throwing inside a handler would mask the failure it reports.
+	const hostname = new URL(url).hostname;
 	// Sanitized, not just clamped: these are public options, and `Math.max(1, NaN)`
 	// is NaN — the loop would never run, and the failure would read "all NaN
 	// attempts: undefined" instead of doing anything.
@@ -125,6 +135,19 @@ export async function resolveVersion(
 		try {
 			const response = await fetchResilient(url);
 			if (!response.ok) {
+				// A 403 through a configured proxy is the special case: on the
+				// pinned Bun a proxy CONNECT refusal always throws, so the 403 came
+				// from the origin through the tunnel — but on older Bun it can be
+				// the proxy's own refusal, so the verdict hedges and keeps the
+				// allowlist fix (#210). With no proxy configured a 403 is the
+				// origin's verdict, like any other status.
+				if (response.status === 403 && isProxyConfiguredFor(url)) {
+					throw new QuickCHRError(
+						"DOWNLOAD_FAILED",
+						`Failed to fetch version for channel "${channel}": HTTP 403 via the egress proxy — the origin refused the request, or on Bun older than 1.4.4 the proxy refused CONNECT for ${hostname}`,
+						PROXY_ALLOWLIST_HINT,
+					);
+				}
 				// An HTTP answer is the server's verdict. Thrown as a QuickCHRError so
 				// the catch below can tell it from a transport failure and let it out.
 				throw new QuickCHRError(
@@ -140,6 +163,18 @@ export async function resolveVersion(
 			// Only "could not reach the host at all" is retried. An HTTP verdict, an
 			// abort (the caller gave up) or a real bug surfaces immediately.
 			if (err instanceof QuickCHRError) throw err;
+			// A proxy policy refusal is terminal, not retriable: no retry can clear
+			// it — allowlist changes do not even apply to a running session — so
+			// map it to a DOWNLOAD_FAILED that names the refused host (#210).
+			// A 407 names the credentials fix; a proxy 5xx is not a refusal at
+			// all and falls through to the connection-failure policy below.
+			if (isProxyRefusal(err)) {
+				throw new QuickCHRError(
+					"DOWNLOAD_FAILED",
+					`Failed to fetch version for channel "${channel}": the egress proxy refused ${hostname} (${err instanceof Error ? err.message : String(err)})`,
+					proxyRefusalHint(err),
+				);
+			}
 			if (!isConnectionFailure(err)) throw err;
 			lastError = err;
 			if (attempt < maxAttempts) await Bun.sleep(attempt * retryDelayMs);
@@ -166,7 +201,7 @@ export async function resolveVersion(
 		"DOWNLOAD_FAILED",
 		`Failed to fetch version for channel "${channel}" on ${tries}: ` +
 			`${lastError instanceof Error ? lastError.message : String(lastError)}`,
-		`Check network access to ${new URL(url).hostname}, or pass an explicit --version to skip channel resolution.`,
+		`Check network access to ${hostname}, or pass an explicit --version to skip channel resolution.`,
 	);
 }
 

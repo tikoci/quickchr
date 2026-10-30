@@ -8,6 +8,7 @@ import {
 	cacheKey,
 } from "../../src/lib/cache-api.ts";
 import * as publicApi from "../../src/index.ts";
+import { PROXY_ALLOWLIST_HINT, PROXY_CREDENTIALS_HINT } from "../../src/lib/net.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
 const TMP = join(import.meta.dir, ".tmp-cache-api-test");
@@ -60,6 +61,19 @@ describe("cacheKey", () => {
 		expect(await cacheKey({ channel: "stable", arch: "x86", cacheDir: TMP }, async () => {
 			throw new QuickCHRError("DOWNLOAD_FAILED", "offline");
 		})).toEqual({ dir: TMP, version: CACHE_VERSION_UNRESOLVED, arch: "x86" });
+	});
+
+	test("a proxy-attributed failure is rethrown with its hint, not degraded", async () => {
+		// A proxy verdict is actionable, not offline: degrading it to
+		// `unresolved` would bury the remediation the hint carries (#210).
+		for (const hint of [PROXY_ALLOWLIST_HINT, PROXY_CREDENTIALS_HINT]) {
+			const err = await cacheKey({ channel: "stable", arch: "x86", cacheDir: TMP }, async () => {
+				throw new QuickCHRError("DOWNLOAD_FAILED", "proxy refused", hint);
+			}).catch((e) => e);
+			expect(err).toBeInstanceOf(QuickCHRError);
+			expect(err.code).toBe("DOWNLOAD_FAILED");
+			expect(err.installHint).toBe(hint);
+		}
 	});
 
 	test("an unexpected resolver bug is not hidden as a cache miss", async () => {

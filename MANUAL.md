@@ -712,8 +712,10 @@ quickchr cache key --version 7.24.4 --arch x86 --json
 `default-channel` applies; both subcommands use `default-arch`. A pinned
 version makes no network request in `cache key`. If channel resolution is
 offline, `cache key` prints the stable `unresolved` sentinel and exits 0 so a CI
-cache lookup cannot red the job; `cache add` fails because it cannot download an
-unknown image. Without `--json`, `cache key` emits `key=value` lines that can be
+cache lookup cannot red the job. Proxy-attributed `DOWNLOAD_FAILED` errors are
+re-thrown with their remediation hint instead. `cache add` fails because it
+cannot download an unknown image. Without `--json`, `cache key` emits `key=value`
+lines that can be
 appended directly to `$GITHUB_OUTPUT`.
 
 ```yaml
