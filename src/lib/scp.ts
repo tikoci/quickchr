@@ -95,13 +95,20 @@ export async function writeAskpass(password: string): Promise<{ askpassPath: str
 	// and chmod. mkdtemp creates the directory owner-only (0o700).
 	const dir = mkdtempSync(join(tmpdir(), "quickchr-askpass-"));
 	const askpassPath = join(dir, `askpass${ext}`);
-	if (isWindows) {
-		await Bun.write(askpassPath, `@echo off\r\necho ${password.replace(/[&|<>^%]/g, "^$&")}\r\n`);
-	} else {
-		await Bun.write(askpassPath, `#!/bin/sh\nprintf '%s' '${password.replace(/'/g, "'\\''")}'`);
-		// Owner-only: OpenSSH runs askpass as us, so no other user needs
-		// read or execute.
-		chmodSync(askpassPath, 0o700);
+	try {
+		if (isWindows) {
+			await Bun.write(askpassPath, `@echo off\r\necho ${password.replace(/[&|<>^%]/g, "^$&")}\r\n`);
+		} else {
+			await Bun.write(askpassPath, `#!/bin/sh\nprintf '%s' '${password.replace(/'/g, "'\\''")}'`);
+			// Owner-only: OpenSSH runs askpass as us, so no other user needs
+			// read or execute.
+			chmodSync(askpassPath, 0o700);
+		}
+	} catch (e) {
+		// The caller's cleanup only runs once this returns, so a failed setup
+		// must not leave a (possibly password-bearing) directory behind.
+		rmSync(dir, { recursive: true, force: true });
+		throw e;
 	}
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),

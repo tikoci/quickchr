@@ -200,8 +200,9 @@ describe("rebootForPackageActivation() — status check, down-detection, wait", 
 
 	test("a dropped POST followed by recovery succeeds", async () => {
 		// The production shape: the reboot POST drops mid-request, the guest is
-		// unreachable briefly, then REST comes back.
-		const downUntil = Date.now() + 800;
+		// unreachable long enough for two probes (1 s apart) to fail, then REST
+		// comes back.
+		const downUntil = Date.now() + 2500;
 		const port = await mockGuest((req, res) => {
 			if (req.method === "POST" && req.url === "/rest/system/reboot") {
 				res.destroy();
@@ -211,7 +212,7 @@ describe("rebootForPackageActivation() — status check, down-detection, wait", 
 			} else { res.writeHead(404, {}); res.end("{}"); }
 		});
 		await rebootForPackageActivation(port, AUTH, "lab", 30_000, 10_000);
-	});
+	}, 15_000);
 
 	test("REST that never goes down after an accepted reboot is a reboot failure", async () => {
 		// 200 on the POST, then the guest keeps answering: the reboot did not
@@ -225,6 +226,25 @@ describe("rebootForPackageActivation() — status check, down-detection, wait", 
 			else { res.writeHead(404, {}); res.end("{}"); }
 		});
 		const { code, message } = await codeOf(rebootForPackageActivation(port, AUTH, "lab", 1500, 1500));
+		expect(code).toBe("REBOOT_FAILED");
+		expect(message).toContain("did not go down");
+	});
+
+	test("one dropped probe with the guest still up is not a reboot", async () => {
+		// A slow guest can drop or time out a single request. Read as "went
+		// down", waitForBoot would pass at once and the install would be
+		// recorded although the reboot never happened.
+		let probes = 0;
+		const port = await mockGuest((req, res) => {
+			if (req.method === "POST" && req.url === "/rest/system/reboot") {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end("{}");
+			} else if (req.method === "GET" && req.url === "/rest/system/resource") {
+				if (probes++ === 0) res.destroy();
+				else resourceOk(res);
+			} else { res.writeHead(404, {}); res.end("{}"); }
+		});
+		const { code, message } = await codeOf(rebootForPackageActivation(port, AUTH, "lab", 1500, 2500));
 		expect(code).toBe("REBOOT_FAILED");
 		expect(message).toContain("did not go down");
 	});

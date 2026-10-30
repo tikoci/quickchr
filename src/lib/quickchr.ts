@@ -1895,10 +1895,10 @@ export async function assertRestAnswering(
  *  effect, and even that is confirmed by the down-detection below rather than
  *  assumed: a spurious reset with the guest still up must not read as a reboot.
  *
- *  Down-detection polls until a request *fails* (refused, reset, timed out).
- *  Any status — 2xx, 401, even 500 — means the guest's network stack still
- *  answers. When the budget expires with REST still up, the reboot did not
- *  happen and the install must not be recorded.
+ *  Down-detection polls until two requests in a row *fail* (refused, reset,
+ *  timed out). Any status — 2xx, 401, even 500 — means the guest's network
+ *  stack still answers. When the budget expires with REST still up, the reboot
+ *  did not happen and the install must not be recorded.
  *
  *  The budgets are parameters so unit tests can drive the failure paths fast;
  *  `installPackage()` passes the production values. */
@@ -1940,13 +1940,22 @@ export async function rebootForPackageActivation(
 
 	const resourceUrl = `http://127.0.0.1:${httpPort}/rest/system/resource`;
 	const downDeadline = Date.now() + downBudgetMs;
+	// Two failed probes in a row, not one: a slow guest can drop or time out a
+	// single request while still up, and reading that as the reboot lets
+	// waitForBoot pass at once and record an install that never activated.
+	// Any answer resets the count. A real reboot is down for far longer.
+	let consecutiveFailures = 0;
 	let wentDown = false;
 	while (Date.now() < downDeadline) {
 		try {
 			await restGet(resourceUrl, authHeader, 3000);
+			consecutiveFailures = 0;
 		} catch {
-			wentDown = true;
-			break;
+			consecutiveFailures++;
+			if (consecutiveFailures >= 2) {
+				wentDown = true;
+				break;
+			}
 		}
 		await Bun.sleep(1000);
 	}
