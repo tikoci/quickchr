@@ -36,9 +36,9 @@ old runtime is a debt that compounds silently, which is how #148 happened.
 
 ## Action refs are pinned to SHAs (except the toolchain)
 
-Every third-party `uses:` ref is pinned to an immutable commit SHA with the major version
-in a trailing comment — `actions/checkout@<sha> # v5` — following the pre-existing
-`oven-sh/setup-bun` style (#103, #118). A mutable `@v5` tag can be repointed after review,
+Every third-party `uses:` ref is pinned to an immutable commit SHA with the release version
+in a trailing comment — `actions/checkout@<sha> # v7.0.1`, the form Dependabot writes —
+following the pre-existing `oven-sh/setup-bun` style (#103, #118). A mutable `@v5` tag can be repointed after review,
 and these workflows hold `contents: write` plus secrets, so action updates must arrive as
 reviewable diffs. Dependabot (`github-actions` ecosystem, weekly) files the pin-update PRs,
 so pinned refs still track latest instead of rotting.
@@ -680,7 +680,7 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 |-------------|--------|----------|-------|--------------------|
 | `linux-x86` | ubuntu-latest | x86 | KVM | 60 min |
 | `linux-arm64` | ubuntu-24.04-arm | arm64 | **TCG** (no usable `/dev/kvm` in practice) | 75 min |
-| `macos-arm64` | macos-15 | arm64 | **TCG** | 60 min |
+| `macos-arm64` | macos-15 | arm64 | **TCG** | 75 min |
 | `macos-x86` | macos-15-intel | x86 | **HVF** | 300 min (90 with `tcg-smoke`/`test-filter`) |
 | `windows-x86` | windows-latest | x86 | TCG | 300 min (90 with `tcg-smoke`/`test-filter`) |
 
@@ -700,6 +700,12 @@ standard step once #189 added `restart-timeout.test.ts`: the last file, `start-s
 needs about 488 s and was cut to a 457 s cap (#151). `long` is a measured size, not
 headroom for hangs. Re-measure before adding another slow file to the suite, and
 retune if the drift warning ever reports `kvm` on this leg.
+
+**`macos-arm64` moved to `long` for the same reason.** #227 added `set-package.test.ts`
+(~84 s under TCG). Together with run-to-run variance (including MikroTik download
+times), that pushed the full suite past the 50 min standard step: `start-stop`, last
+in the file order and about 431 s on the 2026-10-30 main run, got a 392 s cap and was
+killed by the watchdog (run 41124479336).
 
 **Hosted `macos-15-intel` is 4 CPUs / 14336 MiB** — measured by B8a of #110 from
 the leg checkpoint's host snapshot, across four runners. That is half the cores

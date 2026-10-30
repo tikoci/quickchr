@@ -29,6 +29,12 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
   on Bun 1.4.4), so a worker silently uses the real data dir instead of the
   test's — seen as `continue-*` workers polluting `~/.local/share/quickchr` and
   colliding on their monitor socket across runs (#214 review round)
+- Env names are case-insensitive on Windows (`HTTPS_PROXY` and `https_proxy` are one
+  variable), and every test file shares one `process.env`. Swapping a set of variables
+  in one loop — set one spelling, then delete the other — deletes what was just set.
+  Clear first, then assign: proxy variables go through `test/unit/helpers/proxy-env.ts`.
+  The one-loop swap failed five windows-latest tests in #226: the two proxy tests, and
+  three later orphan-dir tests that passed again once only the helper was fixed.
 - Unix socket tests: use `join(tmpdir(), "quickchr-tmp-<name>")` from `node:os` — FUSE mounts (e.g. Multipass) don't support Unix domain sockets
 - Always clean up CHR instances in a `finally` block so failures don't leak machines
 - Reach CHR's REST API only through `test/integration/chr-rest.ts` — see below
