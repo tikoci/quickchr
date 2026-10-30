@@ -224,15 +224,26 @@ export function isUsableProxyValue(value: string | undefined): boolean {
 }
 
 /**
- * The proxy value Bun would select for `https:` URLs: the scheme-specific
+ * The proxy entry Bun would select for `https:` URLs: the scheme-specific
  * variable wins over `ALL_PROXY`, and within a tier uppercase is shown first
- * (the docs list upper first and document no case precedence).
+ * (the docs list upper first and document no case precedence). The source
+ * variable travels with the value because an unusable scheme fails on
+ * `HTTPS_PROXY` but is ignored on `ALL_PROXY` (probed, Bun 1.4.4) — the
+ * doctor row cannot diagnose one wording for both.
  * Empty string counts as unset — probed to fall through to the next variable.
+ * Whitespace-only is treated the same, matching `isUsableProxyValue`, so the
+ * two helpers cannot disagree about which variable is selected.
  */
-export function httpsProxyEnvValue(env: NodeJS.ProcessEnv): string | undefined {
-	return [env.HTTPS_PROXY, env.https_proxy, env.ALL_PROXY, env.all_proxy].find(
-		(v) => v !== undefined && v !== "",
-	);
+export function httpsProxyEnvValue(env: NodeJS.ProcessEnv): { name: string; value: string } | undefined {
+	const entries: Array<[string, string | undefined]> = [
+		["HTTPS_PROXY", env.HTTPS_PROXY],
+		["https_proxy", env.https_proxy],
+		["ALL_PROXY", env.ALL_PROXY],
+		["all_proxy", env.all_proxy],
+	];
+	const hit = entries.find(([, v]) => v !== undefined && v.trim() !== "");
+	if (hit?.[1] === undefined) return undefined;
+	return { name: hit[0], value: hit[1].trim() };
 }
 
 /** Parse a dotted-quad IPv4 address to its 32-bit value, or undefined. */

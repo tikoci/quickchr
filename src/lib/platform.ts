@@ -620,13 +620,16 @@ export function accelDoctorCheck(accelAvailable: string[], hostArch: string, suf
  * through it, and a host off its allowlist fails downloads (#210) — an agent
  * should see that constraint up front. Credentials in the URL are never echoed:
  * only scheme://host is shown. A set-but-unusable value (a non-http(s) scheme
- * Bun never proxies) is reported as ignored, not as an active proxy.
+ * Bun never proxies) is reported per its source variable: ignored with direct
+ * egress on `ALL_PROXY`, a failing fetch on a scheme-specific variable —
+ * Bun throws `UnsupportedProxyProtocol` there instead of going direct.
  */
 export function proxyDoctorCheck(env: NodeJS.ProcessEnv = process.env): DoctorCheck {
-	const raw = httpsProxyEnvValue(env);
-	if (raw === undefined) {
+	const hit = httpsProxyEnvValue(env);
+	if (hit === undefined) {
 		return { label: "HTTPS proxy", status: "ok", detail: "not set (direct egress)" };
 	}
+	const raw = hit.value;
 	// Scheme-less host[:port] values are used as http proxies (probed), so give
 	// them a scheme before parsing — otherwise every one reads as unparseable.
 	const withScheme = raw.includes("://") ? raw : `http://${raw}`;
@@ -638,10 +641,13 @@ export function proxyDoctorCheck(env: NodeJS.ProcessEnv = process.env): DoctorCh
 		shown = "(unparseable value, not shown)";
 	}
 	if (!isUsableProxyValue(raw)) {
+		const ignored = hit.name === "ALL_PROXY" || hit.name === "all_proxy";
 		return {
 			label: "HTTPS proxy",
 			status: "warn",
-			detail: `${shown} — ignored (Bun only proxies http/https); effective direct egress`,
+			detail: ignored
+				? `${shown} — ignored (Bun only proxies http/https); effective direct egress`
+				: `${shown} — not usable by Bun (http/https only); fetch via ${hit.name} throws, so downloads fail`,
 		};
 	}
 	return {

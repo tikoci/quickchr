@@ -681,8 +681,10 @@ describe("proxyDoctorCheck", () => {
 		expect(check.detail).not.toContain("fallback.example");
 	});
 
-	test("a non-HTTP scheme is reported as ignored, not as an active proxy", () => {
-		const check = proxyDoctorCheck({ HTTPS_PROXY: "socks5://proxy.example:1080" });
+	test("a non-HTTP scheme on ALL_PROXY is reported as ignored, not as an active proxy", () => {
+		// "Ignored" is only true on ALL_PROXY — a scheme-specific variable
+		// with an unusable scheme fails fetches (see the test below).
+		const check = proxyDoctorCheck({ ALL_PROXY: "socks5://proxy.example:1080" });
 		expect(check.status).toBe("warn");
 		expect(check.detail).toContain("socks5://proxy.example:1080");
 		expect(check.detail).toContain("ignored");
@@ -709,5 +711,33 @@ describe("proxyDoctorCheck", () => {
 		expect(check.status).toBe("warn");
 		expect(check.detail).toContain("unparseable");
 		expect(check.detail).not.toContain("{{{");
+	});
+
+	test("a whitespace-only value falls through to the next variable", () => {
+		// Without the trim, the selector returns " " while
+		// isProxyConfiguredFor() falls through to ALL_PROXY — the two
+		// helpers disagree and doctor misdiagnoses direct egress.
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "   ", ALL_PROXY: "http://proxy.example:8080" });
+		expect(check.detail).toContain("proxy.example");
+		expect(check.detail).toContain("egress via proxy");
+	});
+
+	test("an unusable scheme on ALL_PROXY is ignored (direct egress)", () => {
+		// Bun ignores a non-http(s) ALL_PROXY and goes direct (probed).
+		const check = proxyDoctorCheck({ ALL_PROXY: "socks5://proxy.example:1080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("ignored");
+		expect(check.detail).toContain("direct egress");
+	});
+
+	test("an unusable scheme on HTTPS_PROXY fails fetches instead of going direct", () => {
+		// Bun throws UnsupportedProxyProtocol for a non-http(s)
+		// scheme-specific variable (probed) — claiming direct egress here
+		// misdiagnoses failing downloads.
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "socks5://proxy.example:1080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("socks5://proxy.example:1080");
+		expect(check.detail).toContain("HTTPS_PROXY");
+		expect(check.detail).not.toContain("direct egress");
 	});
 });

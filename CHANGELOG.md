@@ -26,6 +26,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   retries as the transient failure it is. (#210)
 - HTTP 403 verdicts blame the egress proxy only when a proxy is actually
   configured for the URL; direct 403s keep the generic origin verdict. (#210)
+- `cache key` rethrows proxy-attributed channel-resolution failures with their
+  remediation hint instead of returning the `unresolved` sentinel. (#210)
 
 ## [0.5.4] — 2026-10-29
 
