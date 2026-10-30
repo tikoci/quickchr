@@ -22,7 +22,7 @@ name: Integration
 # Platform ids (comma-separate to combine, or use a group alias):
 #   linux-x86    ubuntu-latest      x86 CHR    KVM   standard budget
 #   linux-arm64  ubuntu-24.04-arm   arm64 CHR  TCG   long budget (no usable /dev/kvm in practice)
-#   macos-arm64  macos-15           arm64 CHR  TCG   standard budget (see note below)
+#   macos-arm64  macos-15           arm64 CHR  TCG   long budget (see note below)
 #   macos-x86    macos-15-intel     x86 CHR    HVF   extended budget
 #   windows-x86  windows-latest     x86 CHR    TCG   extended budget (no hw accel — slow)
 #   gating  = linux-x86,linux-arm64,macos-arm64      all = every platform
