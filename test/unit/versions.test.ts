@@ -21,6 +21,7 @@ import {
 } from "../../src/lib/versions.ts";
 import { CHANNELS } from "../../src/lib/types.ts";
 import type { Channel } from "../../src/lib/types.ts";
+import { restoreProxyEnv, swapProxyEnv } from "./helpers/proxy-env.ts";
 
 // Keep these tests fully network-free by forcing fetchResilient off its
 // DNS-to-IPv4-direct path: fetchResilient first calls dns.Resolver.resolve4(),
@@ -227,37 +228,6 @@ describe("channel recency classification", () => {
 // to keep the mock structurally compatible with `typeof fetch`.
 function makeMockFetch(fn: (url: string | URL | Request, init?: RequestInit) => Promise<Response>) {
 	return Object.assign(fn, { preconnect: (_url: string | URL) => {} }) as typeof fetch;
-}
-
-// Every variable the proxy verdict reads. Tests that touch the verdict swap
-// the whole set — the developer's own shell may export any of them — and
-// restore it in a finally.
-const PROXY_ENV_KEYS = [
-	"HTTPS_PROXY",
-	"https_proxy",
-	"HTTP_PROXY",
-	"http_proxy",
-	"ALL_PROXY",
-	"all_proxy",
-	"NO_PROXY",
-	"no_proxy",
-];
-
-function swapProxyEnv(next: Record<string, string | undefined>): Record<string, string | undefined> {
-	const prev: Record<string, string | undefined> = {};
-	for (const key of PROXY_ENV_KEYS) {
-		prev[key] = process.env[key];
-		if (next[key] === undefined) delete process.env[key];
-		else process.env[key] = next[key];
-	}
-	return prev;
-}
-
-function restoreProxyEnv(prev: Record<string, string | undefined>): void {
-	for (const key of PROXY_ENV_KEYS) {
-		if (prev[key] === undefined) delete process.env[key];
-		else process.env[key] = prev[key];
-	}
 }
 
 describe("resolveVersion", () => {

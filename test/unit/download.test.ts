@@ -34,6 +34,7 @@ import {
 	type TransferOutcome,
 } from "../../src/lib/download.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
+import { restoreProxyEnv, swapProxyEnv } from "./helpers/proxy-env.ts";
 
 const silentLogger = { status() {}, debug() {}, warn() {} };
 
@@ -159,37 +160,6 @@ async function expectQuickCHRError(p: Promise<unknown>): Promise<QuickCHRError> 
 		return e as QuickCHRError;
 	}
 	throw new Error("expected the download to throw, but it resolved");
-}
-
-// Every variable the proxy verdict reads. Tests that touch the verdict swap
-// the whole set — the developer's own shell may export any of them — and
-// restore it in a finally.
-const PROXY_ENV_KEYS = [
-	"HTTPS_PROXY",
-	"https_proxy",
-	"HTTP_PROXY",
-	"http_proxy",
-	"ALL_PROXY",
-	"all_proxy",
-	"NO_PROXY",
-	"no_proxy",
-];
-
-function swapProxyEnv(next: Record<string, string | undefined>): Record<string, string | undefined> {
-	const prev: Record<string, string | undefined> = {};
-	for (const key of PROXY_ENV_KEYS) {
-		prev[key] = process.env[key];
-		if (next[key] === undefined) delete process.env[key];
-		else process.env[key] = next[key];
-	}
-	return prev;
-}
-
-function restoreProxyEnv(prev: Record<string, string | undefined>): void {
-	for (const key of PROXY_ENV_KEYS) {
-		if (prev[key] === undefined) delete process.env[key];
-		else process.env[key] = prev[key];
-	}
 }
 
 describe("transferBudgetMs", () => {
