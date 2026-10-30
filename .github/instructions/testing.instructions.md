@@ -308,6 +308,19 @@ See `.github/instructions/ci.instructions.md` for the full artifact map and fail
 | ECONNRESET noise in output | Expected on fire-and-forget calls (device-mode power-cycle) | Ensure `.catch(() => {})` attached immediately to pending promise |
 | Polls for 90s then fails | Error in response body misclassified as "pending" | Check classification function — RouterOS returns errors inside HTTP 200 |
 
+### Buffered QEMU output needs an orderly QEMU exit
+
+The WAV audio backend creates its file at startup but finalizes the RIFF header
+on orderly exit. A local QEMU 11.1.1 experiment produced 44 bytes after monitor
+`quit`, but 0 after a forced kill. `stop()` sends SIGTERM; on Windows that kills
+QEMU without finalizing the WAV. This caused the same audio-test assertion on
+all three firmware pins in run `41025051328`.
+
+For buffered-output assertions, send monitor `quit`, wait for the PID to exit,
+then call `stop()` to persist stopped state. A monitor connection reset during
+quit is acceptable only with confirmed process exit and valid output. Keep the
+WAV assertions on Windows; changing the library's stop contract is unnecessary.
+
 ### A failing test is a signal — masking it is forbidden
 
 The flowchart above bans the timeout-bump. The same logic bans **every** move that turns
