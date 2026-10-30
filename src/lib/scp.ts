@@ -3,12 +3,12 @@
  *
  * Uses the same SSH_ASKPASS trick as {@link ./packages.ts uploadPackages} so
  * no `sshpass` dependency is required. Both directions share the askpass
- * lifecycle (written to tmpdir, cleaned up on exit).
+ * lifecycle (written to a private tmpdir, removed after the transfer).
  */
 
-import { chmodSync, unlinkSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { QuickCHRError } from "./types.ts";
 
@@ -65,7 +65,7 @@ async function runScp(
 			);
 		}
 	} finally {
-		try { unlinkSync(askpassPath); } catch { /* ignore */ }
+		try { rmSync(dirname(askpassPath), { recursive: true, force: true }); } catch { /* ignore */ }
 	}
 }
 
@@ -90,12 +90,18 @@ async function runScp(
 export async function writeAskpass(password: string): Promise<{ askpassPath: string; env: Record<string, string> }> {
 	const isWindows = process.platform === "win32";
 	const ext = isWindows ? ".cmd" : ".sh";
-	const askpassPath = join(tmpdir(), `quickchr-askpass-${process.pid}-${Date.now()}${ext}`);
+	// A private directory first: the script carries the password, and a file
+	// created directly in shared tmpdir is world-readable between creation
+	// and chmod. mkdtemp creates the directory owner-only (0o700).
+	const dir = mkdtempSync(join(tmpdir(), "quickchr-askpass-"));
+	const askpassPath = join(dir, `askpass${ext}`);
 	if (isWindows) {
 		await Bun.write(askpassPath, `@echo off\r\necho ${password.replace(/[&|<>^%]/g, "^$&")}\r\n`);
 	} else {
 		await Bun.write(askpassPath, `#!/bin/sh\nprintf '%s' '${password.replace(/'/g, "'\\''")}'`);
-		chmodSync(askpassPath, 0o755);
+		// Owner-only: OpenSSH runs askpass as us, so no other user needs
+		// read or execute.
+		chmodSync(askpassPath, 0o700);
 	}
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),

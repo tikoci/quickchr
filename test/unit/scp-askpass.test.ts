@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { unlinkSync } from "node:fs";
+import { rmSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 import { writeAskpass } from "../../src/lib/scp.ts";
 
 /**
@@ -22,7 +23,21 @@ describe("writeAskpass", () => {
 			expect(env.SSH_ASKPASS_REQUIRE).toBe("force");
 			expect(env.DISPLAY).toBe("");
 		} finally {
-			unlinkSync(askpassPath);
+			rmSync(dirname(askpassPath), { recursive: true, force: true });
+		}
+	});
+
+	// POSIX-only: Windows ACLs do not report Unix mode bits, though the
+	// script still lives in a private directory there.
+	test.skipIf(process.platform === "win32")("the script and its directory are owner-only", async () => {
+		// The script carries the password: world-readable in shared tmpdir
+		// would expose it to other local users for the transfer window.
+		const { askpassPath } = await writeAskpass("lab-pass-1");
+		try {
+			expect(statSync(askpassPath).mode & 0o777).toBe(0o700);
+			expect(statSync(dirname(askpassPath)).mode & 0o777).toBe(0o700);
+		} finally {
+			rmSync(dirname(askpassPath), { recursive: true, force: true });
 		}
 	});
 
@@ -36,7 +51,7 @@ describe("writeAskpass", () => {
 				expect(result.exitCode).toBe(0);
 				expect(new TextDecoder().decode(result.stdout)).toBe(password);
 			} finally {
-				unlinkSync(askpassPath);
+				rmSync(dirname(askpassPath), { recursive: true, force: true });
 			}
 		}
 	});
