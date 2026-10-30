@@ -1180,6 +1180,17 @@ function createInstance(state: MachineState): ChrInstance {
 
 				// Persist installed packages to machine.json
 				const current = loadMachine(state.name);
+				// Read before the merge: until the `packages` step is recorded,
+				// `packages`/`installAllPackages` are add-time *desired* config,
+				// not evidence anything ran. Recording the step now would make the
+				// window call those desired names applied — e.g. a first boot kept
+				// by QUICKCHR_PRESERVE_ON_FAILURE before it installed `container`,
+				// then `installPackage("ups")`, would satisfy a later
+				// `start --add-package container` in silence (#176).
+				const before = current ?? state;
+				const stepWasApplied = before.provisioning?.steps?.includes("packages") ?? false;
+				const coversDesired = !before.installAllPackages
+					&& (before.packages ?? []).every((pkg) => installed.includes(pkg));
 				if (current) {
 					const merged = new Set([...(current.packages ?? []), ...installed]);
 					current.packages = [...merged];
@@ -1188,8 +1199,10 @@ function createInstance(state: MachineState): ChrInstance {
 				state.packages = [...new Set([...(state.packages ?? []), ...installed])];
 				// This is quickchr applying a provisioning step, so it belongs in the
 				// record the window reads (#176) — a later `start` passing the same
-				// packages is then a recognised no-op instead of a refusal.
-				recordProvisioningStep(state, "packages");
+				// packages is then a recognised no-op instead of a refusal. Left
+				// unrecorded, that `start` is refused with the `set --package`
+				// route instead — honest, never a silent drop.
+				if (stepWasApplied || coversDesired) recordProvisioningStep(state, "packages");
 
 				return installed;
 			});

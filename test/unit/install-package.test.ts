@@ -89,6 +89,28 @@ describe("installPackage() — a guest-rejected reboot is a failure, not a succe
 	});
 });
 
+describe("installPackage() — what an install records for the provisioning window", () => {
+	test("a clean install records the packages and the step", async () => {
+		const report = await runWorker("applied");
+		expect(report.code).toBeUndefined();
+		expect(report.returned).toEqual(["container"]);
+		expect(report.persistedPackages).toEqual(["container"]);
+		expect(report.persistedSteps).toEqual(["packages"]);
+	}, 30_000);
+
+	test("add-time packages that never ran keep the step unrecorded", async () => {
+		// `ups` is desired config from add(); its first boot never installed it.
+		// Recording the step would let a later `start --add-package ups` pass as
+		// already applied — a silent drop (#176). Unrecorded, that start is
+		// refused with the `set --package` route instead.
+		const report = await runWorker("desired-unapplied");
+		expect(report.code).toBeUndefined();
+		expect(report.returned).toEqual(["container"]);
+		expect(report.persistedPackages).toEqual(["ups", "container"]);
+		expect(report.persistedSteps).toBeNull();
+	}, 30_000);
+});
+
 describe("installPackage() — unknown names return [] without probing the guest", () => {
 	test("no match in all_packages means no REST probe, no upload, no reboot", async () => {
 		// There is no guest at all in this scenario — the REST port is closed.

@@ -12,10 +12,17 @@ import type { MachineState } from "../../../src/lib/types.ts";
  * other unit tests, so each scenario runs here, in a subprocess, and reports a
  * single JSON line on stdout. Invoked as:
  *
- *   bun install-package-worker.ts <rejected-401|rejected-400|unknown-name> <dataDir>
+ *   bun install-package-worker.ts <scenario> <dataDir>
+ *
+ * Scenarios: `rejected-401`/`rejected-400` (the guest refuses the reboot),
+ * `unknown-name` (nothing to install), `applied` (a clean install), and
+ * `desired-unapplied` (a clean install on a machine whose add-time `ups` never
+ * ran — `packages` set, the step not recorded).
  *
  * The mock guest answers REST on 127.0.0.1 (an ephemeral port, or a closed one
- * for `unknown-name`); SCP and the package download are mocked out. The machine
+ * for `unknown-name`); SCP and the package download are mocked out. In the
+ * install scenarios it reboots: the reboot POST drops, REST stays down long
+ * enough for down-detection, then answers again. The machine
  * resolves non-admin credentials (`lab:lab-pass-1` with `disableAdmin`), so the
  * captured SCP arguments pin the credential fix as well as the reboot handling.
  */
@@ -51,8 +58,15 @@ if (scenario === "unknown-name") {
 	await new Promise<void>((resolve, reject) => probe.close((e) => (e ? reject(e) : resolve())));
 } else {
 	const rebootStatus = scenario === "rejected-401" ? 401 : 400;
+	const reboots = scenario === "applied" || scenario === "desired-unapplied";
+	let downUntil = 0;
 	const guest = createServer((req, res) => {
-		if (req.method === "GET" && req.url === "/rest/system/resource") {
+		if (Date.now() < downUntil) {
+			res.destroy();
+		} else if (req.method === "POST" && req.url === "/rest/system/reboot" && reboots) {
+			downUntil = Date.now() + 2500;
+			res.destroy();
+		} else if (req.method === "GET" && req.url === "/rest/system/resource") {
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ "board-name": "CHR", version: "7.24.4" }));
 		} else if (req.method === "POST" && req.url === "/rest/system/reboot") {
@@ -82,7 +96,7 @@ const state: MachineState = {
 		http: { name: "http", host: httpPort, guest: 80, proto: "tcp" },
 		ssh: { name: "ssh", host: 19202, guest: 22, proto: "tcp" },
 	},
-	packages: [],
+	packages: scenario === "desired-unapplied" ? ["ups"] : [],
 	portBase: httpPort,
 	excludePorts: [],
 	extraPorts: [],
