@@ -85,7 +85,7 @@ is the thing that drifts.
 |---|---|---|---|
 | `license` | yes | account-level, orthogonal to config | `quickchr set <name> --license` |
 | `deviceMode` | yes | capability flag — it gates whether a feature *can* run and describes nothing about how the guest is configured. Config it was blocking could not have been applied while it was off. | `quickchr set <name> --device-mode…` |
-| `packages` | probably | additive, but `installPackage()` has no install-all form | `instance.installPackage()`; #24 for the CLI verb |
+| `packages` | yes | additive, but `installPackage()` has no install-all form | `quickchr set <name> --package …` (#24) |
 | `user` | **no** | additive in principle, but it collides with a user of the same name created since, and a login is exactly the config a post-boot path must not rewrite | `clean()` + replay |
 | `disableAdmin` | **no** | depends on another usable login existing — precisely the state that drifts | `clean()` + replay |
 | `secureLogin` | **no** | same class as `user`: it creates a login | `clean()` + replay |
@@ -96,7 +96,8 @@ not a general "apply provisioning later" verb, and the three refusals above are
 refusals on purpose rather than gaps waiting to be filled.
 
 **Preconditions any post-boot provisioning path inherits.** Both fail confusingly when
-unchecked, which is why `assertDeviceModeApplicable()` exists:
+unchecked, which is why `assertDeviceModeApplicable()` and `assertPackageApplicable()`
+exist — one per post-boot step that reaches the guest:
 
 - **The machine must be running with REST reachable.** `applyDeviceMode()` polls
   `waitForDeviceModeApi` before it does anything, so a stopped machine otherwise spends

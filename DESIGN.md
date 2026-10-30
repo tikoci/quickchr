@@ -690,8 +690,8 @@ rather than to `machine.json` wholesale.
 seven were discarded with no warning, no error and a normal-length boot — the only way
 to notice was to read the value back. An option outside the window now throws
 `PROVISIONING_WINDOW_CLOSED`, naming each option and the route that still works
-(`quickchr set <name> --license`, the library's `setDeviceMode()` / `installPackage()`,
-or `clean()` for anything else). An option state already records is treated as a
+(`quickchr set <name> --license`, `quickchr set <name> --package …`,
+`quickchr set <name> --device-mode…`, or `clean()` for anything else). An option state already records is treated as a
 no-op, so passing the same flags on every start — the shape a script naturally takes —
 is not an error.
 

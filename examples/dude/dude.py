@@ -2,9 +2,10 @@
 """dude (CLI driver) — install the dude package on first boot, enable it, read it back.
 
 The Python/CLI sibling of dude.ts. Drives the `quickchr` CLI via subprocess: the
-library shows `installPackage()` (post-boot); the CLI installs at first boot via
-`--add-package` (there is no post-boot "install on a running machine" CLI command
-yet — see the example README's "friction found"). Works on x86 and arm64.
+library shows `installPackage()` (post-boot); this installs at first boot via
+`--add-package` (the CLI also does post-boot installs now —
+`quickchr set <name> --package dude` — but first boot is the cheaper path when
+the machine does not exist yet). Works on x86 and arm64.
 
 Run:  uv run examples/dude/dude.py [--channel stable] [--no-cleanup]
       (uv is preferred over a venv; this script is stdlib-only.)

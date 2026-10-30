@@ -40,6 +40,7 @@ const START_ONLY_FLAGS = [
  *  wrong thing. */
 const SET_ONLY_FLAGS = [
 	"name", "license", "level", "account", "password",
+	"package",
 	"device-mode", "device-mode-enable", "device-mode-disable",
 	"qemu-arg", "clear-qemu-args",
 ] as const;
@@ -83,8 +84,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
 	"qemu-arg",
 	// exec / qga / console
 	"via", "user", "password", "timeout", "path", "data", "script",
-	// set --license
-	"account", "level",
+	// set --license / --package
+	"account", "level", "package",
 	// networks sockets create
 	"mode", "port", "group",
 	// completions / logs
