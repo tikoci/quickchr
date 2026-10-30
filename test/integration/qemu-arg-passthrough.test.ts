@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout, bootTestTimeoutFor } from "./timeouts.ts";
 import { detectAccel } from "../../src/lib/platform.ts";
+import { isMachineRunning } from "../../src/lib/state.ts";
+import { QuickCHRError, type ChrInstance } from "../../src/lib/types.ts";
 
 /**
  * Integration test — `--qemu-arg` passthrough (#213).
@@ -59,7 +61,7 @@ describe.skipIf(SKIP_NON_X86)("qemu-arg audio passthrough (x86)", () => {
 			const resource = await first.rest("/system/resource") as Record<string, unknown>;
 			expect(String(resource["board-name"])).toContain("CHR");
 			assertWavCreated(wav1);
-			await first.stop();
+			await quitForWav(first);
 			assertWavHeaderOnly(wav1);
 
 			// Session args replace stored for this boot only.
@@ -70,7 +72,7 @@ describe.skipIf(SKIP_NON_X86)("qemu-arg audio passthrough (x86)", () => {
 			assertWavCreated(wav2);
 			// Stored intent is untouched by the session override.
 			expect(QuickCHR.get(name)?.state.qemuArgs).toEqual(stored);
-			await second.stop();
+			await quitForWav(second);
 			assertWavHeaderOnly(wav2);
 		} finally {
 			await cleanupMachine(name);
@@ -78,10 +80,25 @@ describe.skipIf(SKIP_NON_X86)("qemu-arg audio passthrough (x86)", () => {
 	}, bootTestTimeoutFor("x86", X86_ACCEL, { boots: 2 }));
 });
 
+/** Finalize QEMU's buffered WAV output before checking it. stop() sends SIGTERM,
+ *  which terminates QEMU abruptly on Windows and leaves the file empty. */
+async function quitForWav(instance: ChrInstance): Promise<void> {
+	try {
+		await instance.monitor("quit");
+	} catch (error) {
+		// Windows can reset the monitor connection as QEMU exits. Accept that
+		// only if the process actually exits; the WAV assertions still follow.
+		if (!(error instanceof QuickCHRError) || error.code !== "PROCESS_FAILED" || !error.message.includes("ECONNRESET")) throw error;
+	}
+	expect(await instance.waitFor(async () => !isMachineRunning(instance.state), 5000)).toBe(true);
+	// QEMU has already exited: persist stopped state without terminating it.
+	await instance.stop();
+}
+
 /** QEMU creates the wav backend file at spawn but flushes the RIFF header only
- *  on exit (measured on QEMU 11.1.1/HVF: 0 bytes while running, 44 after
- *  stop) — so existence-while-running is the "wiring accepted" signal, and the
- *  header is asserted post-stop. Header-only (no samples) is expected: stock
+ *  on an orderly exit (measured on QEMU 11.1.1: monitor quit writes 44 bytes;
+ *  forced termination leaves 0). Existence while running proves the wiring;
+ *  the header is asserted after quit. Header-only (no samples) is expected: stock
  *  CHR skips `:beep` under a hypervisor, so the guest never emits audio
  *  without the #214 RAM-patch workflow. */
 function assertWavCreated(path: string): void {
