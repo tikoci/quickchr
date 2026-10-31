@@ -560,7 +560,7 @@ Apply or renew a CHR trial license on a running instance. Resolves
 MikroTik.com credentials from `--license-account`/`--license-password`,
 the env vars, or the secret store. Requires RouterOS ≥ 7.20.8.
 
-#### `set <name> [--license | --device-mode <m>] [--device-mode-enable <f>] [--device-mode-disable <f>]`
+#### `set <name> [--license | --package <p>] [--device-mode <m>] [--device-mode-enable <f>] [--device-mode-disable <f>]`
 
 Change a property on a machine that has **already booted** — the post-boot half
 of the provisioning flags. `add`/`start` apply them at first boot; `set` applies
@@ -570,6 +570,7 @@ flags that were asked for so it can be run as given.
 | flag | what it does |
 |---|---|
 | `--license` | Apply or renew a CHR trial license (§ `license` above for credential resolution). |
+| `--package <p,…>` | Install one or more extra packages. Repeatable, comma-separated. Reboots to activate. |
 | `--device-mode <m>` | `rose`, `advanced`, `basic`, `home`, `auto`. |
 | `--device-mode-enable <f,…>` | Set one or more device-mode flags to yes. Repeatable, comma-separated. |
 | `--device-mode-disable <f,…>` | Set one or more to no. |
@@ -588,13 +589,27 @@ Naming a feature without a mode resolves the mode to `rose` — so
 before it happens, not discovered afterwards.
 
 Preconditions: the machine must be **running** and have a **user-mode NIC**
-(device-mode is applied over localhost REST), on RouterOS ≥ 7.20.8. Each is a
-named refusal rather than a timeout.
+(device-mode goes over localhost REST; packages over localhost SSH and REST), on
+RouterOS ≥ 7.20.8. Those three are named refusals (`MACHINE_STOPPED`,
+`NETWORK_UNAVAILABLE`, `PROVISIONING_VERSION_UNSUPPORTED`). Package installs
+additionally probe that REST answers before uploading, and that the guest comes
+back after the activating reboot — those two surface as `BOOT_TIMEOUT`, since a
+guest that never answers is a timeout whatever the cause.
+
+Names missing from all_packages are skipped with a warning (the CLI errors when
+*none* match), without probing the guest: REST is only contacted once something
+would be uploaded. A reboot the guest rejects throws before anything is
+recorded, so a failed install never reads as applied later.
 
 The change is folded into `machine.json` rather than overwriting it — device-mode
-updates move only the settings they name, so the record stays cumulative — and
-recorded in `provisioning.steps`, which makes a later `start` passing the same
-device-mode a recognised no-op instead of a refusal.
+updates move only the settings they name, installed packages merge into the
+package list — and recorded in `provisioning.steps`, which makes a later `start`
+passing the same device-mode or packages a recognised no-op instead of a refusal.
+
+**Package installs always reboot.** Unlike device-mode, `set --package` does not
+read the guest back to skip work it already did: every invocation re-uploads the
+packages and reboots to activate them, even when the guest already has them. A
+guest read-back that skips redundant installs is follow-up work.
 
 **Not available here:** `--add-user`, `--disable-admin`, `--secure-login`. Those
 rewrite working config rather than unlock a capability, and they are the steps that
@@ -697,8 +712,10 @@ quickchr cache key --version 7.24.4 --arch x86 --json
 `default-channel` applies; both subcommands use `default-arch`. A pinned
 version makes no network request in `cache key`. If channel resolution is
 offline, `cache key` prints the stable `unresolved` sentinel and exits 0 so a CI
-cache lookup cannot red the job; `cache add` fails because it cannot download an
-unknown image. Without `--json`, `cache key` emits `key=value` lines that can be
+cache lookup cannot red the job. Proxy-attributed `DOWNLOAD_FAILED` errors are
+re-thrown with their remediation hint instead. `cache add` fails because it
+cannot download an unknown image. Without `--json`, `cache key` emits `key=value`
+lines that can be
 appended directly to `$GITHUB_OUTPUT`.
 
 ```yaml
@@ -1223,7 +1240,7 @@ Routes that still work after the window has closed:
 |---|---|
 | license | `quickchr set <name> --license` |
 | device-mode | `quickchr set <name> --device-mode…` / `instance.setDeviceMode()` (power-cycles the VM) |
-| packages | `instance.installPackage()` (library; reboots the guest) |
+| packages | `quickchr set <name> --package …` / `instance.installPackage()` (reboots the guest) |
 | anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window, at first-boot cost |
 
 `clean()` retains provisioning *intent* — packages, device-mode, managed login — so the
@@ -1672,7 +1689,7 @@ centrs execute --quickchr my-chr --yes "/user/add name=-2 group=read password=x"
 
 | `--via` | Source | Notes |
 |---|---|---|
-| `auto` (default) | tries REST, falls back to **console** on network errors (not auth errors) | Best general choice. Rides out transient post-boot connection resets (up to 3 REST retries) before falling back; an HTTP error such as 401/400 fails immediately without retry or fallback. |
+| `auto` (default) | tries REST, then **console** only for refused/unreachable connections | Retries connection establishment up to 3 times, 2 s apart, before fallback. Resets, timeouts, unknown errors and HTTP errors fail without replay because a command may already have executed. |
 | `rest` | `POST /rest/execute` with `{"script": "…", "as-string": ""}` | RouterOS 7.1+. Synchronous (any value for `as-string` enables sync mode; presence is what counts). 60s server-side timeout. |
 | `console` | serial socket with prompt detection + buffer offset tracking | Fallback for restricted environments. Uses `\r` (not `\r\n`) on PTY. |
 | `qga` | QGA `guest-exec` | x86 + KVM only. Throws `QGA_UNSUPPORTED` on ARM64. |
@@ -1708,7 +1725,8 @@ Same `resolveAuth()` chain as REST. Override on the CLI with
 ### Timeouts
 
 `opts.timeout` defaults to 30s for QGA/console and 10s for REST when
-running under `auto` (so the fallback to console kicks in quickly).
+running under `auto`. A timeout fails without retry or console fallback: the
+guest may still be executing the script. Increase `opts.timeout` for long commands.
 On explicit `--via=rest`, the 60s server-side `as-string` cap is the
 ceiling.
 

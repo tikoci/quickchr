@@ -19,6 +19,8 @@ import {
 	requireFirmware,
 	resolveInterfaceAlias,
 	isCrossArchEmulation,
+	accelDoctorCheck,
+	proxyDoctorCheck,
 } from "../../src/lib/platform.ts";
 
 const originalSpawnSync = Bun.spawnSync;
@@ -598,5 +600,144 @@ describe("resolveInterfaceAlias", () => {
 				message: expect.stringContaining("ethernet"),
 			}),
 		);
+	});
+});
+
+describe("accelDoctorCheck", () => {
+	test("TCG-only is a warning, not a success check", () => {
+		// Cloud sessions have no /dev/kvm, so this is the row they see (#210).
+		const check = accelDoctorCheck(["tcg"], "x64");
+		expect(check.label).toBe("Acceleration");
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("tcg");
+		expect(check.detail).toContain("no KVM/HVF");
+	});
+
+	test("hardware acceleration present reads ok and says nothing about TCG-only", () => {
+		const check = accelDoctorCheck(["kvm", "tcg"], "x64");
+		expect(check.status).toBe("ok");
+		expect(check.detail).toContain("kvm, tcg");
+		expect(check.detail).not.toContain("software emulation only");
+	});
+
+	test("a configured override suffix is preserved on either status", () => {
+		const suffix = " — configured override via QUICKCHR_ACCEL";
+		expect(accelDoctorCheck(["tcg"], "x64", suffix).detail).toContain("QUICKCHR_ACCEL");
+		expect(accelDoctorCheck(["hvf", "tcg"], "arm64", suffix).detail).toContain("QUICKCHR_ACCEL");
+	});
+
+	test("an override does not double the verdict with the TCG-only note", () => {
+		// Under an override the row names the forced mode, not host capability —
+		// appending the TCG-only capability note would say TCG twice.
+		const check = accelDoctorCheck(["tcg"], "x64", " — configured override via QUICKCHR_ACCEL");
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("configured override");
+		expect(check.detail).not.toContain("software emulation only");
+	});
+
+	test("no detected accelerator stays a warning without claiming TCG", () => {
+		const check = accelDoctorCheck([], "x64");
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("none detected");
+	});
+});
+
+describe("proxyDoctorCheck", () => {
+	test("unset proxy reads ok", () => {
+		const check = proxyDoctorCheck({} as NodeJS.ProcessEnv);
+		expect(check.label).toBe("HTTPS proxy");
+		expect(check.status).toBe("ok");
+		expect(check.detail).toContain("not set");
+	});
+
+	test("a set proxy is reported as a warning with the endpoint shown", () => {
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "http://proxy.example:8080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("http://proxy.example:8080");
+		expect(check.detail).toContain("*.mikrotik.com");
+	});
+
+	test("honors the lowercase spelling", () => {
+		const check = proxyDoctorCheck({ https_proxy: "http://proxy.example:8080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("http://proxy.example:8080");
+	});
+
+	test("falls back to ALL_PROXY, either case", () => {
+		const upper = proxyDoctorCheck({ ALL_PROXY: "http://proxy.example:8080" });
+		expect(upper.status).toBe("warn");
+		expect(upper.detail).toContain("http://proxy.example:8080");
+		const lower = proxyDoctorCheck({ all_proxy: "http://proxy.example:8080" });
+		expect(lower.status).toBe("warn");
+		expect(lower.detail).toContain("http://proxy.example:8080");
+	});
+
+	test("the scheme-specific variable wins over ALL_PROXY for display", () => {
+		const check = proxyDoctorCheck({
+			HTTPS_PROXY: "http://specific.example:8080",
+			ALL_PROXY: "http://fallback.example:8080",
+		});
+		expect(check.detail).toContain("specific.example");
+		expect(check.detail).not.toContain("fallback.example");
+	});
+
+	test("a non-HTTP scheme on ALL_PROXY is reported as ignored, not as an active proxy", () => {
+		// "Ignored" is only true on ALL_PROXY — a scheme-specific variable
+		// with an unusable scheme fails fetches (see the test below).
+		const check = proxyDoctorCheck({ ALL_PROXY: "socks5://proxy.example:1080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("socks5://proxy.example:1080");
+		expect(check.detail).toContain("ignored");
+		expect(check.detail).not.toContain("egress via proxy");
+	});
+
+	test("a scheme-less host:port reads as the active http proxy", () => {
+		// Bun defaults scheme-less values to http (probed) — not unparseable.
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "proxy.example:8080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("http://proxy.example:8080");
+		expect(check.detail).toContain("egress via proxy");
+	});
+
+	test("credentials in the proxy URL are never echoed", () => {
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "http://user:secret@proxy.example:8080" });
+		expect(check.detail).toContain("http://proxy.example:8080");
+		expect(check.detail).not.toContain("user");
+		expect(check.detail).not.toContain("secret");
+	});
+
+	test("an unparseable value is not echoed raw", () => {
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "not a url {{{" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("unparseable");
+		expect(check.detail).not.toContain("{{{");
+	});
+
+	test("a whitespace-only value falls through to the next variable", () => {
+		// Without the trim, the selector returns " " while
+		// isProxyConfiguredFor() falls through to ALL_PROXY — the two
+		// helpers disagree and doctor misdiagnoses direct egress.
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "   ", ALL_PROXY: "http://proxy.example:8080" });
+		expect(check.detail).toContain("proxy.example");
+		expect(check.detail).toContain("egress via proxy");
+	});
+
+	test("an unusable scheme on ALL_PROXY is ignored (direct egress)", () => {
+		// Bun ignores a non-http(s) ALL_PROXY and goes direct (probed).
+		const check = proxyDoctorCheck({ ALL_PROXY: "socks5://proxy.example:1080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("ignored");
+		expect(check.detail).toContain("direct egress");
+	});
+
+	test("an unusable scheme on HTTPS_PROXY fails fetches instead of going direct", () => {
+		// Bun throws UnsupportedProxyProtocol for a non-http(s)
+		// scheme-specific variable (probed) — claiming direct egress here
+		// misdiagnoses failing downloads.
+		const check = proxyDoctorCheck({ HTTPS_PROXY: "socks5://proxy.example:1080" });
+		expect(check.status).toBe("warn");
+		expect(check.detail).toContain("socks5://proxy.example:1080");
+		expect(check.detail).toContain("HTTPS_PROXY");
+		expect(check.detail).not.toContain("direct egress");
 	});
 });

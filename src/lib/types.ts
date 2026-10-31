@@ -831,10 +831,18 @@ export interface ChrInstance {
 	/** List extra packages available for this instance's version and arch.
 	 *  Downloads and caches the all_packages ZIP on the first call. */
 	availablePackages(): Promise<string[]>;
-	/** Install extra package(s), reboot, and wait until REST API is ready again.
+	/** Install extra package(s), reboot to activate, and wait until REST answers again.
 	 *  quickchr validates this provisioning flow on RouterOS 7.20.8+ only.
 	 *  Accepts a single package name or an array. Returns the names that were
-	 *  actually installed (missing packages are skipped with a warning). */
+	 *  actually installed. Names missing from all_packages are skipped with a
+	 *  warning — and when *no* name matches, that `[]` comes back without
+	 *  touching the guest: REST is only probed once something would be uploaded.
+	 *  Preconditions: the machine must be running with a user-mode NIC and a
+	 *  reachable REST API (`MACHINE_STOPPED`, `NETWORK_UNAVAILABLE`,
+	 *  `BOOT_TIMEOUT` otherwise). A reboot the guest rejects throws before
+	 *  anything is recorded (`PROCESS_FAILED` on 401/403, `REBOOT_FAILED`
+	 *  otherwise). Every call that installs anything reboots, even when the
+	 *  guest already has the packages — there is no read-back skip. */
 	installPackage(packages: string | string[]): Promise<string[]>;
 
 	/** Build an env-var map for spawning a subprocess against this instance.
@@ -931,6 +939,11 @@ export type ErrorCode =
 	| "MISSING_UNZIP"
 	| "PORT_CONFLICT"
 	| "BOOT_TIMEOUT"
+	// The activating reboot for a package install did not happen: the guest
+	// answered the reboot POST with a non-2xx that was not an auth rejection
+	// (those are PROCESS_FAILED), or its REST API kept answering past the
+	// down-detection budget. Nothing is recorded — the install did not activate.
+	| "REBOOT_FAILED"
 	| "QGA_UNSUPPORTED"
 	| "QGA_TIMEOUT"
 	| "DOWNLOAD_FAILED"
@@ -996,7 +1009,7 @@ export type ExecTransport = "auto" | "rest" | "ssh" | "console" | "qga";
 
 /** Options for ChrInstance.exec(). */
 export interface ExecOptions {
-	/** Transport to use. "auto" tries REST /execute, then console on transport failure. */
+	/** Transport to use. "auto" tries REST, then console only on refused/unreachable connections; never replays resets/timeouts. */
 	via?: ExecTransport;
 	/** Override username (default: resolved from machine config). */
 	user?: string;

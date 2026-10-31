@@ -50,23 +50,25 @@ POST /rest/execute  { "script": ":put hello", "as-string": true }  → { "ret": 
 POST /rest/execute  { "script": ":put hello", "as-string": "" }    → { "ret": "hello" }  (sync — presence is what matters)
 ```
 
-Our `exec.ts` always sends `"as-string": ""` for synchronous execution.
+Our `exec.ts` always sends `"as-string": true` for synchronous execution.
 
 ## Transport failures vs HTTP errors (exec retry contract)
 
-A connection-level failure — reset, refused, timeout, anything where **no HTTP
-response was received** — is not covered by the liveness ladder above, which is
-about responses. `ChrInstance.rest()` and the exec `auto` transport retry
-`ECONNRESET` (3 attempts, 2 s backoff) for the brief post-boot window in which
-RouterOS resets early connections; exec `auto` then falls back to the serial
-console when REST stays unreachable. An HTTP error (401/400/500) is never
-retried and never falls back: a response is an answer. Explicit `via: "rest"`
-sends exactly once.
+Exec `auto` retries only `ECONNREFUSED`, `EHOSTUNREACH`, and `ENETUNREACH`
+(up to 3 retries, 2 s apart), then falls back to serial console. These failures
+establish the command was not sent. A missing HTTP response alone does **not**:
+`ECONNRESET`, timeouts (including timeout errors with no code), and unknown failures
+surface immediately without retry or fallback. HTTP errors also surface without
+replay. Explicit `via: "rest"` sends exactly once. `ChrInstance.rest()` has its
+own reset retry policy; do not copy it to arbitrary script execution.
 
-Grounded 2026-10-29 (#135): disabling www makes the forwarded REST port reset
-connections immediately (`read ECONNRESET`, ~16 ms, not refused or timed out);
-serial-console exec keeps working with www down and can re-enable it. The
-`exec — auto transport fallback` integration test pins this round-trip.
+Grounded 2026-10-29/30 (#135, #222): disabling www resets the forwarded port,
+but a reset cannot distinguish that case from a response lost after execution.
+A live CHR 7.25 script set guest state before its client's 300 ms timeout; the
+timeout error with no code was incorrectly eligible for fallback. Integration
+tests cover resets after execution and timeouts without replay, plus safe console
+fallback after
+removing the host REST forward (actual `ECONNREFUSED`).
 
 ## Guest shutdown through exec
 

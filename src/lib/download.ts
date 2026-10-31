@@ -49,7 +49,13 @@
 import { unlinkSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { QuickCHRError } from "./types.ts";
-import { fetchResilient } from "./net.ts";
+import {
+	fetchResilient,
+	isProxyConfiguredFor,
+	isProxyRefusal,
+	PROXY_ALLOWLIST_HINT,
+	proxyRefusalHint,
+} from "./net.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { renameWithRetry } from "./rename.ts";
 
@@ -234,6 +240,9 @@ export async function downloadToFile(
 	const log = opts.logger ?? createLogger();
 	const maxAttempts = opts.maxAttempts ?? DOWNLOAD_MAX_ATTEMPTS;
 	const stallMs = opts.stallMs ?? DOWNLOAD_STALL_MS;
+	// Parsed once, up front: the catch below names this host, and a parse
+	// throwing inside the handler would mask the failure it reports.
+	const hostname = new URL(url).hostname;
 	// Unique per call, not a fixed `<dest>.part`. Both callers guard only with
 	// `existsSync(destPath)`, so two concurrent downloads of the same artifact —
 	// two `quickchr start`s, or parallel tests — reach this together. On a shared
@@ -267,6 +276,17 @@ export async function downloadToFile(
 			// throughput we have ever measured. Retrying either just spends the
 			// budget again — see the retry-policy note at the top of this file.
 			if (e instanceof QuickCHRError) throw e;
+			// Terminal like a client error: a proxy policy refusal will fail every
+			// attempt identically, so say which host was refused instead (#210).
+			// A 407 names the credentials fix; a proxy 5xx is not a refusal at
+			// all and falls through to the retry below.
+			if (isProxyRefusal(e)) {
+				throw new QuickCHRError(
+					"DOWNLOAD_FAILED",
+					`Download failed: the egress proxy refused ${hostname} — ${e instanceof Error ? e.message : String(e)}`,
+					proxyRefusalHint(e),
+				);
+			}
 			if (e instanceof DownloadDeadlineError && e.outcome.deadline === "transfer-budget") {
 				throw new QuickCHRError("DOWNLOAD_TOO_SLOW", e.message);
 			}
@@ -298,6 +318,8 @@ async function attemptDownload(
 ): Promise<TransferOutcome> {
 	const controller = new AbortController();
 	const started = Bun.nanoseconds();
+	// The 403 branch names this host; parse once rather than inside the throw.
+	const hostname = new URL(url).hostname;
 	let fired: DownloadDeadline | undefined;
 	let stallTimer: ReturnType<typeof setTimeout> | undefined;
 	let budgetTimer: ReturnType<typeof setTimeout> | undefined;
@@ -340,8 +362,21 @@ async function attemptDownload(
 			// retriable branch would otherwise repeat that once per attempt.
 			await response.body?.cancel().catch(() => {});
 			// Non-retriable client errors are the server telling us the request is
-			// wrong; a retry cannot change that. Surface immediately.
+			// wrong; a retry cannot change that. Surface immediately. A 403 through
+			// a configured proxy is the special case: on the pinned Bun a proxy
+			// CONNECT refusal always throws, so the 403 came from the origin
+			// through the tunnel — but on older Bun it can be the proxy's own
+			// refusal, so the verdict hedges and keeps the allowlist fix (#210).
+			// With no proxy configured a 403 is the origin's verdict, like any
+			// other client error.
 			if (!isRetriableStatus(response.status)) {
+				if (response.status === 403 && isProxyConfiguredFor(url)) {
+					throw new QuickCHRError(
+						"DOWNLOAD_FAILED",
+						`Download failed: HTTP 403 for ${url} via the egress proxy — the origin refused the request, or on Bun older than 1.4.4 the proxy refused CONNECT for ${hostname}`,
+						PROXY_ALLOWLIST_HINT,
+					);
+				}
 				throw new QuickCHRError(
 					"DOWNLOAD_FAILED",
 					`Download failed: HTTP ${response.status} for ${url}`,

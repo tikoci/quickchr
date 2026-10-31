@@ -81,3 +81,34 @@ These files reach external URLs via `fetchResilient()` (`src/lib/net.ts`) — in
 - `versions.ts` — MikroTik upgrade server
 - `packages.ts` — package ZIP downloads
 - `images.ts` — CHR image downloads
+
+## Bun fetch proxy behavior (grounded, Bun 1.4.4)
+
+Sandboxed cloud sessions proxy all egress, and a host off the proxy's allowlist
+fails every download (#210). The mapping in `net.ts` / `download.ts` /
+`versions.ts` rests on these facts, each confirmed by local stub-proxy probes on
+Bun 1.4.4 except the `NO_PROXY` entry table, which is per the docs (see the
+[Bun fetch docs](https://bun.sh/docs/runtime/networking/fetch)):
+
+- Selection: `HTTP_PROXY` only for `http:` URLs, `HTTPS_PROXY` only for
+  `https:` URLs (either case); `ALL_PROXY` (either case) for both when the
+  scheme-specific variable is unset. Empty string counts as unset. `NO_PROXY`
+  (lowercase `no_proxy` first, then uppercase) bypasses per entry: `*`, bare /
+  dot-prefixed / star-prefixed domains (host plus subdomains), IP literals,
+  CIDR blocks, `host:port`. `isProxyConfiguredFor()` (`src/lib/net.ts`) mirrors
+  this per URL.
+- Usable values: `http(s)://` URLs and scheme-less `host[:port]` (Bun defaults
+  those to http). A value naming another kind of proxy (`socks5://…`) is never
+  used as one: on the scheme-specific variables `fetch` throws
+  `UnsupportedProxyProtocol`; on `ALL_PROXY` it is ignored and the request goes
+  direct.
+- CONNECT refusals throw, never resolve: when the proxy answers `CONNECT` with
+  anything but a 2xx status, `fetch` rejects with `code: "ERR_PROXY_TUNNEL"`
+  carrying the proxy's `status`/`statusText`/`headers` — so on this Bun a 403
+  `Response` necessarily came from the origin through an established tunnel.
+  Observed message shape: `Proxy refused to open a tunnel: 403 Forbidden`.
+- quickchr mapping: `isProxyRefusal()` reads the CONNECT `status` through the
+  cause chain — 403 and status-less shapes get the allowlist hint, 407 gets the
+  credentials hint, and a proxy 5xx is not a refusal (the retry loops own it).
+  An HTTP 403 verdict blames the proxy only when `isProxyConfiguredFor(url)` is
+  true, and hedges for older Bun where proxy 403s arrived as responses.

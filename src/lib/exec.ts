@@ -59,9 +59,8 @@ export async function restExecute(
 			"EXEC_FAILED",
 			`exec timed out or failed: ${e instanceof Error ? e.message : String(e)}`,
 		);
-		// Preserve the transport failure for callers that ride out resets (the
-		// auto transport). HTTP errors below never carry a cause: a response —
-		// even a 401 or 500 — is an answer, not a transient.
+		// Preserve the cause so auto can distinguish failed connection attempts
+		// from ambiguous delivery. HTTP errors below never carry a cause.
 		err.cause = e;
 		throw err;
 	}
@@ -86,33 +85,23 @@ export async function restExecute(
 }
 
 /**
- * True when an exec failure was a connection-level transport failure — the
- * request got no HTTP response at all (reset, refused, timeout) — rather than
- * an HTTP error or command failure. Only transport failures are ever retried
- * or fall back to another transport.
+ * True only for connection failures that establish the command was not sent.
+ * Resets, timeouts, and unknown errors leave delivery ambiguous and must never
+ * cause arbitrary scripts to be replayed through retries or console fallback.
  */
 export function isExecTransportFailure(e: unknown): boolean {
-	return e instanceof QuickCHRError && e.code === "EXEC_FAILED" && e.cause instanceof Error;
-}
-
-function isTransportReset(e: unknown): boolean {
-	return (
-		isExecTransportFailure(e) &&
-		((e as QuickCHRError).cause as { code?: unknown }).code === "ECONNRESET"
-	);
+	if (!(e instanceof QuickCHRError) || e.code !== "EXEC_FAILED" || !(e.cause instanceof Error)) return false;
+	const code = (e.cause as { code?: unknown }).code;
+	return code === "ECONNREFUSED" || code === "EHOSTUNREACH" || code === "ENETUNREACH";
 }
 
 /**
- * Execute via REST, riding out the brief post-boot window in which RouterOS
- * resets connections that arrive before www is fully settled — the same
- * transient `ChrInstance.rest()` already retries (3 attempts, 2 s backoff),
- * and the shape behind #135's first-exec-after-boot failure and #69's
- * first-request resets on linux-arm64.
+ * Execute via REST, retrying only refused or unreachable connections (up to
+ * 3 retries, 2 s backoff). These failures establish the command was not sent.
  *
- * Only connection resets are retried, and only when no HTTP response was
- * received. HTTP errors, auth failures, and timeouts throw immediately: a
- * response is an answer, and a timeout means the server may still be running
- * the script, so replaying it could double-execute a non-idempotent command.
+ * Resets and timeouts throw immediately: the server may already have executed
+ * the script, so replaying could double-execute a non-idempotent command.
+ * HTTP errors, auth failures, and unknown errors also throw without replay.
  *
  * This is the auto transport's REST attempt, not a general policy:
  * `via: "rest"` still sends exactly once (guest shutdown depends on
@@ -131,8 +120,8 @@ export async function restExecuteWithRetry(
 		try {
 			return await restExecute(restUrl, auth, command, opts);
 		} catch (e) {
-			if (attempt >= maxRetries || !isTransportReset(e)) throw e;
-			console.warn(`exec: ECONNRESET on REST attempt ${attempt + 1}, retrying...`);
+			if (attempt >= maxRetries || !isExecTransportFailure(e)) throw e;
+			console.warn(`exec: connection failed before delivery on REST attempt ${attempt + 1}, retrying...`);
 			await Bun.sleep(delayMs);
 		}
 	}

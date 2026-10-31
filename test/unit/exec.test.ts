@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import { createServer } from "node:http";
 import { resolveAuth } from "../../src/lib/auth.ts";
 import { restExecute, restExecuteWithRetry, isExecTransportFailure } from "../../src/lib/exec.ts";
@@ -226,7 +226,8 @@ describe("exec transport failures", () => {
 		try {
 			await fn(`http://127.0.0.1:${port}`);
 		} finally {
-			server.close();
+			server.closeAllConnections();
+			await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
 		}
 	}
 
@@ -269,43 +270,57 @@ describe("exec transport failures", () => {
 		);
 	});
 
-	test("restExecuteWithRetry succeeds after one ECONNRESET", async () => {
-		let requests = 0;
+	test("restExecuteWithRetry does not replay after a command takes effect then resets", async () => {
+		let effects = 0;
 		await withNodeServer(
-			(req, res) => {
-				requests++;
-				if (requests === 1) {
-					req.socket.destroy();
-					return;
-				}
-				res.writeHead(200, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ret: "recovered" }));
+			(req, _res) => {
+				effects++;
+				req.socket.destroy();
 			},
 			async (baseUrl) => {
-				const result = await restExecuteWithRetry(baseUrl, auth, ":put hi", { retryDelayMs: 5 });
-				expect(result.output).toBe("recovered");
-				expect(result.via).toBe("rest");
-				expect(requests).toBe(2);
+				const err = await restExecuteWithRetry(baseUrl, auth, "/example/add", { retryDelayMs: 5 }).then(
+					() => { throw new Error("expected reset to surface"); },
+					(e: unknown) => e,
+				);
+				expect(err).toBeInstanceOf(QuickCHRError);
+				expect((err as QuickCHRError).code).toBe("EXEC_FAILED");
+				expect(((err as QuickCHRError).cause as { code?: unknown }).code).toBe("ECONNRESET");
+				expect(isExecTransportFailure(err)).toBe(false);
+				expect(effects).toBe(1);
 			},
 		);
 	});
 
-	test("restExecuteWithRetry throws transport EXEC_FAILED after exhausting retries", async () => {
+	test("restExecuteWithRetry bounds retries for a refused connection", async () => {
+		const port = await deadPort();
+		const warnings = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const err = await restExecuteWithRetry(`http://127.0.0.1:${port}`, auth, ":put hi", { retries: 2, retryDelayMs: 5 }).then(
+				() => { throw new Error("expected refusal"); },
+				(e: unknown) => e,
+			);
+			expect(warnings).toHaveBeenCalledTimes(2);
+			expect(((err as QuickCHRError).cause as { code?: unknown }).code).toBe("ECONNREFUSED");
+			expect(isExecTransportFailure(err)).toBe(true);
+		} finally {
+			warnings.mockRestore();
+		}
+	});
+
+	test.each(["single", "auto"])("%s REST timeout is not replayed or eligible for fallback", async (mode) => {
 		let requests = 0;
 		await withNodeServer(
-			(req, _res) => {
-				requests++;
-				req.socket.destroy();
-			},
+			() => { requests++; },
 			async (baseUrl) => {
-				const err = await restExecuteWithRetry(baseUrl, auth, ":put hi", { retries: 2, retryDelayMs: 5 }).then(
-					() => { throw new Error("expected restExecuteWithRetry to throw on persistent reset"); },
+				const execute = mode === "single" ? restExecute : restExecuteWithRetry;
+				const err = await execute(baseUrl, auth, ":delay 30s", { timeout: 100 }).then(
+					() => { throw new Error("expected timeout"); },
 					(e: unknown) => e,
 				);
-				expect(requests).toBe(3); // 1 initial + 2 retries
 				expect(err).toBeInstanceOf(QuickCHRError);
-				expect((err as QuickCHRError).code).toBe("EXEC_FAILED");
-				expect(isExecTransportFailure(err)).toBe(true);
+				expect((err as QuickCHRError).message).toContain("restPost timeout");
+				expect(isExecTransportFailure(err)).toBe(false);
+				expect(requests).toBe(1);
 			},
 		);
 	});
@@ -326,13 +341,18 @@ describe("exec transport failures", () => {
 		);
 	});
 
-	test("isExecTransportFailure classifies cause-carrying EXEC_FAILED only", async () => {
+	test("isExecTransportFailure allows only known failures before delivery", async () => {
 		const port = await deadPort();
 		const transportErr = await restExecute(`http://127.0.0.1:${port}`, auth, ":put hi").then(
 			() => { throw new Error("expected restExecute to throw against a dead port"); },
 			(e: unknown) => e,
 		);
 		expect(isExecTransportFailure(transportErr)).toBe(true);
+		for (const code of ["ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "ECONNRESET", "ETIMEDOUT", "EPIPE", undefined, "UNKNOWN"]) {
+			const err = new QuickCHRError("EXEC_FAILED", "connection failure");
+			err.cause = Object.assign(new Error("transport"), { code });
+			expect(isExecTransportFailure(err)).toBe(["ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH"].includes(code ?? ""));
+		}
 		expect(isExecTransportFailure(new QuickCHRError("EXEC_FAILED", "exec failed (HTTP 401): nope"))).toBe(false);
 		expect(isExecTransportFailure(new QuickCHRError("MACHINE_STOPPED", "stopped"))).toBe(false);
 		expect(isExecTransportFailure(new Error("plain"))).toBe(false);
