@@ -67,8 +67,7 @@ but a reset cannot distinguish that case from a response lost after execution.
 A live CHR 7.25 script set guest state before its client's 300 ms timeout; the
 timeout error with no code was incorrectly eligible for fallback. Integration
 tests cover resets after execution and timeouts without replay, plus safe console
-fallback after
-removing the host REST forward (actual `ECONNREFUSED`).
+fallback after removing the host REST forward (actual `ECONNREFUSED`).
 
 ## Guest shutdown through exec
 

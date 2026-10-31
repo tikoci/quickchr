@@ -1690,7 +1690,7 @@ centrs execute --quickchr my-chr --yes "/user/add name=-2 group=read password=x"
 | `--via` | Source | Notes |
 |---|---|---|
 | `auto` (default) | tries REST, then **console** only for refused/unreachable connections | Retries connection establishment up to 3 times, 2 s apart, before fallback. Resets, timeouts, unknown errors and HTTP errors fail without replay because a command may already have executed. |
-| `rest` | `POST /rest/execute` with `{"script": "…", "as-string": ""}` | RouterOS 7.1+. Synchronous (any value for `as-string` enables sync mode; presence is what counts). 60s server-side timeout. |
+| `rest` | `POST /rest/execute` with `{"script": "…", "as-string": true}` | RouterOS 7.1+. Synchronous (any value for `as-string` enables sync mode; presence is what counts). 60s server-side timeout. |
 | `console` | serial socket with prompt detection + buffer offset tracking | Fallback for restricted environments. Uses `\r` (not `\r\n`) on PTY. |
 | `qga` | QGA `guest-exec` | x86 + KVM only. Throws `QGA_UNSUPPORTED` on ARM64. |
 | `ssh` | reserved | Currently throws `EXEC_FAILED`; planned. |
