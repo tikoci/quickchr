@@ -153,6 +153,15 @@ export function integrationJobName(label: string, target: string): string {
  * version is the identity, the label is display. A leg without a resolution
  * falls back to the label, which is also what version-shaped dispatches
  * resolve to, so those join either way.
+ *
+ * Known limit, not a bug to fix here: two legs on one platform resolving to
+ * one version (e.g. targets `stable,7.25`) share a key, and one record then
+ * marks both complete. They are indistinguishable in EVERY data source — same
+ * suite-record target, same checkpoint external_id, same ndjson filename
+ * (which the aggregate already overwrites) — so no ledger-layer keying can
+ * separate them; that needs the plan to stop emitting indistinguishable legs
+ * or the legs to emit label identity they are not given today. Never observed
+ * in production (122 entries checked, 2026-10-31).
  */
 export function plannedLegKey(leg: PlannedLeg): string {
 	return legKey(leg.id, leg.resolved ?? leg.target);
