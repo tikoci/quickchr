@@ -10,6 +10,7 @@ import {
 	foldLedgerInto,
 	integrationJobName,
 	mapJobsToLegs,
+	plannedLegKey,
 	renderFinalizedOutput,
 	TEST_STEP_NAME,
 	type CheckpointView,
@@ -73,9 +74,9 @@ describe("classifyLeg", () => {
 		// than no signal.
 		const entry = classifyLeg(
 			LEG,
-			new Set([legKey("macos-x86", "stable")]),
-			new Map([[legKey("macos-x86", "stable"), checkpoint()]]),
-			new Map([[legKey("macos-x86", "stable"), vanishedJob()]]),
+			new Set([legKey("macos-x86", "7.23.2")]),
+			new Map([[legKey("macos-x86", "7.23.2"), checkpoint()]]),
+			new Map([[legKey("macos-x86", "7.23.2"), vanishedJob()]]),
 		);
 		expect(entry.terminal).toBe("complete");
 		expect(entry.why).toContain("metrics record");
@@ -85,8 +86,8 @@ describe("classifyLeg", () => {
 		const entry = classifyLeg(
 			LEG,
 			new Set(),
-			new Map([[legKey("macos-x86", "stable"), checkpoint()]]),
-			new Map([[legKey("macos-x86", "stable"), vanishedJob()]]),
+			new Map([[legKey("macos-x86", "7.23.2"), checkpoint()]]),
+			new Map([[legKey("macos-x86", "7.23.2"), vanishedJob()]]),
 		);
 		expect(entry.terminal).toBe("runner-lost");
 		expect(entry.stalled_step).toBe(TEST_STEP_NAME);
@@ -103,7 +104,7 @@ describe("classifyLeg", () => {
 		// Job matching goes through a display-name template; if that ever drifts,
 		// the ledger must degrade to the other instrument rather than silently
 		// reclassify every vanished leg as `attempted-incomplete`.
-		const entry = classifyLeg(LEG, new Set(), new Map([[legKey("macos-x86", "stable"), checkpoint()]]), new Map());
+		const entry = classifyLeg(LEG, new Set(), new Map([[legKey("macos-x86", "7.23.2"), checkpoint()]]), new Map());
 		expect(entry.terminal).toBe("runner-lost");
 		expect(entry.job_matched).toBe(false);
 		expect(entry.last_file).toBe("exec.test.ts");
@@ -124,8 +125,8 @@ describe("classifyLeg", () => {
 		const entry = classifyLeg(
 			LEG,
 			new Set(),
-			new Map([[legKey("macos-x86", "stable"), checkpoint({ status: "in_progress" })]]),
-			new Map([[legKey("macos-x86", "stable"), finishedJob]]),
+			new Map([[legKey("macos-x86", "7.23.2"), checkpoint({ status: "in_progress" })]]),
+			new Map([[legKey("macos-x86", "7.23.2"), finishedJob]]),
 		);
 		expect(entry.terminal).toBe("attempted-incomplete");
 		expect(entry.why).toContain("failed close, not a lost runner");
@@ -143,8 +144,8 @@ describe("classifyLeg", () => {
 		const entry = classifyLeg(
 			LEG,
 			new Set(),
-			new Map([[legKey("macos-x86", "stable"), checkpoint({ status: "completed" })]]),
-			new Map([[legKey("macos-x86", "stable"), job]]),
+			new Map([[legKey("macos-x86", "7.23.2"), checkpoint({ status: "completed" })]]),
+			new Map([[legKey("macos-x86", "7.23.2"), job]]),
 		);
 		expect(entry.terminal).toBe("attempted-incomplete");
 		expect(entry.stalled_step).toBeUndefined();
@@ -158,7 +159,7 @@ describe("classifyLeg", () => {
 				{ name: "Install QEMU + tools (macOS)", status: "completed", conclusion: "failure", started_at: "2026-07-31T21:07:57Z" },
 			],
 		});
-		const entry = classifyLeg(LEG, new Set(), new Map(), new Map([[legKey("macos-x86", "stable"), job]]));
+		const entry = classifyLeg(LEG, new Set(), new Map(), new Map([[legKey("macos-x86", "7.23.2"), job]]));
 		expect(entry.terminal).toBe("attempted-incomplete");
 		expect(entry.last_file).toBeUndefined();
 	});
@@ -171,8 +172,8 @@ describe("classifyLeg", () => {
 
 	test("legs are keyed by platform AND target — one platform runs several", () => {
 		// `macos-x86 · stable` completing says nothing about `macos-x86 · testing`.
-		const testingLeg: PlannedLeg = { ...LEG, target: "testing" };
-		const entry = classifyLeg(testingLeg, new Set([legKey("macos-x86", "stable")]), new Map(), new Map());
+		const testingLeg: PlannedLeg = { ...LEG, target: "testing", resolved: "7.24beta1" };
+		const entry = classifyLeg(testingLeg, new Set([legKey("macos-x86", "7.23.2")]), new Map(), new Map());
 		expect(entry.terminal).not.toBe("complete");
 	});
 });
@@ -189,22 +190,22 @@ describe("buildRunLedger", () => {
 		// would grow a file that lives forever without adding a fact.
 		const ledger = buildRunLedger(
 			planned,
-			new Set([legKey("linux-x86", "stable")]),
-			new Map([[legKey("macos-x86", "stable"), checkpoint()]]),
-			new Map([[legKey("macos-x86", "stable"), vanishedJob()]]),
+			new Set([legKey("linux-x86", "7.23.2")]),
+			new Map([[legKey("macos-x86", "7.23.2"), checkpoint()]]),
+			new Map([[legKey("macos-x86", "7.23.2"), vanishedJob()]]),
 			META,
 		);
 		expect(ledger.planned).toBe(3);
 		expect(ledger.complete).toBe(1);
-		expect(Object.keys(ledger.incomplete ?? {}).sort()).toEqual(["macos-x86|stable", "macos-x86|testing"]);
-		expect(ledger.incomplete?.["macos-x86|stable"]?.terminal).toBe("runner-lost");
-		expect(ledger.incomplete?.["macos-x86|testing"]?.terminal).toBe("not-started");
+		expect(Object.keys(ledger.incomplete ?? {}).sort()).toEqual(["macos-x86|7.23.2", "macos-x86|7.24beta2"]);
+		expect(ledger.incomplete?.["macos-x86|7.23.2"]?.terminal).toBe("runner-lost");
+		expect(ledger.incomplete?.["macos-x86|7.24beta2"]?.terminal).toBe("not-started");
 	});
 
 	test("a fully green run records the counts and omits the incomplete map", () => {
 		const ledger = buildRunLedger(
 			planned,
-			new Set(planned.map((l) => legKey(l.id, l.target))),
+			new Set(planned.map((l) => plannedLegKey(l))),
 			new Map(),
 			new Map(),
 			META,
@@ -277,7 +278,7 @@ describe("closing a lost leg's check run is a round-trip (#128)", () => {
 
 	/** One `build`: classify, then close the check run the way the aggregate does. */
 	function build(cp: CheckpointView) {
-		const key = legKey(LEG.id, LEG.target);
+		const key = legKey(LEG.id, "7.23.2");
 		const entry = classifyLeg(LEG, new Set(), new Map([[key, cp]]), new Map([[key, vanishedJob()]]));
 		return { entry, output: renderFinalizedOutput(entry, cp) };
 	}
@@ -404,17 +405,19 @@ describe("completedLegs", () => {
 
 	test("reads platform and target from the suite record, not the filename", () => {
 		// Platform ids contain no separator today, but the filename is not a
-		// contract — the record is.
-		const dir = dataDir({ "999-macos-x86-stable.ndjson": suite("macos-x86", "stable") });
-		expect([...completedLegs(dir, "999")]).toEqual([legKey("macos-x86", "stable")]);
+		// contract — the record is. The suite record carries the resolved
+		// version (QUICKCHR_TEST_TARGET is matrix.resolved), so the label in
+		// this filename is deliberately stale: the key follows the record.
+		const dir = dataDir({ "999-macos-x86-stable.ndjson": suite("macos-x86", "7.23.2") });
+		expect([...completedLegs(dir, "999")]).toEqual([legKey("macos-x86", "7.23.2")]);
 	});
 
 	test("ignores other runs' files sharing the ci-data branch", () => {
 		const dir = dataDir({
-			"999-linux-x86-stable.ndjson": suite("linux-x86", "stable"),
-			"888-macos-x86-stable.ndjson": suite("macos-x86", "stable"),
+			"999-linux-x86-7.23.2.ndjson": suite("linux-x86", "7.23.2"),
+			"888-macos-x86-7.23.2.ndjson": suite("macos-x86", "7.23.2"),
 		});
-		expect([...completedLegs(dir, "999")]).toEqual([legKey("linux-x86", "stable")]);
+		expect([...completedLegs(dir, "999")]).toEqual([legKey("linux-x86", "7.23.2")]);
 	});
 
 	test("a run that wrote nothing yields an empty set, not a throw", () => {
@@ -427,17 +430,17 @@ describe("completedLegs", () => {
 		// exactly the circumstances it exists for. A half-written trailing record
 		// is the most plausible corruption, so the good legs must still survive it.
 		const dir = dataDir({
-			"999-linux-x86-stable.ndjson": suite("linux-x86", "stable"),
-			"999-macos-x86-stable.ndjson": `${suite("macos-x86", "stable")}{"kind":"suite"`,
+			"999-linux-x86-7.23.2.ndjson": suite("linux-x86", "7.23.2"),
+			"999-macos-x86-7.23.2.ndjson": `${suite("macos-x86", "7.23.2")}{"kind":"suite"`,
 		});
 		expect([...completedLegs(dir, "999")].sort()).toEqual([
-			legKey("linux-x86", "stable"),
-			legKey("macos-x86", "stable"),
+			legKey("linux-x86", "7.23.2"),
+			legKey("macos-x86", "7.23.2"),
 		]);
 	});
 
 	test("a file whose every line is garbage yields no legs and no throw", () => {
-		const dir = dataDir({ "999-linux-x86-stable.ndjson": "not json\n{oops\n" });
+		const dir = dataDir({ "999-linux-x86-7.23.2.ndjson": "not json\n{oops\n" });
 		expect(completedLegs(dir, "999").size).toBe(0);
 	});
 });
@@ -540,5 +543,84 @@ describe("job name mapping", () => {
 
 	test("the stalled-step name matches the workflow's test step", () => {
 		expect(TEST_STEP_NAME).toBe("Run integration tests (sequential per-file)");
+	});
+});
+
+describe("channel-labeled legs join on the resolved version (#245)", () => {
+	// Transcribed from main.yml push run 41162086323 (2026-10-31, 2/2 legs
+	// green, both ndjson present): the ledger read `planned=2 complete=0`
+	// with both legs `not-started`, because the plan keys legs by dispatch
+	// label (`stable`) while every data source keys by what the leg actually
+	// ran — QUICKCHR_TEST_TARGET is matrix.resolved (`7.25`) — and wrapper
+	// runs prefix job display names with the calling job.
+	const RESOLVED = "7.25";
+	const LEG_X86: PlannedLeg = { id: "linux-x86", label: "linux/x86_64", target: "stable", resolved: RESOLVED };
+	const PLAN: PlannedLeg[] = [
+		LEG_X86,
+		{ id: "linux-arm64", label: "linux/aarch64", target: "stable", resolved: RESOLVED },
+	];
+	const prefixedJobs: JobView[] = PLAN.map((leg) => ({
+		name: `Integration (gating platforms) / ${integrationJobName(leg.label, leg.target)}`,
+		status: "completed",
+		conclusion: "success",
+		started_at: "2026-10-31T02:48:24Z",
+		completed_at: "2026-10-31T03:20:11Z",
+		steps: [
+			{ name: "Set up job", status: "completed", conclusion: "success", started_at: "2026-10-31T02:48:20Z" },
+			{ name: TEST_STEP_NAME, status: "completed", conclusion: "success", started_at: "2026-10-31T02:50:00Z" },
+		],
+	}));
+	// What the leg's own instruments key by: the suite record's target and
+	// the checkpoint external_id both carry QUICKCHR_TEST_TARGET = resolved.
+	const resolvedKeys = (legs: PlannedLeg[]) => new Set(legs.map((leg) => legKey(leg.id, RESOLVED)));
+
+	test("a green channel run reads complete, with jobs matched through the wrapper prefix", () => {
+		const checkpoints = new Map(
+			PLAN.map((leg) => [legKey(leg.id, RESOLVED), checkpoint({ status: "completed" })] as const),
+		);
+		const ledger = buildRunLedger(PLAN, resolvedKeys(PLAN), checkpoints, mapJobsToLegs(PLAN, prefixedJobs), META);
+		expect(ledger.planned).toBe(2);
+		expect(ledger.complete).toBe(2);
+		expect(ledger.incomplete).toBeUndefined();
+		// The join itself, not just the verdict: complete legs are counted,
+		// not listed, so a broken join would hide behind this green.
+		expect(mapJobsToLegs(PLAN, prefixedJobs).size).toBe(2);
+	});
+
+	test("a lost channel leg still names its file — checkpoints join on resolved too", () => {
+		const leg = LEG_X86;
+		const key = legKey(leg.id, RESOLVED);
+		const entry = classifyLeg(
+			leg,
+			new Set(),
+			new Map([[key, checkpoint()]]),
+			mapJobsToLegs(
+				[leg],
+				[
+					{
+						...vanishedJob(),
+						name: `Integration (gating platforms) / ${integrationJobName(leg.label, leg.target)}`,
+					},
+				],
+			),
+		);
+		expect(entry.terminal).toBe("runner-lost");
+		expect(entry.job_matched).toBe(true);
+		expect(entry.last_file).toBe("exec.test.ts");
+		expect(entry.last_checkpoint_ts).toBe("2026-07-31T21:14:14Z");
+	});
+
+	test("the join tolerates any wrapper depth — the separator is the rule, not the prefix", () => {
+		// Nested reusable calls stack prefixes: lint jobs arrive as
+		// `Integration (gating platforms) / Lint PowerShell examples / Lint …`.
+		const deep: JobView = {
+			...vanishedJob(),
+			name: `Outer / Inner / ${integrationJobName(LEG.label, LEG.target)}`,
+		};
+		expect(mapJobsToLegs([LEG], [deep]).get(legKey(LEG.id, "7.23.2"))).toBe(deep);
+		// …but a bare substring is not a match: without the ` / ` separator
+		// this would match job names that merely end in similar text.
+		const bare: JobView = { ...vanishedJob(), name: `X${integrationJobName(LEG.label, LEG.target)}` };
+		expect(mapJobsToLegs([LEG], [bare]).size).toBe(0);
 	});
 });

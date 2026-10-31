@@ -423,12 +423,13 @@ jobs:
             # — growing the step cap too would quietly buy a hang more rope,
             # which is exactly the anti-pattern in this program's rule 5.
             [ -n "$QV" ] && timeout=$((timeout + 20))
-            # Resolved versions already claimed on THIS platform. Two targets can
-            # resolve to one version (`stable,7.23.2` when stable *is* 7.23.2),
-            # which would otherwise give two legs the same cache key and race
-            # them to save it — one upload of a few hundred MB always discarded.
-            # The first leg to claim a version owns it; the rest read.
-            claimed=""
+            # Every emitted leg owns its platform+version. Two targets resolving
+            # to one version (`stable,7.25` when stable *is* 7.25) are rejected
+            # after the loop (ci-plan.ts check), not demoted to readers: such
+            # legs are indistinguishable downstream — same suite-record target,
+            # checkpoint id, ndjson filename and ledger key — and the second
+            # would overwrite the first's evidence. `cacheowner` stays in the
+            # schema (legs honor it) but the plan always emits true.
             for t in "${TARGET_ARR[@]}"; do
               [ -z "$t" ] && continue
               # The concrete version behind this target, from the resolve step.
@@ -441,12 +442,6 @@ jobs:
                 exit 1
               fi
               cacheowner=true
-              case " $claimed " in
-                *" $resolved "*)
-                  cacheowner=false
-                  echo "::notice::${id} · ${t} resolves to ${resolved}, already claimed on this platform — this leg reads the cache, it does not write it" ;;
-                *) claimed="$claimed $resolved" ;;
-              esac
 
               # A full owner performs a separately bounded cold prefetch before
               # the test step. Pad the JOB budget without widening the test-step
@@ -477,6 +472,10 @@ jobs:
             echo "::error::platforms × targets resolved to an empty matrix — nothing would run"
             exit 1
           fi
+          # Duplicate (platform, resolved) legs cannot produce attributable
+          # results — see scripts/ci-plan.ts — so the plan fails here with the
+          # legs named, the same way unknown platforms and malformed targets do.
+          printf '%s' "$inc" | bun scripts/ci-plan.ts check
           echo "matrix={\"include\":$inc}" >> "$GITHUB_OUTPUT"
           echo "Resolved matrix: $inc"
 
@@ -792,9 +791,10 @@ jobs:
           CACHE_OWNER: ${{ matrix.cacheowner }}
         run: |
           set -eo pipefail
-          # Three ways to be a reader, and the log says which: this leg runs a
-          # subset (filter/smoke), or another leg in this dispatch already claimed
-          # the same platform+version (plan decides that, so it cannot be a race).
+          # Two ways to be a reader, and the log says which: this leg runs a
+          # subset (filter/smoke). `CACHE_OWNER=false` is still honored if set —
+          # defense for a hand-built matrix — but the plan always emits true now
+          # that duplicate platform+version dispatches are rejected outright.
           owner=true
           why=""
           if [ -n "${TEST_FILTER// /}" ]; then owner=false; why="test-filter is set"; fi

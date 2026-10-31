@@ -150,7 +150,7 @@ gh run list --workflow integration.yml --limit 1   # grab the run id
 gh run watch <run-id> --exit-status                # wait for the verdict
 ```
 
-A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix job (unknown platform ids or malformed targets **fail the plan** — a typo never produces an empty green run). **There is no `continue-on-error` anywhere**, and **no implicit narrowing either**: every platform — including the TCG ones (macos-x86, windows-x86) — runs the full suite by default; a `platforms=all` dispatch means all platforms, full set. TCG legs are slow (they get a 300-minute timeout when running the full suite) — pass `tcg-smoke=true` to bound them to the curated `anchor.test.ts` subset when you only need a boot+REST pulse (the weekly sweep does). **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
+A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix job (unknown platform ids, malformed targets, or two targets resolving to one version on one platform **fail the plan** — a typo never produces an empty green run, and a dispatch that cannot produce attributable results never runs). **There is no `continue-on-error` anywhere**, and **no implicit narrowing either**: every platform — including the TCG ones (macos-x86, windows-x86) — runs the full suite by default; a `platforms=all` dispatch means all platforms, full set. TCG legs are slow (they get a 300-minute timeout when running the full suite) — pass `tcg-smoke=true` to bound them to the curated `anchor.test.ts` subset when you only need a boot+REST pulse (the weekly sweep does). **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
 
 Every integration job records per-file wall-clock timing to `integration-timing.txt` and assembles `metrics.ndjson` (both in the artifact) — see "CI metrics (ci-data)" below ([#30](https://github.com/tikoci/quickchr/issues/30)).
 
@@ -434,6 +434,14 @@ plus `actions: read`. Reusable-workflow permissions are capped by the calling jo
 goes through the display-name string. `integrationJobName()` in `ci-leg-ledger.ts` is its one home,
 asserted against production job names by a unit test. If `integration.yml`'s `name:` is edited,
 update that function or every ledger entry silently degrades to `job_matched: false`.
+That display name carries the dispatch **label** (`stable`), while reconciliation keys carry the
+**resolved** version (`7.25`) — every data source (suite record, checkpoint external_id, ndjson
+filename) derives from `QUICKCHR_TEST_TARGET`, which is `matrix.resolved` (#245). Joining
+plan-on-label against data-on-resolved silently strands every channel leg at `not-started`;
+`plannedLegKey()` is the one home of the resolved-shaped key. Wrapper runs (`main.yml`,
+`sweep.yml` → reusable `integration.yml`) additionally prefix the display name with each calling
+job, and nested reusable calls stack further segments, so the join matches a ` / `-anchored
+suffix, never an exact name.
 
 **`watchdog-cap` dispatch input** is an experiment lever that forces the cap to N seconds so the
 timeout path itself can be exercised on a real runner without committing a test that hangs on
@@ -1020,26 +1028,26 @@ drift between cache acquisition and the test boot.
 
 | Configuration | Cache action | Writes? |
 |---------------|--------------|---------|
-| Integration leg, full unfiltered suite, first to claim its platform+version | `actions/cache` | **yes — the owner** |
+| Integration leg, full unfiltered suite | `actions/cache` | **yes — the owner** |
 | Integration leg, `test-filter` or `tcg-smoke` | `actions/cache/restore` | no |
-| Integration leg whose platform+version another leg already claimed | `actions/cache/restore` | no |
 | `examples-smoke` leg (any) | `actions/cache/restore` | no |
 
-Ownership is decided in `plan`, not on the leg: two targets can resolve to one
-version (`stable,7.23.2` when stable *is* 7.23.2), and the first to claim a
-version on a platform gets `matrix.cacheowner`. Deciding it centrally is what
-makes "one owner" true rather than merely likely — two legs discovering the same
-key independently would both save and race, and one multi-hundred-MB upload
-would always be discarded. The reader's `::notice::` states which of the three
-reasons applies.
+Ownership is decided in `plan`, not on the leg. Two targets resolving to one
+version on one platform (`stable,7.25` when stable *is* 7.25) used to demote the
+second leg to reader; that fixed only the cache race, while the legs stayed
+indistinguishable everywhere downstream (suite record, checkpoint id, ndjson
+file, ledger row) and overwrote each other's evidence — so the plan now rejects
+such a matrix outright (`scripts/ci-plan.ts check`, unit-tested), and every
+emitted full-suite leg owns its key. The reader's `::notice::` states which of
+the two reasons applies.
 
 Restore and save are separate steps (`actions/cache/restore` + a guarded
-`actions/cache/save`), not the combined action. An owner saves only when it
-claimed the key in `plan`, the restore **missed**, and
-`scripts/ci-cache-manifest.ts` has prefetched and verified every declared
-artifact. The save happens immediately after acquisition, before tests. An
-exact hit is also verified before use because GitHub cache entries are
-immutable: a partial exact hit cannot be repaired under the same key.
+`actions/cache/save`), not the combined action. An owner saves only when the
+restore **missed** and `scripts/ci-cache-manifest.ts` has prefetched and
+verified every declared artifact. The save happens immediately after
+acquisition, before tests. An exact hit is also verified before use because
+GitHub cache entries are immutable: a partial exact hit cannot be repaired
+under the same key.
 
 A cache entry is only trustworthy while its required content is a **function of
 its key**, which is why exactly one configuration writes. The checked-in
