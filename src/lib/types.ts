@@ -1009,7 +1009,7 @@ export type ExecTransport = "auto" | "rest" | "ssh" | "console" | "qga";
 
 /** Options for ChrInstance.exec(). */
 export interface ExecOptions {
-	/** Transport to use. "auto" tries REST /execute, future: SSH fallback. */
+	/** Transport to use. "auto" tries REST, then console only on refused/unreachable connections; never replays resets/timeouts. */
 	via?: ExecTransport;
 	/** Override username (default: resolved from machine config). */
 	user?: string;

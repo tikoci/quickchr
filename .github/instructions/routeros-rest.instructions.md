@@ -50,7 +50,24 @@ POST /rest/execute  { "script": ":put hello", "as-string": true }  → { "ret": 
 POST /rest/execute  { "script": ":put hello", "as-string": "" }    → { "ret": "hello" }  (sync — presence is what matters)
 ```
 
-Our `exec.ts` always sends `"as-string": ""` for synchronous execution.
+Our `exec.ts` always sends `"as-string": true` for synchronous execution.
+
+## Transport failures vs HTTP errors (exec retry contract)
+
+Exec `auto` retries only `ECONNREFUSED`, `EHOSTUNREACH`, and `ENETUNREACH`
+(up to 3 retries, 2 s apart), then falls back to serial console. These failures
+establish the command was not sent. A missing HTTP response alone does **not**:
+`ECONNRESET`, timeouts (including timeout errors with no code), and unknown failures
+surface immediately without retry or fallback. HTTP errors also surface without
+replay. Explicit `via: "rest"` sends exactly once. `ChrInstance.rest()` has its
+own reset retry policy; do not copy it to arbitrary script execution.
+
+Grounded 2026-10-29/30 (#135, #222): disabling www resets the forwarded port,
+but a reset cannot distinguish that case from a response lost after execution.
+A live CHR 7.25 script set guest state before its client's 300 ms timeout; the
+timeout error with no code was incorrectly eligible for fallback. Integration
+tests cover resets after execution and timeouts without replay, plus safe console
+fallback after removing the host REST forward (actual `ECONNREFUSED`).
 
 ## Guest shutdown through exec
 

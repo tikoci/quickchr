@@ -1155,6 +1155,22 @@ Explicitly rejected, with rationale, so they aren't re-proposed:
 
 DESIGN.md is the living home for design decisions and rationale. At the end of any significant work session, agents should review whether new implementation details, design decisions, or discovered constraints belong here. Open/close work in **GitHub Issues** — not BACKLOG.md (see CONTRIBUTING.md "Tracking work"); record grounded RouterOS/QEMU behaviour facts in the narrowest scoped doc (`.github/instructions/*.md`, `docs/`, or `test/lab/<topic>/REPORT.md`); add a CHANGELOG.md entry for user-facing changes. Treat this as a lightweight checklist, not a gate.
 
+## Exec fallback requires evidence of non-delivery (#135, #222)
+
+`exec()` accepts arbitrary scripts, including non-idempotent writes. A reset or
+timeout without an HTTP response cannot establish that the guest never ran the
+script. Auto therefore surfaces ambiguous failures instead of replaying them,
+even when a reset could also mean www is disabled. It retries and falls back to
+console only for refused or unreachable connections. Unknown errors fail closed.
+The existing `rest()` reset policy is independent of this script-execution contract.
+
+The integration regression forwards a command to real CHR, waits for its response,
+then resets the client connection and reads back a guest counter to prove single
+execution. A separate slow script covers timeout handling. Safe console fallback
+is exercised by removing QEMU's host REST listener, producing a genuine refusal.
+These repair the demonstrated fallback defect; the historical arm64 failure's
+root cause remains unproven.
+
 ## Explicit guest shutdown (#143)
 
 `stop()` remains a power cut (QEMU SIGTERM, then SIGKILL), the primary teardown

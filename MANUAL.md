@@ -1689,8 +1689,8 @@ centrs execute --quickchr my-chr --yes "/user/add name=-2 group=read password=x"
 
 | `--via` | Source | Notes |
 |---|---|---|
-| `auto` (default) | tries REST, falls back to **console** on network errors (not auth errors) | Best general choice |
-| `rest` | `POST /rest/execute` with `{"script": "…", "as-string": ""}` | RouterOS 7.1+. Synchronous (any value for `as-string` enables sync mode; presence is what counts). 60s server-side timeout. |
+| `auto` (default) | tries REST, then **console** only for refused/unreachable connections | Retries connection establishment up to 3 times, 2 s apart, before fallback. Resets, timeouts, unknown errors and HTTP errors fail without replay because a command may already have executed. |
+| `rest` | `POST /rest/execute` with `{"script": "…", "as-string": true}` | RouterOS 7.1+. Synchronous (any value for `as-string` enables sync mode; presence is what counts). 60s server-side timeout. |
 | `console` | serial socket with prompt detection + buffer offset tracking | Fallback for restricted environments. Uses `\r` (not `\r\n`) on PTY. |
 | `qga` | QGA `guest-exec` | x86 + KVM only. Throws `QGA_UNSUPPORTED` on ARM64. |
 | `ssh` | reserved | Currently throws `EXEC_FAILED`; planned. |
@@ -1725,7 +1725,8 @@ Same `resolveAuth()` chain as REST. Override on the CLI with
 ### Timeouts
 
 `opts.timeout` defaults to 30s for QGA/console and 10s for REST when
-running under `auto` (so the fallback to console kicks in quickly).
+running under `auto`. A timeout fails without retry or console fallback: the
+guest may still be executing the script. Increase `opts.timeout` for long commands.
 On explicit `--via=rest`, the 60s server-side `as-string` cap is the
 ceiling.
 

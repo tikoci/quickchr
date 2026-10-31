@@ -23,6 +23,13 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- `exec`'s default `auto` transport now retries refused/unreachable REST
+  connections (up to 3 retries, 2 s apart), then falls back to the serial
+  console. Resets, timeouts, unknown errors and HTTP failures surface without
+  replay: the command may already have executed. Explicit `--via=rest` still
+  sends exactly once. Previously wrapped transport errors prevented any
+  console fallback. Console execution and fallback also resolve stored machine
+  credentials so reloaded provisioned machines can authenticate. (#135)
 - `installPackage()` enforces the post-boot preconditions instead of failing
   mid-operation: a stopped machine is refused with `MACHINE_STOPPED`, a machine
   with no user-mode NIC with `NETWORK_UNAVAILABLE`, and a machine whose REST API

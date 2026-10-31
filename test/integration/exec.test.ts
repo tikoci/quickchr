@@ -1,5 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
+import { createServer } from "node:http";
+import { resolveAuth } from "../../src/lib/auth.ts";
+import { restExecute } from "../../src/lib/exec.ts";
+import { restPost } from "../../src/lib/rest.ts";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
 
@@ -334,4 +338,134 @@ describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
 		});
 		expect(result.output.trim()).toBe("credtest");
 	}, 30_000);
+
+	test.each(["auto", "console"] as const)("%s exec uses reloaded stored credentials for console login", async (via) => {
+		if (!instance) throw new Error("Missing CHR instance");
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { STORED_IN_SECRETS_PASSWORD } = await import("../../src/lib/credentials.ts");
+		// Restart to force a fresh console login; an existing authenticated
+		// serial session would hide a bad password.
+		await instance.stop();
+		instance = await QuickCHR.start({ name: MACHINE, background: true });
+		const reloaded = QuickCHR.get(MACHINE);
+		if (!reloaded) throw new Error("Provisioned machine did not reload");
+		expect(reloaded.state.user?.password).toBe(STORED_IN_SECRETS_PASSWORD);
+		try {
+			if (via === "auto") {
+				expect(await reloaded.monitor(`hostfwd_remove net0 tcp::${reloaded.ports.http}`)).toContain("removed");
+			}
+			const result = await reloaded.exec(":put stored-login-ok", { via, timeout: 30_000 });
+			expect(result.via).toBe("console");
+			expect(result.output.trim()).toBe("stored-login-ok");
+		} finally {
+			if (via === "auto") await reloaded.monitor(`hostfwd_add net0 tcp::${reloaded.ports.http}-:80`);
+		}
+	}, bootTestTimeout());
+});
+
+// Own machine: these tests temporarily remove the host REST forward.
+describe.skipIf(SKIP)("exec — auto transport fallback", () => {
+	const MACHINE = "integration-exec-fallback";
+	let instance: Awaited<ReturnType<typeof import("../../src/lib/quickchr.ts").QuickCHR.start>> | undefined;
+
+	beforeAll(async () => {
+		await cleanupMachine(MACHINE);
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		instance = await QuickCHR.start({
+			...imageTarget(),
+			background: true,
+			name: MACHINE,
+			extraPorts: [{ name: "exec-upstream", host: 0, guest: 80, proto: "tcp" }],
+		});
+		expect(instance).toBeDefined();
+		if (!instance) {
+			throw new Error("Failed to start integration CHR instance");
+		}
+		const booted = await instance.waitForBoot(120_000);
+		expect(booted).toBe(true);
+		await waitForExecReady(instance, 60_000);
+	}, bootTestTimeout());
+
+	afterAll(async () => {
+		if (instance) {
+			try { await instance.stop(); } catch { /* ignore */ }
+			try { await instance.remove(); } catch { /* ignore */ }
+		}
+	});
+
+	test("auto falls back only on a refused connection and returns to REST (#135)", async () => {
+		if (!instance) throw new Error("Missing CHR instance");
+		const chr = instance;
+		expect((await chr.exec(":put baseline")).via).toBe("rest");
+
+		// Removing the listener gives ECONNREFUSED. Disabling www instead gives
+		// ECONNRESET, which cannot prove a command was never executed.
+		try {
+			expect(await chr.monitor(`hostfwd_remove net0 tcp::${chr.ports.http}`)).toContain("removed");
+			const fallback = await chr.exec(":put fallback-ok");
+			expect(fallback.via).toBe("console");
+			expect(fallback.output.trim()).toBe("fallback-ok");
+		} finally {
+			await chr.monitor(`hostfwd_add net0 tcp::${chr.ports.http}-:80`);
+		}
+		const recovered = await chr.exec(":put rest-ok");
+		expect(recovered.via).toBe("rest");
+		expect(recovered.output.trim()).toBe("rest-ok");
+	}, 60_000);
+
+	test("auto surfaces a reset after a real guest mutation without replay", async () => {
+		if (!instance) throw new Error("Missing CHR instance");
+		const chr = instance;
+		const auth = resolveAuth(chr.state);
+		const upstream = `http://127.0.0.1:${chr.ports.execUpstream}`;
+		await chr.exec(":global review222ResetCount 0", { via: "rest" });
+		let requests = 0;
+		let upstreamStatus: number | undefined;
+		let proxyError: unknown;
+		const server = createServer(async (req, _res) => {
+			requests++;
+			try {
+				let body = "";
+				for await (const chunk of req) body += chunk.toString();
+				// Let the real router finish the script, then lose its response.
+				const response = await restPost(`${upstream}/rest/execute`, auth.header, JSON.parse(body));
+				upstreamStatus = response.status;
+			} catch (error) {
+				proxyError = error;
+			} finally {
+				req.socket.destroy();
+			}
+		});
+		try {
+			expect(await chr.monitor(`hostfwd_remove net0 tcp::${chr.ports.http}`)).toContain("removed");
+			await new Promise<void>((resolve, reject) => {
+				server.once("error", reject);
+				server.listen(chr.ports.http, "127.0.0.1", resolve);
+			});
+			await expect(chr.exec(
+				":global review222ResetCount; :set review222ResetCount ($review222ResetCount + 1); :put done",
+			)).rejects.toMatchObject({ code: "EXEC_FAILED", cause: { code: "ECONNRESET" } });
+			expect(proxyError).toBeUndefined();
+			expect(upstreamStatus).toBe(200);
+			expect(requests).toBe(1);
+			const count = await restExecute(upstream, auth, ":put $review222ResetCount");
+			expect(count.output.trim()).toBe("1");
+		} finally {
+			server.closeAllConnections();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await chr.monitor(`hostfwd_add net0 tcp::${chr.ports.http}-:80`);
+		}
+	}, 60_000);
+
+	test("auto surfaces a timeout after a real guest mutation without console replay", async () => {
+		if (!instance) throw new Error("Missing CHR instance");
+		const chr = instance;
+		await chr.exec(":global review222TimeoutCount 0", { via: "rest" });
+		await expect(chr.exec(
+			":global review222TimeoutCount; :set review222TimeoutCount ($review222TimeoutCount + 1); :delay 2s; :put done",
+			{ timeout: 300 },
+		)).rejects.toMatchObject({ code: "EXEC_FAILED", cause: { message: expect.stringContaining("restPost timeout") } });
+		const count = await chr.exec(":put $review222TimeoutCount", { via: "rest" });
+		expect(count.output.trim()).toBe("1");
+	}, 20_000);
 });

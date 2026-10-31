@@ -55,10 +55,14 @@ export async function restExecute(
 		status = resp.status;
 		data = resp.body;
 	} catch (e) {
-		throw new QuickCHRError(
+		const err = new QuickCHRError(
 			"EXEC_FAILED",
 			`exec timed out or failed: ${e instanceof Error ? e.message : String(e)}`,
 		);
+		// Preserve the cause so auto can distinguish failed connection attempts
+		// from ambiguous delivery. HTTP errors below never carry a cause.
+		err.cause = e;
+		throw err;
 	}
 
 	if (status < 200 || status >= 300) {
@@ -78,6 +82,49 @@ export async function restExecute(
 	}
 
 	return { output, via: "rest" as ExecTransport };
+}
+
+/**
+ * True only for connection failures that establish the command was not sent.
+ * Resets, timeouts, and unknown errors leave delivery ambiguous and must never
+ * cause arbitrary scripts to be replayed through retries or console fallback.
+ */
+export function isExecTransportFailure(e: unknown): boolean {
+	if (!(e instanceof QuickCHRError) || e.code !== "EXEC_FAILED" || !(e.cause instanceof Error)) return false;
+	const code = (e.cause as { code?: unknown }).code;
+	return code === "ECONNREFUSED" || code === "EHOSTUNREACH" || code === "ENETUNREACH";
+}
+
+/**
+ * Execute via REST, retrying only refused or unreachable connections (up to
+ * 3 retries, 2 s backoff). These failures establish the command was not sent.
+ *
+ * Resets and timeouts throw immediately: the server may already have executed
+ * the script, so replaying could double-execute a non-idempotent command.
+ * HTTP errors, auth failures, and unknown errors also throw without replay.
+ *
+ * This is the auto transport's REST attempt, not a general policy:
+ * `via: "rest"` still sends exactly once (guest shutdown depends on
+ * no-replay), and the auto path falls back to console when REST stays
+ * unreachable after the retries.
+ */
+export async function restExecuteWithRetry(
+	restUrl: string,
+	auth: ResolvedAuth,
+	command: string,
+	opts?: Pick<ExecOptions, "timeout"> & { retries?: number; retryDelayMs?: number },
+): Promise<ExecResult> {
+	const maxRetries = opts?.retries ?? 3;
+	const delayMs = opts?.retryDelayMs ?? 2000;
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await restExecute(restUrl, auth, command, opts);
+		} catch (e) {
+			if (attempt >= maxRetries || !isExecTransportFailure(e)) throw e;
+			console.warn(`exec: connection failed before delivery on REST attempt ${attempt + 1}, retrying...`);
+			await Bun.sleep(delayMs);
+		}
+	}
 }
 
 /**

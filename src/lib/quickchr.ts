@@ -77,7 +77,7 @@ import { resolveAuth, resolveCreds } from "./auth.ts";
 import { scpPush, scpPull } from "./scp.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownGuest, validateShutdownTimeout } from "./shutdown.ts";
-import { restExecute } from "./exec.ts";
+import { restExecute, restExecuteWithRetry, isExecTransportFailure } from "./exec.ts";
 import { qgaExec } from "./qga.ts";
 import { consoleExec, CONSOLE_LOGIN_COST_MS } from "./console.ts";
 import { restRequest, restGet, restPost } from "./rest.ts";
@@ -985,12 +985,12 @@ function createInstance(state: MachineState): ChrInstance {
 			}
 
 			if (via === "console") {
-				const auth = resolveAuth(state, opts?.user, opts?.password);
+				const creds = resolveCreds(state, opts?.user, opts?.password);
 				const result = await consoleExec(
 					state.machineDir,
 					command,
-					auth.user,
-					opts?.password ?? state.user?.password ?? "",
+					creds.user,
+					creds.password,
 					opts?.timeout ?? 30_000,
 					state.portBase,
 				);
@@ -1010,22 +1010,21 @@ function createInstance(state: MachineState): ChrInstance {
 			if (via === "rest") {
 				return restExecute(restUrl, auth, command, opts);
 			}
-			// via === "auto": try REST, fall back to console on network/timeout errors.
-			// QuickCHRError from REST (HTTP errors like 401/400) are not retried — they
-			// represent a real command or auth failure, not an unreachable endpoint.
+			// Retry or fall back only when connection establishment failed. Missing
+			// responses (reset/timeout) do not prove the script was never executed.
 			try {
-				return await restExecute(restUrl, auth, command, {
+				return await restExecuteWithRetry(restUrl, auth, command, {
 					...opts,
 					timeout: opts?.timeout ?? 10_000,
 				});
 			} catch (e) {
-				if (e instanceof QuickCHRError) throw e;
-				// Network error (ECONNREFUSED, timeout) — fall back to console
+				if (!isExecTransportFailure(e)) throw e;
+				const creds = resolveCreds(state, opts?.user, opts?.password);
 				const consoleResult = await consoleExec(
 					state.machineDir,
 					command,
-					auth.user,
-					opts?.password ?? state.user?.password ?? "",
+					creds.user,
+					creds.password,
 					opts?.timeout ?? 30_000,
 					state.portBase,
 				);
