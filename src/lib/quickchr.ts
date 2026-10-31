@@ -985,12 +985,12 @@ function createInstance(state: MachineState): ChrInstance {
 			}
 
 			if (via === "console") {
-				const auth = resolveAuth(state, opts?.user, opts?.password);
+				const creds = resolveCreds(state, opts?.user, opts?.password);
 				const result = await consoleExec(
 					state.machineDir,
 					command,
-					auth.user,
-					opts?.password ?? state.user?.password ?? "",
+					creds.user,
+					creds.password,
 					opts?.timeout ?? 30_000,
 					state.portBase,
 				);
@@ -1019,11 +1019,12 @@ function createInstance(state: MachineState): ChrInstance {
 				});
 			} catch (e) {
 				if (!isExecTransportFailure(e)) throw e;
+				const creds = resolveCreds(state, opts?.user, opts?.password);
 				const consoleResult = await consoleExec(
 					state.machineDir,
 					command,
-					auth.user,
-					opts?.password ?? state.user?.password ?? "",
+					creds.user,
+					creds.password,
 					opts?.timeout ?? 30_000,
 					state.portBase,
 				);

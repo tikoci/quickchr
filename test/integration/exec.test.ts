@@ -338,6 +338,29 @@ describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
 		});
 		expect(result.output.trim()).toBe("credtest");
 	}, 30_000);
+
+	test.each(["auto", "console"] as const)("%s exec uses reloaded stored credentials for console login", async (via) => {
+		if (!instance) throw new Error("Missing CHR instance");
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { STORED_IN_SECRETS_PASSWORD } = await import("../../src/lib/credentials.ts");
+		// Restart to force a fresh console login; an existing authenticated
+		// serial session would hide a bad password.
+		await instance.stop();
+		instance = await QuickCHR.start({ name: MACHINE, background: true });
+		const reloaded = QuickCHR.get(MACHINE);
+		if (!reloaded) throw new Error("Provisioned machine did not reload");
+		expect(reloaded.state.user?.password).toBe(STORED_IN_SECRETS_PASSWORD);
+		try {
+			if (via === "auto") {
+				expect(await reloaded.monitor(`hostfwd_remove net0 tcp::${reloaded.ports.http}`)).toContain("removed");
+			}
+			const result = await reloaded.exec(":put stored-login-ok", { via, timeout: 30_000 });
+			expect(result.via).toBe("console");
+			expect(result.output.trim()).toBe("stored-login-ok");
+		} finally {
+			if (via === "auto") await reloaded.monitor(`hostfwd_add net0 tcp::${reloaded.ports.http}-:80`);
+		}
+	}, bootTestTimeout());
 });
 
 // Own machine: these tests temporarily remove the host REST forward.
