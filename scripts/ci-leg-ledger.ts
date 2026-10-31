@@ -154,14 +154,12 @@ export function integrationJobName(label: string, target: string): string {
  * falls back to the label, which is also what version-shaped dispatches
  * resolve to, so those join either way.
  *
- * Known limit, not a bug to fix here: two legs on one platform resolving to
- * one version (e.g. targets `stable,7.25`) share a key, and one record then
- * marks both complete. They are indistinguishable in EVERY data source — same
- * suite-record target, same checkpoint external_id, same ndjson filename
- * (which the aggregate already overwrites) — so no ledger-layer keying can
- * separate them; that needs the plan to stop emitting indistinguishable legs
- * or the legs to emit label identity they are not given today. Never observed
- * in production (122 entries checked, 2026-10-31).
+ * Unreachable through the plan, which rejects duplicate (platform, resolved)
+ * matrices before anything runs (`scripts/ci-plan.ts check`): such legs are
+ * indistinguishable in every data source — same suite-record target, same
+ * checkpoint external_id, same ndjson filename — so no ledger-layer keying
+ * could separate them, and one record would mark both complete. The note
+ * stays as the reason the guard exists.
  */
 export function plannedLegKey(leg: PlannedLeg): string {
 	return legKey(leg.id, leg.resolved ?? leg.target);
