@@ -510,507 +510,97 @@
 	},
 	"35374626313": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "fa6959ab95afaf617a949f8301d697ac316b964f",
 		"ts": "2026-09-18T18:03:39.552Z"
 	},
 	"35386692051": {
 		"attempt": "4",
-		"complete": 0,
+		"complete": 12,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1982,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1883,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1547,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1409,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1575,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1110,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2034,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1827,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1411,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2354,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|long-term": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 1716,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 1580,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			}
-		},
 		"planned": 12,
 		"sha": "fa6959ab95afaf617a949f8301d697ac316b964f",
 		"ts": "2026-09-19T03:37:47.446Z"
 	},
 	"35468739623": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"windows-x86|long-term": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 506,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 604,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 2,
 		"sha": "46fd66816451662d02e371a154529955c26708c3",
 		"ts": "2026-09-19T21:03:20.673Z"
 	},
 	"35474618896": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "19849c7c0843c525e4bfb90c42480159df0edc02",
 		"ts": "2026-09-19T23:20:20.496Z"
 	},
 	"35482359055": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 3,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 175,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 108,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 123,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 3,
 		"sha": "c71ca65e2f250d054caf3b75e6bd86bb0c15e508",
 		"ts": "2026-09-20T01:52:20.031Z"
 	},
 	"35482786304": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "a8d93cd4ecf732a2f9630ce13c0e2570468ad696",
 		"ts": "2026-09-20T02:27:39.976Z"
 	},
 	"35489135492": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "f250cb78eb14c70b5c842f17497238d0436dd39a",
 		"ts": "2026-09-20T04:54:24.535Z"
 	},
 	"35524422966": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "74ee25f6e2d03a49ed1f7ba1678db5be29d5db28",
 		"ts": "2026-09-20T17:29:54.561Z"
 	},
 	"35531260604": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "d12e8dcc5959b59534b55d0da2c5ad3a3a7296b2",
 		"ts": "2026-09-20T19:38:38.301Z"
 	},
 	"35536730584": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "8bfd8ab0e103de86a80787e6d6eeec92cabd75cd",
 		"ts": "2026-09-20T21:19:19.907Z"
 	},
 	"35542517990": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "8aaa319c54ad11ffd28bf3db85fff478364f0649",
 		"ts": "2026-09-20T23:12:37.807Z"
 	},
 	"35542607992": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 12,
 		"event": "workflow_dispatch",
 		"incomplete": {
-			"linux-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1812,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1793,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1800,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1245,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1331,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1244,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1575,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1694,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1654,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
 			"macos-x86|development": {
 				"job_conclusion": "failure",
 				"job_elapsed_s": 3602,
@@ -1043,36 +633,6 @@
 				"target": "stable",
 				"terminal": "runner-lost",
 				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
-			},
-			"windows-x86|development": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 1863,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			},
-			"windows-x86|long-term": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 2007,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 1752,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
 			}
 		},
 		"planned": 15,
@@ -1081,374 +641,72 @@
 	},
 	"35545697945": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 1,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 163,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 1,
 		"sha": "1a2da7318f7a79a3b2811fcf3b59f7f43c938e73",
 		"ts": "2026-09-20T23:51:02.981Z"
 	},
 	"35547108826": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 1,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 181,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 1,
 		"sha": "27875cb1356dd6bfbaa621f599be467f03918dde",
 		"ts": "2026-09-21T00:18:44.032Z"
 	},
 	"35547328327": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "e46e00d9fcaffb77d3095ade6f6a8b1188738686",
 		"ts": "2026-09-21T00:50:01.522Z"
 	},
 	"35547708681": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 12,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1885,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1824,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1809,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1408,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1400,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1254,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1553,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1594,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1631,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|development": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 1557,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.25beta5",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			},
-			"windows-x86|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2072,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.23.7",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1942,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 12,
 		"sha": "e46e00d9fcaffb77d3095ade6f6a8b1188738686",
 		"ts": "2026-09-21T01:01:32.938Z"
 	},
 	"35552118511": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "e5b90c811748c50897f7f1ae327c65dbb8699531",
 		"ts": "2026-09-21T02:19:17.136Z"
 	},
 	"35591875844": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 5,
 		"event": "schedule",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-arm64|stable": {
-				"job_matched": false,
-				"platform": "macos-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-x86|stable": {
-				"job_matched": false,
-				"platform": "macos-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"windows-x86|stable": {
-				"job_matched": false,
-				"platform": "windows-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 5,
 		"sha": "e5b90c811748c50897f7f1ae327c65dbb8699531",
 		"ts": "2026-09-21T11:31:35.336Z"
 	},
 	"35620080887": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "d8a99ffbe00f5e04fe0eef7ee4f7df31dbf4c0b1",
 		"ts": "2026-09-21T16:09:11.041Z"
 	},
 	"35679535647": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "a258a7b68fd05fb976166415218df47a6411b6a5",
 		"ts": "2026-09-22T03:04:24.767Z"
 	},
 	"36418684488": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 5,
 		"event": "schedule",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-arm64|stable": {
-				"job_matched": false,
-				"platform": "macos-arm64",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-x86|stable": {
-				"job_matched": false,
-				"platform": "macos-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"windows-x86|stable": {
-				"job_matched": false,
-				"platform": "windows-x86",
-				"resolved": "7.24.4",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 5,
 		"sha": "a258a7b68fd05fb976166415218df47a6411b6a5",
 		"ts": "2026-09-28T12:33:08.340Z"
@@ -1479,76 +737,16 @@
 	},
 	"37310343187": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 5,
 		"event": "schedule",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-arm64|stable": {
-				"job_matched": false,
-				"platform": "macos-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-x86|stable": {
-				"job_matched": false,
-				"platform": "macos-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"windows-x86|stable": {
-				"job_matched": false,
-				"platform": "windows-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 5,
 		"sha": "a258a7b68fd05fb976166415218df47a6411b6a5",
 		"ts": "2026-10-05T13:12:41.413Z"
 	},
 	"37416441678": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "a3a639b0352c8002569c260b750670b83852324e",
 		"ts": "2026-10-06T05:37:41.601Z"
@@ -1563,50 +761,8 @@
 	},
 	"38255762855": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 5,
 		"event": "schedule",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-arm64|stable": {
-				"job_matched": false,
-				"platform": "macos-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-x86|stable": {
-				"job_matched": false,
-				"platform": "macos-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"windows-x86|stable": {
-				"job_matched": false,
-				"platform": "windows-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 5,
 		"sha": "a3a639b0352c8002569c260b750670b83852324e",
 		"ts": "2026-10-12T14:03:33.859Z"
@@ -1629,235 +785,56 @@
 	},
 	"39242652482": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 5,
 		"event": "schedule",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-arm64|stable": {
-				"job_matched": false,
-				"platform": "macos-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-x86|stable": {
-				"job_matched": false,
-				"platform": "macos-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"windows-x86|stable": {
-				"job_matched": false,
-				"platform": "windows-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 5,
 		"sha": "a3a639b0352c8002569c260b750670b83852324e",
 		"ts": "2026-10-19T11:46:43.733Z"
 	},
 	"39278449139": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 4,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|development": {
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.26beta3",
-				"stalled_step": "Run integration tests (sequential per-file)",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'in_progress' before the suite could instrument itself"
-			},
-			"linux-x86|development": {
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.26beta3",
-				"stalled_step": "Close leg checkpoint",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'in_progress' before the suite could instrument itself"
-			},
-			"macos-arm64|development": {
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.26beta3",
-				"stalled_step": "Run integration tests (sequential per-file)",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'in_progress' before the suite could instrument itself"
-			},
-			"windows-x86|development": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 654,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.26beta3",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			}
-		},
 		"planned": 4,
 		"sha": "a3a639b0352c8002569c260b750670b83852324e",
 		"ts": "2026-10-19T16:12:03.481Z"
 	},
 	"39650108625": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "03b584c98206e67e5efc57d156f6a82883a35a72",
 		"ts": "2026-10-21T18:48:18.969Z"
 	},
 	"39659774117": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 371,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 166,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 2,
 		"sha": "2eaf99640ea8b012f1c210dfe99b080173962fd8",
 		"ts": "2026-10-21T19:20:25.385Z"
 	},
 	"39660533921": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 300,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 162,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 2,
 		"sha": "d77707d4a1db0153f327173f1647d034fba96a43",
 		"ts": "2026-10-21T19:24:24.314Z"
 	},
 	"39662876100": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "1135d5f9185a24ec28425df45b7dc399b2f7db5a",
 		"ts": "2026-10-21T20:27:34.416Z"
 	},
 	"39704822250": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "664e1b8466c00b54e9f1d20dcdf27f109b4a95e7",
 		"ts": "2026-10-22T01:59:15.856Z"
@@ -1880,26 +857,8 @@
 	},
 	"39720464576": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "eeaa69144c38854acf15e8cdd0f25ea335e39c35",
 		"ts": "2026-10-22T04:49:43.319Z"
@@ -1922,382 +881,88 @@
 	},
 	"39826703794": {
 		"attempt": "2",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "6728ee235c351be81a8bc0d00455b99338f3d82b",
 		"ts": "2026-10-22T21:01:30.124Z"
 	},
 	"39830965935": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2772,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.26beta3",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|development": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 3164,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.26beta3",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			}
-		},
 		"planned": 2,
 		"sha": "6728ee235c351be81a8bc0d00455b99338f3d82b",
 		"ts": "2026-10-22T19:16:54.043Z"
 	},
 	"39857054586": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 1,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2771,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 1,
 		"sha": "f74bd96d28896bcbadbc28780c31a77508c89602",
 		"ts": "2026-10-22T22:11:36.751Z"
 	},
 	"39857059647": {
 		"attempt": "2",
-		"complete": 0,
+		"complete": 1,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 658,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 1,
 		"sha": "f74bd96d28896bcbadbc28780c31a77508c89602",
 		"ts": "2026-10-22T21:49:50.597Z"
 	},
 	"39863698774": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "2e8e5865ed0745e7fa49f52a247aee3c0a2a8f59",
 		"ts": "2026-10-22T23:03:32.600Z"
 	},
 	"39874128012": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "2829a2789207bab90c9c64f78594d232c4218a94",
 		"ts": "2026-10-23T00:36:35.198Z"
 	},
 	"39884015706": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "ba8fc76f0c87f980745d091636c55572ed81984b",
 		"ts": "2026-10-23T02:15:27.408Z"
 	},
 	"39903947179": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "0defdbfb24ad0073659510ed20853e6e40a89e1b",
 		"ts": "2026-10-23T05:56:10.297Z"
 	},
 	"39908889523": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.24.5",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "3df777c87aae7c69ad7c50cef8cb118d23c59cf1",
 		"ts": "2026-10-23T06:48:19.835Z"
 	},
 	"39945572036": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "90a01286c7acbbc239f1d102cc598c5d88e37006",
 		"ts": "2026-10-23T12:09:39.570Z"
 	},
 	"39948209078": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 12,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2595,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.26beta3",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2919,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2791,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2191,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.26beta3",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1920,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1850,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2559,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.26beta3",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2581,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2579,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2961,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.26beta3",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|long-term": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 2748,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2946,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 12,
 		"sha": "90a01286c7acbbc239f1d102cc598c5d88e37006",
 		"ts": "2026-10-23T12:37:18.581Z"
@@ -2328,76 +993,16 @@
 	},
 	"39971040666": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "2158582723e309f7a2bfd615e5a62ac99ceb188b",
 		"ts": "2026-10-23T15:25:43.905Z"
 	},
 	"40315320887": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 5,
 		"event": "schedule",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-arm64|stable": {
-				"job_matched": false,
-				"platform": "macos-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"macos-x86|stable": {
-				"job_matched": false,
-				"platform": "macos-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"windows-x86|stable": {
-				"job_matched": false,
-				"platform": "windows-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 5,
 		"sha": "2158582723e309f7a2bfd615e5a62ac99ceb188b",
 		"ts": "2026-10-26T12:15:13.420Z"
@@ -2412,314 +1017,64 @@
 	},
 	"40779320727": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "bbb28d79710dd4d488d0d7992085dad754c1fd32",
 		"ts": "2026-10-28T23:10:43.715Z"
 	},
 	"40789302291": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "d51e941fc895ed720fc5cbaedd7d12c11c4596a7",
 		"ts": "2026-10-29T00:47:10.731Z"
 	},
 	"40908671782": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 1,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 184,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 1,
 		"sha": "615ec0b3ab0dfd48467228d28d6a3bb42beeff7f",
 		"ts": "2026-10-29T16:12:24.006Z"
 	},
 	"40914444637": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"macos-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 338,
-				"job_matched": true,
-				"platform": "macos-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 332,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 2,
 		"sha": "a5688d8de8f6b12c8f371258481da6d24ad15d1d",
 		"ts": "2026-10-29T16:50:08.008Z"
 	},
 	"40914465244": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"macos-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 346,
-				"job_matched": true,
-				"platform": "macos-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 313,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 2,
 		"sha": "a5688d8de8f6b12c8f371258481da6d24ad15d1d",
 		"ts": "2026-10-29T16:50:18.931Z"
 	},
 	"40924795427": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "07574a840d843e9846f53b905bd9d2871b84df62",
 		"ts": "2026-10-29T18:38:00.109Z"
 	},
 	"40936401588": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "b0ebef0967ffdd75573e37dddb8bfa70b09cf415",
 		"ts": "2026-10-29T19:52:54.313Z"
 	},
 	"41025051328": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 12,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2888,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.26beta4",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2928,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2920,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 1957,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.26beta4",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2011,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2012,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2582,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.26beta4",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2679,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2578,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|development": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 2993,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.26beta4",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			},
-			"windows-x86|long-term": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 2737,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 2988,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			}
-		},
 		"planned": 12,
 		"sha": "b0ebef0967ffdd75573e37dddb8bfa70b09cf415",
 		"ts": "2026-10-30T09:06:12.366Z"
@@ -2734,224 +1089,56 @@
 	},
 	"41035618071": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "82d06333710962ab490f38eeb72c4e43d1e74409",
 		"ts": "2026-10-30T10:33:27.618Z"
 	},
 	"41038132463": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 3,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"windows-x86|development": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 3029,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.26beta4",
-				"target": "development",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|long-term": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2993,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.23.8",
-				"target": "long-term",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"windows-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 3001,
-				"job_matched": true,
-				"platform": "windows-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 3,
 		"sha": "82d06333710962ab490f38eeb72c4e43d1e74409",
 		"ts": "2026-10-30T10:56:05.089Z"
 	},
 	"41123908923": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "cf5e8a3050841c0fa9f7cc3d83a2ea0aefcc79b2",
 		"ts": "2026-10-30T21:23:23.846Z"
 	},
 	"41124479336": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 3,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 3010,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2043,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|stable": {
-				"job_conclusion": "failure",
-				"job_elapsed_s": 2761,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'failure' before the suite could instrument itself"
-			}
-		},
 		"planned": 3,
 		"sha": "16719765b10a91958ebf5cd53df11ce6dc3c8cec",
 		"ts": "2026-10-30T21:26:27.071Z"
 	},
 	"41131976472": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 3,
 		"event": "workflow_dispatch",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 3017,
-				"job_matched": true,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"linux-x86|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2030,
-				"job_matched": true,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			},
-			"macos-arm64|stable": {
-				"job_conclusion": "success",
-				"job_elapsed_s": 2989,
-				"job_matched": true,
-				"platform": "macos-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "attempted-incomplete",
-				"why": "job ended 'success' before the suite could instrument itself"
-			}
-		},
 		"planned": 3,
 		"sha": "3dd9a3a894d25a1d98f628e5f4e9597febaf5cc5",
 		"ts": "2026-10-30T22:24:40.157Z"
 	},
 	"41138107945": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "58da85041a2908f167c512d808346cd767fa8319",
 		"ts": "2026-10-30T23:16:52.469Z"
 	},
 	"41162086323": {
 		"attempt": "1",
-		"complete": 0,
+		"complete": 2,
 		"event": "push",
-		"incomplete": {
-			"linux-arm64|stable": {
-				"job_matched": false,
-				"platform": "linux-arm64",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			},
-			"linux-x86|stable": {
-				"job_matched": false,
-				"platform": "linux-x86",
-				"resolved": "7.25",
-				"target": "stable",
-				"terminal": "not-started",
-				"why": "no job, no checkpoint — the leg never started"
-			}
-		},
 		"planned": 2,
 		"sha": "3a6d19a554a4682d04e66b99d4d85a2e9d243f63",
 		"ts": "2026-10-31T03:48:24.490Z"
