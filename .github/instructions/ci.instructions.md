@@ -434,6 +434,14 @@ plus `actions: read`. Reusable-workflow permissions are capped by the calling jo
 goes through the display-name string. `integrationJobName()` in `ci-leg-ledger.ts` is its one home,
 asserted against production job names by a unit test. If `integration.yml`'s `name:` is edited,
 update that function or every ledger entry silently degrades to `job_matched: false`.
+That display name carries the dispatch **label** (`stable`), while reconciliation keys carry the
+**resolved** version (`7.25`) — every data source (suite record, checkpoint external_id, ndjson
+filename) derives from `QUICKCHR_TEST_TARGET`, which is `matrix.resolved` (#245). Joining
+plan-on-label against data-on-resolved silently strands every channel leg at `not-started`;
+`plannedLegKey()` is the one home of the resolved-shaped key. Wrapper runs (`main.yml`,
+`sweep.yml` → reusable `integration.yml`) additionally prefix the display name with each calling
+job, and nested reusable calls stack further segments, so the join matches a ` / `-anchored
+suffix, never an exact name.
 
 **`watchdog-cap` dispatch input** is an experiment lever that forces the cap to N seconds so the
 timeout path itself can be exercised on a real runner without committing a test that hangs on

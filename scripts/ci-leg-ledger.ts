@@ -132,9 +132,30 @@ export interface RunLedger {
  * lives in ONE place and `integration.yml` carries a pointer to it. A rename
  * then breaks the unit test rather than silently degrading every ledger entry
  * to `job_matched: false`.
+ *
+ * The name carries the dispatch LABEL (`stable`), not the resolved version —
+ * `integration.yml`'s `name:` interpolates `matrix.target`. Wrapper runs
+ * (main.yml, sweep.yml → reusable integration.yml) prefix it with each calling
+ * job, so this template is matched as a ` / `-anchored suffix in
+ * {@link mapJobsToLegs}, never exactly.
  */
 export function integrationJobName(label: string, target: string): string {
 	return `Integration (${label} · ${target})`;
+}
+
+/**
+ * The key a planned leg is reconciled under. The plan labels legs by dispatch
+ * channel (`stable`) but every data source keys by what the leg actually ran:
+ * QUICKCHR_TEST_TARGET is `matrix.resolved` (integration.yml), so the suite
+ * record, the checkpoint external_id, and the ndjson filename all carry the
+ * resolved version (`7.25`). Joining plan-on-label against data-on-resolved
+ * silently strands every channel leg at `not-started` (#245) — the resolved
+ * version is the identity, the label is display. A leg without a resolution
+ * falls back to the label, which is also what version-shaped dispatches
+ * resolve to, so those join either way.
+ */
+export function plannedLegKey(leg: PlannedLeg): string {
+	return legKey(leg.id, leg.resolved ?? leg.target);
 }
 
 /** The step whose non-terminal state means "died running the suite". Same
@@ -151,7 +172,7 @@ export function classifyLeg(
 	checkpoints: ReadonlyMap<string, CheckpointView>,
 	jobs: ReadonlyMap<string, JobView>,
 ): LegLedgerEntry {
-	const key = legKey(leg.id, leg.target);
+	const key = plannedLegKey(leg);
 	const cp = checkpoints.get(key);
 	const job = jobs.get(key);
 	const records = cp?.payload?.records ?? [];
@@ -252,7 +273,7 @@ export function buildRunLedger(
 	for (const leg of planned) {
 		const entry = classifyLeg(leg, completed, checkpoints, jobs);
 		if (entry.terminal === "complete") complete += 1;
-		else incomplete[legKey(leg.id, leg.target)] = entry;
+		else incomplete[plannedLegKey(leg)] = entry;
 	}
 	const ledger: RunLedger = { ...meta, planned: planned.length, complete };
 	if (Object.keys(incomplete).length > 0) ledger.incomplete = incomplete;
@@ -340,6 +361,8 @@ async function fetchCheckpoints(sha: string, runId: string, attempt: string): Pr
 		for (const cr of runs) {
 			const ext = parseExternalId(cr.external_id as string | null);
 			if (!ext || ext.run_id !== runId || ext.attempt !== attempt) continue;
+			// The external_id's target is resolved-shaped: the leg opens its
+			// checkpoint with QUICKCHR_TEST_TARGET, which is matrix.resolved.
 			const text = (cr.output as { text?: string } | undefined)?.text;
 			out.set(legKey(ext.platform, ext.target), {
 				status: String(cr.status),
@@ -362,12 +385,16 @@ async function fetchCheckpoints(sha: string, runId: string, attempt: string): Pr
  * erroring, that is precisely the failure a test here has to be able to catch.
  */
 export function mapJobsToLegs(planned: readonly PlannedLeg[], jobs: readonly JobView[]): Map<string, JobView> {
-	const byName = new Map<string, JobView>();
-	for (const j of jobs) byName.set(j.name, j);
 	const out = new Map<string, JobView>();
 	for (const leg of planned) {
-		const job = byName.get(integrationJobName(leg.label, leg.target));
-		if (job) out.set(legKey(leg.id, leg.target), job);
+		const expected = integrationJobName(leg.label, leg.target);
+		// Direct integration.yml dispatches name the job exactly this; wrapper
+		// runs prefix each calling job (`Integration (gating platforms) /
+		// Integration (…)`), and nested reusable calls stack further segments —
+		// so the rule is a ` / `-anchored suffix. A bare substring would match
+		// job names that merely end in similar text.
+		const job = jobs.find((j) => j.name === expected || j.name.endsWith(` / ${expected}`));
+		if (job) out.set(plannedLegKey(leg), job);
 	}
 	return out;
 }
