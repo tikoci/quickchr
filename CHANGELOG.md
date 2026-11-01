@@ -11,6 +11,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+## [0.5.5] — 2026-11-01
+
 ### Added
 
 - `quickchr set <name> --package <pkg>[,<pkg>...]` installs extra packages on a
