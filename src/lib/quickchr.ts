@@ -71,7 +71,7 @@ import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, 
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
-import { provision } from "./provision.ts";
+import { ensureEmptySshConfig, provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
 import { resolveAuth, resolveCreds } from "./auth.ts";
 import { type ScpOptions, scpPush, scpPull } from "./scp.ts";
@@ -108,7 +108,7 @@ import { admitStorage, estimateMachineCreation, formatQuickchrUsage, getQuickchr
 import { pinCacheEntries } from "./storage-lease.ts";
 import { existsSync, rmSync } from "node:fs";
 import { acquireLock, acquireLockNow, allocationLockPath, legacyMachineLockPath, listReservations, machineLockPath, type HeldLock, type LockOperation } from "./lock.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // --- Architecture-aware defaults ---
 
@@ -424,12 +424,16 @@ async function resetGuestToFactory(state: MachineState): Promise<void> {
  *  noun for `MACHINE_LOCKED`. */
 /** SCP options for a machine: its resolved login plus the managed private key. RouterOS
  *  refuses password login for a user that has a key, so the managed `quickchr` user
- *  can only authenticate by key (#229). The key is installed only for the generated
- *  user that `resolveCreds()` returns, so it always belongs to the login it rides with. */
-function scpOptions(state: MachineState, sshPort: number): ScpOptions {
+ *  can only authenticate by key (#229). The key rides only with its owner: the stored
+ *  credentials can name another user (`saveInstanceCredentials()` is public), and
+ *  `IdentitiesOnly=yes` would then hide that user's own keys. With the key, ssh_config
+ *  is replaced by an empty file, as in the provisioning probe that verified the key,
+ *  so a host `PubkeyAuthentication no` cannot turn key auth off. Exported for the unit test. */
+export async function scpOptions(state: MachineState, sshPort: number): Promise<ScpOptions> {
 	const creds = resolveCreds(state);
 	const keyPath = state.managedSshKey?.privateKeyPath;
-	return { sshPort, ...creds, identityFile: keyPath && existsSync(keyPath) ? keyPath : undefined };
+	if (!keyPath || creds.user !== state.user?.name || !existsSync(keyPath)) return { sshPort, ...creds };
+	return { sshPort, ...creds, identityFile: keyPath, sshConfigFile: await ensureEmptySshConfig(dirname(keyPath)) };
 }
 
 function machineLockOptions(name: string, machineDir: string): { legacyPath: string; subject: string } {
@@ -1173,8 +1177,8 @@ function createInstance(state: MachineState): ChrInstance {
 					// reboot that follows can neither be sent nor observed.
 					await assertRestAnswering(ports.http, auth.header, state.name);
 
-					const scp = scpOptions(state, ports.ssh);
-					await uploadPackages(packagePaths, scp.sshPort, scp.user, scp.password, undefined, scp.identityFile);
+					const scp = await scpOptions(state, ports.ssh);
+					await uploadPackages(packagePaths, scp);
 				} finally {
 					pin.release();
 				}
@@ -1224,7 +1228,7 @@ function createInstance(state: MachineState): ChrInstance {
 					`Machine "${state.name}" must be running to upload files.`,
 				);
 			}
-			await scpPush(localPath, remotePath, scpOptions(state, ports.ssh));
+			await scpPush(localPath, remotePath, await scpOptions(state, ports.ssh));
 		},
 
 		async download(remotePath: string, localPath: string): Promise<void> {
@@ -1234,7 +1238,7 @@ function createInstance(state: MachineState): ChrInstance {
 					`Machine "${state.name}" must be running to download files.`,
 				);
 			}
-			await scpPull(remotePath, localPath, scpOptions(state, ports.ssh));
+			await scpPull(remotePath, localPath, await scpOptions(state, ports.ssh));
 		},
 
 		async destroy(): Promise<void> {

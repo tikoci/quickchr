@@ -2259,7 +2259,10 @@ async function cmdSet(argv: string[]) {
 	if (deviceMode) await applyDeviceModeChange(name, deviceMode);
 	if (packages.length > 0) await applyPackageChange(name, packages);
 	if (wantsLicense) {
-		const subcmdArgs = [name, ...Object.entries(flags).flatMap(([k, v]) => v === true ? [`--${k}`] : [`--${k}=${v}`]), ...positional.slice(1)];
+		// One argv element per occurrence: an array joined into `--level=p1,p10` would
+		// reach applyLicense as the single value "p1,p10" instead of last-wins `p10`.
+		const subcmdArgs = [name, ...Object.entries(flags).flatMap(([k, v]) =>
+			v === true ? [`--${k}`] : Array.isArray(v) ? v.map((x) => `--${k}=${x}`) : [`--${k}=${v}`]), ...positional.slice(1)];
 		await applyLicense(subcmdArgs);
 	}
 }
@@ -3430,8 +3433,8 @@ Options:
                         socket::<name>, tap:<if>. Default: single user NIC.
   --no-network          Start with no NICs (headless)
   --qemu-arg <arg>      Extra QEMU argv element, appended verbatim after quickchr's
-                        own args (repeatable, space-form only: one element per
-                        flag). Recorded here and reused every boot; a start-time
+                        own args (repeatable, one element per flag; use
+                        --qemu-arg=<arg> for values starting with --). Recorded here and reused every boot; a start-time
                         value replaces it for that boot only.
 
 Provisioning flags apply on the machine's first boot — whether they are given
@@ -3553,8 +3556,8 @@ Options:
   --timeout-extra <s>, -T <s>  Add extra seconds to the auto-computed boot timeout
   --dry-run             Print what would run without starting
   --qemu-arg <arg>      Extra QEMU argv element, appended verbatim after quickchr's
-                        own args (repeatable, space-form only: one element per
-                        flag). Recorded when creating; on an existing machine it
+                        own args (repeatable, one element per flag; use
+                        --qemu-arg=<arg> for values starting with --). Recorded when creating; on an existing machine it
                         replaces recorded args for this boot only.
 
 Provisioning flags (packages, login, device-mode, license) apply only on a machine's
@@ -3733,7 +3736,7 @@ Flags:
   --device-mode-enable <f>   Set one or more device-mode flags to yes (e.g. container)
   --device-mode-disable <f>  Set one or more device-mode flags to no
   --qemu-arg <arg>    Replace the recorded QEMU passthrough args (repeatable,
-                      space-form only). The machine must be stopped; takes
+                      one element per flag). The machine must be stopped; takes
                       effect on the next start.
   --clear-qemu-args   Drop the recorded QEMU passthrough args. Stopped only.
 

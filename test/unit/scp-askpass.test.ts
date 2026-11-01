@@ -68,9 +68,15 @@ describe("scpArgv (#229)", () => {
 		expect(argv.slice(-2)).toEqual(["a.npk", "quickchr@127.0.0.1:/a.npk"]);
 	});
 
+	test("replaces ssh_config when given one, so host config cannot disable the key", () => {
+		const argv = scpArgv(["a", "b"], { ...base, identityFile: "/m/id_ed25519", sshConfigFile: "/m/empty_ssh_config" });
+		expect(argv.slice(1, 3)).toEqual(["-F", "/m/empty_ssh_config"]);
+	});
+
 	test("without a key the command line is password-only, as before", () => {
 		const argv = scpArgv(["a.npk", "admin@127.0.0.1:/a.npk"], { ...base, user: "admin", password: "" });
 		expect(argv).not.toContain("-i");
 		expect(argv).not.toContain("IdentitiesOnly=yes");
+		expect(argv).not.toContain("-F");
 	});
 });

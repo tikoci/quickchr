@@ -22,6 +22,9 @@ export interface ScpOptions {
 	 *  (`password-authentication=yes-if-no-key`, `always-allow-password-login=no`
 	 *  before 7.23), so the managed `quickchr` user can only authenticate this way. */
 	identityFile?: string;
+	/** `-F` config file, replacing the user's ssh_config. Set with `identityFile` so host
+	 *  config such as `PubkeyAuthentication no` cannot disable the key. */
+	sshConfigFile?: string;
 }
 
 /** Copy a local file to the CHR. `remotePath` defaults to `/<basename>` (RouterOS flash root). */
@@ -48,6 +51,7 @@ export async function scpPull(
 export function scpArgv(scpArgs: string[], opts: ScpOptions): string[] {
 	return [
 		"scp",
+		...(opts.sshConfigFile ? ["-F", opts.sshConfigFile] : []),
 		"-P", String(opts.sshPort),
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "UserKnownHostsFile=/dev/null",
