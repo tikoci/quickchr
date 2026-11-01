@@ -3,7 +3,8 @@
  *
  * Uses the same SSH_ASKPASS trick as {@link ./packages.ts uploadPackages} so
  * no `sshpass` dependency is required. Both directions share the askpass
- * lifecycle (written to a private tmpdir, removed after the transfer).
+ * lifecycle (written to a private tmpdir, removed after the transfer). With
+ * `identityFile` the key is offered first and askpass stays the fallback.
  */
 
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
@@ -16,6 +17,14 @@ export interface ScpOptions {
 	sshPort: number;
 	user: string;
 	password: string;
+	/** Private key to offer before the password. Required for a user that has an SSH
+	 *  key installed: RouterOS then refuses password login for that user
+	 *  (`password-authentication=yes-if-no-key`, `always-allow-password-login=no`
+	 *  before 7.23), so the managed `quickchr` user can only authenticate this way. */
+	identityFile?: string;
+	/** `-F` config file, replacing the user's ssh_config. Set with `identityFile` so host
+	 *  config such as `PubkeyAuthentication no` cannot disable the key. */
+	sshConfigFile?: string;
 }
 
 /** Copy a local file to the CHR. `remotePath` defaults to `/<basename>` (RouterOS flash root). */
@@ -37,6 +46,20 @@ export async function scpPull(
 	await runScp([`${opts.user}@127.0.0.1:${remotePath}`, localPath], opts, `download ${remotePath}`);
 }
 
+/** The `scp` command line. `IdentitiesOnly` keeps agent keys from being offered ahead of
+ *  `identityFile` and using up the server's auth attempts. Exported for the unit test. */
+export function scpArgv(scpArgs: string[], opts: ScpOptions): string[] {
+	return [
+		"scp",
+		...(opts.sshConfigFile ? ["-F", opts.sshConfigFile] : []),
+		"-P", String(opts.sshPort),
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "UserKnownHostsFile=/dev/null",
+		...(opts.identityFile ? ["-i", opts.identityFile, "-o", "IdentitiesOnly=yes"] : []),
+		...scpArgs,
+	];
+}
+
 /** Shared plumbing: write askpass, invoke `scp`, clean up, translate exit code to QuickCHRError. */
 async function runScp(
 	scpArgs: string[],
@@ -45,14 +68,7 @@ async function runScp(
 ): Promise<void> {
 	const { askpassPath, env } = await writeAskpass(opts.password);
 	try {
-		const args = [
-			"scp",
-			"-P", String(opts.sshPort),
-			"-o", "StrictHostKeyChecking=accept-new",
-			"-o", "UserKnownHostsFile=/dev/null",
-			...scpArgs,
-		];
-		const result = Bun.spawnSync(args, {
+		const result = Bun.spawnSync(scpArgv(scpArgs, opts), {
 			stdout: "pipe",
 			stderr: "pipe",
 			env,

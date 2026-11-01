@@ -42,8 +42,8 @@ const realPackages = await import("../../../src/lib/packages.ts");
 mock.module("../../../src/lib/packages.ts", () => ({
 	...realPackages,
 	downloadPackages: async () => extractDir,
-	uploadPackages: async (packagePaths: string[], sshPort: number, user = "admin", password = "") => {
-		uploadCalls.push({ paths: packagePaths, sshPort, user, password });
+	uploadPackages: async (packagePaths: string[], scp: { sshPort: number; user: string; password: string }) => {
+		uploadCalls.push({ paths: packagePaths, sshPort: scp.sshPort, user: scp.user, password: scp.password });
 	},
 }));
 

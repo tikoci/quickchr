@@ -56,13 +56,7 @@ export function parseFlags(
 			if (eqIdx !== -1) {
 				const key = arg.slice(2, eqIdx);
 				rejectRemovedFlag(key);
-				// Last wins on purpose, unlike the space form below which
-				// accumulates repeats: single-value readers (`flag()`) return
-				// `undefined` for an array, so accumulating here would turn
-				// `--name=a --name=b` into no name at all. Repeatable flags
-				// (`--package`, `--add-package`, …) therefore only repeat with
-				// a space; the `=` form keeps quiet last-wins semantics.
-				flags[key] = arg.slice(eqIdx + 1);
+				appendFlagValue(flags, key, arg.slice(eqIdx + 1));
 			} else if (arg.startsWith("--no-")) {
 				rejectRemovedFlag(arg.slice(5));
 				flags[arg.slice(5)] = false;
@@ -71,15 +65,7 @@ export function parseFlags(
 				rejectRemovedFlag(key);
 				const next = argv[i + 1];
 				if (valueFlags.has(key) && next !== undefined && !next.startsWith("--")) {
-					// Check if this is a repeatable flag
-					const existing = flags[key];
-					if (Array.isArray(existing)) {
-						existing.push(next);
-					} else if (existing !== undefined && typeof existing === "string") {
-						flags[key] = [existing, next];
-					} else {
-						flags[key] = next;
-					}
+					appendFlagValue(flags, key, next);
 					i++;
 				} else {
 					flags[key] = true;
@@ -93,15 +79,30 @@ export function parseFlags(
 	return { flags, positional };
 }
 
-function flag(flags: Record<string, string | boolean | string[]>, key: string): string | undefined {
+/** Repeats accumulate the same way in both spellings, so `--package=a --package b`
+ *  keeps both (#231). Single-value readers take the last one through `flag()`. */
+function appendFlagValue(flags: Record<string, string | boolean | string[]>, key: string, value: string): void {
+	const existing = flags[key];
+	if (Array.isArray(existing)) existing.push(value);
+	else if (typeof existing === "string") flags[key] = [existing, value];
+	else flags[key] = value;
+}
+
+/** What a single-value reader sees: the last value of a repeated flag. */
+function lastFlagValue(flags: Record<string, string | boolean | string[]>, key: string): string | boolean | undefined {
 	const val = flags[key];
-	if (typeof val === "string") return val;
-	return undefined;
+	return Array.isArray(val) ? val.at(-1) : val;
+}
+
+/** A single-value flag. Given more than once, the last one wins. */
+export function flag(flags: Record<string, string | boolean | string[]>, key: string): string | undefined {
+	const val = lastFlagValue(flags, key);
+	return typeof val === "string" ? val : undefined;
 }
 
 function cacheTargetFlag(flags: Record<string, string | boolean | string[]>, key: string): string | undefined {
 	if (!(key in flags)) return undefined;
-	const value = flags[key];
+	const value = lastFlagValue(flags, key);
 	if (typeof value !== "string" || value.length === 0) {
 		throw new Error(`--${key} requires a value`);
 	}
@@ -109,7 +110,8 @@ function cacheTargetFlag(flags: Record<string, string | boolean | string[]>, key
 }
 
 function flagBool(flags: Record<string, string | boolean | string[]>, key: string): boolean {
-	return flags[key] === true || flags[key] === "true";
+	const value = lastFlagValue(flags, key);
+	return value === true || value === "true";
 }
 
 /** A boolean flag that keeps "not given" apart from `--no-<key>`: `true`, `false`, or
@@ -122,8 +124,9 @@ function flagBool(flags: Record<string, string | boolean | string[]>, key: strin
  *  rule as `--no-device-mode`: silence and refusal are different instructions, and only
  *  silence may fall through to what `add` recorded. */
 export function flagOptionalBool(flags: Record<string, string | boolean | string[]>, key: string): boolean | undefined {
-	if (flags[key] === undefined) return undefined;
-	return flags[key] !== false && flags[key] !== "false";
+	const value = lastFlagValue(flags, key);
+	if (value === undefined) return undefined;
+	return value !== false && value !== "false";
 }
 
 function flagList(flags: Record<string, string | boolean | string[]>, key: string): string[] {
@@ -2256,7 +2259,10 @@ async function cmdSet(argv: string[]) {
 	if (deviceMode) await applyDeviceModeChange(name, deviceMode);
 	if (packages.length > 0) await applyPackageChange(name, packages);
 	if (wantsLicense) {
-		const subcmdArgs = [name, ...Object.entries(flags).flatMap(([k, v]) => v === true ? [`--${k}`] : [`--${k}=${v}`]), ...positional.slice(1)];
+		// One argv element per occurrence: an array joined into `--level=p1,p10` would
+		// reach applyLicense as the single value "p1,p10" instead of last-wins `p10`.
+		const subcmdArgs = [name, ...Object.entries(flags).flatMap(([k, v]) =>
+			v === true ? [`--${k}`] : Array.isArray(v) ? v.map((x) => `--${k}=${x}`) : [`--${k}=${v}`]), ...positional.slice(1)];
 		await applyLicense(subcmdArgs);
 	}
 }
@@ -3098,9 +3104,12 @@ async function cmdCache(argv: string[]) {
 		}
 		case "prune": {
 			const opts: Parameters<typeof pruneCache>[0] = { dryRun: flags["dry-run"] === true };
-			if (typeof flags["older-than"] === "string") opts.olderThan = flags["older-than"];
-			if (typeof flags["max-age"] === "string") opts.maxAgeMs = parseDuration(flags["max-age"]);
-			if (typeof flags["max-size"] === "string") opts.maxSizeBytes = parseSize(flags["max-size"]);
+			const olderThan = flag(flags, "older-than");
+			const maxAge = flag(flags, "max-age");
+			const maxSize = flag(flags, "max-size");
+			if (olderThan !== undefined) opts.olderThan = olderThan;
+			if (maxAge !== undefined) opts.maxAgeMs = parseDuration(maxAge);
+			if (maxSize !== undefined) opts.maxSizeBytes = parseSize(maxSize);
 			if (opts.olderThan === undefined && opts.maxAgeMs === undefined && opts.maxSizeBytes === undefined) {
 				console.error("cache prune: provide at least one of --older-than, --max-age, --max-size");
 				process.exit(1);
@@ -3424,8 +3433,8 @@ Options:
                         socket::<name>, tap:<if>. Default: single user NIC.
   --no-network          Start with no NICs (headless)
   --qemu-arg <arg>      Extra QEMU argv element, appended verbatim after quickchr's
-                        own args (repeatable, space-form only: one element per
-                        flag). Recorded here and reused every boot; a start-time
+                        own args (repeatable, one element per flag; use
+                        --qemu-arg=<arg> for values starting with --). Recorded here and reused every boot; a start-time
                         value replaces it for that boot only.
 
 Provisioning flags apply on the machine's first boot — whether they are given
@@ -3547,8 +3556,8 @@ Options:
   --timeout-extra <s>, -T <s>  Add extra seconds to the auto-computed boot timeout
   --dry-run             Print what would run without starting
   --qemu-arg <arg>      Extra QEMU argv element, appended verbatim after quickchr's
-                        own args (repeatable, space-form only: one element per
-                        flag). Recorded when creating; on an existing machine it
+                        own args (repeatable, one element per flag; use
+                        --qemu-arg=<arg> for values starting with --). Recorded when creating; on an existing machine it
                         replaces recorded args for this boot only.
 
 Provisioning flags (packages, login, device-mode, license) apply only on a machine's
@@ -3727,7 +3736,7 @@ Flags:
   --device-mode-enable <f>   Set one or more device-mode flags to yes (e.g. container)
   --device-mode-disable <f>  Set one or more device-mode flags to no
   --qemu-arg <arg>    Replace the recorded QEMU passthrough args (repeatable,
-                      space-form only). The machine must be stopped; takes
+                      one element per flag). The machine must be stopped; takes
                       effect on the next start.
   --clear-qemu-args   Drop the recorded QEMU passthrough args. Stopped only.
 

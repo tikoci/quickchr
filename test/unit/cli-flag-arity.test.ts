@@ -8,7 +8,7 @@ import {
 	START_FLAGS,
 	VALUE_FLAGS,
 } from "../../src/cli/flags.ts";
-import { parseFlags } from "../../src/cli/index.ts";
+import { flag, flagOptionalBool, parseFlags } from "../../src/cli/index.ts";
 
 const CLI_SOURCE = await Bun.file(new URL("../../src/cli/index.ts", import.meta.url)).text();
 
@@ -64,7 +64,8 @@ describe("flag arity is declared, not guessed (#164)", () => {
 
 	test("a flag read straight off the object is declared too", () => {
 		const direct = directReads();
-		expect(direct.value.length).toBeGreaterThan(3);
+		// `cache prune`'s three reads moved onto `flag()` (#231), so the floor dropped.
+		expect(direct.value.length).toBeGreaterThan(2);
 		expect(direct.boolean.length).toBeGreaterThan(5);
 		for (const name of direct.value) {
 			expect({ name, declared: VALUE_FLAGS.has(name) }).toEqual({ name, declared: true });
@@ -127,9 +128,36 @@ describe("--qemu-arg passthrough (#213)", () => {
 		expect(positional).toEqual(["lab"]);
 	});
 
-	test("equals form overwrites instead of accumulating — space form only", () => {
+	test("equals form accumulates like the space form (#231)", () => {
 		const { flags } = parseFlags(["--qemu-arg=-M", "--qemu-arg=-audiodev"]);
-		expect(flags["qemu-arg"]).toBe("-audiodev");
+		expect(flags["qemu-arg"]).toEqual(["-M", "-audiodev"]);
+	});
+});
+
+describe("repeated flags keep every value in either spelling (#231)", () => {
+	test("--package=a --package=b keeps both", () => {
+		expect(parseFlags(["--package=a", "--package=b"]).flags.package).toEqual(["a", "b"]);
+	});
+
+	test("mixed spellings keep every value, in argv order", () => {
+		const { flags, positional } = parseFlags([
+			"--add-network", "user", "--add-network=socket::lab", "--add-network", "shared", "lab",
+		]);
+		expect(flags["add-network"]).toEqual(["user", "socket::lab", "shared"]);
+		expect(positional).toEqual(["lab"]);
+	});
+
+	test("a single-value flag given twice is last-wins, not dropped", () => {
+		// The space form already collected repeats into an array, which `flag()` used to
+		// read as absent — `--name a --name b` silently got an auto-generated name.
+		for (const argv of [["--name", "a", "--name", "b"], ["--name=a", "--name=b"], ["--name", "a", "--name=b"]]) {
+			expect(flag(parseFlags(argv).flags, "name")).toBe("b");
+		}
+	});
+
+	test("boolean readers also see the last occurrence", () => {
+		const { flags } = parseFlags(["--install-all-packages=true", "--install-all-packages=false"]);
+		expect(flagOptionalBool(flags, "install-all-packages")).toBe(false);
 	});
 });
 

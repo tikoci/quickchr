@@ -192,6 +192,10 @@ improvements.
 The dispatcher lives in `src/cli/index.ts`. Help text is
 available for every command via `quickchr help <command>`.
 
+Value flags take `--flag value` or `--flag=value`, and the two can be mixed. A
+repeatable flag keeps every occurrence in either form; a single-value flag given
+twice takes the last one.
+
 ### Lifecycle
 
 #### `add [name]`
@@ -229,7 +233,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--no-winbox` | false | Exclude WinBox port |
 | `--no-api-ssl` | false | Exclude API-SSL port |
 | `--port-base <n>` | auto from 9100 | First port of the 10-port block |
-| `--qemu-arg <arg>` | — | Extra QEMU argv element, repeatable (space form only). Recorded and reused every boot. See Extra QEMU arguments below. |
+| `--qemu-arg <arg>` | — | Extra QEMU argv element, repeatable. Recorded and reused every boot. See Extra QEMU arguments below. |
 
 `--vmnet-shared` and `--vmnet-bridge <iface>` have been removed. Use
 `--add-network shared` and `--add-network bridged:<iface>`; either old spelling is
@@ -258,7 +262,7 @@ Additional flags:
 | `--bg` / `--background` | **Deprecated, does nothing.** Background is the default, and the flag never made `start` return early — it only ever chose where the serial console went. Prints a warning; use `--no-wait` |
 | `--timeout-extra <s>` / `-T <s>` | Add extra seconds to computed boot timeout |
 | `--dry-run` | Print the resolved start options as JSON (including `qemuArgs`/`frozen`) and exit — not the final QEMU argv |
-| `--qemu-arg <arg>` | Extra QEMU argv element, repeatable (space form only). Recorded when creating; on an existing machine it replaces recorded args for this boot only. Refused with `--all`. |
+| `--qemu-arg <arg>` | Extra QEMU argv element, repeatable. Recorded when creating; on an existing machine it replaces recorded args for this boot only. Refused with `--all`. |
 | `--frozen` | Boot frozen at reset (`-S`) with a gdbstub; resume with `continue`. Refused with `--fg`, provisioning, and `--all` |
 
 After `--no-wait`, readiness is yours. centrs (0.1.8+) waits for it in one command:
@@ -285,9 +289,8 @@ machine state.
 
 **Extra QEMU arguments (`--qemu-arg`).** One argv element per occurrence,
 appended verbatim (no splitting, no validation) after quickchr's own args.
-Use the space form: `--qemu-arg=x` overwrites instead of accumulating, so
-mixing space and `=` forms keeps only the `=` values. Values beginning with
-`--` need the `--qemu-arg=<arg>` form (one element per flag).
+The space and `=` forms accumulate alike and can be mixed. Values beginning
+with `--` need the `--qemu-arg=<arg>` form (one element per flag).
 
 Passthrough runs with your privileges and is replayed every boot: it can
 touch any path you can (`-drive`, `-audiodev`) or open QEMU-side listeners,

@@ -10,7 +10,7 @@ import { downloadToFile } from "./download.ts";
 import { getCacheDir, ensureDir } from "./state.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { restPost } from "./rest.ts";
-import { scpPush } from "./scp.ts";
+import { type ScpOptions, scpPush } from "./scp.ts";
 import { extractZip } from "./zip.ts";
 import { renameWithRetry } from "./rename.ts";
 import { admitStorage, STORAGE_ESTIMATES } from "./storage.ts";
@@ -165,16 +165,14 @@ export function findPackageFile(
 /** Upload packages to a running CHR via SCP. Uploads each file to flash root (`/<basename>`). */
 export async function uploadPackages(
 	packagePaths: string[],
-	sshPort: number,
-	user: string = "admin",
-	password: string = "",
+	scp: ScpOptions,
 	logger?: ProgressLogger,
 ): Promise<void> {
 	const log = logger ?? createLogger();
 	for (const pkgPath of packagePaths) {
 		const filename = basename(pkgPath);
 		log.status(`Uploading: ${filename}`);
-		await scpPush(pkgPath, undefined, { sshPort, user, password });
+		await scpPush(pkgPath, undefined, scp);
 	}
 }
 
@@ -208,7 +206,7 @@ export async function installPackages(
 
 	if (packagePaths.length === 0) return [];
 
-	await uploadPackages(packagePaths, sshPort, undefined, undefined, logger);
+	await uploadPackages(packagePaths, { sshPort, user: "admin", password: "" }, logger);
 
 	// Reboot to activate packages
 	log.status("Rebooting CHR to activate packages...");

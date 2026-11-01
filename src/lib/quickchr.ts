@@ -71,10 +71,10 @@ import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, 
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
-import { provision } from "./provision.ts";
+import { ensureEmptySshConfig, provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
 import { resolveAuth, resolveCreds } from "./auth.ts";
-import { scpPush, scpPull } from "./scp.ts";
+import { type ScpOptions, scpPush, scpPull } from "./scp.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownGuest, validateShutdownTimeout } from "./shutdown.ts";
 import { restExecute, restExecuteWithRetry, isExecTransportFailure } from "./exec.ts";
@@ -108,7 +108,7 @@ import { admitStorage, estimateMachineCreation, formatQuickchrUsage, getQuickchr
 import { pinCacheEntries } from "./storage-lease.ts";
 import { existsSync, rmSync } from "node:fs";
 import { acquireLock, acquireLockNow, allocationLockPath, legacyMachineLockPath, listReservations, machineLockPath, type HeldLock, type LockOperation } from "./lock.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // --- Architecture-aware defaults ---
 
@@ -422,6 +422,20 @@ async function resetGuestToFactory(state: MachineState): Promise<void> {
 
 /** Options every machine-lock acquisition passes: the pre-0.5 lock to honour, and the
  *  noun for `MACHINE_LOCKED`. */
+/** SCP options for a machine: its resolved login plus the managed private key. RouterOS
+ *  refuses password login for a user that has a key, so the managed `quickchr` user
+ *  can only authenticate by key (#229). The key rides only with its owner: the stored
+ *  credentials can name another user (`saveInstanceCredentials()` is public), and
+ *  `IdentitiesOnly=yes` would then hide that user's own keys. With the key, ssh_config
+ *  is replaced by an empty file, as in the provisioning probe that verified the key,
+ *  so a host `PubkeyAuthentication no` cannot turn key auth off. Exported for the unit test. */
+export async function scpOptions(state: MachineState, sshPort: number): Promise<ScpOptions> {
+	const creds = resolveCreds(state);
+	const keyPath = state.managedSshKey?.privateKeyPath;
+	if (!keyPath || creds.user !== state.user?.name || !existsSync(keyPath)) return { sshPort, ...creds };
+	return { sshPort, ...creds, identityFile: keyPath, sshConfigFile: await ensureEmptySshConfig(dirname(keyPath)) };
+}
+
 function machineLockOptions(name: string, machineDir: string): { legacyPath: string; subject: string } {
 	return { legacyPath: legacyMachineLockPath(machineDir), subject: `Machine "${name}"` };
 }
@@ -1134,7 +1148,6 @@ function createInstance(state: MachineState): ChrInstance {
 				// `--disable-admin` answers 401 to `admin:`, and those are exactly the
 				// machines this route exists for.
 				const auth = resolveAuth(state);
-				const creds = resolveCreds(state);
 
 				// A booted machine no longer holds its package cache in use, so pin it until the
 				// upload is done: a concurrent eviction must not remove it mid-read.
@@ -1164,7 +1177,8 @@ function createInstance(state: MachineState): ChrInstance {
 					// reboot that follows can neither be sent nor observed.
 					await assertRestAnswering(ports.http, auth.header, state.name);
 
-					await uploadPackages(packagePaths, ports.ssh, creds.user, creds.password);
+					const scp = await scpOptions(state, ports.ssh);
+					await uploadPackages(packagePaths, scp);
 				} finally {
 					pin.release();
 				}
@@ -1214,8 +1228,7 @@ function createInstance(state: MachineState): ChrInstance {
 					`Machine "${state.name}" must be running to upload files.`,
 				);
 			}
-			const creds = resolveCreds(state);
-			await scpPush(localPath, remotePath, { sshPort: ports.ssh, ...creds });
+			await scpPush(localPath, remotePath, await scpOptions(state, ports.ssh));
 		},
 
 		async download(remotePath: string, localPath: string): Promise<void> {
@@ -1225,8 +1238,7 @@ function createInstance(state: MachineState): ChrInstance {
 					`Machine "${state.name}" must be running to download files.`,
 				);
 			}
-			const creds = resolveCreds(state);
-			await scpPull(remotePath, localPath, { sshPort: ports.ssh, ...creds });
+			await scpPull(remotePath, localPath, await scpOptions(state, ports.ssh));
 		},
 
 		async destroy(): Promise<void> {

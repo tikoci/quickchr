@@ -17,6 +17,7 @@ import { bootTestTimeout } from "./timeouts.ts";
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 const MACHINE = "integration-file-transfer";
+const MACHINE_SECURE = "integration-file-transfer-secure";
 
 async function cleanupMachine(name: string): Promise<void> {
 	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
@@ -31,11 +32,13 @@ describe.skipIf(SKIP)("ChrInstance upload/download round-trip", () => {
 
 	beforeAll(async () => {
 		await cleanupMachine(MACHINE);
+		await cleanupMachine(MACHINE_SECURE);
 		workDir = mkdtempSync(join(tmpdir(), "quickchr-ft-"));
 	});
 
 	afterAll(async () => {
 		await cleanupMachine(MACHINE);
+		await cleanupMachine(MACHINE_SECURE);
 		if (workDir) {
 			try { rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
 		}
@@ -78,5 +81,38 @@ describe.skipIf(SKIP)("ChrInstance upload/download round-trip", () => {
 			}
 		}
 	}, bootTestTimeout());
-});
 
+	// The managed `quickchr` user has an SSH key, and RouterOS refuses password login
+	// for a user with a key, so this only passes over the key (#229). The factory-admin
+	// test above never reaches that path.
+	test("secure-login machine transfers over its managed key", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+
+		const payload = `quickchr managed-key round-trip ${Date.now()}\n`;
+		const localIn = join(workDir, "secure-in.txt");
+		const localOut = join(workDir, "secure-out.txt");
+		await Bun.write(localIn, payload);
+
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+		try {
+			instance = await QuickCHR.start({
+				...imageTarget(),
+				background: true,
+				name: MACHINE_SECURE,
+				secureLogin: true,
+			});
+
+			// Prove the shape first, so a pass cannot have ridden a password login.
+			expect(instance.state.user?.name).toBe("quickchr");
+			expect(instance.state.managedSshKey?.batchVerified).toBe(true);
+
+			await instance.upload(localIn, "/ft-secure.txt");
+			await instance.download("/ft-secure.txt", localOut);
+			expect(await Bun.file(localOut).text()).toBe(payload);
+		} finally {
+			if (instance) {
+				await instance.stop();
+			}
+		}
+	}, bootTestTimeout());
+});
