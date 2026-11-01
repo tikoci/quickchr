@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { rmSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { writeAskpass } from "../../src/lib/scp.ts";
+import { scpArgv, writeAskpass } from "../../src/lib/scp.ts";
 
 /**
  * The SSH_ASKPASS contract `scpPush()`/`scpPull()` rely on.
@@ -54,5 +54,23 @@ describe("writeAskpass", () => {
 				rmSync(dirname(askpassPath), { recursive: true, force: true });
 			}
 		}
+	});
+});
+
+describe("scpArgv (#229)", () => {
+	const base = { sshPort: 9022, user: "quickchr", password: "lab-pass-1" };
+
+	test("offers the managed key, and only that key, when one is given", () => {
+		const argv = scpArgv(["a.npk", "quickchr@127.0.0.1:/a.npk"], { ...base, identityFile: "/m/id_ed25519" });
+		expect(argv.slice(argv.indexOf("-i"), argv.indexOf("-i") + 4)).toEqual([
+			"-i", "/m/id_ed25519", "-o", "IdentitiesOnly=yes",
+		]);
+		expect(argv.slice(-2)).toEqual(["a.npk", "quickchr@127.0.0.1:/a.npk"]);
+	});
+
+	test("without a key the command line is password-only, as before", () => {
+		const argv = scpArgv(["a.npk", "admin@127.0.0.1:/a.npk"], { ...base, user: "admin", password: "" });
+		expect(argv).not.toContain("-i");
+		expect(argv).not.toContain("IdentitiesOnly=yes");
 	});
 });

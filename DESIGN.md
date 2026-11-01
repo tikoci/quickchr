@@ -722,6 +722,16 @@ user RouterOS had deleted — the confound removed ahead of #79's QEMU-version
 experiment. Priority (3) above is what a cleaned machine must land on, and it is
 the truth of a fresh CHR image: `admin` with an empty password.
 
+**SCP authenticates the managed user by key, never by password (#229).** RouterOS
+refuses SSH password login for any user that has a key installed
+(`always-allow-password-login=no` through 7.20, renamed
+`password-authentication=yes-if-no-key` in 7.23; `test/lab/ssh-keys/REPORT.md`).
+`--secure-login` installs the managed key for the `quickchr` user, so SCP that sent
+only a password (`upload()`, `download()`, `installPackage()`) got `Permission
+denied (publickey)` on every secure-login machine. `scpOptions()` passes
+`managedSshKey.privateKeyPath` with `IdentitiesOnly=yes`, and askpass stays as the
+fallback for users without a key (factory `admin`, `--add-user`).
+
 Output formatting via `--json` flag. RouterOS trick for structured output: wrap commands in `[:serialize to=json [<routeros-cmd>]]` to get JSON from any CLI command. For REST-to-CLI mapping, see tikoci/restraml `lookup.html`.
 
 ### Examples Philosophy

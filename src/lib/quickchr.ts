@@ -74,7 +74,7 @@ import { installPackages, installAllPackages, downloadAndListPackages, downloadP
 import { provision } from "./provision.ts";
 import { renewLicense, getLicenseInfo } from "./license.ts";
 import { resolveAuth, resolveCreds } from "./auth.ts";
-import { scpPush, scpPull } from "./scp.ts";
+import { type ScpOptions, scpPush, scpPull } from "./scp.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownGuest, validateShutdownTimeout } from "./shutdown.ts";
 import { restExecute, restExecuteWithRetry, isExecTransportFailure } from "./exec.ts";
@@ -422,6 +422,16 @@ async function resetGuestToFactory(state: MachineState): Promise<void> {
 
 /** Options every machine-lock acquisition passes: the pre-0.5 lock to honour, and the
  *  noun for `MACHINE_LOCKED`. */
+/** SCP options for a machine: its resolved login plus the managed private key. RouterOS
+ *  refuses password login for a user that has a key, so the managed `quickchr` user
+ *  can only authenticate by key (#229). The key is installed only for the generated
+ *  user that `resolveCreds()` returns, so it always belongs to the login it rides with. */
+function scpOptions(state: MachineState, sshPort: number): ScpOptions {
+	const creds = resolveCreds(state);
+	const keyPath = state.managedSshKey?.privateKeyPath;
+	return { sshPort, ...creds, identityFile: keyPath && existsSync(keyPath) ? keyPath : undefined };
+}
+
 function machineLockOptions(name: string, machineDir: string): { legacyPath: string; subject: string } {
 	return { legacyPath: legacyMachineLockPath(machineDir), subject: `Machine "${name}"` };
 }
@@ -1134,7 +1144,6 @@ function createInstance(state: MachineState): ChrInstance {
 				// `--disable-admin` answers 401 to `admin:`, and those are exactly the
 				// machines this route exists for.
 				const auth = resolveAuth(state);
-				const creds = resolveCreds(state);
 
 				// A booted machine no longer holds its package cache in use, so pin it until the
 				// upload is done: a concurrent eviction must not remove it mid-read.
@@ -1164,7 +1173,8 @@ function createInstance(state: MachineState): ChrInstance {
 					// reboot that follows can neither be sent nor observed.
 					await assertRestAnswering(ports.http, auth.header, state.name);
 
-					await uploadPackages(packagePaths, ports.ssh, creds.user, creds.password);
+					const scp = scpOptions(state, ports.ssh);
+					await uploadPackages(packagePaths, scp.sshPort, scp.user, scp.password, undefined, scp.identityFile);
 				} finally {
 					pin.release();
 				}
@@ -1214,8 +1224,7 @@ function createInstance(state: MachineState): ChrInstance {
 					`Machine "${state.name}" must be running to upload files.`,
 				);
 			}
-			const creds = resolveCreds(state);
-			await scpPush(localPath, remotePath, { sshPort: ports.ssh, ...creds });
+			await scpPush(localPath, remotePath, scpOptions(state, ports.ssh));
 		},
 
 		async download(remotePath: string, localPath: string): Promise<void> {
@@ -1225,8 +1234,7 @@ function createInstance(state: MachineState): ChrInstance {
 					`Machine "${state.name}" must be running to download files.`,
 				);
 			}
-			const creds = resolveCreds(state);
-			await scpPull(remotePath, localPath, { sshPort: ports.ssh, ...creds });
+			await scpPull(remotePath, localPath, scpOptions(state, ports.ssh));
 		},
 
 		async destroy(): Promise<void> {

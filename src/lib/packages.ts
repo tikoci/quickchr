@@ -162,19 +162,21 @@ export function findPackageFile(
 	return match ? join(extractDir, match) : undefined;
 }
 
-/** Upload packages to a running CHR via SCP. Uploads each file to flash root (`/<basename>`). */
+/** Upload packages to a running CHR via SCP. Uploads each file to flash root (`/<basename>`).
+ *  `identityFile` is the user's private key, see `ScpOptions.identityFile` in ./scp.ts. */
 export async function uploadPackages(
 	packagePaths: string[],
 	sshPort: number,
 	user: string = "admin",
 	password: string = "",
 	logger?: ProgressLogger,
+	identityFile?: string,
 ): Promise<void> {
 	const log = logger ?? createLogger();
 	for (const pkgPath of packagePaths) {
 		const filename = basename(pkgPath);
 		log.status(`Uploading: ${filename}`);
-		await scpPush(pkgPath, undefined, { sshPort, user, password });
+		await scpPush(pkgPath, undefined, { sshPort, user, password, identityFile });
 	}
 }
 

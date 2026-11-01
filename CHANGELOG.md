@@ -23,6 +23,16 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- `upload()`, `download()`, `installPackage()` and `quickchr set --package` work
+  on `--secure-login` machines. They failed with `Permission denied (publickey)`:
+  RouterOS refuses password login for a user that has an SSH key, and SCP never
+  offered the managed `quickchr` key. It now does, and still falls back to the
+  password for users without a key. (#229)
+- Repeated `--flag=value` options are no longer silently dropped:
+  `--package=a --package=b`, and mixed forms like `--add-network user
+  --add-network=socket::lab`, keep every value, as the space form always did.
+  A single-value flag given twice now takes the last value; `--name a --name b`
+  used to discard both and auto-generate a name. (#231)
 - `exec`'s default `auto` transport now retries refused/unreachable REST
   connections (up to 3 retries, 2 s apart), then falls back to the serial
   console. Resets, timeouts, unknown errors and HTTP failures surface without
