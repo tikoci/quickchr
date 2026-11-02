@@ -11,15 +11,7 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
-### Fixed
-
-- The hedged "HTTP 403 via the egress proxy" error names the right Bun version.
-  It said proxy CONNECT refusals arrive as responses on Bun older than 1.4.4.
-  Checked against a live refusing proxy, Bun 1.4.3 already throws
-  `ERR_PROXY_TUNNEL`, and only 1.4.2 and older return the proxy's 403 as a
-  response, so the message now says "older than 1.4.3". (#232)
-
-## [0.5.5] — 2026-11-01
+## [0.5.5] — 2026-11-02
 
 ### Added
 
@@ -31,8 +23,20 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   `ALL_PROXY`/`all_proxy`, credentials redacted) or direct egress, and warns when
   acceleration is TCG-only. (#210)
 
+### Changed
+
+- quickchr requires Bun 1.4.3 or newer, declared in `package.json` `engines`.
+  Older Bun hands proxy CONNECT refusals back as plain HTTP responses, which
+  loses the proxy diagnostics (a 407 from a proxy that wants credentials got no
+  hint). The docs said Bun 1.1. (#232)
+
 ### Fixed
 
+- The hedged "HTTP 403 via the egress proxy" error names the right Bun version.
+  It said proxy CONNECT refusals arrive as responses on Bun older than 1.4.4.
+  Checked against a live refusing proxy, Bun 1.4.3 already throws
+  `ERR_PROXY_TUNNEL`, and only 1.4.2 and older return the proxy's 403 as a
+  response, so the message now says "older than 1.4.3". (#232)
 - `upload()`, `download()`, `installPackage()` and `quickchr set --package` work
   on `--secure-login` machines. They failed with `Permission denied (publickey)`:
   RouterOS refuses password login for a user that has an SSH key, and SCP never

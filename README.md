@@ -6,7 +6,7 @@ CLI and library to download, launch, and manage MikroTik CHR virtual machines vi
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) runtime
+- [Bun](https://bun.sh) runtime, 1.4.3 or newer
 - [QEMU](https://www.qemu.org) with `qemu-system-x86_64` and/or `qemu-system-aarch64`
 - `qemu-img` for default qcow2 creation, the setup wizard, disk resize, extra disks, and snapshots
 - UEFI firmware (edk2) for arm64 CHR

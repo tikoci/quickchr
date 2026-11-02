@@ -81,7 +81,7 @@ never older than `latest`. While 0.x, a breaking API/CLI change bumps the minor 
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) >= 1.1
+- [Bun](https://bun.sh) >= 1.4.3
 - [QEMU](https://www.qemu.org) (for integration tests)
 - [Biome](https://biomejs.dev) (installed as a dev dependency)
 

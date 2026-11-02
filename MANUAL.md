@@ -61,7 +61,7 @@ by the user (or their AI agent) using `quickchr` as a building block.
 
 | Component | Required for | Install |
 |---|---|---|
-| Bun ≥ 1.1 | runtime | macOS/Linux: `curl -fsSL https://bun.sh/install \| bash` · Windows: `powershell -c "irm bun.sh/install.ps1 \| iex"` (or `winget install Oven-sh.Bun`) |
+| Bun ≥ 1.4.3 | runtime | macOS/Linux: `curl -fsSL https://bun.sh/install \| bash` · Windows: `powershell -c "irm bun.sh/install.ps1 \| iex"` (or `winget install Oven-sh.Bun`) |
 | `qemu-system-x86_64` | x86 CHR | brew/apt/dnf/pacman · Windows: `winget install SoftwareFreedomConservancy.QEMU` |
 | `qemu-system-aarch64` | arm64 CHR | brew/apt/dnf/pacman · Windows: bundled in the SFC QEMU package above |
 | `qemu-img` | Default qcow2 creation, setup wizard, `--boot-size`, `--add-disk`, snapshots | included in all standard QEMU packages (brew, apt, dnf, SFC installer) |
