@@ -25,10 +25,11 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Changed
 
-- quickchr requires Bun 1.4.3 or newer, declared in `package.json` `engines`.
-  Older Bun hands proxy CONNECT refusals back as plain HTTP responses, which
-  loses the proxy diagnostics (a 407 from a proxy that wants credentials got no
-  hint). The docs said Bun 1.1. (#232)
+- The documented minimum Bun version is 1.4.3 (README, MANUAL, CONTRIBUTING,
+  and `engines.bun` in `package.json`, which Bun does not enforce). Bun 1.4.2
+  and older return proxy CONNECT refusals as plain HTTP responses, and the
+  proxy diagnostics are verified only on 1.4.3 and newer. The docs said
+  Bun 1.1. (#232)
 
 ### Fixed
 
