@@ -447,7 +447,12 @@ describe("resolveVersion", () => {
 				message: expect.stringContaining("via the egress proxy"),
 				installHint: expect.stringContaining("*.mikrotik.com"),
 			});
-			expect(calls).toBe(1);
+			// Observed live (#232): Bun 1.4.2 and older resolve a proxy 403 as a
+			// Response; 1.4.3 is the first that throws ERR_PROXY_TUNNEL.
+			await expect(resolveVersion("stable", { retryDelayMs: 1 })).rejects.toMatchObject({
+				message: expect.stringContaining("on Bun older than 1.4.3"),
+			});
+			expect(calls).toBe(2);
 		} finally {
 			restoreProxyEnv(prevEnv);
 		}

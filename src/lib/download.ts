@@ -50,6 +50,7 @@ import { unlinkSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { QuickCHRError } from "./types.ts";
 import {
+	BUN_PROXY_TUNNEL_THROWS_SINCE,
 	fetchResilient,
 	isProxyConfiguredFor,
 	isProxyRefusal,
@@ -365,15 +366,17 @@ async function attemptDownload(
 			// wrong; a retry cannot change that. Surface immediately. A 403 through
 			// a configured proxy is the special case: on the pinned Bun a proxy
 			// CONNECT refusal always throws, so the 403 came from the origin
-			// through the tunnel — but on older Bun it can be the proxy's own
-			// refusal, so the verdict hedges and keeps the allowlist fix (#210).
+			// through the tunnel — but on Bun older than
+			// BUN_PROXY_TUNNEL_THROWS_SINCE it can be the proxy's own refusal
+			// (observed live, #232), so the verdict hedges and keeps the
+			// allowlist fix (#210).
 			// With no proxy configured a 403 is the origin's verdict, like any
 			// other client error.
 			if (!isRetriableStatus(response.status)) {
 				if (response.status === 403 && isProxyConfiguredFor(url)) {
 					throw new QuickCHRError(
 						"DOWNLOAD_FAILED",
-						`Download failed: HTTP 403 for ${url} via the egress proxy — the origin refused the request, or on Bun older than 1.4.4 the proxy refused CONNECT for ${hostname}`,
+						`Download failed: HTTP 403 for ${url} via the egress proxy — the origin refused the request, or on Bun older than ${BUN_PROXY_TUNNEL_THROWS_SINCE} the proxy refused CONNECT for ${hostname}`,
 						PROXY_ALLOWLIST_HINT,
 					);
 				}

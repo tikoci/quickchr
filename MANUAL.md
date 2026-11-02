@@ -133,7 +133,7 @@ typical of CI sandboxes generally:
 |---|---|
 | No `/dev/kvm` | TCG only. `detectAccel()` picks it automatically; no `QUICKCHR_ACCEL` needed |
 | All egress goes through an HTTPS proxy (`HTTPS_PROXY`) | Bun's `fetch` honours it. Image downloads work only if the proxy allows the MikroTik hosts |
-| Default "Trusted" network policy | `download.mikrotik.com` and `upgrade.mikrotik.com` are refused: the proxy answers `403` to CONNECT and quickchr reports `ERR_PROXY_TUNNEL` |
+| Default "Trusted" network policy | `download.mikrotik.com` and `upgrade.mikrotik.com` are refused: the proxy answers `403` to CONNECT. quickchr fails at once with `DOWNLOAD_FAILED`, names the refused host and hints to allow `*.mikrotik.com` |
 | QEMU not preinstalled | Ubuntu mirrors are allowed even on "Trusted", so `apt-get` works |
 | CHR guest uses user-mode NAT, which bypasses the proxy | The CHR itself has no internet: no package downloads, container pulls or online catalogs from inside RouterOS. Host ↔ guest traffic (port forwards, and the guest reaching the host at `10.0.2.2`) still works |
 
@@ -181,9 +181,21 @@ Measured in a cloud session (4 vCPU, 15 GiB RAM, no KVM, "Full" network, Ubuntu
 | `quickchr start --arch x86` to REST ready, default timeouts | 35 s |
 | `quickchr start --arch arm64` (cross-arch TCG) to REST ready, including the 18 MB image download | 45 s |
 
-`quickchr doctor` currently reports `✓ Acceleration: tcg` and says nothing about
-the proxy. See tikoci/quickchr#210 for the planned doctor and error-message
-improvements.
+`quickchr doctor` flags both constraints as warnings, with any credentials in the
+proxy URL removed:
+
+```text
+⚠ Acceleration: tcg (host: x64) — TCG software emulation only (no KVM/HVF); expect slow boots
+⚠ HTTPS proxy: http://127.0.0.1:40231 — egress via proxy; downloads need *.mikrotik.com allowed
+```
+
+The proxy address varies by session. On "Trusted", `cache add` (or `start`)
+then fails in under a second, without retrying:
+
+```text
+Error [DOWNLOAD_FAILED]: Failed to fetch version for channel "stable": the egress proxy refused upgrade.mikrotik.com (Proxy refused to open a tunnel: 403 Forbidden)
+  Hint: Allow *.mikrotik.com in the proxy or sandbox allowed-domains list (or switch to full network access), then retry in a new session — allowlist changes do not apply to a running session.
+```
 
 ---
 

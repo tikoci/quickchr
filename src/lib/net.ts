@@ -125,6 +125,15 @@ export const PROXY_ALLOWLIST_HINT =
 	"Allow *.mikrotik.com in the proxy or sandbox allowed-domains list (or switch to full network access), then retry in a new session — allowlist changes do not apply to a running session.";
 
 /**
+ * First Bun release whose `fetch` throws `ERR_PROXY_TUNNEL` for a non-2xx
+ * CONNECT answer. Bun 1.4.2 and older (1.3.x included) resolve the proxy's own
+ * answer as a `Response` instead — a proxy 403 arrives as HTTP 403 with the
+ * proxy's body. Observed against a live refusing egress proxy (#232); the 403
+ * verdicts' hedge names this version.
+ */
+export const BUN_PROXY_TUNNEL_THROWS_SINCE = "1.4.3";
+
+/**
  * Hint attached when the egress proxy answers 407 to CONNECT. A credentials
  * problem, not an allowlist refusal: the proxy is reachable and the host may
  * be allowed, but the request carried no (or bad) proxy authentication.
@@ -174,12 +183,14 @@ export function proxyRefusalHint(err: unknown): string {
  * CONNECT tunnel — terminal, not retriable, and never a connection failure.
  *
  * Bun rejects ANY non-2xx CONNECT answer with `code: "ERR_PROXY_TUNNEL"`,
- * carrying the proxy's `status`/`statusText`/`headers` (docs + local probe,
- * Bun 1.4.4) — so the code alone cannot tell "refused" from "the proxy is
- * sick". The status decides, read through the cause chain: a 5xx is the proxy
- * failing (transient — NOT a refusal, the retry loops own it); 407 is refused
- * for credentials (still a refusal — `proxyRefusalHint` picks its hint); 403,
- * and shapes with no status at all, read as the allowlist refusal.
+ * carrying the proxy's `status`/`statusText`/`headers` (docs, local probe, and
+ * a live refusing egress proxy, Bun 1.4.3+: 403 for an allowlist refusal, 502
+ * when the proxy cannot dial an allowed host) — so the code alone cannot tell
+ * "refused" from "the proxy is sick". The status decides, read through the
+ * cause chain: a 5xx is the proxy failing (transient — NOT a refusal, the
+ * retry loops own it); 407 is refused for credentials (still a refusal —
+ * `proxyRefusalHint` picks its hint); 403, and shapes with no status at all,
+ * read as the allowlist refusal.
  *
  * The message branches exist for runtimes/wrappers that drop the code. They
  * deliberately avoid bare "tunnel": a DNS failure for a host with "tunnel" in

@@ -5,6 +5,7 @@
 import type { Arch, Channel } from "./types.ts";
 import { CHANNELS, QuickCHRError } from "./types.ts";
 import {
+	BUN_PROXY_TUNNEL_THROWS_SINCE,
 	fetchResilient,
 	isConnectionFailure,
 	isProxyConfiguredFor,
@@ -137,14 +138,15 @@ export async function resolveVersion(
 			if (!response.ok) {
 				// A 403 through a configured proxy is the special case: on the
 				// pinned Bun a proxy CONNECT refusal always throws, so the 403 came
-				// from the origin through the tunnel — but on older Bun it can be
-				// the proxy's own refusal, so the verdict hedges and keeps the
+				// from the origin through the tunnel — but on Bun older than
+				// BUN_PROXY_TUNNEL_THROWS_SINCE it can be the proxy's own refusal
+				// (observed live, #232), so the verdict hedges and keeps the
 				// allowlist fix (#210). With no proxy configured a 403 is the
 				// origin's verdict, like any other status.
 				if (response.status === 403 && isProxyConfiguredFor(url)) {
 					throw new QuickCHRError(
 						"DOWNLOAD_FAILED",
-						`Failed to fetch version for channel "${channel}": HTTP 403 via the egress proxy — the origin refused the request, or on Bun older than 1.4.4 the proxy refused CONNECT for ${hostname}`,
+						`Failed to fetch version for channel "${channel}": HTTP 403 via the egress proxy — the origin refused the request, or on Bun older than ${BUN_PROXY_TUNNEL_THROWS_SINCE} the proxy refused CONNECT for ${hostname}`,
 						PROXY_ALLOWLIST_HINT,
 					);
 				}
