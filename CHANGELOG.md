@@ -11,6 +11,14 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Fixed
+
+- The hedged "HTTP 403 via the egress proxy" error names the right Bun version.
+  It said proxy CONNECT refusals arrive as responses on Bun older than 1.4.4.
+  Checked against a live refusing proxy, Bun 1.4.3 already throws
+  `ERR_PROXY_TUNNEL`, and only 1.4.2 and older return the proxy's 403 as a
+  response, so the message now says "older than 1.4.3". (#232)
+
 ## [0.5.5] — 2026-11-01
 
 ### Added

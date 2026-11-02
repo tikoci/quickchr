@@ -443,6 +443,9 @@ describe("downloadToFile — HTTP outcomes", () => {
 			expect(err.code).toBe("DOWNLOAD_FAILED");
 			expect(err.message).toContain("403");
 			expect(err.message).toContain("via the egress proxy");
+			// Observed live (#232): Bun 1.4.2 and older resolve a proxy 403 as a
+			// Response; 1.4.3 is the first that throws ERR_PROXY_TUNNEL.
+			expect(err.message).toContain("on Bun older than 1.4.3");
 			expect(err.message).toContain("download.mikrotik.com");
 			expect(err.installHint).toContain("*.mikrotik.com");
 			expect(calls).toBe(1);

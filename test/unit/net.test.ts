@@ -270,6 +270,45 @@ describe("isProxyRefusal", () => {
 		expect(isProxyRefusal(wrapped)).toBe(false);
 	});
 
+	test("live refusing-proxy shapes: 403 is the allowlist refusal, 502 is not a refusal (#232)", () => {
+		// Exactly what Bun 1.4.4 threw against the Claude Code cloud egress proxy:
+		// a plain Error whose `code` lives on its prototype (not an own property,
+		// so spreads and JSON.stringify drop it), own status/statusText/headers,
+		// no cause.
+		const live = (status: number, statusText: string, body: number) => {
+			const proto = Object.create(Error.prototype, {
+				name: { value: "Error", writable: true, enumerable: true, configurable: true },
+				code: { value: "ERR_PROXY_TUNNEL", writable: true, enumerable: true, configurable: true },
+			});
+			const err = Object.setPrototypeOf(
+				new Error(`Proxy refused to open a tunnel: ${status} ${statusText}`),
+				proto,
+			) as Error & { status: number; statusText: string; headers: Headers };
+			err.status = status;
+			err.statusText = statusText;
+			err.headers = new Headers({
+				"content-type": "text/plain; charset=utf-8",
+				"content-length": String(body),
+				connection: "close",
+			});
+			return err;
+		};
+
+		// Host off the allowlist: body "request blocked: no rule or allowlist entry allows host …".
+		const refused = live(403, "Forbidden", 79);
+		expect(Object.getOwnPropertyNames(refused)).not.toContain("code");
+		expect(isProxyRefusal(refused)).toBe(true);
+		expect(proxyTunnelStatus(refused)).toBe(403);
+		expect(proxyRefusalHint(refused)).toBe(PROXY_ALLOWLIST_HINT);
+		expect(isConnectionFailure(refused)).toBe(false);
+
+		// Allowed wildcard, unresolvable host: body "upstream dial failed".
+		const sick = live(502, "Bad Gateway", 20);
+		expect(isProxyRefusal(sick)).toBe(false);
+		expect(proxyTunnelStatus(sick)).toBe(502);
+		expect(isConnectionFailure(sick)).toBe(false);
+	});
+
 	test("false for connection failures, aborts, and unrelated errors", () => {
 		// A proxy refusal must never read as a connection failure — that is what
 		// would send it down the public-DNS fallback and the retry loops.

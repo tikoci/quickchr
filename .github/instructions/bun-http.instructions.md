@@ -88,7 +88,10 @@ Sandboxed cloud sessions proxy all egress, and a host off the proxy's allowlist
 fails every download (#210). The mapping in `net.ts` / `download.ts` /
 `versions.ts` rests on these facts, each confirmed by local stub-proxy probes on
 Bun 1.4.4 except the `NO_PROXY` entry table, which is per the docs (see the
-[Bun fetch docs](https://bun.sh/docs/runtime/networking/fetch)):
+[Bun fetch docs](https://bun.sh/docs/runtime/networking/fetch)). The CONNECT
+refusal shapes and the version boundary were also observed against a live
+refusing egress proxy, a Claude Code cloud session on the default "Trusted"
+network policy (#232):
 
 - Selection: `HTTP_PROXY` only for `http:` URLs, `HTTPS_PROXY` only for
   `https:` URLs (either case); `ALL_PROXY` (either case) for both when the
@@ -102,13 +105,29 @@ Bun 1.4.4 except the `NO_PROXY` entry table, which is per the docs (see the
   used as one: on the scheme-specific variables `fetch` throws
   `UnsupportedProxyProtocol`; on `ALL_PROXY` it is ignored and the request goes
   direct.
-- CONNECT refusals throw, never resolve: when the proxy answers `CONNECT` with
-  anything but a 2xx status, `fetch` rejects with `code: "ERR_PROXY_TUNNEL"`
-  carrying the proxy's `status`/`statusText`/`headers` — so on this Bun a 403
-  `Response` necessarily came from the origin through an established tunnel.
-  Observed message shape: `Proxy refused to open a tunnel: 403 Forbidden`.
+- CONNECT refusals throw, never resolve (Bun 1.4.3 and newer): when the proxy
+  answers `CONNECT` with anything but a 2xx status, `fetch` rejects with
+  `code: "ERR_PROXY_TUNNEL"` carrying the proxy's `status`/`statusText`/`headers`
+  — so on these Bun versions a 403 `Response` necessarily came from the origin
+  through an established tunnel. Message shape:
+  `Proxy refused to open a tunnel: 403 Forbidden`. The error is a plain `Error`
+  with no `cause` and no `stack`; `code` (and `name`) live on its prototype, so
+  read `err.code` directly — spreads, `Object.keys` and `JSON.stringify` drop it.
+- Live statuses: an allowlist refusal is `403` (proxy body
+  `request blocked: no rule or allowlist entry allows host "<host>"`, which Bun
+  does not expose on the thrown error). An allowed wildcard whose host does not
+  resolve is `502 Bad Gateway` (body `upstream dial failed`). A bad port on an
+  allowed host opens the tunnel, then fails as a connection reset
+  (`ECONNRESET`), not as a CONNECT status. A `407` needs a proxy that requires
+  credentials; it was not reproduced live.
+- Bun 1.4.2 and older (1.3.x included) resolve the proxy's CONNECT answer as a
+  `Response` instead of throwing: HTTP 403 with the proxy's body for a refusal,
+  HTTP 502 for a dial failure. `BUN_PROXY_TUNNEL_THROWS_SINCE` (`net.ts`) holds
+  the boundary, and the 403 hedge names it.
 - quickchr mapping: `isProxyRefusal()` reads the CONNECT `status` through the
   cause chain — 403 and status-less shapes get the allowlist hint, 407 gets the
-  credentials hint, and a proxy 5xx is not a refusal (the retry loops own it).
-  An HTTP 403 verdict blames the proxy only when `isProxyConfiguredFor(url)` is
-  true, and hedges for older Bun where proxy 403s arrived as responses.
+  credentials hint, and a proxy 5xx is not a refusal. `downloadToFile` retries
+  it like any transient failure; `resolveVersion` surfaces it on the first
+  attempt, as it does any non-connection error. An HTTP 403 verdict blames the
+  proxy only when `isProxyConfiguredFor(url)` is true, and hedges for Bun
+  older than 1.4.3, where proxy 403s arrive as responses.
