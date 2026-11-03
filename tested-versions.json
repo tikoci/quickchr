@@ -383,6 +383,13 @@
 			"run_id": "41038132463"
 		}
 	},
+	"7.25.1": {
+		"linux-x86": {
+			"conclusion": "pass",
+			"date": "2026-11-03T12:35:09.630Z",
+			"run_id": "41631634952"
+		}
+	},
 	"7.25beta3": {
 		"linux-arm64": {
 			"conclusion": "pass",
