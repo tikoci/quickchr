@@ -73,6 +73,7 @@ cmr
 cmrpkgs
 coderabbit
 coderabbitai
+codesign
 compdef
 compgen
 compinit
@@ -143,6 +144,7 @@ eslintcache
 ethertype
 ethertypes
 etimeout
+euid
 execve
 failable
 failback
@@ -470,6 +472,7 @@ tzsp
 udevadm
 udp
 uefi
+uid
 uncharacterized
 unfiled
 unparseable
@@ -484,6 +487,7 @@ usernet
 userprofile
 userspace
 usr
+utf
 utm
 utmctl
 utmzip

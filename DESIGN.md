@@ -1238,3 +1238,18 @@ is `MACHINE_STOPPED`; a wait that never reaches REST is a genuine
 `BOOT_TIMEOUT` with `preserve-existing` cleanup. Deliberately out: no frozen-specific hint on `exec`/`get` failures,
 and no `savevm` refusal on prelaunch VMs (snapshot is already tricky business;
 QEMU accepts or errors on its own).
+
+## Managed macOS networks and services — research direction (2026-11-07)
+
+The next avenue is quickchr-owned privileged network setup and optional persistent
+machine supervision, using this Intel Mac's bridged app-t3code workload to ground
+the model. Replacing Homebrew service management does not require replacing the
+socket_vmnet binary. Network jobs and machine runners may share deployment code
+while retaining separate lifetimes and privileges. This is research, not an
+accepted CLI/state schema or a change to current network-management behavior.
+
+See [the research direction](docs/macos-managed-services-research.md) for scope,
+current host observations, alternatives, and the staged evidence needed before
+product surfacing; the first direct-QEMU experiment is preserved in
+[test/lab/macos-launchd/REPORT.md](test/lab/macos-launchd/REPORT.md). Linux TAP/TUN
+remains a later comparison, after a working macOS model establishes the boundary.

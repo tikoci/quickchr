@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>dev.tikoci.quickchr.lab.db7b9287-bd8a-46ee-8d8b-30f903e44ed6</string>
+<key>ProgramArguments</key><array><string>/usr/local/bin/qemu-system-x86_64</string><string>-M</string><string>pc</string><string>-m</string><string>512</string><string>-smp</string><string>1</string><string>-accel</string><string>hvf</string><string>-cpu</string><string>host</string><string>-drive</string><string>file=/private/tmp/qchr-lld/machines/launchd-lab-1107a/boot.qcow2,format=qcow2,if=virtio</string><string>-netdev</string><string>user,id=net0,hostfwd=tcp::9280-:80,hostfwd=tcp::9281-:443,hostfwd=tcp::9282-:22,hostfwd=tcp::9283-:8728,hostfwd=tcp::9284-:8729,hostfwd=tcp::9285-:8291</string><string>-device</string><string>virtio-net-pci,netdev=net0,mac=02:78:69:74:d6:80</string><string>-netdev</string><string>vmnet-shared,id=net1</string><string>-device</string><string>virtio-net-pci,netdev=net1,mac=02:15:87:b7:e2:62</string><string>-display</string><string>none</string><string>-chardev</string><string>socket,id=monitor0,path=/private/tmp/qchr-lld/machines/launchd-lab-1107a/monitor.sock,server=on,wait=off</string><string>-mon</string><string>chardev=monitor0,mode=readline</string><string>-chardev</string><string>socket,id=serial0,path=/private/tmp/qchr-lld/machines/launchd-lab-1107a/serial.sock,server=on,wait=off</string><string>-serial</string><string>chardev:serial0</string><string>-device</string><string>virtio-serial-pci,id=virtio-serial-qga</string><string>-chardev</string><string>socket,id=qga0,path=/private/tmp/qchr-lld/machines/launchd-lab-1107a/qga.sock,server=on,wait=off</string><string>-device</string><string>virtserialport,chardev=qga0,name=org.qemu.guest_agent.0,id=qga-port0</string></array>
+<key>WorkingDirectory</key><string>/private/tmp/qchr-lld/machines/launchd-lab-1107a</string>
+<key>RunAtLoad</key><false/>
+<key>KeepAlive</key><false/>
+<key>StandardOutPath</key><string>/private/tmp/qchr-lld-out1/qemu.stdout.log</string>
+<key>StandardErrorPath</key><string>/private/tmp/qchr-lld-out1/qemu.stderr.log</string>
+<key>Umask</key><integer>63</integer>
+<key>ExitTimeOut</key><integer>30</integer>
+</dict></plist>

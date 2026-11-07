@@ -22,7 +22,8 @@ disk resets, and provisioning rollback currently depend on quickchr's runtime.
 This report does not propose changing centrs or the website yet.
 
 Persistent quickchr-owned macOS guests with direct vmnet networking are a
-different topic; see [launchd service research](macos-launchd-research.md).
+different topic; see [launchd service research](macos-launchd-research.md) and the
+[managed-network/service research direction](macos-managed-services-research.md).
 
 ## Conclusion
 

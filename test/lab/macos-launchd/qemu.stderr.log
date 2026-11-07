@@ -1,0 +1,5 @@
+qemu-system-x86_64: -mon chardev=monitor0,mode=readline: warning: '-mon' is deprecated, use '-object' with 'monitor-hmp' or 'monitor-qmp' types instead
+qemu-system-x86_64: terminating on signal 15 from pid 1 (<unknown process>)
+qemu-system-x86_64: -mon chardev=monitor0,mode=readline: warning: '-mon' is deprecated, use '-object' with 'monitor-hmp' or 'monitor-qmp' types instead
+qemu-system-x86_64: -mon chardev=monitor0,mode=readline: warning: '-mon' is deprecated, use '-object' with 'monitor-hmp' or 'monitor-qmp' types instead
+qemu-system-x86_64: -mon chardev=monitor0,mode=readline: warning: '-mon' is deprecated, use '-object' with 'monitor-hmp' or 'monitor-qmp' types instead

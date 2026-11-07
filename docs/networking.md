@@ -6,6 +6,11 @@
 > This document covers *how things work under the hood* — what QEMU does, how each
 > platform's networking stack operates, and what quickchr's resolution engine maps to.
 
+For the current macOS managed-network/service research direction, see
+[managed macOS networks and persistent machines](macos-managed-services-research.md).
+It explores quickchr-owned setup in place of Homebrew service management; the
+command proposals in this reference are not all implemented.
+
 ---
 
 ## The Core Problem

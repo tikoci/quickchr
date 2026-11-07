@@ -1,13 +1,22 @@
 # macOS launchd service research
 
-Research date: 2026-11-06. Options and feasibility research only; no service has
-been installed and no runtime behavior has changed. Reviewed on Linux against
-repository code and primary upstream sources. macOS runtime validation is pending.
+Research date: 2026-11-06. Options and feasibility research; no production service
+mode is implemented and no permanent service remains installed. Initially reviewed
+on Linux against repository code and primary upstream sources. Validation: the
+bounded experiment
+in `test/lab/macos-launchd/README.md` ran live on Morpheus 2026-11-06; results
+and limits are in `test/lab/macos-launchd/REPORT.md`. Host reboot, start-at-boot,
+and bridged-with-guest validation remain pending.
+
+For the next research direction and the 2026-11-07 discussion, see
+[managed macOS networks and persistent machines](macos-managed-services-research.md).
+That direction favors quickchr-owned service setup, potentially reusing the
+socket_vmnet binary. The direct-QEMU experiment below remains comparison evidence.
 
 ## Assessment
 
-A launchd-managed quickchr machine is a better fit for persistent, headless
-RouterOS use than synchronizing quickchr and UTM configurations. Quickchr keeps
+The initial assessment favored a launchd-managed quickchr machine for persistent,
+headless RouterOS use than synchronizing quickchr and UTM configurations. Quickchr keeps
 one authoritative machine configuration, disk inventory, MAC addresses, and
 management interface. Launchd becomes the process supervisor, not another VM
 configuration editor. The plist is generated deployment state.

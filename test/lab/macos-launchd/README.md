@@ -1,11 +1,14 @@
 # macOS launchd experiment
 
-Status: prepared on Linux; **not run on macOS**. The T3 Mac environment Morpheus is linked and reachable; live execution
-is the next step. No service is installed and no test guest has been created.
+Status: ran live on Morpheus (Intel Mac) 2026-11-06; see `REPORT.md` for versions,
+timings, and evidence. No service remains installed and no test guest remains.
 
 Purpose: establish whether a persistent quickchr guest can be supervised by
 launchd with direct vmnet networking, retaining a stable management endpoint for
 app-t3code projects. This is a disposable experiment, not production service mode.
+
+Next research: [quickchr-owned managed networks and service lifecycle](../../../docs/macos-managed-services-research.md).
+This direct-QEMU lab is an initial comparison, not the final service architecture.
 
 ## Scope
 
