@@ -11,6 +11,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+## [0.5.6] — 2026-11-07
+
 ### Fixed
 
 - arm64 machines find UEFI firmware that lives beside the QEMU quickchr runs,
