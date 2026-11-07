@@ -288,7 +288,8 @@ the lease and redirects were unchanged.
    the rename across reboots. **Product fix:** pin disk PCI addresses
    (`-device virtio-blk-pci,drive=…,addr=…`) or emit disks before NICs. As it
    stands, any NIC change on a machine with extra disks can break `/app`/container
-   paths.
+   paths. Tracked in #257. Pinning disks may move the problem to NICs, which is
+   why it is a separate UX bug and not part of Track A.
 2. **`/app` NAT follows `/app/settings router-ip`, and the auto value goes stale.**
    Redirects are dynamic dst-nat rules with `dst-address=<router-ip>`.
    `assumed-router-ip` stayed `10.0.2.15` (detected when user mode was the only
@@ -302,13 +303,19 @@ the lease and redirects were unchanged.
    reservation for guest MAC `02:69:6c:32:6f:e0` on the LAN router would make it
    durable. The lease was keyed on the guest MAC even though the LAN sees the
    host's Wi-Fi MAC; not yet done.
+   **Open, research-only (not critical):** how RouterOS resolves `assumed-router-ip`.
+   The user's hypothesis is that it relates to equal DHCP `default-route-distance`,
+   which is untested; the user is asking on forum.mikrotik.com. The answer belongs
+   in the eventual `/app` skill. No routeros-skills issue yet, by choice. The
+   quickchr side is #258.
 3. **Explicit router-ip breaks the user-mode forward.** Once redirects target the
    LAN IP, quickchr's `hostfwd 9156→3773` lands on `10.0.2.15:3773` and matches
    nothing. One static rule keeps both:
    `chain=dstnat dst-address=10.0.2.15 dst-port=3773 protocol=tcp
    action=dst-nat to-addresses=172.18.0.2 to-ports=3773` (commented
    `quickchr: keep host 127.0.0.1:9156 …`). It hard-codes the app's internal IP,
-   so a product version should derive it.
+   so a product version should derive it. #258 proposes quickchr owning the
+   user-mode DHCP client's route policy instead of documenting rules like this.
 4. **Start an app through `/app`, not `/container`.** `/app` has no `start`
    verb, and `/app/restart` does nothing on a stopped app. `/container/start` runs
    the container, but `/app` still reports `running=false` and installs none of its
@@ -332,29 +339,20 @@ run by the network service; machines stay unprivileged.
 | stop / start | sudo | `launchctl kill TERM` / `kickstart` (the previous lab found `launchctl stop` ineffective) |
 | remove | sudo | `bootout`, delete the plist and socket; check for attached machines first |
 
-Machine-side pieces for Track A, smallest first:
+Open work for Track A lives in **#256**. That covers the network service verbs,
+`-netdev stream` attachment, `set --add-network`, `bridged:auto` link state and
+socket naming. Companion bugs are #257 (NIC changes renumber disk slots), #258
+(user-mode DHCP route policy with a real network) and #259 (`EPERM` status
+falsification).
 
-- Attach with `-netdev stream` instead of `socket_vmnet_client`, which allows any
-  number of networks and reconnection.
-- Add `set --add-network` / remove-network that preserve existing NIC MACs.
-- Pin disk PCI addresses (finding 1).
-- Make `bridged:auto` check link state.
-- Fix the `EPERM`-as-dead status bug from the earlier lab before any
-  root-adjacent mode.
-- Name sockets for quickchr rather than borrowing lima's
-  `socket_vmnet.bridged.<iface>` convention. Borrowing it worked here only because
-  detection already scans for it.
-
-**Open in Track A: how the helper binary gets installed without Homebrew's
-service.** Options, all ending in a root-owned copy outside owner-writable paths:
-
-- Copy from the Homebrew Cellar real path (done here; requires the formula).
-- Download the upstream release tarball (`socket_vmnet-1.2.2-x86_64.tar.gz`,
-  about 20 KB, published with `SHA256SUMS` and a GPG `.asc`), verify, extract.
-- Build from source (small C).
-
-Upgrades re-run the sudo install step. Which source quickchr trusts by default is
-undecided.
+**Decided 2026-11-07: helper install source.** Use the upstream release tarball
+(`socket_vmnet-<v>-<arch>.tar.gz`; x86_64 1.2.2 is about 20 KB, published with
+`SHA256SUMS` and `SHA256SUMS.asc`). quickchr pins the version and sha256. Before
+the one sudo step, it discloses the version, source URL, hash, destination, and
+plist label and arguments. It installs into a root-owned prefix. No Homebrew
+dependency. The Cellar copy used for t3code (sha256 `babe3440…e87e763`) was an
+interim. Side note, not on either track: pinning QEMU the same way could follow
+(app-t3code already has a recipe).
 
 **Track B — daemonizing machines (separate, later).** Today, start/stop and orphan
 handling stay with the user; the machine runs as owner from `quickchr start`.
