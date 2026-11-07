@@ -154,17 +154,39 @@ Sockets created:
 
 ### How QEMU Attaches (No Root)
 
-`socket_vmnet` provides `socket_vmnet_client`, a small wrapper that connects to the daemon socket and passes the resulting file descriptor (as fd 3) to the QEMU subprocess. QEMU is then launched as a child process of `socket_vmnet_client`, not as root.
+QEMU connects to the daemon's unix socket itself with `-netdev stream` (QEMU 7.2+).
+socket_vmnet speaks QEMU's stream framing (a 4-byte big-endian length before each
+frame), so quickchr spawns QEMU directly as your user. There is no
+`socket_vmnet_client` wrapper and no fd passing.
 
 ```sh
-# Note: no sudo here!
-$(brew --prefix)/opt/socket_vmnet/bin/socket_vmnet_client \
-  $(brew --prefix)/var/run/socket_vmnet \
-  qemu-system-aarch64 \
-    -netdev socket,id=net0,fd=3 \
-    -device virtio-net-pci,netdev=net0 \
-    [... other QEMU args ...]
+# Note: no sudo here, and no wrapper
+qemu-system-aarch64 \
+  -netdev stream,id=net0,server=off,addr.type=unix,addr.path=$(brew --prefix)/var/run/socket_vmnet,reconnect-ms=1000 \
+  -device virtio-net-pci,netdev=net0 \
+  [... other QEMU args ...]
 ```
+
+- **`reconnect-ms`** (QEMU 9.2+) makes the NIC re-attach when the daemon restarts,
+  without restarting QEMU or the guest. quickchr adds it when it can read a QEMU
+  version of 9.2 or later. The older seconds-based `reconnect` is removed in current
+  QEMU (11.1 rejects it). Without reconnection, a daemon restart leaves the NIC down
+  until the VM restarts.
+- **A missing socket does not fail QEMU at startup.** A stream client to a socket that
+  is not there just runs with the link down. quickchr therefore checks the daemon
+  before spawning (`NETWORK_UNAVAILABLE`).
+- **Any number of socket_vmnet NICs per VM.** Each NIC is its own `-netdev stream`,
+  for example one shared and one bridged.
+
+Grounded 2026-11-07 on macOS 26.6 / QEMU 11.1.1 with a bridged-en0 daemon: two
+bridged stream NICs on one unprivileged VM each got a LAN lease. After
+`launchctl kickstart -k` of the daemon, both were reachable again within 2 s,
+while a VM on the old `socket_vmnet_client` path stayed down
+([research notes](macos-managed-services-research.md)).
+
+socket_vmnet still ships `socket_vmnet_client` (`socket_vmnet_client <socket> qemu …
+-netdev socket,id=net0,fd=3`) for tools that cannot open the socket themselves.
+quickchr used it through 0.5.6, which limited a VM to one socket_vmnet network.
 
 **The critical difference from QEMU built-in vmnet:**
 
@@ -173,7 +195,7 @@ $(brew --prefix)/opt/socket_vmnet/bin/socket_vmnet_client \
 sudo qemu-system-aarch64 -netdev vmnet-shared,id=net0 ...
 
 # socket_vmnet — root is in the daemon, QEMU runs as your user
-socket_vmnet_client /var/run/socket_vmnet qemu-system-aarch64 -netdev socket,id=net0,fd=3 ...
+qemu-system-aarch64 -netdev stream,id=net0,server=off,addr.type=unix,addr.path=/var/run/socket_vmnet ...
 ```
 
 ### Multi-VM with socket_vmnet
@@ -182,13 +204,13 @@ Multiple VMs can share **one** `socket_vmnet` instance because vmnet itself acts
 
 ```sh
 # VM 1
-socket_vmnet_client /var/run/socket_vmnet qemu-system-aarch64 \
-  -netdev socket,id=net0,fd=3 \
+qemu-system-aarch64 \
+  -netdev stream,id=net0,server=off,addr.type=unix,addr.path=/var/run/socket_vmnet \
   -device virtio-net-pci,netdev=net0,mac=52:54:00:ab:cd:01
 
 # VM 2 (simultaneously, different terminal)
-socket_vmnet_client /var/run/socket_vmnet qemu-system-aarch64 \
-  -netdev socket,id=net0,fd=3 \
+qemu-system-aarch64 \
+  -netdev stream,id=net0,server=off,addr.type=unix,addr.path=/var/run/socket_vmnet \
   -device virtio-net-pci,netdev=net0,mac=52:54:00:ab:cd:02
 ```
 
@@ -541,36 +563,14 @@ When quickchr sees a named network in the registry, it builds QEMU args based on
 |---|---|---|
 | `user` | `-netdev user,id=netN,hostfwd=...` | No |
 | `socket::name` | depends on the link's mode — `-netdev dgram,local.type=unix,...` (default), `-netdev socket,listen=/connect=`, or `-netdev socket,mcast=` | No |
-| `socket_vmnet-shared` | `-netdev socket,id=netN,fd=3` (or fd=5,7 for multi-NIC) | Yes: `socket_vmnet_client <socketPath>` |
-| `socket_vmnet-bridged` | `-netdev socket,id=netN,fd=3` | Yes: `socket_vmnet_client <socketPath>` |
+| `socket_vmnet-shared` | `-netdev stream,id=netN,server=off,addr.type=unix,addr.path=<socketPath>[,reconnect-ms=1000]` | No |
+| `socket_vmnet-bridged` | `-netdev stream,id=netN,server=off,addr.type=unix,addr.path=<socketPath>[,reconnect-ms=1000]` | No |
 | `tap` | `-netdev tap,id=netN,ifname=<ifname>,script=no,downscript=no` | No |
 | `bridge` | `-netdev bridge,id=netN,br=<brname>` | No |
 
-The `socket_vmnet_client` wrapper is transparent: it wraps the entire QEMU spawn so quickchr's Bun.spawn call becomes:
-
-```typescript
-// Conceptually:
-const cmd = network.type.startsWith("socket_vmnet")
-  ? [socketVmnetClientBin, network.socketPath, qemuBin, ...qemuArgs]
-  : [qemuBin, ...qemuArgs];
-Bun.spawn(cmd, { ... });
-```
-
-Using multiple `socket_vmnet` networks (e.g., one shared + one bridged) requires chaining two `socket_vmnet_client` calls, each passing a different fd:
-
-```sh
-# Multi-NIC with two different socket_vmnet networks
-socket_vmnet_client /var/run/socket_vmnet \
-  socket_vmnet_client /var/run/socket_vmnet.bridged.en0 \
-  qemu-system-aarch64 \
-    -netdev socket,id=net0,fd=3 \
-    -device virtio-net-pci,netdev=net0 \
-    -netdev socket,id=net1,fd=4 \
-    -device virtio-net-pci,netdev=net1 \
-    ...
-```
-
-This is how Lima handles dual-socket-vmnet setups. The fd numbers increment: first `socket_vmnet_client` passes fd=3, second passes fd=4 (or the next available).
+No row needs a wrapper. Several socket_vmnet networks on one VM (for example one
+shared and one bridged) are just several `-netdev stream` entries, each with its own
+socket path.
 
 ### MAC Address Management
 
@@ -665,7 +665,6 @@ VRRP needs a shared broadcast domain visible to the host. This is the one scenar
 
 These are tracked here as platform-level questions. Implementation items are tracked as GitHub Issues (`area:networking`).
 
-- **socket_vmnet fd numbering with multi-NIC:** Need to verify the exact fd passthrough mechanism when chaining two `socket_vmnet_client` calls. Test before committing to the multi-NIC socket_vmnet design.
 - **ARM64 CHR `--add-network` NIC limit:** RouterOS arm64 CHR has been observed to support up to 9 VirtIO-net NICs on `virt` machine. Verify the exact limit before documenting it.
 - **Persistent TAP on Linux reboot:** Decide between systemd-networkd, udev, or explicit systemd service for persistence. `systemd-networkd` .netdev files are the cleanest but require network daemon config.
 - **Docker networks as underlay:** Podman/Docker's `macvlan` networks can bridge containers to a physical interface without user-land TAP management. Interesting for CI (Docker-in-Docker style). Worth exploring as an alternative to raw TAP for Linux CI.

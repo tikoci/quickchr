@@ -56,7 +56,7 @@ macOS **arm64 guests never auto-select HVF** — see the Apple Silicon note belo
 
 - User mode: `-netdev user,id=net0,hostfwd=...`
 - Socket (inter-VM L2): `-netdev dgram,id=net1,local.type=unix,local.path=...,remote.type=unix,remote.path=...` (default), or `-netdev socket,id=net1,listen=:4001` / `connect=127.0.0.1:4001`, or `-netdev socket,id=net1,mcast=230.0.0.1:4001`
-- socket_vmnet (macOS, preferred): `-netdev socket,id=net0,fd=3` — QEMU launched via `socket_vmnet_client <socket_path> qemu-system-*`. Daemon runs as root, QEMU runs unprivileged
+- socket_vmnet (macOS, preferred): `-netdev stream,id=net0,server=off,addr.type=unix,addr.path=<socket>[,reconnect-ms=1000]` — QEMU (7.2+) connects to the daemon socket itself; no `socket_vmnet_client` wrapper, any number of such NICs per VM. `reconnect-ms` needs 9.2+ (the seconds-based `reconnect` is removed in current QEMU). A missing socket does not fail QEMU at startup, so check the daemon before spawning. Daemon runs as root, QEMU runs unprivileged
 - vmnet-shared (macOS, fallback): `-netdev vmnet-shared,id=net0` — requires entire QEMU as root
 - vmnet-bridged (macOS, fallback): `-netdev vmnet-bridged,id=net0,ifname=en0` — requires root
 - TAP (Linux): `-netdev tap,id=net0,ifname=tap-chr0,script=no,downscript=no` — pre-created user-owned TAP

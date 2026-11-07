@@ -11,6 +11,17 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Changed
+
+- macOS `shared` and `bridged:<iface>` networks served by a socket_vmnet daemon
+  now attach with QEMU's `-netdev stream` (QEMU 7.2+) instead of wrapping QEMU in
+  `socket_vmnet_client`. A machine can have **more than one** socket_vmnet network
+  (for example shared and bridged), where before it failed with "only one wrapper is
+  supported". On QEMU 9.2+ each such NIC carries `reconnect-ms`, so restarting the
+  daemon no longer leaves the VM's network down until the VM restarts. QEMU older
+  than 7.2 is refused for these networks with `NETWORK_UNAVAILABLE`. Library: the
+  optional `ResolvedNetwork.wrapper` field is gone, since nothing sets it. (#256)
+
 ## [0.5.6] — 2026-11-07
 
 First `latest` release since 0.5.4, so upgrading from `latest` also brings in

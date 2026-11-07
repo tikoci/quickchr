@@ -66,7 +66,7 @@ import {
 import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
@@ -1732,8 +1732,7 @@ async function hardRebootMachine(
 		background: true,
 	};
 	const qemuArgs = await buildQemuArgs(restartConfig);
-	const wrapper = extractWrapper(restartConfig.networks);
-	const { pid } = await spawnQemu(qemuArgs, state.machineDir, true, wrapper);
+	const { pid } = await spawnQemu(qemuArgs, state.machineDir, true);
 	state.pid = pid;
 	state.status = "running";
 	state.lastStartedAt = new Date().toISOString();
@@ -2747,9 +2746,8 @@ export class QuickCHR {
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
-		const wrapper = extractWrapper(resolvedNetworks);
 		const bootStart = Date.now();
-		let { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper);
+		let { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground);
 
 		// Foreground (no provisioning): spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
@@ -2802,7 +2800,7 @@ export class QuickCHR {
 			);
 			try { await stopQemu(pid); } catch { /* ignore */ }
 			cleanupQemuSockets(machineDir);
-			({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper));
+			({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground));
 			state.pid = pid;
 			saveMachine(state);
 			booted = await instance.waitForBoot(bootTimeout, probe);
@@ -3175,9 +3173,8 @@ export class QuickCHR {
 		};
 
 		const qemuArgs = await buildQemuArgs(launchConfig);
-		const wrapper = extractWrapper(resolvedNetworks);
 		const bootStart = Date.now();
-		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground, wrapper);
+		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground);
 
 		// Foreground without provisioning: spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {

@@ -20,6 +20,8 @@ mock.module("../../src/lib/platform.ts", () => ({
 import {
 	resolveNetworkConfig,
 	resolveAllNetworks,
+	socketVmnetNetdev,
+	SOCKET_VMNET_RECONNECT_MS,
 	type ResolutionContext,
 } from "../../src/lib/network.ts";
 import type { NetworkConfig, SocketVmnetInfo } from "../../src/lib/types.ts";
@@ -78,7 +80,6 @@ describe("resolveNetworkConfig", () => {
 			expect(resolved(result).qemuNetdevArgs).toContain("-netdev");
 			const netdev = resolved(result).qemuNetdevArgs[1];
 			expect(netdev).toStartWith("user,id=net0");
-			expect(resolved(result).wrapper).toBeUndefined();
 		});
 
 		test("resolves on Linux", () => {
@@ -110,12 +111,10 @@ describe("resolveNetworkConfig", () => {
 	describe("shared", () => {
 		test("uses socket_vmnet when available on macOS", () => {
 			const result = resolveNetworkConfig(cfg("shared"), macCtx(MOCK_SVN));
-			expect(resolved(result).wrapper).toEqual([
-				"/opt/homebrew/opt/socket_vmnet/bin/socket_vmnet_client",
-				"/opt/homebrew/var/run/socket_vmnet",
-			]);
 			const netdev = resolved(result).qemuNetdevArgs[1];
-			expect(netdev).toBe("socket,id=net0,fd=3");
+			expect(netdev).toBe(
+				"stream,id=net0,server=off,addr.type=unix,addr.path=/opt/homebrew/var/run/socket_vmnet",
+			);
 			expect(resolved(result).downgraded).toBeUndefined();
 		});
 
@@ -170,12 +169,10 @@ describe("resolveNetworkConfig", () => {
 				cfg({ type: "bridged", iface: "en0" }),
 				macCtx(MOCK_SVN),
 			);
-			expect(resolved(result).wrapper).toEqual([
-				"/opt/homebrew/opt/socket_vmnet/bin/socket_vmnet_client",
-				"/opt/homebrew/var/run/socket_vmnet.bridged.en0",
-			]);
 			const netdev = resolved(result).qemuNetdevArgs[1];
-			expect(netdev).toBe("socket,id=net0,fd=3");
+			expect(netdev).toBe(
+				"stream,id=net0,server=off,addr.type=unix,addr.path=/opt/homebrew/var/run/socket_vmnet.bridged.en0",
+			);
 		});
 
 		test("falls back to vmnet-bridged without socket_vmnet on macOS", () => {
@@ -472,13 +469,20 @@ describe("resolveAllNetworks", () => {
 		);
 	});
 
-	test("throws on multiple socket_vmnet wrappers", () => {
+	test("allows several socket_vmnet networks on one VM", () => {
 		const configs = [
-			cfg("shared", "net0"),
+			cfg("user", "net0"),
 			cfg("shared", "net1"),
+			cfg({ type: "bridged", iface: "en0" }, "net2"),
 		];
-		const ctx = macCtx(MOCK_SVN);
-		expect(() => resolveAllNetworks(configs, ctx)).toThrow(QuickCHRError);
+		const ctx = { ...macCtx(MOCK_SVN), qemuVersion: "11.1.1" };
+		const netdevs = resolveAllNetworks(configs, ctx).map((c) => resolved(c).qemuNetdevArgs[1]);
+		expect(netdevs[1]).toBe(
+			`stream,id=net1,server=off,addr.type=unix,addr.path=/opt/homebrew/var/run/socket_vmnet,reconnect-ms=${SOCKET_VMNET_RECONNECT_MS}`,
+		);
+		expect(netdevs[2]).toBe(
+			`stream,id=net2,server=off,addr.type=unix,addr.path=/opt/homebrew/var/run/socket_vmnet.bridged.en0,reconnect-ms=${SOCKET_VMNET_RECONNECT_MS}`,
+		);
 	});
 
 	test("preserves original config fields", () => {
@@ -486,5 +490,29 @@ describe("resolveAllNetworks", () => {
 		const results = resolveAllNetworks([original], linuxCtx());
 		expect(results[0]?.specifier).toBe("user");
 		expect(results[0]?.id).toBe("net0");
+	});
+});
+
+describe("socketVmnetNetdev", () => {
+	const sock = "/var/run/socket_vmnet.bridged.en0";
+	const plain = `stream,id=net1,server=off,addr.type=unix,addr.path=${sock}`;
+
+	test("refuses QEMU older than 7.2 (no -netdev stream)", () => {
+		expect(() => socketVmnetNetdev("net1", sock, "7.1.0")).toThrow(/QEMU 7\.2 or newer/);
+	});
+
+	test("QEMU 7.2 through 9.1 attach without reconnect-ms", () => {
+		expect(socketVmnetNetdev("net1", sock, "7.2.0")).toBe(plain);
+		expect(socketVmnetNetdev("net1", sock, "9.1.3")).toBe(plain);
+	});
+
+	test("QEMU 9.2+ re-attaches after a daemon restart", () => {
+		const withReconnect = `${plain},reconnect-ms=${SOCKET_VMNET_RECONNECT_MS}`;
+		expect(socketVmnetNetdev("net1", sock, "9.2.0")).toBe(withReconnect);
+		expect(socketVmnetNetdev("net1", sock, "11.1.1")).toBe(withReconnect);
+	});
+
+	test("an unknown QEMU version gets the plain form rather than an error", () => {
+		expect(socketVmnetNetdev("net1", sock)).toBe(plain);
 	});
 });
