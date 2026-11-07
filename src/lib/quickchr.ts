@@ -2814,7 +2814,7 @@ export class QuickCHR {
 				({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground));
 			} catch (err) {
 				finalizeStoppedState(state);
-				throw err;
+				throw await failProvisioning(err, instance, undefined);
 			}
 			state.pid = pid;
 			saveMachine(state);

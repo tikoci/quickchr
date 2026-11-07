@@ -45,13 +45,27 @@ if (kind === "timeout") {
 	const probe = spyOn(network, "assertSocketVmnetReachable");
 	const { QuickCHR } = await import("../../../src/lib/quickchr.ts");
 	let instance: ReturnType<typeof QuickCHR.get>;
-	if (kind === "retry") {
+	if (kind?.startsWith("retry")) {
+		const options = {
+			name, version: "7.25", arch: "x86" as const,
+			secureLogin: kind === "retry-secure",
+			user: kind === "retry-secure" ? undefined : { name: "review-ops", password: "sentinel-password" },
+		};
 		probe.mockResolvedValueOnce(undefined).mockRejectedValue(new QuickCHRError("NETWORK_UNAVAILABLE", "daemon stopped"));
 		const diagnostics = await import("../../../src/lib/diagnostics.ts");
 		spyOn(diagnostics, "captureBootFailure").mockResolvedValue({ summary: "failed", reportPath: null, preserved: false });
-		await expect(QuickCHR.start({ name, version: "7.25", arch: "x86", secureLogin: false })).rejects.toMatchObject({ code: "NETWORK_UNAVAILABLE" });
+		await expect(QuickCHR.start(options)).rejects.toMatchObject({ code: "NETWORK_UNAVAILABLE" });
 		expect(probe).toHaveBeenCalledTimes(2);
 		expect(spawn).toHaveBeenCalledTimes(1);
+		if (kind === "retry-preserve") {
+			expect(loadMachine(name)?.lastStartedAt).toBeDefined();
+		} else {
+			// The same provisioning request must reach launch again, not be refused
+			// by a window closed by the unsuccessful first boot.
+			await expect(QuickCHR.start(options)).rejects.toMatchObject({ code: "NETWORK_UNAVAILABLE" });
+			expect(probe).toHaveBeenCalledTimes(3);
+			expect(spawn).toHaveBeenCalledTimes(1);
+		}
 	} else {
 		const state = await QuickCHR.add({ name, version: "7.25", arch: "x86" });
 		state.status = "running";
@@ -76,7 +90,11 @@ if (kind === "timeout") {
 		expect(instance.state.pid).toBeUndefined();
 		expect(() => instance?.descriptor()).toThrow();
 	}
-	expect(loadMachine(name)?.status).toBe("stopped");
-	expect(loadMachine(name)?.pid).toBeUndefined();
+	if (kind?.startsWith("retry") && kind !== "retry-preserve") {
+		expect(loadMachine(name)).toBeUndefined();
+	} else {
+		expect(loadMachine(name)?.status).toBe("stopped");
+		expect(loadMachine(name)?.pid).toBeUndefined();
+	}
 }
 console.log("vmnet-failure-ok");
