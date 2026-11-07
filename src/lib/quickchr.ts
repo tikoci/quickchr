@@ -42,7 +42,7 @@ import {
 	isRouterOs6,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport, assertSocketVmnetReachable } from "./network.ts";
 import {
 	getUsedPortBases,
 	getUsedMacs,
@@ -66,7 +66,7 @@ import {
 import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, extractWrapper, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
@@ -1649,7 +1649,7 @@ export async function rollbackFailedProvisioning(
 	try {
 		await stopUnderLock(instance.state);
 		if (preserveOnFailure()) {
-			return ` Machine "${name}" was preserved half-provisioned for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — reset it with \`quickchr clean ${quoted}\` and repeat the start command, or remove it with \`quickchr remove ${quoted}\`.`;
+			return ` Machine "${name}" was preserved for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — reset it with \`quickchr clean ${quoted}\` and repeat the start command, or remove it with \`quickchr remove ${quoted}\`.`;
 		}
 		if (!restore) {
 			await removeUnderLock(instance.state);
@@ -1731,9 +1731,16 @@ async function hardRebootMachine(
 		...launchConfig,
 		background: true,
 	};
-	const qemuArgs = await buildQemuArgs(restartConfig);
-	const wrapper = extractWrapper(restartConfig.networks);
-	const { pid } = await spawnQemu(qemuArgs, state.machineDir, true, wrapper);
+	let pid: number;
+	try {
+		await assertSocketVmnetReachable(restartConfig.networks);
+		const qemuArgs = await buildQemuArgs(restartConfig);
+		({ pid } = await spawnQemu(qemuArgs, state.machineDir, true));
+	} catch (err) {
+		// The old QEMU has exited; a failed replacement must not retain its PID.
+		finalizeStoppedState(state);
+		throw err;
+	}
 	state.pid = pid;
 	state.status = "running";
 	state.lastStartedAt = new Date().toISOString();
@@ -2746,10 +2753,10 @@ export class QuickCHR {
 			frozen: opts.frozen,
 		};
 
+		await assertSocketVmnetReachable(launchConfig.networks);
 		const qemuArgs = await buildQemuArgs(launchConfig);
-		const wrapper = extractWrapper(resolvedNetworks);
 		const bootStart = Date.now();
-		let { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper);
+		let { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground);
 
 		// Foreground (no provisioning): spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {
@@ -2802,7 +2809,13 @@ export class QuickCHR {
 			);
 			try { await stopQemu(pid); } catch { /* ignore */ }
 			cleanupQemuSockets(machineDir);
-			({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground, wrapper));
+			try {
+				await assertSocketVmnetReachable(launchConfig.networks);
+				({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground));
+			} catch (err) {
+				finalizeStoppedState(state);
+				throw await failProvisioning(err, instance, undefined);
+			}
 			state.pid = pid;
 			saveMachine(state);
 			booted = await instance.waitForBoot(bootTimeout, probe);
@@ -3174,10 +3187,10 @@ export class QuickCHR {
 			frozen: launch?.frozen,
 		};
 
+		await assertSocketVmnetReachable(launchConfig.networks);
 		const qemuArgs = await buildQemuArgs(launchConfig);
-		const wrapper = extractWrapper(resolvedNetworks);
 		const bootStart = Date.now();
-		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground, wrapper);
+		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground);
 
 		// Foreground without provisioning: spawnQemu blocks until QEMU exits
 		if (!background && !hasProvisioning) {

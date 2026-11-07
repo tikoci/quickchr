@@ -93,8 +93,10 @@ export type NetworkSpecifier =
 export interface ResolvedNetwork {
 	/** QEMU -netdev and -device argument pairs. */
 	qemuNetdevArgs: string[];
-	/** Optional wrapper command (e.g. socket_vmnet_client). When set, QEMU is spawned as a child of this wrapper. */
-	wrapper?: string[];
+	/** socket_vmnet daemon socket this NIC attaches to with `-netdev stream`. QEMU's
+	 *  stream client does not fail at startup when the socket is dead, so launch probes
+	 *  this path before spawning (`assertSocketVmnetReachable`). */
+	socketVmnetPath?: string;
 	/** If the specifier was downgraded (e.g. shared → user), details are here. */
 	downgraded?: { from: string; reason: string };
 	/** MAC address override for deterministic addressing (socket_vmnet DHCP). */

@@ -335,29 +335,6 @@ async function prepareEfiVars(codePath: string, varsTemplatePath: string, destPa
 	}
 }
 
-/** Extract socket_vmnet wrapper from resolved networks (at most one allowed). */
-export function extractWrapper(
-	networks: NetworkConfig[],
-): { command: string; args: string[] } | undefined {
-	const wrappers: string[][] = [];
-	for (const n of networks) {
-		if (n.resolved?.wrapper) {
-			wrappers.push(n.resolved.wrapper);
-		}
-	}
-	if (wrappers.length > 1) {
-		throw new QuickCHRError(
-			"INVALID_NETWORK",
-			"Multiple networks require socket_vmnet wrapper — only one is supported per VM",
-		);
-	}
-	const w = wrappers[0];
-	if (!w || w.length === 0) return undefined;
-	const [command, ...wrapperArgs] = w;
-	if (!command) return undefined;
-	return { command, args: wrapperArgs };
-}
-
 /** Parse QEMU log output and produce a human-friendly error message. */
 export function buildQemuErrorMessage(log: string): string {
 	if (log.includes("Permission denied")) {
@@ -377,27 +354,14 @@ export async function spawnQemu(
 	qemuArgs: string[],
 	machineDir: string,
 	background: boolean,
-	wrapper?: { command: string; args: string[] },
 ): Promise<{ pid: number; process?: ReturnType<typeof Bun.spawn> }> {
 	ensureDir(machineDir);
 
 	const logPath = join(machineDir, "qemu.log");
 	const pidPath = join(machineDir, "qemu.pid");
 
-	const [bin, ...args] = qemuArgs;
-
-	if (!bin) throw new QuickCHRError("SPAWN_FAILED", "Empty QEMU args");
-
-	let spawnCmd: string[];
-	if (wrapper) {
-		// socket_vmnet wrapper path logged at debug level — full paths belong in `doctor`
-		if (process.env.QUICKCHR_DEBUG === "1") {
-			process.stderr.write(`[quickchr] Using socket_vmnet wrapper: ${wrapper.command} ${wrapper.args.join(" ")}\n`);
-		}
-		spawnCmd = [wrapper.command, ...wrapper.args, bin, ...args];
-	} else {
-		spawnCmd = [bin, ...args];
-	}
+	if (!qemuArgs[0]) throw new QuickCHRError("SPAWN_FAILED", "Empty QEMU args");
+	const spawnCmd = qemuArgs;
 
 	if (background) {
 		// Open log file as an fd — more reliable than BunFile for subprocess stdio.
