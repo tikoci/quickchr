@@ -377,6 +377,17 @@ describe("UEFI firmware beside a QEMU's own data dirs (#254)", () => {
 		expect(findEfiFirmwareInDataDirs([join(tmp, "brew", "share", "qemu")])).toEqual({ code, vars });
 	});
 
+	test("takes code and vars from one layout: a mixed pair in one dir is skipped for a complete one", () => {
+		// Upstream code in the data dir, Debian vars beside it: no complete pair from either layout…
+		touch("m", "share", "qemu", "edk2-aarch64-code.fd");
+		touch("m", "share", "AAVMF", "AAVMF_VARS.fd");
+		expect(findEfiFirmwareInDataDirs([join(tmp, "m", "share", "qemu")])).toBeUndefined();
+		// …until a later layout in the same dir is complete.
+		const code = touch("m", "share", "qemu-efi-aarch64", "QEMU_EFI.fd");
+		const vars = touch("m", "share", "qemu-efi-aarch64", "QEMU_VARS.fd");
+		expect(findEfiFirmwareInDataDirs([join(tmp, "m", "share", "qemu")])).toEqual({ code, vars });
+	});
+
 	test("takes code and vars from one installation: a dir with only code is skipped", () => {
 		touch("a", "share", "AAVMF", "AAVMF_CODE.fd");
 		const code = touch("b", "share", "qemu-efi-aarch64", "QEMU_EFI.fd");
@@ -388,12 +399,10 @@ describe("UEFI firmware beside a QEMU's own data dirs (#254)", () => {
 	});
 
 	test("findEfiFirmware falls back to the arm64 QEMU's data dirs when no standard path exists", () => {
-		// With every command failing, only the standard paths can match.
+		// No standard paths, so the fallback runs whatever firmware this host has installed.
+		const none = { code: [], vars: [] };
 		mockSpawnSync(() => ({ exitCode: 1 }));
-		if (findEfiFirmware()) {
-			console.log("Skipping: EFI firmware is installed at a standard path on this system");
-			return;
-		}
+		expect(findEfiFirmware(none)).toBeUndefined();
 		const code = touch("root", "usr", "share", "AAVMF", "AAVMF_CODE.fd");
 		const vars = touch("root", "usr", "share", "AAVMF", "AAVMF_VARS.fd");
 		const qemu = join(tmp, "bin", "qemu-system-aarch64");
@@ -405,7 +414,15 @@ describe("UEFI firmware beside a QEMU's own data dirs (#254)", () => {
 			// `which` / `where.exe` resolving qemu-system-aarch64 on PATH.
 			return cmd[1] === "qemu-system-aarch64" ? { exitCode: 0, stdout: `${qemu}\n` } : { exitCode: 1 };
 		});
-		expect(findEfiFirmware()).toEqual({ code, vars });
+		expect(findEfiFirmware(none)).toEqual({ code, vars });
+	});
+
+	test("findEfiFirmware does not ask QEMU when a standard path matches", () => {
+		const code = touch("std", "AAVMF_CODE.fd");
+		const vars = touch("std", "AAVMF_VARS.fd");
+		const spawn = mockSpawnSync(() => ({ exitCode: 1 }));
+		expect(findEfiFirmware({ code: ["/nonexistent/code.fd", code], vars: [vars] })).toEqual({ code, vars });
+		expect(spawn).not.toHaveBeenCalled();
 	});
 });
 

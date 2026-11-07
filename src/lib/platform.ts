@@ -43,15 +43,18 @@ const EFI_VARS_PATHS = [
 
 /**
  * The same firmware layouts relative to one QEMU data dir (a line of
- * `qemu-system-aarch64 -L help`), for a QEMU outside the prefixes above: the
- * dir itself holds upstream's edk2 images (`make install`, Homebrew, Windows);
- * its parent `share/` holds the distro packages' directories.
+ * `qemu-system-aarch64 -L help`), for a QEMU outside the prefixes above, as
+ * code/vars pairs so a match never mixes layouts. `.` is the data dir itself,
+ * where upstream's edk2 images live (`make install`, Homebrew, Windows); `..`
+ * is its parent `share/`, which holds the distro packages' directories.
  */
-const EFI_IN_DATA_DIR = { code: ["edk2-aarch64-code.fd"], vars: ["edk2-arm-vars.fd"] };
-const EFI_BESIDE_DATA_DIR = {
-	code: ["AAVMF/AAVMF_CODE.fd", "edk2/aarch64/QEMU_EFI.fd", "edk2-armvirt/aarch64/QEMU_EFI.fd", "qemu-efi-aarch64/QEMU_EFI.fd"],
-	vars: ["AAVMF/AAVMF_VARS.fd", "edk2/aarch64/QEMU_VARS.fd", "edk2-armvirt/aarch64/vars-template-pflash.raw", "qemu-efi-aarch64/QEMU_VARS.fd"],
-};
+const EFI_LAYOUTS_BY_DATA_DIR: readonly { base: "." | ".."; code: string; vars: string }[] = [
+	{ base: ".", code: "edk2-aarch64-code.fd", vars: "edk2-arm-vars.fd" },
+	{ base: "..", code: "AAVMF/AAVMF_CODE.fd", vars: "AAVMF/AAVMF_VARS.fd" },
+	{ base: "..", code: "edk2/aarch64/QEMU_EFI.fd", vars: "edk2/aarch64/QEMU_VARS.fd" },
+	{ base: "..", code: "edk2-armvirt/aarch64/QEMU_EFI.fd", vars: "edk2-armvirt/aarch64/vars-template-pflash.raw" },
+	{ base: "..", code: "qemu-efi-aarch64/QEMU_EFI.fd", vars: "qemu-efi-aarch64/QEMU_VARS.fd" },
+];
 
 /** Detect the system package manager. */
 export function detectPackageManager(): PackageManager {
@@ -123,31 +126,39 @@ export function qemuDataDirs(qemuBin: string): string[] {
 }
 
 /**
- * UEFI code and vars for aarch64 relative to QEMU data dirs: the first dir
- * with both wins, so the pair always comes from one installation.
+ * UEFI code and vars for aarch64 relative to QEMU data dirs: the first
+ * complete pair wins, in data-dir order, then layout order. Both files of a
+ * pair come from one layout of one installation; a half-present layout is
+ * skipped.
  */
 export function findEfiFirmwareInDataDirs(dataDirs: readonly string[]): EfiFirmwarePaths | undefined {
 	for (const dir of dataDirs) {
-		const candidates = (kind: "code" | "vars") => [
-			...EFI_IN_DATA_DIR[kind].map((file) => join(dir, file)),
-			...EFI_BESIDE_DATA_DIR[kind].map((file) => join(dirname(dir), file)),
-		];
-		const code = candidates("code").find((p) => existsSync(p));
-		const vars = candidates("vars").find((p) => existsSync(p));
-		if (code && vars) return { code, vars };
+		for (const layout of EFI_LAYOUTS_BY_DATA_DIR) {
+			const base = layout.base === "." ? dir : dirname(dir);
+			const code = join(base, layout.code);
+			const vars = join(base, layout.vars);
+			if (existsSync(code) && existsSync(vars)) return { code, vars };
+		}
 	}
 	return undefined;
+}
+
+/** The standard install paths `findEfiFirmware` checks first. */
+export interface EfiFirmwareSearchPaths {
+	code: readonly string[];
+	vars: readonly string[];
 }
 
 /**
  * Find UEFI firmware files for aarch64: the standard install paths first;
  * otherwise wherever the QEMU that quickchr runs keeps its data, as it reports
  * with `-L help`. That covers a QEMU under another prefix, or one relocated
- * by a wrapper that passes `-L` (#254).
+ * by a wrapper that passes `-L` (#254). The probe is one ~20 ms spawn, made
+ * only when no standard path matches. `standard` exists for tests.
  */
-export function findEfiFirmware(): EfiFirmwarePaths | undefined {
-	const code = EFI_CODE_PATHS.find((p) => existsSync(p));
-	const vars = EFI_VARS_PATHS.find((p) => existsSync(p));
+export function findEfiFirmware(standard: EfiFirmwareSearchPaths = { code: EFI_CODE_PATHS, vars: EFI_VARS_PATHS }): EfiFirmwarePaths | undefined {
+	const code = standard.code.find((p) => existsSync(p));
+	const vars = standard.vars.find((p) => existsSync(p));
 	if (code && vars) return { code, vars };
 	const qemu = findQemuBinary("arm64");
 	return qemu ? findEfiFirmwareInDataDirs(qemuDataDirs(qemu)) : undefined;

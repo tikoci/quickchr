@@ -11,7 +11,8 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 - Firmware lookup (`findEfiFirmware`): the fixed install paths first; when none
   exists, the data dirs the arm64 QEMU itself reports with `-L help` (`-L` dirs
   first), checking `<dir>/edk2-aarch64-code.fd` and the distro layouts under
-  `<dir>/..` (`AAVMF/`, `edk2/aarch64/`, …). Code and vars come from the same dir.
+  `<dir>/..` (`AAVMF/`, `edk2/aarch64/`, …). Code and vars come from one layout
+  of one dir (a half-present layout is skipped).
   This finds firmware for a QEMU under another prefix, or one relocated by a
   wrapper that adds `-L` (app-t3code's `labs` payload, #254).
 - **Vars pflash MUST be qcow2** (`efi-vars.qcow2`, built via `qemu-img convert`) —
