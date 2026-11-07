@@ -13,6 +13,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [0.5.6] — 2026-11-07
 
+First `latest` release since 0.5.4, so upgrading from `latest` also brings in
+everything in [0.5.5](https://github.com/tikoci/quickchr/releases/tag/v0.5.5), including the Bun >= 1.4.3 minimum.
+
 ### Fixed
 
 - arm64 machines find UEFI firmware that lives beside the QEMU quickchr runs,
