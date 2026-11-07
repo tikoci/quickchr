@@ -8,6 +8,13 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 
 - Machine: `-M virt`
 - UEFI firmware: two pflash drives (unit=0 code readonly raw, unit=1 vars writable)
+- Firmware lookup (`findEfiFirmware`): the fixed install paths first; when none
+  exists, the data dirs the arm64 QEMU itself reports with `-L help` (`-L` dirs
+  first), checking `<dir>/edk2-aarch64-code.fd` and the distro layouts under
+  `<dir>/..` (`AAVMF/`, `edk2/aarch64/`, …). Code and vars come from one layout
+  of one dir (a half-present layout is skipped).
+  This finds firmware for a QEMU under another prefix, or one relocated by a
+  wrapper that adds `-L` (app-t3code's `labs` payload, #254).
 - **Vars pflash MUST be qcow2** (`efi-vars.qcow2`, built via `qemu-img convert`) —
   QEMU refuses `savevm`/`loadvm` while ANY writable block device is non-qcow2
   ("Device 'pflash1' is writable but does not support snapshots"), which silently

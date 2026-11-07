@@ -1,4 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
 	detectAccel,
 	detectPackageManager,
@@ -6,6 +8,9 @@ import {
 	findCommandOnPath,
 	findQemuBinary,
 	findEfiFirmware,
+	findEfiFirmwareInDataDirs,
+	parseQemuDataDirs,
+	qemuDataDirs,
 	findQemuImg,
 	getQemuInstallHint,
 	getQemuVersion,
@@ -307,6 +312,117 @@ describe("requireFirmware", () => {
 		expect(() => requireFirmware()).toThrow(
 			expect.objectContaining({ code: "MISSING_FIRMWARE" }),
 		);
+	});
+});
+
+describe("UEFI firmware beside a QEMU's own data dirs (#254)", () => {
+	let tmp: string;
+	const touch = (...parts: string[]) => {
+		const path = join(tmp, ...parts);
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, "");
+		return path;
+	};
+	beforeEach(() => {
+		tmp = mkdtempSync(join(import.meta.dir, ".efi-data-dirs-"));
+	});
+	afterEach(() => {
+		rmSync(tmp, { recursive: true, force: true });
+	});
+
+	test("parses -L help: absolute dirs in order, -L dirs first", () => {
+		// Debian's QEMU 10.0.13 behind a wrapper that adds three leading -L (app-t3code labs payload).
+		const output = [
+			"/data/t/groups/labs/x/root/usr/share/qemu",
+			"/data/t/groups/labs/x/root/usr/share/seabios",
+			"/data/t/groups/labs/x/root/usr/lib/ipxe/qemu",
+			"/usr/share/qemu",
+			"/usr/share/seabios",
+			"/usr/lib/ipxe/qemu",
+			"",
+		].join("\n");
+		expect(parseQemuDataDirs(output)).toEqual([
+			"/data/t/groups/labs/x/root/usr/share/qemu",
+			"/data/t/groups/labs/x/root/usr/share/seabios",
+			"/data/t/groups/labs/x/root/usr/lib/ipxe/qemu",
+			"/usr/share/qemu",
+			"/usr/share/seabios",
+			"/usr/lib/ipxe/qemu",
+		]);
+		expect(parseQemuDataDirs("qemu-system-aarch64: warning: something\r\n\r\n")).toEqual([]);
+	});
+
+	test("asks the binary for -L help and returns [] when it fails", () => {
+		const spawn = mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["/mock/bin/qemu-system-aarch64", "-L", "help"]);
+			return { exitCode: 0, stdout: "/opt/q/share/qemu\n" };
+		});
+		expect(qemuDataDirs("/mock/bin/qemu-system-aarch64")).toEqual(["/opt/q/share/qemu"]);
+		expect(spawn).toHaveBeenCalledTimes(1);
+		mockSpawnSync(() => ({ exitCode: 1, stderr: "unknown option" }));
+		expect(qemuDataDirs("/mock/bin/qemu-system-aarch64")).toEqual([]);
+	});
+
+	test("finds a Debian AAVMF pair in the share dir beside a data dir", () => {
+		const code = touch("root", "usr", "share", "AAVMF", "AAVMF_CODE.fd");
+		const vars = touch("root", "usr", "share", "AAVMF", "AAVMF_VARS.fd");
+		mkdirSync(join(tmp, "root", "usr", "share", "qemu"), { recursive: true });
+		const dirs = [join(tmp, "root", "usr", "share", "qemu"), join(tmp, "root", "usr", "share", "seabios"), join(tmp, "root", "usr", "lib", "ipxe", "qemu")];
+		expect(findEfiFirmwareInDataDirs(dirs)).toEqual({ code, vars });
+	});
+
+	test("finds upstream edk2 images inside the data dir (Homebrew, make install, Windows)", () => {
+		const code = touch("brew", "share", "qemu", "edk2-aarch64-code.fd");
+		const vars = touch("brew", "share", "qemu", "edk2-arm-vars.fd");
+		expect(findEfiFirmwareInDataDirs([join(tmp, "brew", "share", "qemu")])).toEqual({ code, vars });
+	});
+
+	test("takes code and vars from one layout: a mixed pair in one dir is skipped for a complete one", () => {
+		// Upstream code in the data dir, Debian vars beside it: no complete pair from either layout…
+		touch("m", "share", "qemu", "edk2-aarch64-code.fd");
+		touch("m", "share", "AAVMF", "AAVMF_VARS.fd");
+		expect(findEfiFirmwareInDataDirs([join(tmp, "m", "share", "qemu")])).toBeUndefined();
+		// …until a later layout in the same dir is complete.
+		const code = touch("m", "share", "qemu-efi-aarch64", "QEMU_EFI.fd");
+		const vars = touch("m", "share", "qemu-efi-aarch64", "QEMU_VARS.fd");
+		expect(findEfiFirmwareInDataDirs([join(tmp, "m", "share", "qemu")])).toEqual({ code, vars });
+	});
+
+	test("takes code and vars from one installation: a dir with only code is skipped", () => {
+		touch("a", "share", "AAVMF", "AAVMF_CODE.fd");
+		const code = touch("b", "share", "qemu-efi-aarch64", "QEMU_EFI.fd");
+		const vars = touch("b", "share", "qemu-efi-aarch64", "QEMU_VARS.fd");
+		const dirs = [join(tmp, "a", "share", "qemu"), join(tmp, "b", "share", "qemu")];
+		expect(findEfiFirmwareInDataDirs(dirs)).toEqual({ code, vars });
+		expect(findEfiFirmwareInDataDirs([join(tmp, "a", "share", "qemu")])).toBeUndefined();
+		expect(findEfiFirmwareInDataDirs([])).toBeUndefined();
+	});
+
+	test("findEfiFirmware falls back to the arm64 QEMU's data dirs when no standard path exists", () => {
+		// No standard paths, so the fallback runs whatever firmware this host has installed.
+		const none = { code: [], vars: [] };
+		mockSpawnSync(() => ({ exitCode: 1 }));
+		expect(findEfiFirmware(none)).toBeUndefined();
+		const code = touch("root", "usr", "share", "AAVMF", "AAVMF_CODE.fd");
+		const vars = touch("root", "usr", "share", "AAVMF", "AAVMF_VARS.fd");
+		const qemu = join(tmp, "bin", "qemu-system-aarch64");
+		mockSpawnSync((cmd) => {
+			if (cmd[0] === qemu) {
+				expect(cmd).toEqual([qemu, "-L", "help"]);
+				return { exitCode: 0, stdout: `${join(tmp, "root", "usr", "share", "qemu")}\n/usr/share/qemu\n` };
+			}
+			// `which` / `where.exe` resolving qemu-system-aarch64 on PATH.
+			return cmd[1] === "qemu-system-aarch64" ? { exitCode: 0, stdout: `${qemu}\n` } : { exitCode: 1 };
+		});
+		expect(findEfiFirmware(none)).toEqual({ code, vars });
+	});
+
+	test("findEfiFirmware does not ask QEMU when a standard path matches", () => {
+		const code = touch("std", "AAVMF_CODE.fd");
+		const vars = touch("std", "AAVMF_VARS.fd");
+		const spawn = mockSpawnSync(() => ({ exitCode: 1 }));
+		expect(findEfiFirmware({ code: ["/nonexistent/code.fd", code], vars: [vars] })).toEqual({ code, vars });
+		expect(spawn).not.toHaveBeenCalled();
 	});
 });
 

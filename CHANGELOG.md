@@ -11,6 +11,15 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Fixed
+
+- arm64 machines find UEFI firmware that lives beside the QEMU quickchr runs,
+  not only at the standard install paths. When no standard path has it,
+  quickchr asks `qemu-system-aarch64 -L help` for that QEMU's data dirs and
+  looks for the same firmware layouts there. A QEMU installed under another
+  prefix, or relocated by a wrapper that passes `-L`, no longer fails with
+  `MISSING_FIRMWARE`. (#254)
+
 ## [0.5.5] — 2026-11-02
 
 ### Added
