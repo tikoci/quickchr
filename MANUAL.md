@@ -1357,6 +1357,22 @@ Resolution chains:
 - **`shared`** on macOS: socket_vmnet daemon → vmnet-shared (root-only QEMU). On Linux: pre-created TAP owned by the user, else root-created TAP+bridge.
 - **`bridged:<iface>`** on macOS: socket_vmnet bridged → vmnet-bridged (root). On Linux: TAP attached to a bridge containing the named iface.
 
+**socket_vmnet networks (macOS).** When a socket_vmnet daemon serves `shared` or
+`bridged:<iface>`, QEMU attaches to its socket directly with `-netdev stream`:
+
+- **QEMU 7.2 or newer is required.** Older QEMU is refused with `NETWORK_UNAVAILABLE`.
+- **One machine can have several socket_vmnet networks**, for example
+  `--add-network shared --add-network bridged:en0`.
+- **Daemon restarts:** on **QEMU 9.2+** each such NIC re-attaches by itself, with no
+  VM restart. On 7.2–9.1, or when quickchr cannot read the QEMU version, the NIC stays
+  down after a daemon restart until the machine restarts.
+- **The socket is checked before boot.** `start` connects to each socket first and
+  fails with `NETWORK_UNAVAILABLE` when the socket is missing, stale (its daemon is
+  gone) or not permitted. QEMU itself would boot with the link down instead.
+- **Machines started by quickchr 0.5.6 or earlier** still run under
+  `socket_vmnet_client` and do not re-attach. Restart them (`stop`/`start`) to pick up
+  the new attachment.
+
 > The table lists the strings the **CLI** takes. The library's equivalents are the
 > `NetworkSpecifier` type names, which are spelled with a dash rather than a colon:
 > `socket:listen:5000` on the command line is `{ type: "socket-listen", port: 5000 }`

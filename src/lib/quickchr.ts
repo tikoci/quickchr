@@ -42,7 +42,7 @@ import {
 	isRouterOs6,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport, assertSocketVmnetReachable } from "./network.ts";
 import {
 	getUsedPortBases,
 	getUsedMacs,
@@ -1731,6 +1731,7 @@ async function hardRebootMachine(
 		...launchConfig,
 		background: true,
 	};
+	await assertSocketVmnetReachable(restartConfig.networks);
 	const qemuArgs = await buildQemuArgs(restartConfig);
 	const { pid } = await spawnQemu(qemuArgs, state.machineDir, true);
 	state.pid = pid;
@@ -2745,6 +2746,7 @@ export class QuickCHR {
 			frozen: opts.frozen,
 		};
 
+		await assertSocketVmnetReachable(launchConfig.networks);
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const bootStart = Date.now();
 		let { pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground);
@@ -3172,6 +3174,7 @@ export class QuickCHR {
 			frozen: launch?.frozen,
 		};
 
+		await assertSocketVmnetReachable(launchConfig.networks);
 		const qemuArgs = await buildQemuArgs(launchConfig);
 		const bootStart = Date.now();
 		const { pid } = await spawnQemu(qemuArgs, state.machineDir, spawnBackground);

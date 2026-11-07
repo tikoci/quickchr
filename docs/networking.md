@@ -173,8 +173,11 @@ qemu-system-aarch64 \
   QEMU (11.1 rejects it). Without reconnection, a daemon restart leaves the NIC down
   until the VM restarts.
 - **A missing socket does not fail QEMU at startup.** A stream client to a socket that
-  is not there just runs with the link down. quickchr therefore checks the daemon
-  before spawning (`NETWORK_UNAVAILABLE`).
+  is not there just runs with the link down. quickchr therefore connects to each
+  requested socket before spawning, and fails with `NETWORK_UNAVAILABLE` when it is
+  missing, stale (the file outlived its daemon) or not permitted. The older check (a
+  socket file plus any `socket_vmnet` process) passed a stale socket next to an
+  unrelated live daemon.
 - **Any number of socket_vmnet NICs per VM.** Each NIC is its own `-netdev stream`,
   for example one shared and one bridged.
 

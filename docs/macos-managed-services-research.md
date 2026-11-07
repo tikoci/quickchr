@@ -132,6 +132,10 @@ The daemon's own `last exit = 1` (`runs = 1`) remains unattributed.
 
 ### Attachment: the one-network limit has two sources
 
+> **Implementation status, 2026-11-07:** #260 replaces the wrapper with `-netdev stream`
+> (one NIC per socket, `reconnect-ms` on QEMU 9.2+) plus a connect probe of each socket
+> before spawn. The observations below are the dated grounding for that change.
+
 Homebrew's one-liner (`sudo brew services start socket_vmnet`) installs exactly one
 shared-mode daemon. A second network, such as bridged en0, means copying and
 editing a plist by hand (socket_vmnet's README does this with `sed`). On the

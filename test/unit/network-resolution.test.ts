@@ -469,7 +469,7 @@ describe("resolveAllNetworks", () => {
 		);
 	});
 
-	test("allows several socket_vmnet networks on one VM", () => {
+	test("emits one -netdev stream per socket_vmnet network (reconnect-ms on 9.2+); argv only", () => {
 		const configs = [
 			cfg("user", "net0"),
 			cfg("shared", "net1"),
@@ -483,6 +483,20 @@ describe("resolveAllNetworks", () => {
 		expect(netdevs[2]).toBe(
 			`stream,id=net2,server=off,addr.type=unix,addr.path=/opt/homebrew/var/run/socket_vmnet.bridged.en0,reconnect-ms=${SOCKET_VMNET_RECONNECT_MS}`,
 		);
+	});
+
+	test("records each socket_vmnet socket so launch can probe it before spawning", () => {
+		const configs = [
+			cfg("user", "net0"),
+			cfg("shared", "net1"),
+			cfg({ type: "bridged", iface: "en0" }, "net2"),
+		];
+		const paths = resolveAllNetworks(configs, macCtx(MOCK_SVN)).map((c) => resolved(c).socketVmnetPath);
+		expect(paths).toEqual([
+			undefined,
+			"/opt/homebrew/var/run/socket_vmnet",
+			"/opt/homebrew/var/run/socket_vmnet.bridged.en0",
+		]);
 	});
 
 	test("preserves original config fields", () => {

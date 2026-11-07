@@ -19,7 +19,11 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   (for example shared and bridged), where before it failed with "only one wrapper is
   supported". On QEMU 9.2+ each such NIC carries `reconnect-ms`, so restarting the
   daemon no longer leaves the VM's network down until the VM restarts. QEMU older
-  than 7.2 is refused for these networks with `NETWORK_UNAVAILABLE`. Library: the
+  than 7.2 is refused for these networks with `NETWORK_UNAVAILABLE`. Before booting,
+  `start` connects to each socket_vmnet socket and fails with `NETWORK_UNAVAILABLE`
+  when it is missing, stale or not permitted, instead of booting with that link down.
+  Machines already running under `socket_vmnet_client` need a restart to switch.
+  Library: the
   optional `ResolvedNetwork.wrapper` field is gone, since nothing sets it. (#256)
 
 ## [0.5.6] — 2026-11-07

@@ -539,6 +539,7 @@ function resolveShared(
 					"-netdev", socketVmnetNetdev(config.id, svn.sharedSocket, ctx.qemuVersion),
 					...deviceArgs(config),
 				],
+				socketVmnetPath: svn.sharedSocket,
 			};
 		}
 		return {
@@ -598,6 +599,7 @@ function resolveBridged(
 					"-netdev", socketVmnetNetdev(config.id, bridgeSocket, ctx.qemuVersion),
 					...deviceArgs(config),
 				],
+				socketVmnetPath: bridgeSocket,
 			};
 		}
 		return {
@@ -694,6 +696,69 @@ export function socketVmnetNetdev(id: string, socketPath: string, qemuVersion?: 
 	return qemuVersion && qemuAtLeast(qemuVersion, 9, 2)
 		? `${base},reconnect-ms=${SOCKET_VMNET_RECONNECT_MS}`
 		: base;
+}
+
+/** How long a launch waits for a socket_vmnet daemon to accept a probe connection. */
+export const SOCKET_VMNET_PROBE_TIMEOUT_MS = 2000;
+
+/** Connect once to a unix socket. Resolves `undefined` on success, else the error code. */
+function probeUnixSocket(path: string, timeoutMs: number): Promise<string | undefined> {
+	return new Promise((resolve) => {
+		const socket = createConnection(path);
+		const finish = (code?: string) => {
+			clearTimeout(timer);
+			socket.destroy();
+			resolve(code);
+		};
+		const timer = setTimeout(() => finish("ETIMEDOUT"), timeoutMs);
+		socket.once("connect", () => finish(undefined));
+		socket.once("error", (err: Error & { code?: string }) => finish(err.code ?? "UNKNOWN"));
+	});
+}
+
+/** Refuse a launch whose socket_vmnet sockets do not accept a connection.
+ *
+ *  The `socket_vmnet_client` wrapper used to fail the spawn when its `connect()` failed.
+ *  QEMU's `-netdev stream` client does not: against a dead socket it keeps running with
+ *  the link down. A stale socket (the file outlives its daemon) or a socket the user may
+ *  not open would then boot a machine whose requested network never attached, while a
+ *  user-mode management NIC makes the boot look healthy. So each requested socket gets
+ *  one real connect before QEMU spawns.
+ *
+ *  This proves the daemon was accepting a moment before spawn; it does not promise
+ *  QEMU's own attach. A daemon that dies in between is the same case as a daemon restart
+ *  later: QEMU 9.2+ re-attaches (`reconnect-ms`), older QEMU stays link-down. */
+export async function assertSocketVmnetReachable(
+	networks: NetworkConfig[],
+	timeoutMs = SOCKET_VMNET_PROBE_TIMEOUT_MS,
+): Promise<void> {
+	const paths = [...new Set(networks.flatMap((n) => n.resolved?.socketVmnetPath ?? []))];
+	for (const path of paths) {
+		const code = await probeUnixSocket(path, timeoutMs);
+		if (code === undefined) continue;
+		if (code === "EACCES" || code === "EPERM") {
+			throw new QuickCHRError(
+				"NETWORK_UNAVAILABLE",
+				`Not permitted to connect to socket_vmnet socket ${path} (${code})`,
+				"The daemon's --socket-group (socket_vmnet default: staff) must include your user.",
+			);
+		}
+		if (code === "ENOENT") {
+			throw new QuickCHRError(
+				"NETWORK_UNAVAILABLE",
+				`socket_vmnet socket ${path} does not exist`,
+				"Start the socket_vmnet daemon that serves this network.",
+			);
+		}
+		const why = code === "ETIMEDOUT"
+			? `did not accept a connection within ${timeoutMs} ms`
+			: `refused the connection (${code}): the socket file is stale, its daemon is not running`;
+		throw new QuickCHRError(
+			"NETWORK_UNAVAILABLE",
+			`socket_vmnet socket ${path} ${why}`,
+			"Start or restart the socket_vmnet daemon that serves this network.",
+		);
+	}
 }
 
 function resolveSocketNamed(
