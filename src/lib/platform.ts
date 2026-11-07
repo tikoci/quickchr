@@ -3,6 +3,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import type { AccelMode, EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo, DoctorCheck } from "./types.ts";
 import { QuickCHRError as QError, parseAccelMode } from "./types.ts";
 // settings-file.ts, not settings.ts: the latter's graph (cache → state → network
@@ -39,6 +40,18 @@ const EFI_VARS_PATHS = [
 	// Windows (winget QEMU)
 	`${process.env.PROGRAMFILES || "C:\\Program Files"}\\qemu\\share\\edk2-arm-vars.fd`,
 ];
+
+/**
+ * The same firmware layouts relative to one QEMU data dir (a line of
+ * `qemu-system-aarch64 -L help`), for a QEMU outside the prefixes above: the
+ * dir itself holds upstream's edk2 images (`make install`, Homebrew, Windows);
+ * its parent `share/` holds the distro packages' directories.
+ */
+const EFI_IN_DATA_DIR = { code: ["edk2-aarch64-code.fd"], vars: ["edk2-arm-vars.fd"] };
+const EFI_BESIDE_DATA_DIR = {
+	code: ["AAVMF/AAVMF_CODE.fd", "edk2/aarch64/QEMU_EFI.fd", "edk2-armvirt/aarch64/QEMU_EFI.fd", "qemu-efi-aarch64/QEMU_EFI.fd"],
+	vars: ["AAVMF/AAVMF_VARS.fd", "edk2/aarch64/QEMU_VARS.fd", "edk2-armvirt/aarch64/vars-template-pflash.raw", "qemu-efi-aarch64/QEMU_VARS.fd"],
+};
 
 /** Detect the system package manager. */
 export function detectPackageManager(): PackageManager {
@@ -90,12 +103,54 @@ export function findQemuBinary(guestArch: "x86" | "arm64"): string | undefined {
 	return undefined;
 }
 
-/** Find UEFI firmware files for aarch64. */
+/** Absolute directories in `qemu-system-* -L help` output, in QEMU's search order (`-L` dirs first). */
+export function parseQemuDataDirs(output: string): string[] {
+	return output
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((line) => line !== "" && isAbsolute(line));
+}
+
+/** A QEMU binary's data dirs (`<bin> -L help`), or [] if it cannot say. */
+export function qemuDataDirs(qemuBin: string): string[] {
+	try {
+		const result = Bun.spawnSync([qemuBin, "-L", "help"], { stdout: "pipe", stderr: "pipe", timeout: 10_000 });
+		if (result.exitCode !== 0) return [];
+		return parseQemuDataDirs(new TextDecoder().decode(result.stdout));
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * UEFI code and vars for aarch64 relative to QEMU data dirs: the first dir
+ * with both wins, so the pair always comes from one installation.
+ */
+export function findEfiFirmwareInDataDirs(dataDirs: readonly string[]): EfiFirmwarePaths | undefined {
+	for (const dir of dataDirs) {
+		const candidates = (kind: "code" | "vars") => [
+			...EFI_IN_DATA_DIR[kind].map((file) => join(dir, file)),
+			...EFI_BESIDE_DATA_DIR[kind].map((file) => join(dirname(dir), file)),
+		];
+		const code = candidates("code").find((p) => existsSync(p));
+		const vars = candidates("vars").find((p) => existsSync(p));
+		if (code && vars) return { code, vars };
+	}
+	return undefined;
+}
+
+/**
+ * Find UEFI firmware files for aarch64: the standard install paths first;
+ * otherwise wherever the QEMU that quickchr runs keeps its data, as it reports
+ * with `-L help`. That covers a QEMU under another prefix, or one relocated
+ * by a wrapper that passes `-L` (#254).
+ */
 export function findEfiFirmware(): EfiFirmwarePaths | undefined {
 	const code = EFI_CODE_PATHS.find((p) => existsSync(p));
 	const vars = EFI_VARS_PATHS.find((p) => existsSync(p));
 	if (code && vars) return { code, vars };
-	return undefined;
+	const qemu = findQemuBinary("arm64");
+	return qemu ? findEfiFirmwareInDataDirs(qemuDataDirs(qemu)) : undefined;
 }
 
 /**
