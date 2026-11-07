@@ -49,15 +49,18 @@ if (kind === "timeout") {
 		const options = {
 			name, version: "7.25", arch: "x86" as const,
 			secureLogin: kind === "retry-secure",
-			user: kind === "retry-secure" ? undefined : { name: "review-ops", password: "sentinel-password" },
+			user: kind === "retry-secure" || kind === "retry-preserve-bare" ? undefined : { name: "review-ops", password: "sentinel-password" },
 		};
 		probe.mockResolvedValueOnce(undefined).mockRejectedValue(new QuickCHRError("NETWORK_UNAVAILABLE", "daemon stopped"));
 		const diagnostics = await import("../../../src/lib/diagnostics.ts");
 		spyOn(diagnostics, "captureBootFailure").mockResolvedValue({ summary: "failed", reportPath: null, preserved: false });
-		await expect(QuickCHR.start(options)).rejects.toMatchObject({ code: "NETWORK_UNAVAILABLE" });
+		const failure = await QuickCHR.start(options).then(() => undefined, (err: unknown) => err);
+		expect(failure).toMatchObject({ code: "NETWORK_UNAVAILABLE" });
 		expect(probe).toHaveBeenCalledTimes(2);
 		expect(spawn).toHaveBeenCalledTimes(1);
-		if (kind === "retry-preserve") {
+		if (kind.startsWith("retry-preserve")) {
+			expect((failure as Error).message).toContain("was preserved for diagnosis");
+			expect((failure as Error).message).not.toContain("half-provisioned");
 			expect(loadMachine(name)?.lastStartedAt).toBeDefined();
 		} else {
 			// The same provisioning request must reach launch again, not be refused
@@ -90,7 +93,7 @@ if (kind === "timeout") {
 		expect(instance.state.pid).toBeUndefined();
 		expect(() => instance?.descriptor()).toThrow();
 	}
-	if (kind?.startsWith("retry") && kind !== "retry-preserve") {
+	if (kind?.startsWith("retry") && !kind.startsWith("retry-preserve")) {
 		expect(loadMachine(name)).toBeUndefined();
 	} else {
 		expect(loadMachine(name)?.status).toBe("stopped");

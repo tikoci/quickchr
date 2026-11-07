@@ -1649,7 +1649,7 @@ export async function rollbackFailedProvisioning(
 	try {
 		await stopUnderLock(instance.state);
 		if (preserveOnFailure()) {
-			return ` Machine "${name}" was preserved half-provisioned for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — reset it with \`quickchr clean ${quoted}\` and repeat the start command, or remove it with \`quickchr remove ${quoted}\`.`;
+			return ` Machine "${name}" was preserved for diagnosis (QUICKCHR_PRESERVE_ON_FAILURE=1) — reset it with \`quickchr clean ${quoted}\` and repeat the start command, or remove it with \`quickchr remove ${quoted}\`.`;
 		}
 		if (!restore) {
 			await removeUnderLock(instance.state);

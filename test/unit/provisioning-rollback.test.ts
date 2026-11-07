@@ -163,7 +163,7 @@ describe("rollbackFailedProvisioning — QUICKCHR_PRESERVE_ON_FAILURE=1", () => 
 
 		expect(readFileSync(join(machineDir(), "disk.img"), "utf-8")).toBe("half-provisioned-guest");
 		expect(loadMachine(NAME)?.lastStartedAt).toBe("2026-10-21T00:01:00.000Z");
-		expect(message).toContain("preserved half-provisioned");
+		expect(message).toContain("preserved for diagnosis");
 		expect(message).toContain(`quickchr clean ${NAME}`);
 	});
 });
