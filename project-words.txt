@@ -44,6 +44,7 @@ ble
 blockquotes
 bodyless
 bootaa
+bootout
 bootptab
 borderless
 bpath
@@ -328,6 +329,7 @@ pipefail
 pkgs
 pkill
 pkl
+plutil
 pnet
 postrouting
 powerdown
@@ -483,6 +485,8 @@ userprofile
 userspace
 usr
 utm
+utmctl
+utmzip
 validname
 vcpu
 vcs
