@@ -24,19 +24,20 @@ import { findQemuBinary, getQemuVersion } from "../../src/lib/platform.ts";
  * Guest traffic over a real daemon is the opt-in `socket-vmnet-chr.test.ts`.
  */
 
-const SKIP = !process.env.QUICKCHR_INTEGRATION || process.platform === "win32";
-
 const hostArch = process.arch === "arm64" ? "arm64" : "x86";
 const qemuBin = findQemuBinary(hostArch);
 const qemuVersion = qemuBin ? getQemuVersion(qemuBin) : undefined;
 const machineArgs = hostArch === "arm64" ? ["-M", "virt", "-cpu", "cortex-a57"] : ["-M", "pc"];
 
-/** `-netdev stream,…,reconnect-ms` exists from QEMU 9.2. */
-function supportsReconnect(version: string | undefined): boolean {
+function supportsQemuVersion(version: string | undefined, requiredMajor: number, requiredMinor: number): boolean {
 	if (!version) return false;
 	const [major = 0, minor = 0] = version.split(".").map((p) => Number.parseInt(p, 10) || 0);
-	return major > 9 || (major === 9 && minor >= 2);
+	return major > requiredMajor || (major === requiredMajor && minor >= requiredMinor);
 }
+
+// Stream itself needs 7.2. An unknown version still exercises the installed binary.
+const SKIP = !process.env.QUICKCHR_INTEGRATION || process.platform === "win32"
+	|| (qemuVersion !== undefined && !supportsQemuVersion(qemuVersion, 7, 2));
 
 interface FakeDaemon {
 	path: string;
@@ -145,7 +146,7 @@ describe.skipIf(SKIP)("socket_vmnet NICs over -netdev stream (real QEMU)", () =>
 		expect(qemu.exitCode).toBeNull();
 	}, 60_000);
 
-	test.skipIf(!supportsReconnect(qemuVersion))(
+	test.skipIf(!supportsQemuVersion(qemuVersion, 9, 2))(
 		`daemon restart: both NICs re-attach without restarting QEMU (needs QEMU 9.2+, found ${qemuVersion ?? "unknown"})`,
 		async () => {
 			const paths = [join(dir, "shared.sock"), join(dir, "bridged.sock")];

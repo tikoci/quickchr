@@ -29,11 +29,15 @@ Bun.listen({
 				if (buf.length < 4 + len) break;
 				const f = buf.subarray(4, 4 + len);
 				const fv = new DataView(f.buffer, f.byteOffset);
-				const et = fv.getUint16(12, false);
-				const isDhcp = et === 0x0800 && fv.getUint8(23) === 17 && fv.getUint16(36, false) === 67;
-				console.log(
-					`frame len=${len} dst=${hex(f.subarray(0, 6))} src=${hex(f.subarray(6, 12))} ethertype=0x${et.toString(16)}${isDhcp ? " DHCP-to-server" : ""}`,
-				);
+				if (len < 14) {
+					console.log(`short Ethernet frame len=${len}`);
+				} else {
+					const et = fv.getUint16(12, false);
+					const isDhcp = len >= 38 && et === 0x0800 && fv.getUint8(23) === 17 && fv.getUint16(36, false) === 67;
+					console.log(
+						`frame len=${len} dst=${hex(f.subarray(0, 6))} src=${hex(f.subarray(6, 12))} ethertype=0x${et.toString(16)}${isDhcp ? " DHCP-to-server" : ""}`,
+					);
+				}
 				buf = buf.subarray(4 + len);
 				if (++n >= 3) process.exit(0);
 			}

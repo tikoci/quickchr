@@ -1731,9 +1731,16 @@ async function hardRebootMachine(
 		...launchConfig,
 		background: true,
 	};
-	await assertSocketVmnetReachable(restartConfig.networks);
-	const qemuArgs = await buildQemuArgs(restartConfig);
-	const { pid } = await spawnQemu(qemuArgs, state.machineDir, true);
+	let pid: number;
+	try {
+		await assertSocketVmnetReachable(restartConfig.networks);
+		const qemuArgs = await buildQemuArgs(restartConfig);
+		({ pid } = await spawnQemu(qemuArgs, state.machineDir, true));
+	} catch (err) {
+		// The old QEMU has exited; a failed replacement must not retain its PID.
+		finalizeStoppedState(state);
+		throw err;
+	}
 	state.pid = pid;
 	state.status = "running";
 	state.lastStartedAt = new Date().toISOString();
@@ -2802,7 +2809,13 @@ export class QuickCHR {
 			);
 			try { await stopQemu(pid); } catch { /* ignore */ }
 			cleanupQemuSockets(machineDir);
-			({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground));
+			try {
+				await assertSocketVmnetReachable(launchConfig.networks);
+				({ pid } = await spawnQemu(qemuArgs, machineDir, spawnInBackground));
+			} catch (err) {
+				finalizeStoppedState(state);
+				throw err;
+			}
 			state.pid = pid;
 			saveMachine(state);
 			booted = await instance.waitForBoot(bootTimeout, probe);

@@ -22,6 +22,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   than 7.2 is refused for these networks with `NETWORK_UNAVAILABLE`. Before booting,
   `start` connects to each socket_vmnet socket and fails with `NETWORK_UNAVAILABLE`
   when it is missing, stale or not permitted, instead of booting with that link down.
+  Boot retries recheck the socket; a failed retry or device-mode restart leaves the
+  machine stopped with its old PID cleared.
   Machines already running under `socket_vmnet_client` need a restart to switch.
   Library: the
   optional `ResolvedNetwork.wrapper` field is gone, since nothing sets it. (#256)
