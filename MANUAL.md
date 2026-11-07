@@ -232,7 +232,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--install-all-packages` | false | Provisioning, ≥ 7.20.8 |
 | `--add-user <user:pass>` | — | Provisioning, ≥ 7.20.8 |
 | `--disable-admin` | false | Provisioning, ≥ 7.20.8 |
-| `--secure-login` / `--no-secure-login` | unset | Provisioning, ≥ 7.20.8 |
+| `--secure-login` / `--no-secure-login` | unset | Provisioning, ≥ 7.20.8. The only way to get the managed SSH key that centrs and other descriptor consumers need for SSH/SFTP: it creates the `quickchr` account with a batch-verified key. Without it, or when combined with `--add-user`, no key is created. First boot only; an already-booted machine cannot add the key later, so pass it at `add`/`start` (#253) |
 | `--license-level <l>` | — | `p1`, `p10`, `unlimited`, ≥ 7.20.8 |
 | `--license-account <a>` | env `MIKROTIK_WEB_ACCOUNT` | MikroTik.com email |
 | `--license-password <p>` | env `MIKROTIK_WEB_PASSWORD` | |
@@ -1080,7 +1080,7 @@ redact before logging or attaching to bug reports.
 | `installAllPackages` | boolean | `false` | Provisioning |
 | `user` | `{ name, password }` | — | Provisioning |
 | `disableAdmin` | boolean | `false` | Provisioning |
-| `secureLogin` | boolean | `false` | **`true` is the explicit trigger** for managed-account creation |
+| `secureLogin` | boolean | `false` | **`true` is the explicit trigger** for managed-account creation, including the batch-verified SSH key that `descriptor()` advertises (first boot only, #253) |
 | `license` | `LicenseInput` | — | `"p1"` / `"p10"` / `"unlimited"` or `LicenseOptions` |
 | `deviceMode` | `DeviceModeOptions` | — | `{mode?, enable?[], disable?[]}` |
 | `installDeps` | boolean | — | **Deprecated, ignored.** Never installed anything; run `quickchr doctor` for install hints |
