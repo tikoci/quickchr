@@ -1,0 +1,24 @@
+INFO | Initializing vmnet.framework (mode 1002)
+INFO | Using network interface "en0"
+INFO | * vmnet_write_max_packets: 256
+INFO | * vmnet_read_max_packets: 256
+INFO | * vmnet_mtu: 1500
+INFO | * vmnet_interface_id: C55AA42A-03A3-4CE5-8748-8663CB2696F2
+INFO | * vmnet_max_packet_size: 1514
+INFO | * vmnet_mac_address: 26:ce:27:45:05:c9
+INFO | Accepted a connection (fd 6)
+INFO | Connection closed by peer (fd 6)
+INFO | Closing a connection (fd 6)
+INFO | Accepted a connection (fd 6)
+INFO | Initializing vmnet.framework (mode 1002)
+INFO | Using network interface "en0"
+INFO | * vmnet_write_max_packets: 256
+INFO | * vmnet_read_max_packets: 256
+INFO | * vmnet_mtu: 1500
+INFO | * vmnet_interface_id: B80437D4-A3BF-4D4E-A9C5-4A639BFEC9A0
+INFO | * vmnet_max_packet_size: 1514
+INFO | * vmnet_mac_address: fe:dc:fc:c2:19:d1
+INFO | Accepted a connection (fd 6)
+INFO | Connection closed by peer (fd 6)
+INFO | Closing a connection (fd 6)
+INFO | Received signal Terminated: 15

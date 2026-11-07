@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>dev.tikoci.quickchr.lab.net.shared</string>
+<key>ProgramArguments</key><array>
+<string>/opt/quickchr-lab/bin/socket_vmnet</string>
+<string>--vmnet-mode=shared</string>
+<string>--vmnet-gateway=192.168.106.1</string>
+<string>--socket-group=staff</string>
+<string>/var/run/quickchr-lab.shared.sock</string>
+</array>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><true/>
+<key>StandardOutPath</key><string>/var/log/quickchr-lab/net-shared.log</string>
+<key>StandardErrorPath</key><string>/var/log/quickchr-lab/net-shared.log</string>
+<key>UserName</key><string>root</string>
+</dict></plist>
