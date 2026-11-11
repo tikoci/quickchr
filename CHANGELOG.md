@@ -29,6 +29,21 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   Machines already running under `socket_vmnet_client` need a restart to switch.
   Library: the
   optional `ResolvedNetwork.wrapper` field is gone, since nothing sets it. (#256)
+- macOS socket_vmnet networks are found by their **socket**, not by the
+  `socket_vmnet_client` binary, so a daemon installed without Homebrew works.
+  `quickchr networks` and `doctor` now connect to each socket and report it as
+  accepting, stale, missing or not permitted; the wizard checks the same way.
+  Library: in `PlatformInfo.socketVmnet`, `client` is now optional and `daemon` is
+  new. (#262)
+- `bridged:auto` prefers a port with link: an unplugged Ethernet adapter no longer
+  wins over working Wi-Fi. With no link anywhere it keeps the Ethernet-first order.
+  `networks interfaces` shows a Link column. (#256)
+
+### Fixed
+
+- `quickchr networks` no longer reports a dead socket_vmnet daemon as running. The
+  old check took any `socket_vmnet` process as proof, so a leftover Homebrew socket
+  read as running while only a bridged daemon was up. (#262)
 
 ## [0.5.6] — 2026-11-07
 

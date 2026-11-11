@@ -23,6 +23,7 @@ import {
 	requireQemu,
 	requireFirmware,
 	resolveInterfaceAlias,
+	parseIfconfigLinkState,
 	isCrossArchEmulation,
 	accelDoctorCheck,
 	proxyDoctorCheck,
@@ -657,6 +658,19 @@ describe("detectPhysicalInterfaces", () => {
 	test("parses macOS networksetup output, filters virtual ports, and assigns aliases once", () => {
 		setPlatform("darwin");
 		mockSpawnSync((cmd) => {
+			if (cmd[0] === "ifconfig") {
+				expect(cmd).toEqual(["ifconfig", "-a"]);
+				return {
+					exitCode: 0,
+					stdout: [
+						"en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500",
+						"\tether aa:bb:cc:dd:ee:ff",
+						"\tstatus: active",
+						"en5: flags=8822<BROADCAST,SMART,SIMPLEX,MULTICAST> mtu 1500",
+						"\tstatus: inactive",
+					].join("\n"),
+				};
+			}
 			expect(cmd).toEqual(["networksetup", "-listallhardwareports"]);
 			return {
 				exitCode: 0,
@@ -681,9 +695,9 @@ describe("detectPhysicalInterfaces", () => {
 		});
 
 		expect(detectPhysicalInterfaces()).toEqual([
-			{ device: "en0", name: "Wi-Fi", mac: "aa:bb:cc:dd:ee:ff", alias: "wifi" },
-			{ device: "en5", name: "USB Ethernet", mac: "11:22:33:44:55:66", alias: "ethernet" },
-			{ device: "en7", name: "Ethernet", mac: "77:88:99:aa:bb:cc", alias: undefined },
+			{ device: "en0", name: "Wi-Fi", mac: "aa:bb:cc:dd:ee:ff", alias: "wifi", active: true },
+			{ device: "en5", name: "USB Ethernet", mac: "11:22:33:44:55:66", alias: "ethernet", active: false },
+			{ device: "en7", name: "Ethernet", mac: "77:88:99:aa:bb:cc", alias: undefined, active: undefined },
 		]);
 	});
 
@@ -709,6 +723,21 @@ describe("resolveInterfaceAlias", () => {
 		expect(resolveInterfaceAlias("auto", [wifiIface])).toBe("en0");
 	});
 
+	test("auto passes over an unplugged ethernet port for wifi with link", () => {
+		const linked = [{ ...wifiIface, active: true }, { ...ethernetIface, active: false }];
+		expect(resolveInterfaceAlias("auto", linked)).toBe("en0");
+	});
+
+	test("auto takes ethernet with link over wifi with link", () => {
+		const linked = [{ ...wifiIface, active: true }, { ...ethernetIface, active: true }];
+		expect(resolveInterfaceAlias("auto", linked)).toBe("en5");
+	});
+
+	test("auto keeps the ethernet-first order when nothing has link", () => {
+		const down = [{ ...wifiIface, active: false }, { ...ethernetIface, active: false }];
+		expect(resolveInterfaceAlias("auto", down)).toBe("en5");
+	});
+
 	test("throws NETWORK_UNAVAILABLE when an alias has no match", () => {
 		expect(() => resolveInterfaceAlias("ethernet", [wifiIface])).toThrow(
 			expect.objectContaining({
@@ -716,6 +745,23 @@ describe("resolveInterfaceAlias", () => {
 				message: expect.stringContaining("ethernet"),
 			}),
 		);
+	});
+});
+
+describe("parseIfconfigLinkState", () => {
+	test("maps each device's status line; devices without one are absent", () => {
+		const links = parseIfconfigLinkState([
+			"lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384",
+			"\tinet 127.0.0.1 netmask 0xff000000",
+			"en0: flags=8b63<UP,BROADCAST,SMART,RUNNING,PROMISC,ALLMULTI,SIMPLEX,MULTICAST> mtu 1500",
+			"\tether 14:7d:da:0a:07:a1",
+			"\tmedia: autoselect",
+			"\tstatus: active",
+			"en1: flags=8822<BROADCAST,SMART,SIMPLEX,MULTICAST> mtu 1500",
+			"\tstatus: inactive",
+			"utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1500",
+		].join("\n"));
+		expect([...links]).toEqual([["en0", true], ["en1", false]]);
 	});
 });
 

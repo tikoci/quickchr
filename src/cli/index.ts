@@ -2582,13 +2582,15 @@ async function cmdNetworks(argv: string[]) {
 async function showNetworkOverview() {
 	const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
 	const { listNamedSockets } = await import("../lib/socket-registry.ts");
-	const { describeSocketTransport } = await import("../lib/network.ts");
+	const { describeSocketTransport, probeSocketVmnetSockets, describeSocketVmnetProbe } = await import("../lib/network.ts");
 	const { statusIcon, bold, dim } = await import("./format.ts");
 
 	const platform = await detectPlatform();
 	const interfaces = detectPhysicalInterfaces();
 	const sockets = listNamedSockets();
 	const vmnet = platform.socketVmnet;
+	const probed = vmnet ? await probeSocketVmnetSockets(vmnet) : [];
+	const sharedUp = probed.some((s) => s.specifier === "shared" && s.probe.state === "accepting");
 
 	const osLabel = platform.os === "darwin" ? "macOS" : platform.os === "linux" ? "Linux" : "Windows";
 
@@ -2598,20 +2600,12 @@ async function showNetworkOverview() {
 
 	if (platform.os === "darwin") {
 		if (vmnet) {
-			console.log(`  socket_vmnet:   ${statusIcon("ok")} installed (${dim(vmnet.client)})`);
-			if (vmnet.sharedSocket) {
-				console.log(`    Shared daemon:  ${statusIcon("ok")} running (${dim(vmnet.sharedSocket)})`);
-			} else {
-				console.log(`    Shared daemon:  ${statusIcon("error")} not running`);
-			}
-			const bridgedEntries = Object.entries(vmnet.bridgedSockets);
-			if (bridgedEntries.length > 0) {
-				console.log(`    Bridged daemons:`);
-				for (const [iface, sock] of bridgedEntries) {
-					console.log(`      ${iface}: ${dim(sock)}`);
-				}
-			} else {
-				console.log("    Bridged daemons: none");
+			const binaries = [vmnet.daemon, vmnet.client].filter((b): b is string => !!b);
+			console.log(`  socket_vmnet:   ${binaries.length > 0 ? dim(binaries.join(", ")) : dim("no binaries found (sockets only)")}`);
+			if (probed.length === 0) console.log("    Sockets:        none");
+			for (const s of probed) {
+				const icon = statusIcon(s.probe.state === "accepting" ? "ok" : "error");
+				console.log(`    ${s.specifier.padEnd(16)}${icon} ${describeSocketVmnetProbe(s.probe)} ${dim(`(${s.path})`)}`);
 			}
 		} else {
 			console.log(`  socket_vmnet:   ${statusIcon("error")} not installed`);
@@ -2627,7 +2621,8 @@ async function showNetworkOverview() {
 		console.log("  Physical Interfaces:");
 		for (const iface of interfaces) {
 			const aliasStr = iface.alias ? dim(`  (alias: ${iface.alias})`) : "";
-			console.log(`    ${iface.device.padEnd(6)}${iface.name}${aliasStr}`);
+			const linkStr = iface.active === false ? dim("  no link") : "";
+			console.log(`    ${iface.device.padEnd(6)}${iface.name}${aliasStr}${linkStr}`);
 		}
 	} else {
 		console.log(`  Physical Interfaces: ${dim("none detected")}`);
@@ -2637,10 +2632,12 @@ async function showNetworkOverview() {
 	console.log("  Available Specifiers:");
 	console.log("    user              User-mode networking with port forwarding (default)");
 	if (platform.os === "darwin") {
-		if (vmnet?.sharedSocket) {
+		if (sharedUp) {
 			console.log("    shared            Shared network via socket_vmnet (rootless)");
-		} else if (vmnet) {
+		} else if (vmnet?.sharedSocket) {
 			console.log(`    shared            ${dim("Shared daemon not running")}`);
+		} else if (vmnet) {
+			console.log(`    shared            ${dim("No shared socket_vmnet socket")}`);
 		} else {
 			console.log(`    shared            ${dim("Requires socket_vmnet")}`);
 		}
@@ -2679,9 +2676,10 @@ async function showInterfaces() {
 		iface.device,
 		iface.name,
 		iface.alias ?? "",
+		iface.active === undefined ? dim("?") : iface.active ? "up" : "down",
 		iface.mac ?? dim("n/a"),
 	]);
-	console.log(table(["Device", "Name", "Alias", "MAC"], rows));
+	console.log(table(["Device", "Name", "Alias", "Link", "MAC"], rows));
 }
 
 const SOCKET_MODES = ["dgram", "listen-connect", "mcast"] as const;

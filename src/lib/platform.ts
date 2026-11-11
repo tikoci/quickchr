@@ -432,11 +432,19 @@ const SOCKET_VMNET_SOCKET_DIRS = [
 	"/var/run",
 ];
 
-/** Candidate paths for socket_vmnet_client binary. */
-const SOCKET_VMNET_CLIENT_PATHS = [
-	"/opt/homebrew/opt/socket_vmnet/bin/socket_vmnet_client",
-	"/usr/local/opt/socket_vmnet/bin/socket_vmnet_client",
+/** Install prefixes that hold socket_vmnet's `bin/` (Homebrew Apple Silicon and Intel,
+ *  upstream `make install`, and the quickchr-labeled network service). */
+const SOCKET_VMNET_PREFIXES = [
+	"/opt/quickchr",
+	"/opt/socket_vmnet",
+	"/opt/homebrew/opt/socket_vmnet",
+	"/usr/local/opt/socket_vmnet",
 ];
+
+function findSocketVmnetBinary(name: "socket_vmnet" | "socket_vmnet_client"): string | undefined {
+	return SOCKET_VMNET_PREFIXES.map((p) => `${p}/bin/${name}`).find((p) => existsSync(p)) ??
+		findCommandOnPath(name);
+}
 
 function isSocket(path: string): boolean {
 	try {
@@ -446,22 +454,11 @@ function isSocket(path: string): boolean {
 	}
 }
 
-/** Check if a socket_vmnet daemon socket is accessible (file exists and is a socket). */
-export function isSocketVmnetDaemonRunning(socketPath: string): boolean {
-	if (!existsSync(socketPath) || !isSocket(socketPath)) return false;
-	// Socket file persists on disk after the daemon stops. Verify the process is alive.
-	const result = Bun.spawnSync(["pgrep", "socket_vmnet"], { stdout: "pipe", stderr: "pipe" });
-	return result.exitCode === 0;
-}
-
-/** Detect socket_vmnet installation and running daemons (macOS only). */
+/** Detect socket_vmnet sockets (macOS only). Undefined when there is neither a socket
+ *  nor a socket_vmnet binary. A socket found here may be stale: liveness is
+ *  `probeSocketVmnet()` in network.ts, never a process-table check (#262). */
 export function detectSocketVmnet(): SocketVmnetInfo | undefined {
 	if (process.platform !== "darwin") return undefined;
-
-	const client =
-		SOCKET_VMNET_CLIENT_PATHS.find((p) => existsSync(p)) ??
-		findCommandOnPath("socket_vmnet_client");
-	if (!client) return undefined;
 
 	let sharedSocket: string | undefined;
 	const bridgedSockets: Record<string, string> = {};
@@ -491,7 +488,10 @@ export function detectSocketVmnet(): SocketVmnetInfo | undefined {
 		}
 	}
 
-	return { client, sharedSocket, bridgedSockets };
+	const client = findSocketVmnetBinary("socket_vmnet_client");
+	const daemon = findSocketVmnetBinary("socket_vmnet");
+	if (!sharedSocket && Object.keys(bridgedSockets).length === 0 && !client && !daemon) return undefined;
+	return { client, daemon, sharedSocket, bridgedSockets };
 }
 
 /** Gather full platform information. */
@@ -592,6 +592,7 @@ export function detectPhysicalInterfaces(): HostInterface[] {
 
 	const output = new TextDecoder().decode(result.stdout);
 	const blocks = output.split(/\n\n+/).filter(Boolean);
+	const links = detectLinkState();
 	const interfaces: HostInterface[] = [];
 	let assignedWifi = false;
 	let assignedEthernet = false;
@@ -622,10 +623,33 @@ export function detectPhysicalInterfaces(): HostInterface[] {
 			assignedEthernet = true;
 		}
 
-		interfaces.push({ device, name, mac: mac !== "(null)" ? mac : undefined, alias });
+		interfaces.push({ device, name, mac: mac !== "(null)" ? mac : undefined, alias, active: links.get(device) });
 	}
 
 	return interfaces;
+}
+
+/** Link state per device from `ifconfig -a`: the `status:` line under each device's
+ *  `flags=` header. Devices that print no status line are absent from the map. */
+export function parseIfconfigLinkState(output: string): Map<string, boolean> {
+	const links = new Map<string, boolean>();
+	let device: string | undefined;
+	for (const line of output.split("\n")) {
+		const header = line.match(/^([^\s:]+): flags=/);
+		if (header) {
+			device = header[1];
+			continue;
+		}
+		const status = line.match(/^\s+status:\s*(\S+)/);
+		if (device && status) links.set(device, status[1] === "active");
+	}
+	return links;
+}
+
+function detectLinkState(): Map<string, boolean> {
+	const result = Bun.spawnSync(["ifconfig", "-a"], { stdout: "pipe", stderr: "pipe" });
+	if (result.exitCode !== 0) return new Map();
+	return parseIfconfigLinkState(new TextDecoder().decode(result.stdout));
 }
 
 const KNOWN_ALIASES = new Set(["wifi", "ethernet", "auto"]);
@@ -640,10 +664,15 @@ export function resolveInterfaceAlias(
 	const ifaces = interfaces ?? detectPhysicalInterfaces();
 
 	if (alias === "auto") {
-		const eth = ifaces.find((i) => i.alias === "ethernet");
-		if (eth) return eth.device;
-		const wifi = ifaces.find((i) => i.alias === "wifi");
-		if (wifi) return wifi.device;
+		// Ethernet before Wi-Fi, but a port with link before one without: an unplugged
+		// adapter must not win over working Wi-Fi. With no link anywhere, keep the
+		// Ethernet-first order rather than refusing to start.
+		const candidates = [
+			ifaces.find((i) => i.alias === "ethernet"),
+			ifaces.find((i) => i.alias === "wifi"),
+		].filter((i): i is HostInterface => i !== undefined);
+		const pick = candidates.find((i) => i.active === true) ?? candidates[0];
+		if (pick) return pick.device;
 		throw new QError(
 			"NETWORK_UNAVAILABLE",
 			"No physical network interface found for 'auto' — no ethernet or wifi detected",

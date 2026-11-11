@@ -177,7 +177,11 @@ qemu-system-aarch64 \
   requested socket before spawning, and fails with `NETWORK_UNAVAILABLE` when it is
   missing, stale (the file outlived its daemon) or not permitted. The older check (a
   socket file plus any `socket_vmnet` process) passed a stale socket next to an
-  unrelated live daemon.
+  unrelated live daemon. `networks`, `doctor` and the wizard use the same connect.
+- **Detection keys on the socket, not a binary.** quickchr looks for `socket_vmnet`
+  and `socket_vmnet.bridged.<iface>` in `/usr/local/var/run`, `/opt/homebrew/var/run`
+  and `/var/run`. A daemon installed outside Homebrew, with no `socket_vmnet_client`,
+  works.
 - **Any number of socket_vmnet NICs per VM.** Each NIC is its own `-netdev stream`,
   for example one shared and one bridged.
 

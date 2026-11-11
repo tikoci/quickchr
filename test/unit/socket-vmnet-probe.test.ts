@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { assertSocketVmnetReachable } from "../../src/lib/network.ts";
+import { assertSocketVmnetReachable, probeSocketVmnet, probeSocketVmnetSockets } from "../../src/lib/network.ts";
 import type { NetworkConfig } from "../../src/lib/types.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
@@ -14,7 +14,8 @@ import { QuickCHRError } from "../../src/lib/types.ts";
  * every requested socket_vmnet socket before spawning. These tests pin that probe,
  * including a stale socket file next to an unrelated live daemon. The old
  * `isSocketVmnetDaemonRunning()` check (socket file + global `pgrep socket_vmnet`)
- * passed that case.
+ * passed that case. `networks`, `doctor` and the wizard report through the same probe
+ * (`probeSocketVmnet`), so a leftover socket file reads as down there too (#262).
  */
 
 const SKIP = process.platform === "win32";
@@ -89,6 +90,34 @@ describe.skipIf(SKIP)("assertSocketVmnetReachable", () => {
 		const path = liveSocket("private.sock");
 		chmodSync(path, 0o000);
 		await expectUnavailable([vmnetNic("net1", path)], /Not permitted to connect/);
+	});
+
+	test("probeSocketVmnet reports each state separately", async () => {
+		const live = liveSocket("live.sock");
+		const stale = join(dir, "stale.sock");
+		await staleSocket(stale);
+		expect(await probeSocketVmnet(live, 1000)).toEqual({ state: "accepting" });
+		expect(await probeSocketVmnet(stale, 1000)).toMatchObject({ state: "refused" });
+		expect(await probeSocketVmnet(join(dir, "absent.sock"), 1000)).toEqual({ state: "missing", code: "ENOENT" });
+	});
+
+	test.skipIf(process.getuid?.() === 0)("probeSocketVmnet reports a socket it may not open as denied", async () => {
+		const path = liveSocket("private.sock");
+		chmodSync(path, 0o000);
+		expect(await probeSocketVmnet(path, 1000)).toMatchObject({ state: "denied" });
+	});
+
+	test("probeSocketVmnetSockets reports a leftover shared socket as down beside a live bridged daemon", async () => {
+		// Morpheus, 2026-11-11: Homebrew's shared socket left behind, the quickchr bridged
+		// daemon live. A global pgrep called both running.
+		const bridged = liveSocket("socket_vmnet.bridged.en0");
+		const shared = join(dir, "socket_vmnet");
+		await staleSocket(shared);
+		const probed = await probeSocketVmnetSockets({ sharedSocket: shared, bridgedSockets: { en0: bridged } }, 1000);
+		expect(probed.map((p) => [p.specifier, p.probe.state])).toEqual([
+			["shared", "refused"],
+			["bridged:en0", "accepting"],
+		]);
 	});
 
 	test("ignores NICs that are not socket_vmnet-backed", async () => {

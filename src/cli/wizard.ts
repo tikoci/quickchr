@@ -221,8 +221,8 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	// The wizard only asks about *additional* networks. To remove the user-mode
 	// interface, use `quickchr start --no-network --add-network <spec>`.
 	const networks: NetworkSpecifier[] = ["user"];
-	const { detectPlatform, detectPhysicalInterfaces, isSocketVmnetDaemonRunning } = await import("../lib/platform.ts");
-	const { parseNetworkSpecifier } = await import("../lib/network.ts");
+	const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
+	const { parseNetworkSpecifier, probeSocketVmnet, describeSocketVmnetProbe } = await import("../lib/network.ts");
 	const platform = await detectPlatform();
 	const isMacOS = platform.os === "darwin";
 	const hasSocketVmnet = !!platform.socketVmnet;
@@ -264,10 +264,13 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 					let daemonOk = false;
 					while (!daemonOk) {
 						const socketPath = platform.socketVmnet?.sharedSocket;
-						if (socketPath && isSocketVmnetDaemonRunning(socketPath)) {
+						const probe = socketPath ? await probeSocketVmnet(socketPath) : undefined;
+						if (probe?.state === "accepting") {
 							daemonOk = true;
 						} else {
-							clack.log.warn("socket_vmnet daemon is not running.");
+							clack.log.warn(probe
+								? `socket_vmnet shared socket ${socketPath}: ${describeSocketVmnetProbe(probe)}.`
+								: "No shared socket_vmnet socket found.");
 							const retry = await clack.select({
 								message: "What would you like to do?",
 								options: [

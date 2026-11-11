@@ -1,21 +1,14 @@
-import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import * as platformMod from "../../src/lib/platform.ts";
 import {
 	createNamedSocket,
 	addSocketMember,
 	socketEndpointPath,
 	_resetSocketCache,
 } from "../../src/lib/socket-registry.ts";
-
-const mockDaemonRunning = mock(() => true);
-mock.module("../../src/lib/platform.ts", () => ({
-	...platformMod,
-	isSocketVmnetDaemonRunning: mockDaemonRunning,
-}));
 
 import {
 	resolveNetworkConfig,
@@ -132,11 +125,11 @@ describe("resolveNetworkConfig", () => {
 			);
 		});
 
-		test("throws when socket_vmnet daemon is not running", () => {
-			mockDaemonRunning.mockReturnValueOnce(false);
-			expect(() => resolveNetworkConfig(cfg("shared"), macCtx(MOCK_SVN))).toThrow(
-				/socket_vmnet daemon is not running/,
-			);
+		test("resolves from the socket alone, with no socket_vmnet_client installed", () => {
+			const clientless: SocketVmnetInfo = { daemon: "/opt/quickchr/bin/socket_vmnet", sharedSocket: "/var/run/socket_vmnet", bridgedSockets: {} };
+			const result = resolveNetworkConfig(cfg("shared"), macCtx(clientless));
+			expect(resolved(result).socketVmnetPath).toBe("/var/run/socket_vmnet");
+			expect(resolved(result).downgraded).toBeUndefined();
 		});
 	});
 
@@ -194,14 +187,12 @@ describe("resolveNetworkConfig", () => {
 			).toThrow(QuickCHRError);
 		});
 
-		test("throws when socket_vmnet daemon is not running", () => {
-			mockDaemonRunning.mockReturnValueOnce(false);
-			expect(() =>
-				resolveNetworkConfig(
-					cfg({ type: "bridged", iface: "en0" }),
-					macCtx(MOCK_SVN),
-				),
-			).toThrow(/socket_vmnet bridged daemon is not running/);
+		test("resolves from the socket alone, with no binaries found at all", () => {
+			// #256's target host: a quickchr-labeled LaunchDaemon serving the socket, no Homebrew.
+			const socketOnly: SocketVmnetInfo = { bridgedSockets: { en0: "/var/run/socket_vmnet.bridged.en0" } };
+			const result = resolveNetworkConfig(cfg({ type: "bridged", iface: "en0" }), macCtx(socketOnly));
+			expect(resolved(result).socketVmnetPath).toBe("/var/run/socket_vmnet.bridged.en0");
+			expect(resolved(result).downgraded).toBeUndefined();
 		});
 	});
 

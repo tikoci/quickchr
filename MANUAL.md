@@ -1350,7 +1350,7 @@ Picking among the specifiers/forwards by *goal* — full guide with recipes in
 | `shared` | NAT'd L3 with DHCP from the host | yes (or `socket_vmnet` rootless) | yes | yes |
 | `bridged:<iface>` | L2 bridged onto host iface | yes (or `socket_vmnet` rootless) | yes | yes |
 | `tap:<iface>` | pre-created TAP, no quickchr setup | depends | yes | yes |
-| `wifi`, `ethernet`, `auto` (alias) | resolves to detected host iface | as above | | |
+| `wifi`, `ethernet`, `auto` (alias) | resolves to detected host iface; `auto` takes Ethernet before Wi-Fi, but a port with link before one without | as above | | |
 
 Resolution chains:
 
@@ -1366,9 +1366,14 @@ Resolution chains:
 - **Daemon restarts:** on **QEMU 9.2+** each such NIC re-attaches by itself, with no
   VM restart. On 7.2–9.1, or when quickchr cannot read the QEMU version, the NIC stays
   down after a daemon restart until the machine restarts.
+- **A daemon is found by its socket**: `socket_vmnet` (shared) or
+  `socket_vmnet.bridged.<iface>` in `/usr/local/var/run`, `/opt/homebrew/var/run` or
+  `/var/run`. Neither `socket_vmnet_client` nor Homebrew is needed.
 - **The socket is checked before boot.** `start` connects to each socket first and
   fails with `NETWORK_UNAVAILABLE` when the socket is missing, stale (its daemon is
   gone) or not permitted. QEMU itself would boot with the link down instead.
+  `quickchr networks` and `doctor` make the same connection and report each socket
+  as accepting, stale, missing or not permitted.
 - **Machines started by quickchr 0.5.6 or earlier** still run under
   `socket_vmnet_client` and do not re-attach. Restart them (`stop`/`start`) to pick up
   the new attachment.
