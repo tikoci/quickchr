@@ -441,9 +441,12 @@ export function managedSocketPath(slug: string): string {
 }
 const MANAGED_SOCKET_RE = /^quickchr-net-(shared|bridged-(.+))\.sock$/;
 
-/** True for a socket a quickchr-managed network service owns (`quickchr networks`). */
-export function isManagedSocketPath(path: string): boolean {
-	return path.startsWith(`${MANAGED_SOCKET_DIR}/`) && MANAGED_SOCKET_RE.test(path.slice(MANAGED_SOCKET_DIR.length + 1));
+/** The specifier a managed socket serves (`shared`, `bridged:<iface>`), from its name. */
+export function managedSocketSpecifier(path: string): string | undefined {
+	if (!path.startsWith(`${MANAGED_SOCKET_DIR}/`)) return undefined;
+	const match = path.slice(MANAGED_SOCKET_DIR.length + 1).match(MANAGED_SOCKET_RE);
+	if (!match) return undefined;
+	return match[2] ? `bridged:${match[2]}` : "shared";
 }
 
 /** Where `quickchr networks create` installs the pinned helper:
@@ -696,6 +699,17 @@ function detectLinkState(): Map<string, boolean> {
 	return parseIfconfigLinkState(new TextDecoder().decode(result.stdout));
 }
 
+/** Ports `detectPhysicalInterfaces` keeps that are not a wired LAN uplink: a bare
+ *  Thunderbolt port (a member of Thunderbolt Bridge) and iPhone/iPad USB tethering. */
+const NOT_WIRED_PORT = /^thunderbolt \d+$|iphone|ipad/i;
+
+/** A wired adapter, by elimination rather than by name: macOS names USB and dock
+ *  adapters by their chip or vendor ("USB 10/100/1000 LAN", "AX88179A", "USB-C
+ *  LAN"), so "contains ethernet" misses them (Copilot review of #264). */
+export function isWiredPortName(name: string): boolean {
+	return !NOT_WIRED_PORT.test(name) && name.toLowerCase() !== "wi-fi";
+}
+
 const KNOWN_ALIASES = new Set(["wifi", "ethernet", "auto"]);
 
 /** Resolve a convenience alias ("wifi", "ethernet", "auto") to a device name. */
@@ -709,11 +723,11 @@ export function resolveInterfaceAlias(
 
 	if (alias === "auto") {
 		// Ethernet before Wi-Fi, but a port with link before one without: an unplugged
-		// adapter must not win over a second adapter or working Wi-Fi. Every Ethernet
-		// port counts, not only the one holding the `ethernet` alias. With no link
-		// anywhere, keep the old order (aliased Ethernet, then Wi-Fi) rather than refusing.
-		const isEthernet = (i: HostInterface) => i.alias === "ethernet" || i.name.toLowerCase().includes("ethernet");
+		// adapter must not win over a second adapter or working Wi-Fi. Every wired port
+		// counts, not only the one holding the `ethernet` alias. With no link anywhere,
+		// keep the old order (aliased Ethernet, then Wi-Fi) rather than refusing.
 		const isWifi = (i: HostInterface) => i.alias === "wifi" || i.name.toLowerCase() === "wi-fi";
+		const isEthernet = (i: HostInterface) => i.alias === "ethernet" || (!isWifi(i) && isWiredPortName(i.name));
 		const linked = [...ifaces.filter(isEthernet), ...ifaces.filter(isWifi)].find((i) => i.active === true);
 		const fallback = ifaces.find((i) => i.alias === "ethernet") ?? ifaces.find((i) => i.alias === "wifi");
 		const pick = linked ?? fallback;

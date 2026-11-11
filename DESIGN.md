@@ -1276,7 +1276,9 @@ network, running socket_vmnet as root, and machines attach to its socket with
   because vmnet derives the host-side interface MAC from it.
 - **Root acts on nothing the user can still change.** The root script writes the plist
   itself from content embedded in the script (a staged plist could be swapped while
-  sudo waits for the password), hash-checks the helper after copying it into place, and
+  sudo waits for the password), copies the staged helper to a root-owned temp file
+  beside the live one, hash-checks that copy and only then renames it into place (a
+  mismatch leaves the old helper running untouched; Copilot review of #264), and
   refuses if any path from `/opt` to the helper, or the log dir, is a symlink, not
   root-owned, or group/world-writable, checked both before and after `install -d`
   (which follows a symlinked directory). `restart` bootstraps an unloaded job before

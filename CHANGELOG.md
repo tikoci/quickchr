@@ -53,7 +53,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   Library: in `PlatformInfo.socketVmnet`, `client` is now optional and `daemon` is
   new. (#262)
 - `bridged:auto` prefers a port with link: an unplugged Ethernet adapter no longer
-  wins over working Wi-Fi. With no link anywhere it keeps the Ethernet-first order.
+  wins over working Wi-Fi. Every wired adapter counts, including USB and dock
+  adapters named by chip or vendor ("USB 10/100/1000 LAN"). With no link anywhere it
+  keeps the Ethernet-first order.
   `networks interfaces` shows a Link column. (#256)
 
 ### Fixed

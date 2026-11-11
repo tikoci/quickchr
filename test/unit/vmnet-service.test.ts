@@ -159,11 +159,24 @@ describe("generated plist and root scripts", () => {
 		// Codex review of #267: a staged plist in a user-owned temp dir could be swapped
 		// while sudo waits for the password, and root would install it unchecked.
 		const script = buildCreateScript(plan, "/stage/socket_vmnet");
-		const fromStage = script.split("\n").filter((l) => l.includes("/stage/"));
-		expect(fromStage).toEqual([`install -o root -g wheel -m 755 '/stage/socket_vmnet' '${plan.helperPath}'`]);
 		const lines = script.split("\n");
-		expect(lines.findIndex((l) => l.includes(plan.asset.binarySha256))).toBeGreaterThan(lines.indexOf(fromStage[0] as string));
+		const install = lines.indexOf(`install -o root -g wheel -m 755 '/stage/socket_vmnet' "$new"`);
+		expect(install).toBeGreaterThan(0);
+		expect(lines.findIndex((l) => l.includes(plan.asset.binarySha256))).toBeGreaterThan(install);
 		expect(script).toContain(`printf '%s' ${shellQuote(buildLaunchdPlist(plan))} > "$tmp"`);
+	});
+
+	test("the staged helper is verified before it replaces the live one", () => {
+		// Copilot review of #264: installing straight over the live path left unverified
+		// bytes there on a hash mismatch, for KeepAlive to run as root.
+		const lines = buildCreateScript(plan, "/stage/socket_vmnet").split("\n");
+		expect(lines.some((l) => l.startsWith("install ") && l.endsWith(`'${plan.helperPath}'`))).toBe(false);
+		const newCheck = lines.findIndex((l) => l.startsWith(`test "$(shasum -a 256 "$new"`));
+		const swap = lines.indexOf(`mv -f "$new" '${plan.helperPath}'`);
+		const liveCheck = lines.findIndex((l) => l.startsWith(`test "$(shasum -a 256 '${plan.helperPath}'`));
+		expect(newCheck).toBeGreaterThan(0);
+		expect(swap).toBeGreaterThan(newCheck);
+		expect(liveCheck).toBeGreaterThan(swap);
 	});
 
 	test("directories are checked before install -d, which would chown a symlink's target", () => {

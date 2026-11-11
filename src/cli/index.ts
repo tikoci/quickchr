@@ -2811,18 +2811,18 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 			if (want) process.exit(1);
 			return;
 		}
-		let allOk = true;
+		const failing: string[] = [];
 		for (const net of nets) {
 			const st = svc.describeManagedNetworkStatus(await svc.managedNetworkStatus(net));
-			allOk &&= st.ok;
+			if (!st.ok) failing.push(svc.managedNetworkSpecifier(net.spec));
 			console.log(`${statusIcon(st.ok ? "ok" : "error")} ${bold(svc.managedNetworkSpecifier(net.spec))}  ${st.text}`);
 			console.log(dim(`    label ${net.label}  socket ${net.socketPath ?? "?"}  helper ${net.helperPath ?? "?"}`));
 			if (net.socketPath && net.socketPath !== svc.planManagedNetwork(net.spec, net).socketPath) {
 				console.log(dim(`    set up before quickchr managed it; 'quickchr networks create ${svc.managedNetworkSpecifier(net.spec)}' moves it to the quickchr socket name`));
 			}
 		}
-		if (!allOk) {
-			console.log(dim("Restart a network with: quickchr networks restart <network>   (needs sudo)"));
+		if (failing.length > 0) {
+			for (const f of failing) console.log(dim(`Restart it with: quickchr networks restart ${f}   (needs sudo)`));
 			process.exit(1);
 		}
 		return;

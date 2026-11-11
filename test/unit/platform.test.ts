@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import type { HostInterface } from "../../src/lib/types.ts";
 import {
 	detectAccel,
 	detectPackageManager,
@@ -26,6 +27,8 @@ import {
 	resolveInterfaceAlias,
 	parseIfconfigLinkState,
 	findManagedHelper,
+	managedSocketSpecifier,
+	isWiredPortName,
 	isCrossArchEmulation,
 	accelDoctorCheck,
 	proxyDoctorCheck,
@@ -741,6 +744,17 @@ describe("resolveInterfaceAlias", () => {
 		expect(resolveInterfaceAlias("auto", [{ ...wifiIface, active: false }, { ...ethernetIface, active: false }, second])).toBe("en7");
 	});
 
+	test("auto counts USB and dock adapters named by chip or vendor as wired", () => {
+		const usb: HostInterface = { device: "en8", name: "USB 10/100/1000 LAN", active: true };
+		const tbPort: HostInterface = { device: "en2", name: "Thunderbolt 1", active: true };
+		const iphone: HostInterface = { device: "en9", name: "iPhone USB", active: true };
+		const wifiUp = { ...wifiIface, active: true };
+		expect(resolveInterfaceAlias("auto", [wifiUp, { ...ethernetIface, active: false }, usb])).toBe("en8");
+		expect(resolveInterfaceAlias("auto", [tbPort, iphone, wifiUp])).toBe("en0");
+		expect(isWiredPortName("AX88179A")).toBe(true);
+		expect(isWiredPortName("Thunderbolt Ethernet Slot 1")).toBe(true);
+	});
+
 	test("auto keeps the ethernet-first order when nothing has link", () => {
 		const down = [{ ...wifiIface, active: false }, { ...ethernetIface, active: false }];
 		expect(resolveInterfaceAlias("auto", down)).toBe("en5");
@@ -753,6 +767,15 @@ describe("resolveInterfaceAlias", () => {
 				message: expect.stringContaining("ethernet"),
 			}),
 		);
+	});
+});
+
+describe("managedSocketSpecifier", () => {
+	test("names the network a quickchr socket serves, and nothing for other sockets", () => {
+		expect(managedSocketSpecifier("/var/run/quickchr-net-shared.sock")).toBe("shared");
+		expect(managedSocketSpecifier("/var/run/quickchr-net-bridged-en0.sock")).toBe("bridged:en0");
+		expect(managedSocketSpecifier("/var/run/socket_vmnet.bridged.en0")).toBeUndefined();
+		expect(managedSocketSpecifier("/tmp/quickchr-net-shared.sock")).toBeUndefined();
 	});
 });
 

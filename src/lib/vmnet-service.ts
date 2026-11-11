@@ -338,24 +338,39 @@ export function buildCreateScript(plan: ManagedNetworkPlan, stagedHelper?: strin
 	const helperDir = plan.helperPath.slice(0, plan.helperPath.lastIndexOf("/"));
 	const staleSockets = [plan.socketPath, ...(plan.replaces?.socketPath && plan.replaces.socketPath !== plan.socketPath ? [plan.replaces.socketPath] : [])];
 	const dirs = [...helperPathChain(helperDir), MANAGED_LOG_DIR];
+	const hashCheck = (path: string, shown: string) =>
+		`test "$(shasum -a 256 ${path} | cut -d ' ' -f 1)" = ${q(plan.asset.binarySha256)} || { echo ${q(`quickchr: ${shown} does not match the pinned sha256`)} >&2; exit 1; }`;
 	return [
 		"set -eu",
 		"umask 022",
+		// Temp files root creates: removed on any exit before they are moved into place,
+		// so a failure leaves neither unverified bytes nor a stray plist behind.
+		`new=""; tmp=""`,
+		`trap '[ -z "$new" ] || rm -f "$new"; [ -z "$tmp" ] || rm -f "$tmp"' EXIT`,
 		// Checked before `install -d` too: it follows a symlinked directory and would
 		// chown/chmod the link's target before the check after it could refuse.
 		...rootOwnedChecks(dirs),
 		`install -d -o root -g wheel -m 755 ${q(helperDir)} ${q(MANAGED_LOG_DIR)}`,
 		...rootOwnedChecks(dirs),
-		...(stagedHelper ? [`install -o root -g wheel -m 755 ${q(stagedHelper)} ${q(plan.helperPath)}`] : []),
+		// The staged copy is user-owned and could change while sudo waits: copy it into the
+		// root-owned directory, verify that copy, and only then rename it over the live
+		// helper (atomic in one directory). A mismatch leaves the old helper untouched.
+		...(stagedHelper
+			? [
+				`new=$(mktemp ${q(`${helperDir}/.socket_vmnet.XXXXXX`)})`,
+				`install -o root -g wheel -m 755 ${q(stagedHelper)} "$new"`,
+				hashCheck(`"$new"`, `the staged ${stagedHelper}`),
+				`mv -f "$new" ${q(plan.helperPath)}`,
+				`new=""`,
+			]
+			: []),
 		// launchd opens the log as root for StandardOutPath/StandardErrorPath, so an
 		// existing log file gets the same check as the helper.
 		...rootOwnedChecks([plan.helperPath, plan.logPath]),
-		`test "$(shasum -a 256 ${q(plan.helperPath)} | cut -d ' ' -f 1)" = ${q(plan.asset.binarySha256)} || { echo ${q(`quickchr: ${plan.helperPath} does not match the pinned sha256`)} >&2; exit 1; }`,
+		hashCheck(q(plan.helperPath), plan.helperPath),
 		...unloadLabel(plan.label),
 		`rm -f ${staleSockets.map(q).join(" ")}`,
 		`tmp=$(mktemp ${q(`${LAUNCH_DAEMONS_DIR}/.quickchr.XXXXXX`)})`,
-		// A failure before the `mv` must not leave a stray file in LaunchDaemons.
-		`trap 'rm -f "$tmp"' EXIT`,
 		`printf '%s' ${q(buildLaunchdPlist(plan))} > "$tmp"`,
 		`chown root:wheel "$tmp"`,
 		`chmod 644 "$tmp"`,

@@ -28,7 +28,7 @@ import {
 	type SocketEntry,
 } from "./socket-registry.ts";
 import { assertValidResourceName } from "./names.ts";
-import { isManagedSocketPath, resolveInterfaceAlias } from "./platform.ts";
+import { managedSocketSpecifier, resolveInterfaceAlias } from "./platform.ts";
 
 /** Allocate a port block for a new instance, avoiding conflicts with existing machines. */
 export function allocatePortBlock(
@@ -765,6 +765,13 @@ export async function probeSocketVmnetSockets(
 	return Promise.all(sockets.map(async (s) => ({ ...s, probe: await probeSocketVmnet(s.path, timeoutMs) })));
 }
 
+/** The specifier of the network that resolved to `path`, as `networks create` takes it. */
+function socketVmnetSpecifier(networks: NetworkConfig[], path: string): string {
+	const spec = networks.find((n) => n.resolved?.socketVmnetPath === path)?.specifier;
+	if (typeof spec === "object" && spec.type === "bridged") return `bridged:${spec.iface}`;
+	return "shared";
+}
+
 /** Refuse a launch whose socket_vmnet sockets do not accept a connection.
  *
  *  The `socket_vmnet_client` wrapper used to fail the spawn when its `connect()` failed.
@@ -785,10 +792,12 @@ export async function assertSocketVmnetReachable(
 	for (const path of paths) {
 		const probe = await probeSocketVmnet(path, timeoutMs);
 		// `networks status/restart` only know quickchr's own services; a Homebrew or lima
-		// socket belongs to whatever installed it.
-		const fix = isManagedSocketPath(path)
-			? "Check it with: quickchr networks status   (restart it with: quickchr networks restart <network>, needs sudo)"
-			: "This socket is not a quickchr-managed network: restart the service that owns it (Homebrew: sudo brew services restart socket_vmnet), or create a managed one with quickchr networks create <network>.";
+		// socket belongs to whatever installed it. Each hint names the network, so it is a
+		// command the user can run as printed.
+		const managed = managedSocketSpecifier(path);
+		const fix = managed
+			? `Check it with: quickchr networks status ${managed}   (restart it with: quickchr networks restart ${managed}, needs sudo)`
+			: `This socket is not a quickchr-managed network: restart the service that owns it (Homebrew: sudo brew services restart socket_vmnet), or create a managed one with: quickchr networks create ${socketVmnetSpecifier(networks, path)}`;
 		switch (probe.state) {
 			case "accepting":
 				continue;

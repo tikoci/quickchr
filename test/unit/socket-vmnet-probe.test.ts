@@ -100,6 +100,24 @@ describe.skipIf(SKIP)("assertSocketVmnetReachable", () => {
 		expect(await hint("/var/run/quickchr-net-bridged-zz9.sock")).toContain("quickchr networks restart");
 	});
 
+	test("each hint names the network, so it runs as printed", async () => {
+		// Copilot review of #264: `quickchr networks create <network>` is shell redirection.
+		const hint = async (path: string, specifier: NetworkConfig["specifier"]) => {
+			try {
+				await assertSocketVmnetReachable([{ ...vmnetNic("net1", path), specifier }], 1000);
+			} catch (e) {
+				return (e as QuickCHRError).installHint ?? "";
+			}
+			return "";
+		};
+		const managed = await hint("/var/run/quickchr-net-bridged-zz9.sock", { type: "bridged", iface: "auto" });
+		expect(managed).toContain("quickchr networks restart bridged:zz9");
+		expect(managed).toContain("quickchr networks status bridged:zz9");
+		expect(await hint(join(dir, "socket_vmnet.bridged.en7"), { type: "bridged", iface: "en7" })).toEndWith("quickchr networks create bridged:en7");
+		expect(await hint(join(dir, "socket_vmnet.shared"), "shared")).toEndWith("quickchr networks create shared");
+		expect(managed).not.toContain("<");
+	});
+
 	test.skipIf(process.getuid?.() === 0)("refuses a socket the user may not connect to", async () => {
 		const path = liveSocket("private.sock");
 		chmodSync(path, 0o000);
