@@ -131,6 +131,19 @@ QEMU 7.1 added built-in `vmnet` support (`-netdev vmnet-shared`, `-netdev vmnet-
 | Host-only | `--vmnet-mode=host` | Host ↔ guest only; no internet |
 | Bridged | `--vmnet-mode=bridged --vmnet-interface=en0` | Real LAN presence; LAN DHCP assigns IP |
 
+### Install with quickchr (recommended)
+
+```sh
+quickchr networks create shared        # or: bridged:en0 — one sudo step each
+quickchr networks status               # no sudo
+```
+
+This installs lima-vm's upstream socket_vmnet release (pinned version and sha256,
+shown before the sudo prompt) to `/opt/quickchr/socket_vmnet/<version>/`, and one
+LaunchDaemon per network (`dev.tikoci.quickchr.net.<slug>`) with its socket at
+`/var/run/quickchr-net-<slug>.sock`. Homebrew is not involved. See MANUAL.md,
+`networks`. The Homebrew route below still works; quickchr finds its sockets too.
+
 ### Install (Homebrew)
 
 ```sh
@@ -177,7 +190,11 @@ qemu-system-aarch64 \
   requested socket before spawning, and fails with `NETWORK_UNAVAILABLE` when it is
   missing, stale (the file outlived its daemon) or not permitted. The older check (a
   socket file plus any `socket_vmnet` process) passed a stale socket next to an
-  unrelated live daemon.
+  unrelated live daemon. `networks`, `doctor` and the wizard use the same connect.
+- **Detection keys on the socket, not a binary.** quickchr looks for `socket_vmnet`
+  and `socket_vmnet.bridged.<iface>` in `/usr/local/var/run`, `/opt/homebrew/var/run`
+  and `/var/run`. A daemon installed outside Homebrew, with no `socket_vmnet_client`,
+  works.
 - **Any number of socket_vmnet NICs per VM.** Each NIC is its own `-netdev stream`,
   for example one shared and one bridged.
 

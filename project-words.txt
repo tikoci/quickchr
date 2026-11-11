@@ -20,6 +20,7 @@ acpi
 addrs
 aehd
 ahostsv
+allmulti
 amm
 apfs
 apk
@@ -31,6 +32,7 @@ artipacked
 askpass
 audiodev
 authless
+autoselect
 awk
 backgrounded
 backoff
@@ -272,6 +274,7 @@ mountpoint
 mqtts
 mte
 mtree
+mxcl
 ncaps
 ncpu
 neoverse
@@ -333,6 +336,7 @@ pkill
 pkl
 plutil
 pnet
+pointopoint
 postrouting
 powerdown
 poweroff
@@ -342,6 +346,7 @@ prerouting
 printk
 privs
 procs
+promisc
 proplist
 provpass
 ptp
@@ -491,6 +496,7 @@ utf
 utm
 utmctl
 utmzip
+utun
 validname
 vcpu
 vcs

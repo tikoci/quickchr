@@ -7,9 +7,10 @@ import { bootTestTimeout } from "./timeouts.ts";
  * Opt-in integration test — a CHR on two socket_vmnet bridged NICs gets real LAN leases (#256).
  *
  * Runs only with QUICKCHR_INTEGRATION=1 **and** QUICKCHR_TEST_VMNET_BRIDGED=<iface>
- * on macOS, against a socket_vmnet daemon already serving
- * `socket_vmnet.bridged.<iface>` in a directory quickchr scans (for example
- * /var/run). CI has no such daemon, so it never runs there. The test boots one guest
+ * on macOS, against a socket_vmnet daemon already serving that interface: a
+ * quickchr-managed `/var/run/quickchr-net-bridged-<iface>.sock`
+ * (`quickchr networks create bridged:<iface>`), or a Homebrew/lima
+ * `socket_vmnet.bridged.<iface>` in a directory quickchr scans. CI has no such daemon, so it never runs there. The test boots one guest
  * through the library as the current (unprivileged) user and never touches the
  * daemon: no restart, no sudo.
  *
@@ -60,7 +61,14 @@ describe.skipIf(SKIP)(`socket_vmnet bridged:${IFACE} on a real daemon`, () => {
 			expect(pid).toBeDefined();
 			const argv = Bun.spawnSync(["ps", "-o", "command=", "-p", String(pid)]).stdout.toString();
 			expect(argv).not.toContain("socket_vmnet_client");
-			expect(argv.match(/-netdev stream,id=net[12],server=off,addr\.type=unix,addr\.path=\S*socket_vmnet\.bridged\./g)).toHaveLength(2);
+			// Whichever socket detection picked (managed sockets win over lima-named ones),
+			// both NICs must be on it.
+			const { detectSocketVmnet } = await import("../../src/lib/platform.ts");
+			const socket = detectSocketVmnet()?.bridgedSockets[iface];
+			expect(socket).toBeDefined();
+			for (const id of ["net1", "net2"]) {
+				expect(argv).toContain(`-netdev stream,id=${id},server=off,addr.type=unix,addr.path=${socket}`);
+			}
 
 			const guest = instance;
 			await guest.exec("/ip/dhcp-client/add interface=ether2 add-default-route=no");

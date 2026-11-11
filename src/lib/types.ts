@@ -129,16 +129,41 @@ export interface HostInterface {
 	mac?: string;
 	/** Interface alias for --add-network convenience: "wifi", "ethernet", or undefined. */
 	alias?: "wifi" | "ethernet";
+	/** Link state from `ifconfig` (`status: active`); undefined when it reports none. */
+	active?: boolean;
 }
 
-/** socket_vmnet daemon availability on macOS. */
+/** socket_vmnet sockets found on macOS. Detection keys on the sockets: QEMU attaches
+ *  to them with `-netdev stream`, so neither binary is needed to use a network. A
+ *  socket file can outlive its daemon; whether it accepts is `probeSocketVmnet()`'s job. */
 export interface SocketVmnetInfo {
-	/** Path to socket_vmnet_client binary. */
-	client: string;
-	/** Path to shared daemon socket (if running). */
+	/** `socket_vmnet_client` binary, when one is installed. Informational only. */
+	client?: string;
+	/** `socket_vmnet` daemon binary, when one is found. Informational only. */
+	daemon?: string;
+	/** Shared-mode socket file, when present. */
 	sharedSocket?: string;
-	/** Map of interface name → bridged daemon socket path (if running). */
+	/** Map of interface name → bridged socket file. */
 	bridgedSockets: Record<string, string>;
+}
+
+/** What a connect to a socket_vmnet socket found. */
+export type SocketVmnetState =
+	/** A daemon accepted the connection. */
+	| "accepting"
+	/** No socket file. */
+	| "missing"
+	/** The file exists but nothing is listening: the daemon stopped or crashed. */
+	| "refused"
+	/** The daemon is up but this user may not connect (its `--socket-group`). */
+	| "denied"
+	/** No answer within the probe timeout. */
+	| "timeout";
+
+export interface SocketVmnetProbe {
+	state: SocketVmnetState;
+	/** errno code behind a failed probe (ECONNREFUSED, EACCES, ...). */
+	code?: string;
 }
 
 /** A single host→guest port forward, realized as one QEMU SLIRP `hostfwd`
