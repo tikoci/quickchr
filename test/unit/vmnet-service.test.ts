@@ -153,7 +153,6 @@ describe("generated plist and root scripts", () => {
 		expect(hash).toBeGreaterThan(0);
 		expect(bootstrap).toBeGreaterThan(hash);
 		expect(script).toContain("rm -f '/var/run/quickchr-net-bridged-en0.sock' '/var/run/socket_vmnet.bridged.en0'");
-		expect(Bun.spawnSync(["/bin/sh", "-n", "-c", script]).exitCode).toBe(0);
 	});
 
 	test("root takes nothing from a user-writable file unchecked: the plist is embedded, the helper re-hashed in place", () => {
@@ -164,19 +163,7 @@ describe("generated plist and root scripts", () => {
 		expect(fromStage).toEqual([`install -o root -g wheel -m 755 '/stage/socket_vmnet' '${plan.helperPath}'`]);
 		const lines = script.split("\n");
 		expect(lines.findIndex((l) => l.includes(plan.asset.binarySha256))).toBeGreaterThan(lines.indexOf(fromStage[0] as string));
-		// The embedded plist, written by the script's own printf, is byte-for-byte the plan.
-		const at = script.indexOf("printf '%s' ");
-		const end = script.indexOf(' > "$tmp"', at);
-		expect(at).toBeGreaterThan(0);
-		const printf = script.slice(at, end);
-		const dir = mkdtempSync(join(tmpdir(), "quickchr-tmp-plist-"));
-		try {
-			const out = join(dir, "p.plist");
-			expect(Bun.spawnSync(["/bin/sh", "-c", `${printf} > ${shellQuote(out)}`]).exitCode).toBe(0);
-			expect(readFileSync(out, "utf8")).toBe(buildLaunchdPlist(plan));
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
+		expect(script).toContain(`printf '%s' ${shellQuote(buildLaunchdPlist(plan))} > "$tmp"`);
 	});
 
 	test("create skips the helper install when it is already in place, but still checks it", () => {
@@ -187,17 +174,82 @@ describe("generated plist and root scripts", () => {
 		expect(script).toContain(`for p in '${plan.helperPath}' '${plan.logPath}'; do`);
 	});
 
-	test("remove and restart scripts are valid sh; restart loads an unloaded job first", () => {
-		for (const s of [buildRemoveScript(morpheus()), buildRestartScript(morpheus())]) {
-			expect(Bun.spawnSync(["/bin/sh", "-n", "-c", s]).exitCode).toBe(0);
-		}
+	test("remove deletes the plist and socket; restart loads an unloaded job first", () => {
 		expect(buildRemoveScript(morpheus())).toContain(`rm -f '${PLIST_PATH}' '/var/run/socket_vmnet.bridged.en0'`);
 		const restart = buildRestartScript(morpheus()).split("\n");
 		expect(restart[1]).toBe(`launchctl print 'system/${morpheus().label}' >/dev/null 2>&1 || launchctl bootstrap system '${PLIST_PATH}'`);
 		expect(restart[2]).toStartWith("launchctl kickstart -k");
 	});
+});
+
+/**
+ * The root scripts are macOS `/bin/sh` scripts, so these tests run them under a POSIX
+ * shell. Windows has no `/bin/sh` (`uv_spawn '/bin/sh'` ENOENT, run 43058959832): that
+ * is a fact about the test harness, not about the product, which only builds these
+ * scripts on macOS. The string-level assertions above still run on every platform.
+ */
+describe.skipIf(process.platform === "win32")("generated root scripts under /bin/sh", () => {
+	const plan = planManagedNetwork({ mode: "bridged", iface: "en0" }, morpheus(), "x64");
+
+	test("create, remove and restart scripts parse", () => {
+		for (const script of [buildCreateScript(plan, "/stage/socket_vmnet"), buildCreateScript(plan), buildRemoveScript(morpheus()), buildRestartScript(morpheus())]) {
+			expect(Bun.spawnSync(["/bin/sh", "-n", "-c", script]).exitCode).toBe(0);
+		}
+	});
+
+	test("the plist the script writes with its own printf is byte-for-byte the plan", () => {
+		const script = buildCreateScript(plan, "/stage/socket_vmnet");
+		const at = script.indexOf("printf '%s' ");
+		const printf = script.slice(at, script.indexOf(' > "$tmp"', at));
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-tmp-plist-"));
+		try {
+			const out = join(dir, "p.plist");
+			expect(Bun.spawnSync(["/bin/sh", "-c", `${printf} > ${shellQuote(out)}`]).exitCode).toBe(0);
+			expect(readFileSync(out, "utf8")).toBe(buildLaunchdPlist(plan));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("shellQuote survives a single quote", () => {
 		expect(Bun.spawnSync(["/bin/sh", "-c", `printf %s ${shellQuote("a'b c")}`]).stdout.toString()).toBe("a'b c");
+	});
+
+	test("an unload that never finishes stops remove before it deletes anything", () => {
+		// Codex review of #264: the wait loop used to fall through after 5 s and the
+		// script went on to delete the plist with the service still loaded. launchctl
+		// is stubbed to report the job as loaded forever, and sleep to return at once.
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-tmp-unload-"));
+		try {
+			const plistPath = join(dir, "svc.plist");
+			const socketPath = join(dir, "svc.sock");
+			writeFileSync(plistPath, "plist");
+			writeFileSync(socketPath, "sock");
+			const net = { ...morpheus(), plistPath, socketPath };
+			const stubs = "launchctl() { return 0; }\nsleep() { :; }\n";
+			const r = Bun.spawnSync(["/bin/sh", "-c", stubs + buildRemoveScript(net)], { stderr: "pipe" });
+			expect(r.exitCode).toBe(1);
+			expect(r.stderr.toString()).toContain("still loaded after bootout");
+			expect(readFileSync(plistPath, "utf8")).toBe("plist");
+			expect(readFileSync(socketPath, "utf8")).toBe("sock");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("an already-unloaded job is not an error", () => {
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-tmp-unload-"));
+		try {
+			const plistPath = join(dir, "svc.plist");
+			writeFileSync(plistPath, "plist");
+			const net = { ...morpheus(), plistPath, socketPath: join(dir, "svc.sock") };
+			// bootout fails (not loaded), print fails (not loaded): remove proceeds.
+			const stubs = "launchctl() { return 113; }\n";
+			expect(Bun.spawnSync(["/bin/sh", "-c", stubs + buildRemoveScript(net)]).exitCode).toBe(0);
+			expect(() => readFileSync(plistPath)).toThrow();
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

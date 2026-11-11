@@ -446,17 +446,35 @@ export function isManagedSocketPath(path: string): boolean {
 	return path.startsWith(`${MANAGED_SOCKET_DIR}/`) && MANAGED_SOCKET_RE.test(path.slice(MANAGED_SOCKET_DIR.length + 1));
 }
 
-/** Install prefixes that hold socket_vmnet's `bin/` (Homebrew Apple Silicon and Intel,
- *  upstream `make install`, and the quickchr-labeled network service). */
+/** Where `quickchr networks create` installs the pinned helper:
+ *  `<root>/<version>/bin/socket_vmnet`. The installer (vmnet-service.ts) builds its
+ *  path from this, so detection and installation cannot drift apart. */
+export const MANAGED_HELPER_ROOT = "/opt/quickchr/socket_vmnet";
+
+/** Install prefixes that hold socket_vmnet's `bin/`: upstream `make install`, then
+ *  Homebrew on Apple Silicon and Intel. */
 const SOCKET_VMNET_PREFIXES = [
-	"/opt/quickchr",
 	"/opt/socket_vmnet",
 	"/opt/homebrew/opt/socket_vmnet",
 	"/usr/local/opt/socket_vmnet",
 ];
 
+/** The newest quickchr-installed helper version present, if any. A stopped managed
+ *  network has no socket, and its helper is still how detection knows it is installed. */
+export function findManagedHelper(root: string = MANAGED_HELPER_ROOT): string | undefined {
+	let versions: string[];
+	try {
+		versions = readdirSync(root);
+	} catch {
+		return undefined;
+	}
+	const sorted = versions.filter((v) => /^\d+(\.\d+)*$/.test(v)).sort((a, b) => Bun.semver.order(b, a));
+	return sorted.map((v) => join(root, v, "bin", "socket_vmnet")).find((p) => existsSync(p));
+}
+
 function findSocketVmnetBinary(name: "socket_vmnet" | "socket_vmnet_client"): string | undefined {
-	return SOCKET_VMNET_PREFIXES.map((p) => `${p}/bin/${name}`).find((p) => existsSync(p)) ??
+	return (name === "socket_vmnet" ? findManagedHelper() : undefined) ??
+		SOCKET_VMNET_PREFIXES.map((p) => `${p}/bin/${name}`).find((p) => existsSync(p)) ??
 		findCommandOnPath(name);
 }
 

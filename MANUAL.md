@@ -539,6 +539,11 @@ service. quickchr installs one per network, and only that step needs sudo:
 | `networks restart <net>` | yes | `launchctl kickstart -k`; machines on QEMU 9.2+ re-attach by themselves |
 | `networks remove <net>` | yes | unloads and deletes the service (refuses while machines on it run, unless `--force`) |
 
+The `remove` guard only sees **your** machines, the ones in the quickchr data dir you
+are running with. A network service is host-wide: any local user (group `staff`), another
+`QUICKCHR_DATA_DIR`, or a QEMU started outside quickchr can be attached to it too, and
+`remove` disconnects them without warning.
+
 `<net>` is the specifier machines use: `shared` or `bridged:<iface>` (`wifi`,
 `ethernet` and `auto` resolve to a device at create time). Before it asks, `create`
 shows the socket_vmnet version, release URL, tarball and binary sha256, and every

@@ -17,7 +17,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { QuickCHRError, type MachineState, type SocketVmnetProbe } from "./types.ts";
-import { managedSocketPath, resolveInterfaceAlias } from "./platform.ts";
+import { MANAGED_HELPER_ROOT, managedSocketPath, resolveInterfaceAlias } from "./platform.ts";
 import { probeSocketVmnet } from "./network.ts";
 import { downloadToFile } from "./download.ts";
 import { createLogger } from "./log.ts";
@@ -44,7 +44,6 @@ export const SOCKET_VMNET_RELEASE = {
 
 export type SocketVmnetAsset = (typeof SOCKET_VMNET_RELEASE.assets)[keyof typeof SOCKET_VMNET_RELEASE.assets];
 
-export const MANAGED_PREFIX = "/opt/quickchr";
 export const MANAGED_LABEL_PREFIX = "dev.tikoci.quickchr.net.";
 export const MANAGED_LOG_DIR = "/var/log/quickchr";
 export const LAUNCH_DAEMONS_DIR = "/Library/LaunchDaemons";
@@ -64,7 +63,7 @@ export function socketVmnetAssetUrl(asset: SocketVmnetAsset): string {
 }
 
 export function managedHelperPath(version: string = SOCKET_VMNET_RELEASE.version): string {
-	return `${MANAGED_PREFIX}/socket_vmnet/${version}/bin/socket_vmnet`;
+	return `${MANAGED_HELPER_ROOT}/${version}/bin/socket_vmnet`;
 }
 
 /** Interface names become path segments, a launchd label and a shell word. */
@@ -289,11 +288,19 @@ export function shellQuote(s: string): string {
 	return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Wait for launchd to finish unloading a label before it is bootstrapped again;
- *  an immediate bootstrap after bootout can fail with an I/O error. */
-function waitUnloaded(label: string): string {
+/** Unload a label and wait until launchd no longer has it. An immediate bootstrap after
+ *  bootout can fail with an I/O error, and an unload that never finishes must stop the
+ *  script before it deletes or replaces anything: otherwise `remove` reports success
+ *  with the root service still running (Codex review of #264). `bootout`'s own exit
+ *  status is not used: it also fails for a label that is already unloaded, so the
+ *  `launchctl print` afterwards is what decides. */
+function unloadLabel(label: string): string[] {
 	const target = shellQuote(`system/${label}`);
-	return `i=0; while launchctl print ${target} >/dev/null 2>&1 && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done`;
+	return [
+		`launchctl bootout ${target} 2>/dev/null || true`,
+		`i=0; while launchctl print ${target} >/dev/null 2>&1 && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done`,
+		`if launchctl print ${target} >/dev/null 2>&1; then echo ${shellQuote(`quickchr: ${label} is still loaded after bootout; its plist and socket were left in place`)} >&2; exit 1; fi`,
+	];
 }
 
 /** Shell lines that stop the root script unless every path is a real (not symlinked),
@@ -340,8 +347,7 @@ export function buildCreateScript(plan: ManagedNetworkPlan, stagedHelper?: strin
 		// existing log file gets the same check as the helper.
 		...rootOwnedChecks([plan.helperPath, plan.logPath]),
 		`test "$(shasum -a 256 ${q(plan.helperPath)} | cut -d ' ' -f 1)" = ${q(plan.asset.binarySha256)} || { echo ${q(`quickchr: ${plan.helperPath} does not match the pinned sha256`)} >&2; exit 1; }`,
-		`launchctl bootout ${q(`system/${plan.label}`)} 2>/dev/null || true`,
-		waitUnloaded(plan.label),
+		...unloadLabel(plan.label),
 		`rm -f ${staleSockets.map(q).join(" ")}`,
 		`tmp=$(mktemp ${q(`${LAUNCH_DAEMONS_DIR}/.quickchr.XXXXXX`)})`,
 		`printf '%s' ${q(buildLaunchdPlist(plan))} > "$tmp"`,
@@ -356,8 +362,7 @@ export function buildRemoveScript(net: ManagedNetwork): string {
 	const q = shellQuote;
 	return [
 		"set -eu",
-		`launchctl bootout ${q(`system/${net.label}`)} 2>/dev/null || true`,
-		waitUnloaded(net.label),
+		...unloadLabel(net.label),
 		`rm -f ${[net.plistPath, ...(net.socketPath ? [net.socketPath] : [])].map(q).join(" ")}`,
 	].join("\n");
 }

@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import {
 	detectAccel,
 	detectPackageManager,
@@ -24,6 +25,7 @@ import {
 	requireFirmware,
 	resolveInterfaceAlias,
 	parseIfconfigLinkState,
+	findManagedHelper,
 	isCrossArchEmulation,
 	accelDoctorCheck,
 	proxyDoctorCheck,
@@ -751,6 +753,25 @@ describe("resolveInterfaceAlias", () => {
 				message: expect.stringContaining("ethernet"),
 			}),
 		);
+	});
+});
+
+describe("findManagedHelper", () => {
+	test("finds the newest installed version, ignoring non-version entries and empty versions", () => {
+		// Copilot review of #264: detection looked in /opt/quickchr/bin while the installer
+		// writes /opt/quickchr/socket_vmnet/<version>/bin, so a stopped managed network
+		// read as "not installed".
+		const root = mkdtempSync(join(tmpdir(), "quickchr-tmp-helper-"));
+		try {
+			expect(findManagedHelper(root)).toBeUndefined();
+			for (const v of ["1.2.2", "1.10.0", "notes"]) mkdirSync(join(root, v, "bin"), { recursive: true });
+			writeFileSync(join(root, "1.2.2", "bin", "socket_vmnet"), "");
+			expect(findManagedHelper(root)).toBe(join(root, "1.2.2", "bin", "socket_vmnet"));
+			writeFileSync(join(root, "1.10.0", "bin", "socket_vmnet"), "");
+			expect(findManagedHelper(root)).toBe(join(root, "1.10.0", "bin", "socket_vmnet"));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });
 

@@ -3088,7 +3088,9 @@ Managed host networks (macOS):
 
   --dry-run   Print what would run as root, and stop
   --yes       Do not ask (sudo still asks for your password)
-  --force     remove: even while running machines use the network
+  --force     remove: even while running machines use the network. The check
+              only sees your own machines (this data dir), not other users' or
+              QEMUs started outside quickchr.
 
 Socket create options:
   --mode <mode>    dgram | listen-connect | mcast
