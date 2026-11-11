@@ -521,6 +521,19 @@ function resolveUser(
 	};
 }
 
+/** With no socket_vmnet socket, `shared`/`bridged:` fall back to QEMU's native vmnet,
+ *  which needs QEMU itself to run as root: every vmnet mode does (DESIGN.md, #256). As
+ *  any other user that boot can only fail inside QEMU, so refuse here and name the
+ *  one-sudo fix instead. Running quickchr as root keeps the native path. */
+function requireRootForNativeVmnet(specifier: string): void {
+	if (process.getuid?.() === 0) return;
+	throw new QuickCHRError(
+		"NETWORK_UNAVAILABLE",
+		`No socket_vmnet daemon serves ${specifier}, and without one QEMU would need to run as root.`,
+		`Create the network once (one sudo step): quickchr networks create ${specifier}`,
+	);
+}
+
 function resolveShared(
 	config: NetworkConfig,
 	ctx: ResolutionContext,
@@ -538,6 +551,7 @@ function resolveShared(
 				socketVmnetPath: svn.sharedSocket,
 			};
 		}
+		requireRootForNativeVmnet("shared");
 		return {
 			qemuNetdevArgs: [
 				"-netdev", `vmnet-shared,id=${config.id}`,
@@ -591,6 +605,7 @@ function resolveBridged(
 				socketVmnetPath: bridgeSocket,
 			};
 		}
+		requireRootForNativeVmnet(`bridged:${resolved}`);
 		return {
 			qemuNetdevArgs: [
 				"-netdev", `vmnet-bridged,id=${config.id},ifname=${resolved}`,
@@ -769,6 +784,7 @@ export async function assertSocketVmnetReachable(
 	const paths = [...new Set(networks.flatMap((n) => n.resolved?.socketVmnetPath ?? []))];
 	for (const path of paths) {
 		const probe = await probeSocketVmnet(path, timeoutMs);
+		const fix = "Check it with: quickchr networks status   (restart a quickchr network with: quickchr networks restart <network>, needs sudo)";
 		switch (probe.state) {
 			case "accepting":
 				continue;
@@ -782,19 +798,19 @@ export async function assertSocketVmnetReachable(
 				throw new QuickCHRError(
 					"NETWORK_UNAVAILABLE",
 					`socket_vmnet socket ${path} does not exist`,
-					"Start the socket_vmnet daemon that serves this network.",
+					fix,
 				);
 			case "timeout":
 				throw new QuickCHRError(
 					"NETWORK_UNAVAILABLE",
 					`socket_vmnet socket ${path} did not accept a connection within ${timeoutMs} ms`,
-					"Start or restart the socket_vmnet daemon that serves this network.",
+					fix,
 				);
 			case "refused":
 				throw new QuickCHRError(
 					"NETWORK_UNAVAILABLE",
 					`socket_vmnet socket ${path} refused the connection (${probe.code}): the socket file is stale, its daemon is not running`,
-					"Start or restart the socket_vmnet daemon that serves this network.",
+					fix,
 				);
 		}
 	}

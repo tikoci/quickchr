@@ -11,8 +11,22 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Added
+
+- `quickchr networks create | status | restart | remove <net>` manage macOS host
+  networks. `<net>` is `shared` or `bridged:<iface>`, the same specifier machines
+  use. `create` installs lima-vm's upstream socket_vmnet (pinned version and
+  sha256, not Homebrew) and one LaunchDaemon per network, after showing everything
+  it will install; that one step needs sudo, and machines then attach without it.
+  `status` needs no sudo and tells "service not loaded", "service not running" and
+  "socket not accepting" apart. (#256)
+
 ### Changed
 
+- On macOS, `shared` or `bridged:<iface>` with no socket_vmnet daemon now fails with
+  `NETWORK_UNAVAILABLE` naming `quickchr networks create <net>`, instead of falling
+  back to native vmnet, which only works with QEMU as root. Running quickchr as root
+  keeps the native path. (#256)
 - macOS `shared` and `bridged:<iface>` networks served by a socket_vmnet daemon
   now attach with QEMU's `-netdev stream` (QEMU 7.2+) instead of wrapping QEMU in
   `socket_vmnet_client`. A machine can have **more than one** socket_vmnet network

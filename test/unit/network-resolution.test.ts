@@ -54,6 +54,17 @@ const MOCK_SVN: SocketVmnetInfo = {
 	},
 };
 
+/** Native vmnet needs QEMU to run as root, so the no-socket fallback depends on uid. */
+function asUid<T>(uid: number, fn: () => T): T {
+	const original = process.getuid;
+	process.getuid = () => uid;
+	try {
+		return fn();
+	} finally {
+		process.getuid = original;
+	}
+}
+
 function cfg(specifier: NetworkConfig["specifier"], id = "net0"): NetworkConfig {
 	return { specifier, id };
 }
@@ -111,12 +122,18 @@ describe("resolveNetworkConfig", () => {
 			expect(resolved(result).downgraded).toBeUndefined();
 		});
 
-		test("falls back to vmnet-shared without socket_vmnet on macOS", () => {
-			const result = resolveNetworkConfig(cfg("shared"), macCtx());
+		test("as root, falls back to native vmnet-shared without socket_vmnet on macOS", () => {
+			const result = asUid(0, () => resolveNetworkConfig(cfg("shared"), macCtx()));
 			const netdev = resolved(result).qemuNetdevArgs[1];
 			expect(netdev).toBe("vmnet-shared,id=net0");
 			expect(resolved(result).downgraded).toBeDefined();
 			expect(resolved(result).downgraded?.reason).toContain("root");
+		});
+
+		test("as a normal user, refuses the native fallback and names the one-sudo fix", () => {
+			expect(() => asUid(501, () => resolveNetworkConfig(cfg("shared"), macCtx()))).toThrow(
+				expect.objectContaining({ code: "NETWORK_UNAVAILABLE", installHint: expect.stringContaining("quickchr networks create shared") }),
+			);
 		});
 
 		test("throws on Linux", () => {
@@ -168,14 +185,20 @@ describe("resolveNetworkConfig", () => {
 			);
 		});
 
-		test("falls back to vmnet-bridged without socket_vmnet on macOS", () => {
-			const result = resolveNetworkConfig(
+		test("as root, falls back to native vmnet-bridged without socket_vmnet on macOS", () => {
+			const result = asUid(0, () => resolveNetworkConfig(
 				cfg({ type: "bridged", iface: "en0" }),
 				macCtx(),
-			);
+			));
 			const netdev = resolved(result).qemuNetdevArgs[1];
 			expect(netdev).toContain("vmnet-bridged,id=net0,ifname=en0");
 			expect(resolved(result).downgraded).toBeDefined();
+		});
+
+		test("as a normal user, refuses the native fallback and names the one-sudo fix", () => {
+			expect(() => asUid(501, () => resolveNetworkConfig(cfg({ type: "bridged", iface: "en0" }), macCtx()))).toThrow(
+				expect.objectContaining({ installHint: expect.stringContaining("quickchr networks create bridged:en0") }),
+			);
 		});
 
 		test("throws on Linux", () => {

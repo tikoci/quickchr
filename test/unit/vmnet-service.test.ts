@@ -1,0 +1,204 @@
+import { describe, test, expect } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import {
+	SOCKET_VMNET_RELEASE,
+	buildCreateScript,
+	buildLaunchdPlist,
+	buildRemoveScript,
+	buildRestartScript,
+	describeManagedNetworkStatus,
+	managedNetworkLabel,
+	managedNetworkSlug,
+	parseLaunchctlPrint,
+	parseManagedNetworkSpec,
+	parseManagedPlist,
+	planManagedNetwork,
+	shellQuote,
+	socketVmnetAsset,
+	socketVmnetAssetUrl,
+	type ManagedNetwork,
+} from "../../src/lib/vmnet-service.ts";
+import { managedSocketPath } from "../../src/lib/platform.ts";
+
+/** The plist hand-installed on Morpheus on 2026-11-07, before quickchr could create
+ *  networks (docs/macos-managed-services-research.md), as `plutil -convert json` prints it. */
+const MORPHEUS_PLIST = {
+	ProgramArguments: [
+		"/opt/quickchr/bin/socket_vmnet",
+		"--vmnet-mode=bridged",
+		"--vmnet-interface=en0",
+		"--vmnet-interface-id=CDE475DB-BC96-4F9B-BB48-33FC713772F0",
+		"--socket-group=staff",
+		"/var/run/socket_vmnet.bridged.en0",
+	],
+	KeepAlive: true,
+	Label: "dev.tikoci.quickchr.net.bridged-en0",
+	RunAtLoad: true,
+	StandardOutPath: "/var/log/quickchr/net-bridged-en0.log",
+	StandardErrorPath: "/var/log/quickchr/net-bridged-en0.log",
+};
+
+const PLIST_PATH = "/Library/LaunchDaemons/dev.tikoci.quickchr.net.bridged-en0.plist";
+
+function morpheus(): ManagedNetwork {
+	const net = parseManagedPlist(PLIST_PATH, MORPHEUS_PLIST);
+	if (!net) throw new Error("fixture did not parse");
+	return net;
+}
+
+describe("managed network naming", () => {
+	test("the specifier machines use is the network's name", () => {
+		expect(parseManagedNetworkSpec("shared")).toEqual({ mode: "shared" });
+		expect(parseManagedNetworkSpec("bridged:en0")).toEqual({ mode: "bridged", iface: "en0" });
+	});
+
+	test("label, socket and slug derive from the specifier, with quickchr-owned names", () => {
+		const spec = { mode: "bridged", iface: "en0" } as const;
+		expect(managedNetworkSlug(spec)).toBe("bridged-en0");
+		expect(managedNetworkLabel(spec)).toBe("dev.tikoci.quickchr.net.bridged-en0");
+		expect(managedSocketPath("bridged-en0")).toBe("/var/run/quickchr-net-bridged-en0.sock");
+		expect(managedNetworkLabel({ mode: "shared" })).toBe("dev.tikoci.quickchr.net.shared");
+	});
+
+	test("refuses anything else, and interface names that are not safe as path or shell words", () => {
+		expect(() => parseManagedNetworkSpec("socket::lab")).toThrow(/expected shared or bridged/);
+		expect(() => parseManagedNetworkSpec("bridged:en0;rm -rf /")).toThrow(/Not a usable interface name/);
+		expect(() => parseManagedNetworkSpec("bridged:../x")).toThrow(/Not a usable interface name/);
+	});
+});
+
+describe("pinned helper", () => {
+	test("each host arch maps to a pinned upstream tarball", () => {
+		expect(socketVmnetAsset("x64").file).toBe(`socket_vmnet-${SOCKET_VMNET_RELEASE.version}-x86_64.tar.gz`);
+		expect(socketVmnetAsset("arm64").file).toBe(`socket_vmnet-${SOCKET_VMNET_RELEASE.version}-arm64.tar.gz`);
+		expect(socketVmnetAssetUrl(socketVmnetAsset("x64"))).toStartWith("https://github.com/lima-vm/socket_vmnet/releases/download/v");
+		for (const a of Object.values(SOCKET_VMNET_RELEASE.assets)) {
+			expect(a.sha256).toMatch(/^[0-9a-f]{64}$/);
+			expect(a.binarySha256).toMatch(/^[0-9a-f]{64}$/);
+		}
+		expect(() => socketVmnetAsset("ia32")).toThrow(/no release/);
+	});
+});
+
+describe("parseManagedPlist", () => {
+	test("reads a hand-made quickchr service, including its lima-named socket", () => {
+		expect(morpheus()).toMatchObject({
+			spec: { mode: "bridged", iface: "en0" },
+			label: "dev.tikoci.quickchr.net.bridged-en0",
+			helperPath: "/opt/quickchr/bin/socket_vmnet",
+			socketPath: "/var/run/socket_vmnet.bridged.en0",
+			interfaceId: "CDE475DB-BC96-4F9B-BB48-33FC713772F0",
+		});
+	});
+
+	test("ignores services that are not quickchr networks", () => {
+		expect(parseManagedPlist("/x.plist", { ...MORPHEUS_PLIST, Label: "homebrew.mxcl.socket_vmnet" })).toBeUndefined();
+		expect(parseManagedPlist("/x.plist", { Label: "dev.tikoci.quickchr.net.x" })).toBeUndefined();
+	});
+});
+
+describe("planManagedNetwork", () => {
+	test("re-creating keeps the interface id and moves to the quickchr socket name", () => {
+		const plan = planManagedNetwork({ mode: "bridged", iface: "en0" }, morpheus(), "x64");
+		expect(plan.interfaceId).toBe("CDE475DB-BC96-4F9B-BB48-33FC713772F0");
+		expect(plan.programArguments).toEqual([
+			`/opt/quickchr/socket_vmnet/${SOCKET_VMNET_RELEASE.version}/bin/socket_vmnet`,
+			"--vmnet-mode=bridged",
+			"--vmnet-interface=en0",
+			"--vmnet-interface-id=CDE475DB-BC96-4F9B-BB48-33FC713772F0",
+			"--socket-group=staff",
+			"/var/run/quickchr-net-bridged-en0.sock",
+		]);
+		expect(plan.logPath).toBe("/var/log/quickchr/net-bridged-en0.log");
+		expect(plan.plistPath).toBe(PLIST_PATH);
+	});
+
+	test("a new network pins a fresh interface id and has no --vmnet-interface in shared mode", () => {
+		const plan = planManagedNetwork({ mode: "shared" }, undefined, "arm64");
+		expect(plan.interfaceId).toMatch(/^[0-9A-F-]{36}$/);
+		expect(plan.programArguments.some((a) => a.startsWith("--vmnet-interface="))).toBe(false);
+		expect(plan.programArguments).toContain("--vmnet-mode=shared");
+		expect(plan.socketPath).toBe("/var/run/quickchr-net-shared.sock");
+	});
+});
+
+describe("generated plist and root scripts", () => {
+	const plan = planManagedNetwork({ mode: "bridged", iface: "en0" }, morpheus(), "x64");
+
+	test.skipIf(process.platform !== "darwin")("the plist passes plutil -lint and reads back as the same service", () => {
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-tmp-plist-"));
+		try {
+			const path = join(dir, "svc.plist");
+			writeFileSync(path, buildLaunchdPlist(plan));
+			expect(Bun.spawnSync(["plutil", "-lint", path]).exitCode).toBe(0);
+			const json = JSON.parse(new TextDecoder().decode(Bun.spawnSync(["plutil", "-convert", "json", "-o", "-", path]).stdout));
+			expect(json).toMatchObject({ Label: plan.label, ProgramArguments: plan.programArguments, RunAtLoad: true, KeepAlive: true });
+			expect(parseManagedPlist(path, json)?.socketPath).toBe(plan.socketPath);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("create script checks the pinned hash before loading, and clears both old and new sockets", () => {
+		const script = buildCreateScript(plan, "/stage/svc.plist", "/stage/socket_vmnet");
+		const lines = script.split("\n");
+		const hash = lines.findIndex((l) => l.includes(plan.asset.binarySha256));
+		const bootstrap = lines.findIndex((l) => l.startsWith("launchctl bootstrap system"));
+		expect(lines[0]).toBe("set -eu");
+		expect(hash).toBeGreaterThan(0);
+		expect(bootstrap).toBeGreaterThan(hash);
+		expect(script).toContain("rm -f '/var/run/quickchr-net-bridged-en0.sock' '/var/run/socket_vmnet.bridged.en0'");
+		expect(Bun.spawnSync(["/bin/sh", "-n", "-c", script]).exitCode).toBe(0);
+	});
+
+	test("create skips the helper install when it is already in place, but still checks it", () => {
+		const script = buildCreateScript(plan, "/stage/svc.plist");
+		expect(script).not.toContain("/stage/socket_vmnet");
+		expect(script).toContain(plan.asset.binarySha256);
+	});
+
+	test("remove and restart scripts are valid sh", () => {
+		for (const s of [buildRemoveScript(morpheus()), buildRestartScript(morpheus())]) {
+			expect(Bun.spawnSync(["/bin/sh", "-n", "-c", s]).exitCode).toBe(0);
+		}
+		expect(buildRemoveScript(morpheus())).toContain(`rm -f '${PLIST_PATH}' '/var/run/socket_vmnet.bridged.en0'`);
+	});
+
+	test("shellQuote survives a single quote", () => {
+		expect(Bun.spawnSync(["/bin/sh", "-c", `printf %s ${shellQuote("a'b c")}`]).stdout.toString()).toBe("a'b c");
+	});
+});
+
+describe("status", () => {
+	// Morpheus, 2026-11-11: `launchctl print system/dev.tikoci.quickchr.net.bridged-en0`
+	// as the owner (no sudo). Nested blocks repeat `state =`; only the top-level one counts.
+	const PRINT = [
+		"system/dev.tikoci.quickchr.net.bridged-en0 = {",
+		"\tactive count = 1",
+		"\tstate = running",
+		"",
+		"\tprogram = /opt/quickchr/bin/socket_vmnet",
+		"\tendpoints = {",
+		"\t\tstate = active",
+		"\t}",
+		"\truns = 4",
+		"\tpid = 53132",
+		"\tlast exit code = 0",
+		"}",
+	].join("\n");
+
+	test("parseLaunchctlPrint reads the service's own state and pid", () => {
+		expect(parseLaunchctlPrint(PRINT)).toEqual({ running: true, pid: 53132, lastExit: "0" });
+		expect(parseLaunchctlPrint("\tstate = not running\n\tlast exit code = 78: EX_CONFIG\n")).toEqual({ running: false, pid: undefined, lastExit: "78: EX_CONFIG" });
+	});
+
+	test("status separates service down from socket dead (#256 Done-when)", () => {
+		expect(describeManagedNetworkStatus({ loaded: false, running: false })).toMatchObject({ ok: false, text: expect.stringContaining("not loaded") });
+		expect(describeManagedNetworkStatus({ loaded: true, running: false, lastExit: "78" })).toMatchObject({ ok: false, text: expect.stringContaining("not running (last exit 78)") });
+		expect(describeManagedNetworkStatus({ loaded: true, running: true, pid: 9, socket: { state: "refused", code: "ECONNREFUSED" } })).toMatchObject({ ok: false, text: expect.stringContaining("socket is refused") });
+		expect(describeManagedNetworkStatus({ loaded: true, running: true, pid: 9, socket: { state: "accepting" } })).toEqual({ ok: true, text: "running (pid 9), socket accepting" });
+	});
+});

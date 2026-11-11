@@ -3516,19 +3516,19 @@ export class QuickCHR {
 				checks.push({
 					label: "socket_vmnet",
 					status: "warn",
-					detail: `${detail}\nno socket accepts connections. Start the socket_vmnet daemon that serves it (Homebrew: sudo brew services start socket_vmnet).`,
+					detail: `${detail}\nno socket accepts connections. quickchr networks status shows why; quickchr networks restart <net> (sudo) restarts a quickchr network.`,
 				});
 			} else if (vmnet) {
 				checks.push({
 					label: "socket_vmnet",
 					status: "warn",
-					detail: `${detail}\nno socket found (daemon not started). Homebrew: sudo brew services start socket_vmnet`,
+					detail: `${detail}\nno socket found. Create a network: quickchr networks create shared (or bridged:<iface>; one sudo step)`,
 				});
 			} else {
 				checks.push({
 					label: "socket_vmnet",
 					status: "warn",
-					detail: "not found (optional, for rootless shared/bridged networking — brew install socket_vmnet)",
+					detail: "not found (optional, for rootless shared/bridged networking — quickchr networks create shared, one sudo step)",
 				});
 			}
 		}
