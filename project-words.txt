@@ -542,3 +542,9 @@ EACCES
 EBUSY
 EHOSTUNREACH
 ENETUNREACH
+rwxr
+srwxrwx
+socketfilterfw
+getglobalstate
+getstealthmode
+pfctl

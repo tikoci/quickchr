@@ -108,6 +108,8 @@ export interface ManagedNetwork {
 	helperPath?: string;
 	socketPath?: string;
 	interfaceId?: string;
+	/** The plist's StandardErrorPath: where socket_vmnet says why it would not start. */
+	logPath?: string;
 }
 
 function argValue(args: string[], name: string): string | undefined {
@@ -117,7 +119,10 @@ function argValue(args: string[], name: string): string | undefined {
 
 /** Interpret one plist (as `plutil -convert json` prints it). Undefined for a plist
  *  that is not a quickchr network service. */
-export function parseManagedPlist(plistPath: string, plist: { Label?: unknown; ProgramArguments?: unknown }): ManagedNetwork | undefined {
+export function parseManagedPlist(
+	plistPath: string,
+	plist: { Label?: unknown; ProgramArguments?: unknown; StandardErrorPath?: unknown; StandardOutPath?: unknown },
+): ManagedNetwork | undefined {
 	const label = typeof plist.Label === "string" ? plist.Label : undefined;
 	const args = Array.isArray(plist.ProgramArguments) ? plist.ProgramArguments.filter((a): a is string => typeof a === "string") : [];
 	if (!label?.startsWith(MANAGED_LABEL_PREFIX) || args.length === 0) return undefined;
@@ -136,6 +141,7 @@ export function parseManagedPlist(plistPath: string, plist: { Label?: unknown; P
 		helperPath: args[0],
 		socketPath: last && !last.startsWith("-") && last !== args[0] ? last : undefined,
 		interfaceId: argValue(args, "vmnet-interface-id"),
+		logPath: [plist.StandardErrorPath, plist.StandardOutPath].find((p): p is string => typeof p === "string"),
 	};
 }
 
@@ -466,6 +472,19 @@ export async function managedNetworkStatus(net: ManagedNetwork): Promise<Managed
 	const socket = net.socketPath ? await probeSocketVmnet(net.socketPath) : undefined;
 	if (print.exitCode !== 0) return { loaded: false, running: false, socket };
 	return { loaded: true, ...parseLaunchctlPrint(new TextDecoder().decode(print.stdout)), socket };
+}
+
+/** The last `lines` lines of a network's log. launchd creates it root-owned but
+ *  world-readable (644 under the default umask, Morpheus 2026-11-11), so this needs no
+ *  sudo. Undefined when there is no log or it cannot be read. */
+export async function readManagedNetworkLog(net: Pick<ManagedNetwork, "logPath">, lines = 20): Promise<string | undefined> {
+	if (!net.logPath) return undefined;
+	try {
+		const text = await Bun.file(net.logPath).text();
+		return text.trimEnd().split("\n").slice(-lines).join("\n") || undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** One line for `networks status`. */

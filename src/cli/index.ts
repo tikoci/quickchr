@@ -2805,6 +2805,33 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 	if (action === "status") {
 		const want = positional[0] ? svc.managedNetworkLabel(svc.parseManagedNetworkSpec(positional[0])) : undefined;
 		const nets = svc.listManagedNetworks().filter((n) => !want || n.label === want);
+		if (flagBool(flags, "json")) {
+			// Same exit status as the text form: 1 when a named network is missing or any
+			// listed one is not serving, so a script can test it either way.
+			const rows = [];
+			for (const net of nets) {
+				const status = await svc.managedNetworkStatus(net);
+				const d = svc.describeManagedNetworkStatus(status);
+				rows.push({
+					specifier: svc.managedNetworkSpecifier(net.spec),
+					label: net.label,
+					plistPath: net.plistPath,
+					socketPath: net.socketPath ?? null,
+					helperPath: net.helperPath ?? null,
+					logPath: net.logPath ?? null,
+					loaded: status.loaded,
+					running: status.running,
+					pid: status.pid ?? null,
+					lastExit: status.lastExit ?? null,
+					socket: status.socket ?? null,
+					ok: d.ok,
+					text: d.text,
+				});
+			}
+			console.log(JSON.stringify(rows, null, 2));
+			if ((want && rows.length === 0) || rows.some((r) => !r.ok)) process.exit(1);
+			return;
+		}
 		if (nets.length === 0) {
 			console.log(want ? `No quickchr-managed network ${positional[0]}.` : "No quickchr-managed networks.");
 			console.log(dim("Create one with: quickchr networks create bridged:en0   (or: shared) — sudo once, at create"));
@@ -2939,7 +2966,16 @@ async function reportManagedNetworkReady(net: import("../lib/vmnet-service.ts").
 		return;
 	}
 	out.fail(`${name}: ${d.text}`);
-	throw new QuickCHRError("NETWORK_UNAVAILABLE", `${name} is installed but not serving.`, `See its log: sudo tail ${svc.MANAGED_LOG_DIR}/net-${svc.managedNetworkSlug(net.spec)}.log`);
+	// The log is world-readable: show why socket_vmnet would not serve, rather than
+	// sending the user off to read it. The service stays installed (KeepAlive retries
+	// it), so the hint names both ways out.
+	const log = await svc.readManagedNetworkLog(net);
+	if (log) out.fail(`Last lines of ${net.logPath}:\n${log}`);
+	throw new QuickCHRError(
+		"NETWORK_UNAVAILABLE",
+		`${name} is installed but not serving: ${d.text}.`,
+		`${log ? "" : `See its log: ${net.logPath ?? `${svc.MANAGED_LOG_DIR}/net-${svc.managedNetworkSlug(net.spec)}.log`}. `}Fix the cause and run 'quickchr networks restart ${name}', or uninstall it with 'quickchr networks remove ${name}'.`,
+	);
 }
 
 async function showInterfaces() {
@@ -3097,6 +3133,7 @@ Managed host networks (macOS):
 
   --dry-run   Print what would run as root, and stop
   --yes       Do not ask (sudo still asks for your password)
+  --json      status: one object per network (exit 1 if any is not serving)
   --force     remove: even while running machines use the network. The check
               only sees your own machines (this data dir), not other users' or
               QEMUs started outside quickchr.
