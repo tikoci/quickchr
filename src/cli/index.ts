@@ -2669,11 +2669,14 @@ async function showNetworkOverview() {
 }
 
 /** Machines whose stored networks attach to this managed network. Aliases are
- *  resolved the way the resolver resolves them, so `bridged:auto` counts for en0. */
+ *  resolved the way the resolver resolves them, so `bridged:auto` counts for en0.
+ *  Read-only on purpose (no status refresh, which saves machine.json): this also runs
+ *  under `sudo quickchr …`, and must not leave root-owned files in the data dir. */
 async function machinesOnManagedNetwork(spec: import("../lib/vmnet-service.ts").ManagedNetworkSpec) {
 	const { resolveInterfaceAlias } = await import("../lib/platform.ts");
-	const { QuickCHR } = await import("../lib/quickchr.ts");
-	return QuickCHR.list().filter((m) => (m.networks ?? []).some((n) => {
+	const { listMachineNames, loadMachine } = await import("../lib/state.ts");
+	const machines = listMachineNames().flatMap((n) => loadMachine(n) ?? []);
+	return machines.filter((m) => (m.networks ?? []).some((n) => {
 		if (spec.mode === "shared") return n.specifier === "shared";
 		if (typeof n.specifier !== "object" || n.specifier.type !== "bridged") return false;
 		try {
@@ -2684,28 +2687,83 @@ async function machinesOnManagedNetwork(spec: import("../lib/vmnet-service.ts").
 	}));
 }
 
-/** Run a root script through sudo, attached to the terminal so sudo can ask for the
- *  password. The script is shown before this is called; nothing else runs as root. */
-async function runPrivileged(script: string): Promise<void> {
-	const { dim } = await import("./format.ts");
-	console.log(dim("Running sudo (it may ask for your password)..."));
-	const proc = Bun.spawn(["sudo", "/bin/sh", "-c", script], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+/** Output for the managed-network commands. In a terminal the whole flow is clack
+ *  (plan note, confirm, result), like the rest of the interactive CLI. Without one it
+ *  is plain text and never prompts: `--yes` is the consent. */
+interface NetOut {
+	interactive: boolean;
+	plan(title: string, body: string): void;
+	step(message: string): void;
+	ok(message: string): void;
+	fail(message: string): void;
+	done(message?: string): void;
+	confirm(message: string): Promise<boolean>;
+}
+
+/** `plain` forces plain output: `--dry-run` never prompts, in a terminal or not. */
+async function managedNetworkOutput(plain = false): Promise<NetOut> {
+	if (plain || isNoPrompt()) {
+		const { bold } = await import("./format.ts");
+		return {
+			interactive: false,
+			plan: (title, body) => console.log(`${bold(title)}\n\n${body}\n`),
+			step: (m) => console.log(m),
+			ok: (m) => console.log(m),
+			fail: (m) => console.error(m),
+			done: (m) => { if (m) console.log(m); },
+			confirm: async () => false,
+		};
+	}
+	const clack = await import("@clack/prompts");
+	let started = false;
+	const begin = (title: string) => { if (!started) { clack.intro(title); started = true; } };
+	return {
+		interactive: true,
+		plan: (title, body) => { begin("quickchr networks"); clack.note(body, title); },
+		step: (m) => { begin("quickchr networks"); clack.log.step(m); },
+		ok: (m) => { begin("quickchr networks"); clack.log.success(m); },
+		fail: (m) => { begin("quickchr networks"); clack.log.error(m); },
+		done: (m) => { if (started) clack.outro(m ?? ""); else if (m) console.log(m); },
+		confirm: async (message) => {
+			begin("quickchr networks");
+			const answer = await clack.confirm({ message, initialValue: true });
+			if (clack.isCancel(answer) || answer !== true) {
+				clack.cancel("Nothing was changed.");
+				return false;
+			}
+			return true;
+		},
+	};
+}
+
+/** Run the root script. Already root (`sudo quickchr …`): run it directly. In a terminal:
+ *  `sudo`, which may ask for the password. Without one: `sudo -n`, which fails instead
+ *  of waiting for a password nobody can type. */
+async function runPrivileged(script: string, out: NetOut): Promise<void> {
+	const asRoot = process.getuid?.() === 0;
+	const argv = asRoot ? ["/bin/sh", "-c", script] : out.interactive ? ["sudo", "/bin/sh", "-c", script] : ["sudo", "-n", "/bin/sh", "-c", script];
+	out.step(asRoot ? "Running the root step (already root)." : "Running the root step with sudo.");
+	const proc = Bun.spawn(argv, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
 	const code = await proc.exited;
 	if (code !== 0) {
-		throw new QuickCHRError("PROCESS_FAILED", `The privileged step failed (sudo exit ${code}).`, "Nothing else was changed as root. Re-run with --dry-run to see the script.");
+		throw new QuickCHRError(
+			"PROCESS_FAILED",
+			`The root step failed (exit ${code}).`,
+			!asRoot && !out.interactive
+				? "sudo needs a password and there is no terminal to ask in. Run it in a terminal, or run 'sudo -v' first."
+				: "Re-run with --dry-run to see the script.",
+		);
 	}
 }
 
-/** Ask before the sudo step: `--yes` skips the question, and without a terminal the
- *  command refuses rather than assuming consent. */
-async function confirmPrivileged(message: string, yes: boolean): Promise<boolean> {
+/** Consent for the root step: `--yes`, or a confirm in a terminal. Without a terminal
+ *  and without `--yes` there is no prompt: the command stops and says how to proceed. */
+async function consentPrivileged(out: NetOut, message: string, yes: boolean): Promise<boolean> {
 	if (yes) return true;
-	if (isNoPrompt()) {
-		throw new QuickCHRError("INVALID_ARGUMENT", "This step runs sudo and needs confirmation.", "Re-run in a terminal, or pass --yes (sudo still asks for your password). --dry-run prints the root script.");
+	if (!out.interactive) {
+		throw new QuickCHRError("INVALID_ARGUMENT", "This step needs root and was not confirmed.", "Pass --yes to proceed (sudo may still need a password), or --dry-run to print the root script.");
 	}
-	const clack = await import("@clack/prompts");
-	const answer = await clack.confirm({ message, initialValue: true });
-	return !clack.isCancel(answer) && answer === true;
+	return out.confirm(message);
 }
 
 async function handleManagedNetworks(action: "create" | "status" | "restart" | "remove", argv: string[]) {
@@ -2754,6 +2812,7 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 	const existing = svc.findManagedNetwork(spec);
 	const attached = await machinesOnManagedNetwork(spec);
 	const running = attached.filter((m) => m.status === "running").map((m) => m.name);
+	const out = await managedNetworkOutput(dryRun);
 
 	if (action === "restart" || action === "remove") {
 		if (!existing) {
@@ -2763,48 +2822,56 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 			throw new QuickCHRError("MACHINE_RUNNING", `Running machines use ${specifier}: ${running.join(", ")}.`, "Stop them first, or pass --force to remove the network under them (their NIC goes down).");
 		}
 		const script = action === "restart" ? svc.buildRestartScript(existing) : svc.buildRemoveScript(existing);
-		console.log(action === "restart"
-			? `Restart ${bold(specifier)} (${existing.label}). Running machines on QEMU 9.2+ re-attach by themselves.`
-			: `Remove ${bold(specifier)}: unload ${existing.label}, delete ${existing.plistPath}${existing.socketPath ? ` and ${existing.socketPath}` : ""}.\nThe helper binary and ${svc.MANAGED_LOG_DIR} stay.${attached.length > 0 ? `\nMachines configured with it (they will refuse to start until it exists again): ${attached.map((m) => m.name).join(", ")}` : ""}`);
-		console.log(dim("This needs sudo, because the service runs as root."));
+		const body = action === "restart"
+			? `Restarts ${existing.label} (launchctl kickstart -k).\nRunning machines on QEMU 9.2+ re-attach by themselves.${running.length > 0 ? `\nAttached and running: ${running.join(", ")}` : ""}`
+			: `Unloads ${existing.label} and deletes\n  ${existing.plistPath}${existing.socketPath ? `\n  ${existing.socketPath}` : ""}\nThe helper binary and ${svc.MANAGED_LOG_DIR} stay.${attached.length > 0 ? `\nMachines configured with it will refuse to start until it exists again:\n  ${attached.map((m) => m.name).join(", ")}` : ""}`;
+		out.plan(`${action === "restart" ? "Restart" : "Remove"} ${specifier}`, `${body}\n\nNeeds root: the service runs as root.`);
 		if (dryRun) {
-			console.log(`\n${script}`);
+			console.log(script);
 			return;
 		}
-		if (!(await confirmPrivileged(`${action === "restart" ? "Restart" : "Remove"} ${specifier}?`, yes))) return;
-		await runPrivileged(script);
-		if (action === "restart") await reportManagedNetworkReady(existing);
-		else console.log(`Removed ${bold(specifier)}.`);
+		if (!(await consentPrivileged(out, `${action === "restart" ? "Restart" : "Remove"} ${specifier}?`, yes))) return;
+		await runPrivileged(script, out);
+		if (action === "restart") await reportManagedNetworkReady(existing, out);
+		else out.ok(`Removed ${specifier}.`);
+		out.done();
 		return;
 	}
 
 	// create
 	const plan = svc.planManagedNetwork(spec, existing);
 	const installed = await svc.helperInstalled(plan);
-	console.log(`${bold(`Managed network ${specifier}`)}
-
-  Helper    socket_vmnet ${plan.helperVersion} — upstream lima-vm release, not Homebrew
-            ${plan.assetUrl}
-            tarball sha256 ${plan.asset.sha256}
-            binary  sha256 ${plan.asset.binarySha256}
-            -> ${plan.helperPath} (root:wheel 755)${installed ? dim("  already installed, hash matches") : ""}
-  Service   ${plan.plistPath} (root:wheel 644)
-            RunAtLoad, KeepAlive; runs:
-            ${plan.programArguments.join(" ")}
-  Socket    ${plan.socketPath} (group ${svc.MANAGED_SOCKET_GROUP}: any local user can attach)
-  Log       ${plan.logPath}`);
-	if (existing) {
-		console.log(`  Replaces  ${existing.label}, keeping its interface id${existing.socketPath && existing.socketPath !== plan.socketPath ? ` (old socket ${existing.socketPath} is removed)` : ""}`);
-		if (running.length > 0) console.log(`  Running machines on it re-attach after a stop/start: ${running.join(", ")}`);
+	if (existing && installed && existing.programArguments.join("\0") === plan.programArguments.join("\0")) {
+		const d = svc.describeManagedNetworkStatus(await svc.managedNetworkStatus(existing));
+		if (d.ok) {
+			console.log(`${statusIcon("ok")} ${bold(specifier)} is already set up: ${d.text}. Nothing to do.`);
+			return;
+		}
+		throw new QuickCHRError("NETWORK_UNAVAILABLE", `${specifier} is installed but not serving: ${d.text}.`, `Restart it: quickchr networks restart ${specifier}   (needs sudo)`);
 	}
-	console.log(`
-sudo is needed once, for this step: it installs the helper and the service as root.
-After that, machines use the network without sudo (quickchr add <name> --add-network ${specifier}).`);
+	const lines = [
+		`Helper   socket_vmnet ${plan.helperVersion}, upstream lima-vm release (not Homebrew)`,
+		`         ${plan.assetUrl}`,
+		`         tarball sha256 ${plan.asset.sha256}`,
+		`         binary  sha256 ${plan.asset.binarySha256}`,
+		`         -> ${plan.helperPath} (root:wheel 755)${installed ? ", already installed" : ""}`,
+		`Service  ${plan.plistPath} (root:wheel 644)`,
+		"         RunAtLoad, KeepAlive; runs:",
+		...plan.programArguments.map((a, i) => `${i === 0 ? "         " : "           "}${a}`),
+		`Socket   ${plan.socketPath} (group ${svc.MANAGED_SOCKET_GROUP}: any local user can attach)`,
+		`Log      ${plan.logPath}`,
+	];
+	if (existing) {
+		lines.push(`Replaces ${existing.label}, keeping its interface id${existing.socketPath && existing.socketPath !== plan.socketPath ? `;\n         its old socket ${existing.socketPath} is removed` : ""}`);
+		if (running.length > 0) lines.push(`         Running machines on it re-attach after a stop/start: ${running.join(", ")}`);
+	}
+	lines.push("", "Needs root once, for this step. Machines then attach without sudo:", `  quickchr add <name> --add-network user --add-network ${specifier}`);
+	out.plan(`Create ${specifier}`, lines.join("\n"));
 	if (dryRun) {
-		console.log(`\nRoot script (staged files are downloaded and hash-checked first):\n\n${svc.buildCreateScript(plan, "<staged plist>", installed ? undefined : "<staged helper>")}`);
+		console.log(`Root script (staged files are downloaded and hash-checked first):\n\n${svc.buildCreateScript(plan, "<staged plist>", installed ? undefined : "<staged helper>")}`);
 		return;
 	}
-	if (!(await confirmPrivileged(`Install ${specifier}?`, yes))) return;
+	if (!(await consentPrivileged(out, `Install ${specifier}?`, yes))) return;
 
 	const { mkdtempSync, rmSync, chmodSync } = await import("node:fs");
 	const { tmpdir } = await import("node:os");
@@ -2812,32 +2879,38 @@ After that, machines use the network without sudo (quickchr add <name> --add-net
 	const stage = mkdtempSync(join(tmpdir(), "quickchr-net-"));
 	chmodSync(stage, 0o755);
 	try {
-		const helper = installed ? undefined : await svc.stageSocketVmnetHelper(plan, stage);
+		let helper: string | undefined;
+		if (!installed) {
+			helper = await svc.stageSocketVmnetHelper(plan, stage);
+			out.step(`Downloaded ${plan.asset.file}; tarball and binary sha256 match the pins.`);
+		}
 		const plist = join(stage, `${plan.label}.plist`);
 		await Bun.write(plist, svc.buildLaunchdPlist(plan));
-		await runPrivileged(svc.buildCreateScript(plan, plist, helper));
+		await runPrivileged(svc.buildCreateScript(plan, plist, helper), out);
 	} finally {
 		rmSync(stage, { recursive: true, force: true });
 	}
 	const created = svc.findManagedNetwork(spec);
-	if (created) await reportManagedNetworkReady(created);
-	console.log(`Use it: quickchr add <name> --add-network ${specifier}`);
+	if (created) await reportManagedNetworkReady(created, out);
+	out.done(`Use it: quickchr add <name> --add-network user --add-network ${specifier}`);
 }
 
 /** After a privileged change, wait briefly for the daemon's socket and say how it went. */
-async function reportManagedNetworkReady(net: import("../lib/vmnet-service.ts").ManagedNetwork) {
+async function reportManagedNetworkReady(net: import("../lib/vmnet-service.ts").ManagedNetwork, out: NetOut) {
 	const svc = await import("../lib/vmnet-service.ts");
-	const { statusIcon, bold } = await import("./format.ts");
 	let st = await svc.managedNetworkStatus(net);
 	for (let i = 0; i < 20 && st.socket?.state !== "accepting"; i++) {
 		await Bun.sleep(250);
 		st = await svc.managedNetworkStatus(net);
 	}
 	const d = svc.describeManagedNetworkStatus(st);
-	console.log(`${statusIcon(d.ok ? "ok" : "error")} ${bold(svc.managedNetworkSpecifier(net.spec))}  ${d.text}`);
-	if (!d.ok) {
-		throw new QuickCHRError("NETWORK_UNAVAILABLE", `${svc.managedNetworkSpecifier(net.spec)} is installed but not serving.`, `See its log: sudo tail ${svc.MANAGED_LOG_DIR}/net-${svc.managedNetworkSlug(net.spec)}.log`);
+	const name = svc.managedNetworkSpecifier(net.spec);
+	if (d.ok) {
+		out.ok(`${name}: ${d.text}`);
+		return;
 	}
+	out.fail(`${name}: ${d.text}`);
+	throw new QuickCHRError("NETWORK_UNAVAILABLE", `${name} is installed but not serving.`, `See its log: sudo tail ${svc.MANAGED_LOG_DIR}/net-${svc.managedNetworkSlug(net.spec)}.log`);
 }
 
 async function showInterfaces() {
@@ -2989,7 +3062,8 @@ Managed host networks (macOS):
   network service, which runs a pinned upstream socket_vmnet as a LaunchDaemon.
   Machines attach to its socket without sudo:
     quickchr networks create bridged:en0
-    quickchr add lab --add-network bridged:en0
+    quickchr add lab --add-network user --add-network bridged:en0
+  (List user first: it carries REST/SSH port forwards, as ether1.)
   create shows the helper's version, URL, sha256 and every path before it asks.
 
   --dry-run   Print what would run as root, and stop

@@ -548,7 +548,7 @@ still asks for the password).
 
 ```bash
 quickchr networks create bridged:en0      # one sudo step
-quickchr add lab --add-network bridged:en0 # no sudo
+quickchr add lab --add-network user --add-network bridged:en0 # no sudo; user first, for REST/SSH
 quickchr networks status
 ```
 

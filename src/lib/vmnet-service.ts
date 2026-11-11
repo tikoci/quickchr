@@ -20,6 +20,7 @@ import { QuickCHRError, type SocketVmnetProbe } from "./types.ts";
 import { managedSocketPath, resolveInterfaceAlias } from "./platform.ts";
 import { probeSocketVmnet } from "./network.ts";
 import { downloadToFile } from "./download.ts";
+import { createLogger } from "./log.ts";
 
 /** The upstream socket_vmnet release quickchr installs: lima-vm/socket_vmnet's own
  *  release tarballs, not Homebrew. Both the tarball and the extracted binary are
@@ -311,7 +312,8 @@ export async function helperInstalled(plan: ManagedNetworkPlan): Promise<boolean
  *  hashes, and return the extracted helper's path. Nothing here needs root. */
 export async function stageSocketVmnetHelper(plan: ManagedNetworkPlan, stageDir: string): Promise<string> {
 	const tarball = join(stageDir, plan.asset.file);
-	await downloadToFile(plan.assetUrl, tarball);
+	// Quiet: a 20 KB transfer needs no progress lines; failures still throw.
+	await downloadToFile(plan.assetUrl, tarball, { logger: createLogger(() => {}) });
 	const tarSha = await sha256File(tarball);
 	if (tarSha !== plan.asset.sha256) {
 		throw new QuickCHRError(
