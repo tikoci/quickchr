@@ -1278,11 +1278,16 @@ network, running socket_vmnet as root, and machines attach to its socket with
   itself from content embedded in the script (a staged plist could be swapped while
   sudo waits for the password), hash-checks the helper after copying it into place, and
   refuses if any path from `/opt` to the helper, or the log dir, is a symlink, not
-  root-owned, or group/world-writable. `restart` bootstraps an unloaded job before
+  root-owned, or group/world-writable, checked both before and after `install -d`
+  (which follows a symlinked directory). `restart` bootstraps an unloaded job before
   `kickstart`. (Codex review of #267.)
 - **The `remove` guard is per data dir, the service is per host.** The guard reads the
   invoking user's machines only. Other users (the socket is group `staff`), other data
-  dirs and QEMUs started outside quickchr are not visible to it; MANUAL says so.
+  dirs and QEMUs started outside quickchr are not visible to it; MANUAL says so, and
+  the `remove` plan says so at the point of action, with the confirm defaulting to no.
+  A machine recorded as running whose pid is gone counts as stopped (read-only, not
+  saved), and an unreadable `machine.json` is named as "not checked" rather than
+  failing every `networks` command. (CodeRabbit review of #264.)
 - **Attachment is judged from what a VM attached to.** The `remove` guard reads a
   running VM's QEMU argv for the socket path, since `bridged:auto` re-resolves by link.
   Under `sudo -H` the data dir is root's, so `create`/`restart`/`remove` refuse unless

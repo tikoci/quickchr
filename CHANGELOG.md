@@ -19,7 +19,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   sha256, not Homebrew) and one LaunchDaemon per network, after showing everything
   it will install; that one step needs sudo, and machines then attach without it.
   `status` needs no sudo and tells "service not loaded", "service not running" and
-  "socket not accepting" apart. (#256)
+  "socket not accepting" apart. `remove` warns that the service is host-wide and
+  its confirm defaults to no. (#256)
 
 ### Changed
 
@@ -46,7 +47,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 - macOS socket_vmnet networks are found by their **socket**, not by the
   `socket_vmnet_client` binary, so a daemon installed without Homebrew works.
   `quickchr networks` and `doctor` now connect to each socket and report it as
-  accepting, stale, missing or not permitted; the wizard checks the same way.
+  accepting, stale, missing or not permitted. The wizard checks the same way for
+  `shared` and `bridged:<iface>`, and offers `shared` even before it exists, with the
+  `networks create` step to run.
   Library: in `PlatformInfo.socketVmnet`, `client` is now optional and `daemon` is
   new. (#262)
 - `bridged:auto` prefers a port with link: an unplugged Ethernet adapter no longer

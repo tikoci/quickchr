@@ -337,11 +337,15 @@ export function buildCreateScript(plan: ManagedNetworkPlan, stagedHelper?: strin
 	const q = shellQuote;
 	const helperDir = plan.helperPath.slice(0, plan.helperPath.lastIndexOf("/"));
 	const staleSockets = [plan.socketPath, ...(plan.replaces?.socketPath && plan.replaces.socketPath !== plan.socketPath ? [plan.replaces.socketPath] : [])];
+	const dirs = [...helperPathChain(helperDir), MANAGED_LOG_DIR];
 	return [
 		"set -eu",
 		"umask 022",
+		// Checked before `install -d` too: it follows a symlinked directory and would
+		// chown/chmod the link's target before the check after it could refuse.
+		...rootOwnedChecks(dirs),
 		`install -d -o root -g wheel -m 755 ${q(helperDir)} ${q(MANAGED_LOG_DIR)}`,
-		...rootOwnedChecks([...helperPathChain(helperDir), MANAGED_LOG_DIR]),
+		...rootOwnedChecks(dirs),
 		...(stagedHelper ? [`install -o root -g wheel -m 755 ${q(stagedHelper)} ${q(plan.helperPath)}`] : []),
 		// launchd opens the log as root for StandardOutPath/StandardErrorPath, so an
 		// existing log file gets the same check as the helper.
@@ -350,6 +354,8 @@ export function buildCreateScript(plan: ManagedNetworkPlan, stagedHelper?: strin
 		...unloadLabel(plan.label),
 		`rm -f ${staleSockets.map(q).join(" ")}`,
 		`tmp=$(mktemp ${q(`${LAUNCH_DAEMONS_DIR}/.quickchr.XXXXXX`)})`,
+		// A failure before the `mv` must not leave a stray file in LaunchDaemons.
+		`trap 'rm -f "$tmp"' EXIT`,
 		`printf '%s' ${q(buildLaunchdPlist(plan))} > "$tmp"`,
 		`chown root:wheel "$tmp"`,
 		`chmod 644 "$tmp"`,

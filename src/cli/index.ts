@@ -2671,18 +2671,23 @@ async function showNetworkOverview() {
 /** Machines that use this managed network. Running ones are judged by their live QEMU
  *  command line (see `machineUsesManagedNetwork`). Read-only on purpose, with no status
  *  refresh (which saves machine.json): this also runs under `sudo quickchr …`, and
- *  must not leave root-owned files in the data dir. */
+ *  must not leave root-owned files in the data dir. So a machine recorded as running
+ *  whose pid is gone (host reboot, unclean QEMU exit) is reported as stopped here
+ *  without being saved. A machine with an unreadable machine.json cannot be judged and
+ *  is returned in `unreadable`, so one broken machine does not block every network. */
 async function machinesOnManagedNetwork(spec: import("../lib/vmnet-service.ts").ManagedNetworkSpec, socketPath?: string) {
-	const { listMachineNames, loadMachine } = await import("../lib/state.ts");
+	const { loadAllMachines, listUnreadableMachines } = await import("../lib/state.ts");
+	const { isPidAlive } = await import("../lib/storage-lease.ts");
 	const { machineUsesManagedNetwork } = await import("../lib/vmnet-service.ts");
 	const liveArgs = (pid?: number): string | undefined => {
 		if (!pid) return undefined;
 		const ps = Bun.spawnSync(["ps", "-o", "args=", "-p", String(pid)], { stdout: "pipe", stderr: "pipe" });
 		return ps.exitCode === 0 ? new TextDecoder().decode(ps.stdout) : undefined;
 	};
-	return listMachineNames()
-		.flatMap((n) => loadMachine(n) ?? [])
+	const attached = loadAllMachines()
+		.map((m) => (m.status === "running" && !(m.pid && isPidAlive(m.pid)) ? { ...m, status: "stopped" as const, pid: undefined } : m))
 		.filter((m) => machineUsesManagedNetwork(m, spec, { socketPath, liveArgs: m.status === "running" ? liveArgs(m.pid) : undefined }));
+	return { attached, unreadable: listUnreadableMachines().map((u) => u.name) };
 }
 
 /** Under `sudo -H` (or root's own login) HOME is root's, so the data dir quickchr reads
@@ -2718,7 +2723,7 @@ interface NetOut {
 	ok(message: string): void;
 	fail(message: string): void;
 	done(message?: string): void;
-	confirm(message: string): Promise<boolean>;
+	confirm(message: string, initialValue?: boolean): Promise<boolean>;
 }
 
 /** `plain` forces plain output: `--dry-run` never prompts, in a terminal or not. */
@@ -2745,9 +2750,9 @@ async function managedNetworkOutput(plain = false): Promise<NetOut> {
 		ok: (m) => { begin("quickchr networks"); clack.log.success(m); },
 		fail: (m) => { begin("quickchr networks"); clack.log.error(m); },
 		done: (m) => { if (started) clack.outro(m ?? ""); else if (m) console.log(m); },
-		confirm: async (message) => {
+		confirm: async (message, initialValue = true) => {
 			begin("quickchr networks");
-			const answer = await clack.confirm({ message, initialValue: true });
+			const answer = await clack.confirm({ message, initialValue });
 			if (clack.isCancel(answer) || answer !== true) {
 				clack.cancel("Nothing was changed.");
 				return false;
@@ -2779,12 +2784,12 @@ async function runPrivileged(script: string, out: NetOut): Promise<void> {
 
 /** Consent for the root step: `--yes`, or a confirm in a terminal. Without a terminal
  *  and without `--yes` there is no prompt: the command stops and says how to proceed. */
-async function consentPrivileged(out: NetOut, message: string, yes: boolean): Promise<boolean> {
+async function consentPrivileged(out: NetOut, message: string, yes: boolean, initialValue = true): Promise<boolean> {
 	if (yes) return true;
 	if (!out.interactive) {
 		throw new QuickCHRError("INVALID_ARGUMENT", "This step needs root and was not confirmed.", "Pass --yes to proceed (sudo may still need a password), or --dry-run to print the root script.");
 	}
-	return out.confirm(message);
+	return out.confirm(message, initialValue);
 }
 
 async function handleManagedNetworks(action: "create" | "status" | "restart" | "remove", argv: string[]) {
@@ -2832,8 +2837,11 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 	const specifier = svc.managedNetworkSpecifier(spec);
 	const existing = svc.findManagedNetwork(spec);
 	await assertInvokingUsersMachinesVisible(action);
-	const attached = await machinesOnManagedNetwork(spec, existing?.socketPath);
+	const { attached, unreadable } = await machinesOnManagedNetwork(spec, existing?.socketPath);
 	const running = attached.filter((m) => m.status === "running").map((m) => m.name);
+	const unreadableNote = unreadable.length > 0
+		? `\nNot checked (unreadable machine.json): ${unreadable.join(", ")}`
+		: "";
 	const out = await managedNetworkOutput(dryRun);
 
 	if (action === "restart" || action === "remove") {
@@ -2846,13 +2854,13 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 		const script = action === "restart" ? svc.buildRestartScript(existing) : svc.buildRemoveScript(existing);
 		const body = action === "restart"
 			? `Restarts ${existing.label} (launchctl kickstart -k).\nRunning machines on QEMU 9.2+ re-attach by themselves.${running.length > 0 ? `\nAttached and running: ${running.join(", ")}` : ""}`
-			: `Unloads ${existing.label} and deletes\n  ${existing.plistPath}${existing.socketPath ? `\n  ${existing.socketPath}` : ""}\nThe helper binary and ${svc.MANAGED_LOG_DIR} stay.${attached.length > 0 ? `\nMachines configured with it will refuse to start until it exists again:\n  ${attached.map((m) => m.name).join(", ")}` : ""}`;
-		out.plan(`${action === "restart" ? "Restart" : "Remove"} ${specifier}`, `${body}\n\nNeeds root: the service runs as root.`);
+			: `Unloads ${existing.label} and deletes\n  ${existing.plistPath}${existing.socketPath ? `\n  ${existing.socketPath}` : ""}\nThe helper binary and ${svc.MANAGED_LOG_DIR} stay.${attached.length > 0 ? `\nMachines configured with it will refuse to start until it exists again:\n  ${attached.map((m) => m.name).join(", ")}` : ""}\nThe service is host-wide. Only your own quickchr machines were checked: another\nuser's machines, or any other QEMU on this socket, lose their network too.`;
+		out.plan(`${action === "restart" ? "Restart" : "Remove"} ${specifier}`, `${body}${unreadableNote}\n\nNeeds root: the service runs as root.`);
 		if (dryRun) {
 			console.log(script);
 			return;
 		}
-		if (!(await consentPrivileged(out, `${action === "restart" ? "Restart" : "Remove"} ${specifier}?`, yes))) return;
+		if (!(await consentPrivileged(out, `${action === "restart" ? "Restart" : "Remove"} ${specifier}?`, yes, action === "restart"))) return;
 		await runPrivileged(script, out);
 		if (action === "restart") await reportManagedNetworkReady(existing, out);
 		else out.ok(`Removed ${specifier}.`);

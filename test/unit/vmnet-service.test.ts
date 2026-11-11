@@ -166,6 +166,16 @@ describe("generated plist and root scripts", () => {
 		expect(script).toContain(`printf '%s' ${shellQuote(buildLaunchdPlist(plan))} > "$tmp"`);
 	});
 
+	test("directories are checked before install -d, which would chown a symlink's target", () => {
+		// CodeRabbit review of #264: `install -d` follows an existing directory symlink.
+		const lines = buildCreateScript(plan).split("\n");
+		const install = lines.findIndex((l) => l.startsWith("install -d "));
+		const dirChecks = lines.flatMap((l, i) => (l.startsWith("for p in '/opt'") ? [i] : []));
+		expect(dirChecks).toHaveLength(2);
+		expect(dirChecks[0]).toBeLessThan(install);
+		expect(dirChecks[1]).toBeGreaterThan(install);
+	});
+
 	test("create skips the helper install when it is already in place, but still checks it", () => {
 		const script = buildCreateScript(plan);
 		expect(script).not.toContain("/stage/");

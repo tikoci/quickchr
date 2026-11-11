@@ -227,6 +227,31 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	const isMacOS = platform.os === "darwin";
 	const hasSocketVmnet = !!platform.socketVmnet;
 
+	/** Block until the network's socket_vmnet socket accepts, or the user skips it: a
+	 *  non-root launch refuses `shared`/`bridged:` without one, so recording it here
+	 *  would only fail later. As root, QEMU's native vmnet needs no socket. */
+	const waitForVmnetSocket = async (specifier: string, socketFor: () => string | undefined): Promise<boolean> => {
+		if (!isMacOS || process.getuid?.() === 0) return true;
+		for (;;) {
+			const socketPath = socketFor();
+			const probe = socketPath ? await probeSocketVmnet(socketPath) : undefined;
+			if (probe?.state === "accepting") return true;
+			clack.log.warn(probe
+				? `socket_vmnet socket for ${specifier} (${socketPath}): ${describeSocketVmnetProbe(probe)}.`
+				: `No socket_vmnet socket serves ${specifier}.`);
+			const retry = await clack.select({
+				message: "What would you like to do?",
+				options: [
+					{ value: "retry", label: "Check again", hint: `after running: quickchr networks create ${specifier} (one sudo step)` },
+					{ value: "skip", label: `Skip ${specifier}`, hint: "continue without it" },
+				],
+			});
+			if (clack.isCancel(retry)) { clack.cancel("Cancelled."); process.exit(0); }
+			if (retry === "skip") return false;
+			Object.assign(platform, await detectPlatform());
+		}
+	};
+
 	// Only offer additional networks if the platform has options beyond user-mode
 	const hasNetworkOptions = isMacOS || process.platform === "linux";
 	if (hasNetworkOptions) {
@@ -241,8 +266,14 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 			let addMore = true;
 			while (addMore) {
 				const netOptions: Array<{ value: string; label: string; hint?: string }> = [];
-				if (isMacOS && hasSocketVmnet) {
-					netOptions.push({ value: "shared", label: "shared", hint: "routable IP via socket_vmnet (pingable from host)" });
+				if (isMacOS) {
+					netOptions.push({
+						value: "shared",
+						label: "shared",
+						hint: platform.socketVmnet?.sharedSocket
+							? "routable IP via socket_vmnet (pingable from host)"
+							: "routable IP; needs: quickchr networks create shared (one sudo step)",
+					});
 				}
 				if (isMacOS) {
 					netOptions.push({ value: "bridged", label: "bridged", hint: "bridge to a physical interface (e.g. Wi-Fi)" });
@@ -260,36 +291,12 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 						clack.log.warn("Only one shared network is supported.");
 						continue;
 					}
-					// Block until socket_vmnet daemon is running — don't proceed with a known-bad config
-					let daemonOk = false;
-					while (!daemonOk) {
-						const socketPath = platform.socketVmnet?.sharedSocket;
-						const probe = socketPath ? await probeSocketVmnet(socketPath) : undefined;
-						if (probe?.state === "accepting") {
-							daemonOk = true;
-						} else {
-							clack.log.warn(probe
-								? `socket_vmnet shared socket ${socketPath}: ${describeSocketVmnetProbe(probe)}.`
-								: "No shared socket_vmnet socket found.");
-							const retry = await clack.select({
-								message: "What would you like to do?",
-								options: [
-									{ value: "retry", label: "Check again", hint: "after running: quickchr networks create shared (one sudo step)" },
-									{ value: "skip", label: "Skip shared network", hint: "continue without it" },
-								],
-							});
-							if (clack.isCancel(retry)) { clack.cancel("Cancelled."); process.exit(0); }
-							if (retry === "skip") break;
-							// Refresh platform detection for retry
-							const refreshed = await detectPlatform();
-							Object.assign(platform, refreshed);
-						}
-					}
-					if (daemonOk) {
+					if (await waitForVmnetSocket("shared", () => platform.socketVmnet?.sharedSocket)) {
 						networks.push("shared");
 					}
 				} else if (netType === "bridged") {
 					const ifaces = detectPhysicalInterfaces();
+					let iface: string;
 					if (ifaces.length === 0) {
 						clack.log.warn("No physical interfaces detected. Enter device name manually.");
 						const manualIface = await clack.text({
@@ -297,7 +304,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 							validate: (v) => { if (!v.trim()) return "Required"; },
 						});
 						if (clack.isCancel(manualIface)) { clack.cancel("Cancelled."); process.exit(0); }
-						networks.push(parseNetworkSpecifier(`bridged:${manualIface}`));
+						iface = manualIface.trim();
 					} else {
 						const ifaceChoice = await clack.select({
 							message: "Bridge to which interface?",
@@ -308,7 +315,10 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 							})),
 						});
 						if (clack.isCancel(ifaceChoice)) { clack.cancel("Cancelled."); process.exit(0); }
-						networks.push(parseNetworkSpecifier(`bridged:${ifaceChoice}`));
+						iface = ifaceChoice;
+					}
+					if (await waitForVmnetSocket(`bridged:${iface}`, () => platform.socketVmnet?.bridgedSockets[iface])) {
+						networks.push(parseNetworkSpecifier(`bridged:${iface}`));
 					}
 				} else if (netType === "socket") {
 					const socketName = await clack.text({
