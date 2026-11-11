@@ -101,6 +101,35 @@ field-presence polling loop, a retry-until-settled block. A capture costs up to
 `BOOT_FORENSICS_BUDGET_MS` (180 s), so one per retry would blow the test's
 timeout collecting reports on a condition the loop is designed to ride out.
 
+### Managed host networks (`managed-network.test.ts`)
+
+`quickchr networks create|status|restart|remove` installs a root service on the host,
+so its test is split by what the host supports, not by where it runs (#270):
+
+- **macOS** runs the lifecycle: `create shared` under `sudo -n`, a CHR on it, `restart`
+  under the guest (new helper pid, same QEMU pid, gateway echo again), a
+  `launchctl bootout` that `restart` must reload, the `remove` guard, then `remove`.
+  It runs on CI (`GITHUB_ACTIONS=true`, hosted macOS has passwordless sudo) and
+  locally only with `QUICKCHR_TEST_MANAGED_NETWORK=1`. Without `sudo -n` it **fails**,
+  it does not skip. It refuses to touch a managed network, or a machine with one of
+  its names, that it did not create; cleanup removes only what the run added (its log,
+  the helper if it installed it and no network still uses one, directories once empty).
+- **Every other host** asserts the refusal: each `networks` lifecycle command and any
+  `shared`/`bridged:` machine fail as `NETWORK_UNAVAILABLE` with nothing created.
+  When Linux gets its own sudo-installed networks (#263), it moves to a lifecycle.
+
+`managed-network-bridged.test.ts` bridges the runner's default-route interface and runs
+on **Apple Silicon only**: on hosted macos-15-intel it lost the runner 3 of 3 times. It
+requires a lease and the gateway's ARP reply; the runner's NAT gateway never answers a
+bridged guest's ping and answers its DNS only sometimes. The full probe, DNS and ICMP included, is
+`test/lab/managed-bridged/` (its REPORT.md has the runs).
+
+Evidence lands in `<dataDir>/test-evidence/` (uploaded by `integration.yml`): a
+summary per test always, and per failed phase the plist, `launchctl print`, helper
+log, ownership, QEMU argv, guest state and every CLI call. Recovery is judged by
+guest traffic (a gateway echo, then the guest fetching from a listener on the host),
+never by the socket accepting.
+
 ### Diagnosing a boot that never becomes REST-ready
 
 Turn the diagnostic knobs on when chasing a `BOOT_TIMEOUT`. All three are off by

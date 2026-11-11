@@ -108,6 +108,8 @@ export interface ManagedNetwork {
 	helperPath?: string;
 	socketPath?: string;
 	interfaceId?: string;
+	/** The plist's StandardErrorPath: where socket_vmnet says why it would not start. */
+	logPath?: string;
 }
 
 function argValue(args: string[], name: string): string | undefined {
@@ -117,7 +119,10 @@ function argValue(args: string[], name: string): string | undefined {
 
 /** Interpret one plist (as `plutil -convert json` prints it). Undefined for a plist
  *  that is not a quickchr network service. */
-export function parseManagedPlist(plistPath: string, plist: { Label?: unknown; ProgramArguments?: unknown }): ManagedNetwork | undefined {
+export function parseManagedPlist(
+	plistPath: string,
+	plist: { Label?: unknown; ProgramArguments?: unknown; StandardErrorPath?: unknown; StandardOutPath?: unknown },
+): ManagedNetwork | undefined {
 	const label = typeof plist.Label === "string" ? plist.Label : undefined;
 	const args = Array.isArray(plist.ProgramArguments) ? plist.ProgramArguments.filter((a): a is string => typeof a === "string") : [];
 	if (!label?.startsWith(MANAGED_LABEL_PREFIX) || args.length === 0) return undefined;
@@ -136,6 +141,7 @@ export function parseManagedPlist(plistPath: string, plist: { Label?: unknown; P
 		helperPath: args[0],
 		socketPath: last && !last.startsWith("-") && last !== args[0] ? last : undefined,
 		interfaceId: argValue(args, "vmnet-interface-id"),
+		logPath: [plist.StandardErrorPath, plist.StandardOutPath].find((p): p is string => typeof p === "string"),
 	};
 }
 
@@ -466,6 +472,33 @@ export async function managedNetworkStatus(net: ManagedNetwork): Promise<Managed
 	const socket = net.socketPath ? await probeSocketVmnet(net.socketPath) : undefined;
 	if (print.exitCode !== 0) return { loaded: false, running: false, socket };
 	return { loaded: true, ...parseLaunchctlPrint(new TextDecoder().decode(print.stdout)), socket };
+}
+
+/** How much of a log `readManagedNetworkLog` reads: the log grows without rotation
+ *  while KeepAlive restarts a failing helper, and only its end is shown. */
+export const MANAGED_LOG_TAIL_BYTES = 64 * 1024;
+
+/** The last `lines` lines of a network's log, from at most its last
+ *  `MANAGED_LOG_TAIL_BYTES`. launchd creates it root-owned but world-readable (644
+ *  under the default umask, Morpheus 2026-11-11), so this needs no sudo. Undefined when
+ *  there is no log, it is empty, or it cannot be read (an admin's 0600). */
+export async function readManagedNetworkLog(
+	net: Pick<ManagedNetwork, "logPath">,
+	lines = 20,
+	maxBytes = MANAGED_LOG_TAIL_BYTES,
+): Promise<string | undefined> {
+	if (!net.logPath) return undefined;
+	try {
+		const file = Bun.file(net.logPath);
+		const start = Math.max(0, file.size - maxBytes);
+		let text = (await file.slice(start).text()).trimEnd();
+		// Cut mid-line: drop the partial first line, unless it is all there is.
+		const firstBreak = text.indexOf("\n");
+		if (start > 0 && firstBreak !== -1) text = text.slice(firstBreak + 1);
+		return text.split("\n").slice(-lines).join("\n") || undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** One line for `networks status`. */

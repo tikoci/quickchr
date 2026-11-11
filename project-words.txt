@@ -322,6 +322,7 @@ pcspk
 pdb
 penwidth
 perflevel
+pfctl
 pflash
 pfr
 pgrep
@@ -431,6 +432,7 @@ sni
 snmp
 socat
 sockaddr
+socketfilterfw
 softmmu
 srand
 ssbd

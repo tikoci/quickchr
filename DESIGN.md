@@ -1298,6 +1298,13 @@ network, running socket_vmnet as root, and machines attach to its socket with
   resolver fell back to native vmnet, which only works with QEMU as root. A normal
   user now gets `NETWORK_UNAVAILABLE` naming `quickchr networks create <net>`;
   running quickchr as root keeps the native path.
+- **Accepted on hosted macOS, refused elsewhere (#270).** `managed-network.test.ts`
+  runs the `shared` lifecycle on both macOS runner arches under `sudo -n`, judging
+  recovery by guest traffic, and on Linux/Windows asserts the `NETWORK_UNAVAILABLE`
+  refusals. Bridged runs on arm64 only: bridging a hosted x86 runner's only uplink
+  loses the runner (`test/lab/managed-bridged/REPORT.md`). `networks status --json`
+  exists for scripts and that test; a service that will not serve shows its log,
+  which launchd leaves world-readable.
 
 ## Managed macOS networks and services — research direction (2026-11-07)
 

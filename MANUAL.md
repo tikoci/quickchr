@@ -534,7 +534,7 @@ service. quickchr installs one per network, and only that step needs sudo:
 
 | Command | Needs sudo | Does |
 |---|---|---|
-| `networks status [<net>]` | no | service state (launchd) and whether its socket accepts |
+| `networks status [<net>] [--json]` | no | service state (launchd) and whether its socket accepts; exits 1 if any is not serving |
 | `networks create <net>` | once | installs the pinned helper and a LaunchDaemon, starts it |
 | `networks restart <net>` | yes | `launchctl kickstart -k`; machines on QEMU 9.2+ re-attach by themselves |
 | `networks remove <net>` | yes | unloads and deletes the service (refuses while machines on it run, unless `--force`) |
@@ -549,7 +549,11 @@ are running with. A network service is host-wide: any local user (group `staff`)
 shows the socket_vmnet version, release URL, tarball and binary sha256, and every
 path it writes. The helper is lima-vm's upstream release, not Homebrew.
 `--dry-run` prints the root script and stops; `--yes` skips the question (sudo
-still asks for the password).
+still asks for the password). Without a terminal, `--yes` runs the root step under
+`sudo -n`, so a script or CI job needs passwordless sudo (or a cached `sudo -v`).
+If the service does not come up, `create` and `restart` print the end of its log
+(`/var/log/quickchr/net-<slug>.log`, readable without sudo); the service stays
+installed until `remove`.
 
 ```bash
 quickchr networks create bridged:en0      # one sudo step

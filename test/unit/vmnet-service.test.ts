@@ -17,6 +17,7 @@ import {
 	parseManagedNetworkSpec,
 	parseManagedPlist,
 	planManagedNetwork,
+	readManagedNetworkLog,
 	rootOwnedChecks,
 	shellQuote,
 	socketVmnetAsset,
@@ -93,7 +94,16 @@ describe("parseManagedPlist", () => {
 			helperPath: "/opt/quickchr/bin/socket_vmnet",
 			socketPath: "/var/run/socket_vmnet.bridged.en0",
 			interfaceId: "CDE475DB-BC96-4F9B-BB48-33FC713772F0",
+			logPath: "/var/log/quickchr/net-bridged-en0.log",
 		});
+	});
+
+	test("the log is where launchd sends stderr, falling back to stdout, and absent without either", () => {
+		expect(parseManagedPlist(PLIST_PATH, { ...MORPHEUS_PLIST, StandardErrorPath: "/tmp/err.log" })?.logPath).toBe("/tmp/err.log");
+		const { StandardErrorPath: _e, ...stdoutOnly } = MORPHEUS_PLIST;
+		expect(parseManagedPlist(PLIST_PATH, stdoutOnly)?.logPath).toBe("/var/log/quickchr/net-bridged-en0.log");
+		const { StandardErrorPath: _e2, StandardOutPath: _o, ...noLog } = MORPHEUS_PLIST;
+		expect(parseManagedPlist(PLIST_PATH, noLog)?.logPath).toBeUndefined();
 	});
 
 	test("ignores services that are not quickchr networks", () => {
@@ -138,7 +148,7 @@ describe("generated plist and root scripts", () => {
 			expect(Bun.spawnSync(["plutil", "-lint", path]).exitCode).toBe(0);
 			const json = JSON.parse(new TextDecoder().decode(Bun.spawnSync(["plutil", "-convert", "json", "-o", "-", path]).stdout));
 			expect(json).toMatchObject({ Label: plan.label, ProgramArguments: plan.programArguments, RunAtLoad: true, KeepAlive: true });
-			expect(parseManagedPlist(path, json)?.socketPath).toBe(plan.socketPath);
+			expect(parseManagedPlist(path, json)).toMatchObject({ socketPath: plan.socketPath, logPath: plan.logPath });
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -357,6 +367,28 @@ describe("status", () => {
 	test("parseLaunchctlPrint reads the service's own state and pid", () => {
 		expect(parseLaunchctlPrint(PRINT)).toEqual({ running: true, pid: 53132, lastExit: "0" });
 		expect(parseLaunchctlPrint("\tstate = not running\n\tlast exit code = 78: EX_CONFIG\n")).toEqual({ running: false, pid: undefined, lastExit: "78: EX_CONFIG" });
+	});
+
+	test("readManagedNetworkLog returns the tail, and nothing for a missing or absent log", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-net-log-"));
+		try {
+			const logPath = join(dir, "net.log");
+			writeFileSync(logPath, `${Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n")}\n`);
+			expect(await readManagedNetworkLog({ logPath }, 3)).toBe("line 28\nline 29\nline 30");
+			expect(await readManagedNetworkLog({ logPath: join(dir, "absent.log") })).toBeUndefined();
+			expect(await readManagedNetworkLog({})).toBeUndefined();
+			writeFileSync(logPath, "");
+			expect(await readManagedNetworkLog({ logPath })).toBeUndefined();
+
+			// Only the end is read: a byte bound that cuts mid-line drops the partial line,
+			// and a single line longer than the bound still yields its tail.
+			writeFileSync(logPath, "first line that will be cut\nsecond\nthird\n");
+			expect(await readManagedNetworkLog({ logPath }, 20, 15)).toBe("second\nthird");
+			writeFileSync(logPath, `${"x".repeat(100)}\n`);
+			expect(await readManagedNetworkLog({ logPath }, 20, 10)).toBe("x".repeat(9));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("status separates service down from socket dead (#256 Done-when)", () => {

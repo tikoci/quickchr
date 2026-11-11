@@ -21,8 +21,15 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   `status` needs no sudo and tells "service not loaded", "service not running" and
   "socket not accepting" apart. `remove` warns that the service is host-wide and
   its confirm defaults to no. (#256)
+- `quickchr networks status --json`: one object per managed network (launchd state,
+  pid, socket probe, plist/socket/log paths), with the same exit status as the text
+  form. (#270)
 
 ### Changed
+
+- A `networks create` or `restart` whose service does not come up now prints the
+  end of the helper's log, which is world-readable, instead of a `sudo tail` hint,
+  and names both `restart` and `remove` as the way out. (#270)
 
 - On macOS, `shared` or `bridged:<iface>` with no socket_vmnet daemon now fails with
   `NETWORK_UNAVAILABLE` naming `quickchr networks create <net>`, instead of falling
