@@ -2904,7 +2904,8 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 			console.log(`${statusIcon("ok")} ${bold(specifier)} is already set up: ${d.text}. Nothing to do.`);
 			return;
 		}
-		throw new QuickCHRError("NETWORK_UNAVAILABLE", `${specifier} is installed but not serving: ${d.text}.`, `Restart it: quickchr networks restart ${specifier}   (needs sudo)`);
+		out.fail(`${specifier}: ${d.text}`);
+		throw await notServingError(existing, d.text, out);
 	}
 	const lines = [
 		`Helper   socket_vmnet ${plan.helperVersion}, upstream lima-vm release (not Homebrew)`,
@@ -2966,15 +2967,23 @@ async function reportManagedNetworkReady(net: import("../lib/vmnet-service.ts").
 		return;
 	}
 	out.fail(`${name}: ${d.text}`);
-	// The log is world-readable: show why socket_vmnet would not serve, rather than
-	// sending the user off to read it. The service stays installed (KeepAlive retries
-	// it), so the hint names both ways out.
+	throw await notServingError(net, d.text, out);
+}
+
+/** An installed network that does not serve, from `create` (after installing, or on an
+ *  existing service) and `restart`. The log is normally world-readable, so it is shown
+ *  rather than pointed at; when it is not (an admin's 0600), the hint is a `sudo tail`.
+ *  The service stays installed (KeepAlive retries it), so the hint names both ways out. */
+async function notServingError(net: import("../lib/vmnet-service.ts").ManagedNetwork, why: string, out: NetOut): Promise<QuickCHRError> {
+	const svc = await import("../lib/vmnet-service.ts");
+	const name = svc.managedNetworkSpecifier(net.spec);
+	const logPath = net.logPath ?? `${svc.MANAGED_LOG_DIR}/net-${svc.managedNetworkSlug(net.spec)}.log`;
 	const log = await svc.readManagedNetworkLog(net);
-	if (log) out.fail(`Last lines of ${net.logPath}:\n${log}`);
-	throw new QuickCHRError(
+	if (log) out.fail(`Last lines of ${logPath}:\n${log}`);
+	return new QuickCHRError(
 		"NETWORK_UNAVAILABLE",
-		`${name} is installed but not serving: ${d.text}.`,
-		`${log ? "" : `See its log: ${net.logPath ?? `${svc.MANAGED_LOG_DIR}/net-${svc.managedNetworkSlug(net.spec)}.log`}. `}Fix the cause and run 'quickchr networks restart ${name}', or uninstall it with 'quickchr networks remove ${name}'.`,
+		`${name} is installed but not serving: ${why}.`,
+		`${log ? "" : `Read its log: sudo tail -n 50 ${svc.shellQuote(logPath)}   `}Fix the cause and run 'quickchr networks restart ${name}', or uninstall it with 'quickchr networks remove ${name}'.`,
 	);
 }
 

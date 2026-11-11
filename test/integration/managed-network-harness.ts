@@ -13,6 +13,7 @@ import { MANAGED_HELPER_ROOT } from "../../src/lib/platform.ts";
 import {
 	MANAGED_LOG_DIR,
 	findManagedNetwork,
+	listManagedNetworks,
 	managedNetworkLabel,
 	planManagedNetwork,
 	type ManagedNetworkSpec,
@@ -311,24 +312,50 @@ export async function writeEvidence(name: string, body: unknown): Promise<string
 
 // ── setup and cleanup ──────────────────────────────────────────────────────────
 
-export async function cleanupMachine(name: string): Promise<void> {
+/** Refuse a test machine name that already exists: the test removes what it creates,
+ *  and must never stop or delete a machine it did not create (a developer running the
+ *  opt-in locally may have one). */
+export async function assertMachineAbsent(name: string): Promise<void> {
 	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
-	const existing = QuickCHR.get(name);
-	if (!existing) return;
-	try { await existing.stop(); } catch { /* ignore */ }
-	try { await existing.remove(); } catch { /* ignore */ }
+	if (QuickCHR.get(name)) {
+		throw new Error(`A machine named ${name} already exists in ${getDataDir()}. This test creates and removes its own and will not touch one it did not create. Remove it first (quickchr remove ${name}).`);
+	}
 }
 
-/** What exists before the test, so cleanup leaves the host as it found it. */
+/** Stop and remove a machine this test created. Failures are returned, not swallowed,
+ *  and the machine has to be gone afterwards for cleanup to count as clean. */
+export async function cleanupMachine(name: string): Promise<string[]> {
+	const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+	const problems: string[] = [];
+	const existing = QuickCHR.get(name);
+	if (!existing) return problems;
+	try { await existing.stop(); } catch (e) { problems.push(`stop ${name}: ${e instanceof Error ? e.message : String(e)}`); }
+	try { await existing.remove(); } catch (e) { problems.push(`remove ${name}: ${e instanceof Error ? e.message : String(e)}`); }
+	if (QuickCHR.get(name)) problems.push(`${name} still exists after cleanup`);
+	return problems;
+}
+
+/** What existed before the test, so cleanup removes only what this run created. */
 export interface HostBaseline {
-	/** `/opt/quickchr`: create makes it, with the helper under it. */
-	optDir: boolean;
-	logDir: boolean;
+	helper: boolean;
+	log: boolean;
+	/** Directories on the way to the helper and the log that did not exist yet,
+	 *  deepest first: removed afterwards only if empty. */
+	newDirs: string[];
 }
 
 export const OPT_DIR = dirname(MANAGED_HELPER_ROOT);
 
-export async function preflight(spec: ManagedNetworkSpec): Promise<HostBaseline> {
+/** Every directory from `/opt/quickchr` down to `path`'s parent, deepest first. */
+function dirChain(path: string, top: string): string[] {
+	const dirs: string[] = [];
+	for (let d = dirname(path); d.startsWith(top); d = dirname(d)) dirs.push(d);
+	return dirs;
+}
+
+/** Passwordless sudo, no existing managed network of this kind, and no machine with
+ *  any of the test's names. Records what exists, so cleanup leaves the rest alone. */
+export async function preflight(spec: ManagedNetworkSpec, machines: string[]): Promise<HostBaseline> {
 	const sudo = await sh(["sudo", "-n", "true"]);
 	if (sudo.exitCode !== 0) {
 		throw new Error(`The managed-network lifecycle needs passwordless sudo (sudo -n), which this host does not grant. Hosted macOS runners do; locally, run 'sudo -v' first.\n${show(sudo)}`);
@@ -337,12 +364,20 @@ export async function preflight(spec: ManagedNetworkSpec): Promise<HostBaseline>
 	if (existing) {
 		throw new Error(`A managed network ${existing.label} already exists (${existing.plistPath}). This test installs and removes its own and will not touch one it did not create: it is host-wide and may carry other machines. Remove it first (quickchr networks remove …) or run on a clean host.`);
 	}
-	return { optDir: existsSync(OPT_DIR), logDir: existsSync(MANAGED_LOG_DIR) };
+	for (const name of machines) await assertMachineAbsent(name);
+	const plan = planManagedNetwork(spec);
+	const dirs = [...dirChain(plan.helperPath, OPT_DIR), MANAGED_LOG_DIR];
+	return {
+		helper: existsSync(plan.helperPath),
+		log: existsSync(plan.logPath),
+		newDirs: dirs.filter((d) => !existsSync(d)),
+	};
 }
 
-/** Remove the service through the CLI, and by hand if that fails; then anything else
- *  the test created on the host. Errors are collected, not thrown, so cleanup of one
- *  thing never stops cleanup of the next. */
+/** Remove the service through the CLI, and by hand if that fails; then what this run
+ *  added to the host: its log, the helper if it installed it and no managed network
+ *  still uses one, and directories it created, only once empty (`rmdir`). Errors are
+ *  collected, not thrown, so cleanup of one thing never stops cleanup of the next. */
 export async function cleanupService(spec: ManagedNetworkSpec, baseline: HostBaseline | undefined, specifier: string): Promise<string[]> {
 	// No baseline means preflight refused, possibly because the network already existed:
 	// then it is not ours, and cleanup must not remove it.
@@ -358,8 +393,9 @@ export async function cleanupService(spec: ManagedNetworkSpec, baseline: HostBas
 			await sh(["sudo", "-n", "rm", "-f", plan.plistPath, plan.socketPath]);
 		}
 	}
-	if (!baseline.optDir) await sh(["sudo", "-n", "rm", "-rf", OPT_DIR]);
-	if (!baseline.logDir) await sh(["sudo", "-n", "rm", "-rf", MANAGED_LOG_DIR]);
+	if (!baseline.log) await sh(["sudo", "-n", "rm", "-f", plan.logPath]);
+	if (!baseline.helper && listManagedNetworks().length === 0) await sh(["sudo", "-n", "rm", "-f", plan.helperPath]);
+	for (const dir of baseline.newDirs) await sh(["sudo", "-n", "rmdir", dir]);
 	if (launchctlLoaded(label)) problems.push(`${label} is still loaded after cleanup`);
 	if (existsSync(plan.plistPath)) problems.push(`${plan.plistPath} still exists after cleanup`);
 	return problems;
@@ -438,9 +474,8 @@ export async function runBridgedProbe(machine: string, imageOpts: Record<string,
 	let qemuPid: number | undefined;
 	const evidence = async () => ({ ...(await hostEvidence(spec, qemuPid)), guest: await guestEvidence(instance) });
 
-	await cleanupMachine(machine);
 	await withCleanup(async () => {
-		baseline = await phase(record, "preflight", evidence, () => preflight(spec));
+		baseline = await phase(record, "preflight", evidence, () => preflight(spec, [machine]));
 		await phase(record, "create", evidence, async () => {
 			result.created = await quickchr("networks", "create", specifier, "--yes");
 			expectExit(result.created, 0);
@@ -463,8 +498,7 @@ export async function runBridgedProbe(machine: string, imageOpts: Record<string,
 			record.guest = await guestEvidence(instance);
 		});
 	}, async () => {
-		await cleanupMachine(machine);
-		const problems = await cleanupService(spec, baseline, specifier);
+		const problems = baseline ? [...(await cleanupMachine(machine)), ...(await cleanupService(spec, baseline, specifier))] : [];
 		record.cleanup = problems.length === 0 ? "clean" : problems;
 		const where = await writeEvidence("bridged-probe", { record, transcript });
 		console.log(`managed-network bridged probe (${where}):\n${JSON.stringify(record, null, 2)}`);

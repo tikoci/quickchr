@@ -111,8 +111,9 @@ so its test is split by what the host supports, not by where it runs (#270):
   `launchctl bootout` that `restart` must reload, the `remove` guard, then `remove`.
   It runs on CI (`GITHUB_ACTIONS=true`, hosted macOS has passwordless sudo) and
   locally only with `QUICKCHR_TEST_MANAGED_NETWORK=1`. Without `sudo -n` it **fails**,
-  it does not skip. It refuses to touch a managed network it did not create, and its
-  cleanup removes only what it created.
+  it does not skip. It refuses to touch a managed network, or a machine with one of
+  its names, that it did not create; cleanup removes only what the run added (its log,
+  the helper if it installed it and no network still uses one, directories once empty).
 - **Every other host** asserts the refusal: each `networks` lifecycle command and any
   `shared`/`bridged:` machine fail as `NETWORK_UNAVAILABLE` with nothing created.
   When Linux gets its own sudo-installed networks (#263), it moves to a lifecycle.

@@ -12,6 +12,7 @@ import {
 	INTEGRATION,
 	LIFECYCLE_OPTED_IN,
 	MANAGED_HOST,
+	assertMachineAbsent,
 	cleanupMachine,
 	cleanupService,
 	expectExit,
@@ -53,8 +54,8 @@ import {
  *   (`GITHUB_ACTIONS=true`, where hosted macOS has passwordless sudo) and locally only
  *   with `QUICKCHR_TEST_MANAGED_NETWORK=1`. Either way it needs `sudo -n`; without it
  *   the test fails rather than skipping, since a skip would read as coverage. It also
- *   refuses to touch a managed network that already exists: these are host-wide and
- *   may carry someone's machines.
+ *   refuses to touch a managed network that already exists (these are host-wide and
+ *   may carry someone's machines) or a machine with one of its names.
  * - **Every other host** asserts the honest negative: every `networks` lifecycle
  *   command, and any machine asking for `shared`/`bridged:`, is refused as
  *   NETWORK_UNAVAILABLE before anything is created. When Linux gains its own
@@ -66,7 +67,8 @@ import {
  *
  * The data dir is the normal one, not an isolated copy: the `remove` guard reads the
  * machines in the data dir the CLI sees, and the test machine has to be one of them,
- * as it is for a user. It also keeps the runner's warm image cache.
+ * as it is for a user. It also keeps the runner's warm image cache. Name collisions are
+ * refused at preflight rather than cleaned up, so a developer's machines are never touched.
  *
  * Evidence goes to `<dataDir>/test-evidence/` (integration.yml uploads it): a summary
  * of every phase always, and on failure the plist, `launchctl print`, the helper log,
@@ -100,9 +102,8 @@ describe.skipIf(!INTEGRATION || !MANAGED_HOST || !LIFECYCLE_OPTED_IN)("managed h
 		let qemuPid: number | undefined;
 		const evidence = async () => ({ ...(await hostEvidence(spec, qemuPid)), guest: await guestEvidence(instance) });
 
-		await cleanupMachine(SHARED_MACHINE);
 		await withCleanup(async () => {
-			baseline = await phase(record, "preflight", evidence, () => preflight(spec));
+			baseline = await phase(record, "preflight", evidence, () => preflight(spec, [SHARED_MACHINE]));
 
 			await phase(record, "refused-before-create", evidence, async () => {
 				// No daemon serves shared yet, and QEMU's native vmnet would need root: the
@@ -195,6 +196,14 @@ describe.skipIf(!INTEGRATION || !MANAGED_HOST || !LIFECYCLE_OPTED_IN)("managed h
 				expectExit(down.result, 1);
 				expect(down.row).toMatchObject({ loaded: false, running: false, ok: false });
 
+				// create on an installed service that is not serving changes nothing (no root
+				// step) and says why, with the helper's log rather than a pointer to it.
+				const recreate = await quickchr("networks", "create", "shared", "--yes");
+				expectExit(recreate, 1);
+				expect(recreate.stderr).toContain("Error [NETWORK_UNAVAILABLE]");
+				expect(recreate.stderr).toContain(`Last lines of ${plan.logPath}`);
+				expect(recreate.stderr).toContain("quickchr networks restart shared");
+
 				const r = await quickchr("networks", "restart", "shared", "--yes");
 				expectExit(r, 0);
 				const up = await status("shared");
@@ -203,6 +212,7 @@ describe.skipIf(!INTEGRATION || !MANAGED_HOST || !LIFECYCLE_OPTED_IN)("managed h
 				expect(isAlive(qemuPid as number)).toBe(true);
 				const lease = await waitForGuestTraffic(instance as ChrInstance, "ether2");
 				if (!lease) throw new Error("guest traffic on ether2 did not recover after the job was reloaded");
+				await expectGuestReachesHost(instance as ChrInstance, lease, record, "tcpAfterReload");
 			});
 
 			await phase(record, "remove", evidence, async () => {
@@ -232,8 +242,8 @@ describe.skipIf(!INTEGRATION || !MANAGED_HOST || !LIFECYCLE_OPTED_IN)("managed h
 				expect(err?.installHint).toContain("quickchr networks create shared");
 			});
 		}, async () => {
-			await cleanupMachine(SHARED_MACHINE);
-			const problems = await cleanupService(spec, baseline, "shared");
+			// Only after preflight (baseline): the machine did not exist, so it is this run's.
+			const problems = baseline ? [...(await cleanupMachine(SHARED_MACHINE)), ...(await cleanupService(spec, baseline, "shared"))] : [];
 			record.cleanup = problems.length === 0 ? "clean" : problems;
 			const where = await writeEvidence("shared-summary", record);
 			console.log(`managed-network shared summary (${where}):\n${JSON.stringify(record, null, 2)}`);
@@ -260,8 +270,8 @@ describe.skipIf(!INTEGRATION || MANAGED_HOST)(`managed host networks are unavail
 
 	test("a machine asking for shared or bridged is refused before anything is created", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
-		await cleanupMachine(UNAVAILABLE_MACHINE);
-		try {
+		await assertMachineAbsent(UNAVAILABLE_MACHINE);
+		await withCleanup(async () => {
 			const asked: NetworkSpecifier[] = ["shared", { type: "bridged", iface: "eth0" }];
 			for (const net of asked) {
 				const err = await QuickCHR.start({ ...imageTarget(), background: true, name: UNAVAILABLE_MACHINE, networks: ["user", net] })
@@ -269,8 +279,6 @@ describe.skipIf(!INTEGRATION || MANAGED_HOST)(`managed host networks are unavail
 				expect(err?.code).toBe("NETWORK_UNAVAILABLE");
 				expect(QuickCHR.get(UNAVAILABLE_MACHINE)).toBeNull();
 			}
-		} finally {
-			await cleanupMachine(UNAVAILABLE_MACHINE);
-		}
+		}, () => cleanupMachine(UNAVAILABLE_MACHINE));
 	}, bootTestTimeout());
 });

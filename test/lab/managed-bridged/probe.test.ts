@@ -19,7 +19,7 @@ import { GUEST_NET_DEADLINE_MS, runBridgedProbe } from "../../integration/manage
  * On a hosted macos-15-intel runner it costs the runner (REPORT.md).
  */
 
-const RUN = Boolean(process.env.QUICKCHR_LAB_MANAGED_BRIDGED) && Boolean(process.env.QUICKCHR_INTEGRATION) && process.platform === "darwin";
+const RUN = process.env.QUICKCHR_LAB_MANAGED_BRIDGED === "1" && Boolean(process.env.QUICKCHR_INTEGRATION) && process.platform === "darwin";
 
 describe.skipIf(!RUN)("lab: managed bridged network, full LAN probe", () => {
 	test("lease, ARP, DNS and an ICMP echo from the gateway", async () => {

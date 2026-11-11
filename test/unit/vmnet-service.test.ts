@@ -379,6 +379,13 @@ describe("status", () => {
 			expect(await readManagedNetworkLog({})).toBeUndefined();
 			writeFileSync(logPath, "");
 			expect(await readManagedNetworkLog({ logPath })).toBeUndefined();
+
+			// Only the end is read: a byte bound that cuts mid-line drops the partial line,
+			// and a single line longer than the bound still yields its tail.
+			writeFileSync(logPath, "first line that will be cut\nsecond\nthird\n");
+			expect(await readManagedNetworkLog({ logPath }, 20, 15)).toBe("second\nthird");
+			writeFileSync(logPath, `${"x".repeat(100)}\n`);
+			expect(await readManagedNetworkLog({ logPath }, 20, 10)).toBe("x".repeat(9));
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
