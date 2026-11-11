@@ -131,6 +131,19 @@ QEMU 7.1 added built-in `vmnet` support (`-netdev vmnet-shared`, `-netdev vmnet-
 | Host-only | `--vmnet-mode=host` | Host ↔ guest only; no internet |
 | Bridged | `--vmnet-mode=bridged --vmnet-interface=en0` | Real LAN presence; LAN DHCP assigns IP |
 
+### Install with quickchr (recommended)
+
+```sh
+quickchr networks create shared        # or: bridged:en0 — one sudo step each
+quickchr networks status               # no sudo
+```
+
+This installs lima-vm's upstream socket_vmnet release (pinned version and sha256,
+shown before the sudo prompt) to `/opt/quickchr/socket_vmnet/<version>/`, and one
+LaunchDaemon per network (`dev.tikoci.quickchr.net.<slug>`) with its socket at
+`/var/run/quickchr-net-<slug>.sock`. Homebrew is not involved. See MANUAL.md,
+`networks`. The Homebrew route below still works; quickchr finds its sockets too.
+
 ### Install (Homebrew)
 
 ```sh

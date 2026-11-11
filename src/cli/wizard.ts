@@ -274,7 +274,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 							const retry = await clack.select({
 								message: "What would you like to do?",
 								options: [
-									{ value: "retry", label: "Check again", hint: "after running: sudo brew services start socket_vmnet" },
+									{ value: "retry", label: "Check again", hint: "after running: quickchr networks create shared (one sudo step)" },
 									{ value: "skip", label: "Skip shared network", hint: "continue without it" },
 								],
 							});

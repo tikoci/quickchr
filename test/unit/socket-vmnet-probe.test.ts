@@ -86,6 +86,20 @@ describe.skipIf(SKIP)("assertSocketVmnetReachable", () => {
 		await expectUnavailable([vmnetNic("net1", join(dir, "absent.sock"))], /does not exist/);
 	});
 
+	test("the hint names quickchr networks only for a quickchr-managed socket", async () => {
+		// Copilot review of #267: a stale Homebrew/lima socket has no quickchr plist to restart.
+		const hint = async (path: string) => {
+			try {
+				await assertSocketVmnetReachable([vmnetNic("net1", path)], 1000);
+			} catch (e) {
+				return (e as QuickCHRError).installHint ?? "";
+			}
+			return "";
+		};
+		expect(await hint(join(dir, "socket_vmnet.bridged.en0"))).toContain("not a quickchr-managed network");
+		expect(await hint("/var/run/quickchr-net-bridged-zz9.sock")).toContain("quickchr networks restart");
+	});
+
 	test.skipIf(process.getuid?.() === 0)("refuses a socket the user may not connect to", async () => {
 		const path = liveSocket("private.sock");
 		chmodSync(path, 0o000);

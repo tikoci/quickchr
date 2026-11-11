@@ -520,7 +520,12 @@ quickchr manages individual CHR instances. Multi-router topologies, test matrice
 
 ### Networking — Discover, Don't Configure
 
-For advanced networking (TAP interfaces, bridges), quickchr **discovers and presents options** but does not manage OS-level network configuration. On macOS, vmnet is straightforward (root + a QEMU flag). On Linux, TAP requires editing system files that vary by distro and network manager — that's the user's domain. quickchr will enumerate available interfaces, generate the correct QEMU flags, and link to tikoci docs for setup guides.
+For advanced networking (TAP interfaces, bridges), quickchr **discovers and presents options** but does not manage OS-level network configuration. On Linux, TAP requires editing system files that vary by distro and network manager — that's the user's domain. quickchr will enumerate available interfaces, generate the correct QEMU flags, and link to tikoci docs for setup guides.
+
+**Exception, macOS (#256):** quickchr now installs and manages one root network service
+per vmnet network (`quickchr networks create`), because every vmnet mode needs root and
+the Homebrew service it used to defer to kept breaking. See "Managed macOS networks"
+below. Linux and Windows stay discover-only until #263 settles their equivalent.
 
 #### SLiRP hostfwd — Why User-Mode Must Be ether1
 
@@ -1238,6 +1243,51 @@ is `MACHINE_STOPPED`; a wait that never reaches REST is a genuine
 `BOOT_TIMEOUT` with `preserve-existing` cleanup. Deliberately out: no frozen-specific hint on `exec`/`get` failures,
 and no `savevm` refusal on prelaunch VMs (snapshot is already tricky business;
 QEMU accepts or errors on its own).
+
+## Managed macOS networks (#256, decided 2026-11-11)
+
+**Root lives in the network, once; machines stay unprivileged.** Every vmnet mode
+needs root (grounded on macOS 26.6.2, see the research doc). quickchr never runs QEMU
+as root for this. `quickchr networks create <net>` installs one LaunchDaemon per
+network, running socket_vmnet as root, and machines attach to its socket with
+`-netdev stream` as the user. Only `create`, `restart` and `remove` need sudo;
+`status` does not. Every sudo step is disclosed first (`--dry-run` prints the script).
+
+- **The network's name is the specifier machines already use**: `shared` or
+  `bridged:<iface>`. No new specifier syntax and no `machine.json` change; a
+  managed network only supplies the socket the resolver already looks for. The same
+  `bridged:<iface>` should name the Linux/Windows equivalent when #263 lands. A
+  named `shared:<name>` waits until someone needs two shared subnets.
+- **The helper is the upstream lima-vm release tarball, pinned**: tarball and binary
+  sha256 are in `src/lib/vmnet-service.ts`. Not Homebrew. Installed to
+  `/opt/quickchr/socket_vmnet/<version>/bin/socket_vmnet` (root:wheel), so versions
+  can sit side by side and a plist always names a root-owned real path, never a
+  Homebrew symlink in an owner-writable prefix.
+- **quickchr-owned names**: label `dev.tikoci.quickchr.net.<slug>`, plist in
+  `/Library/LaunchDaemons`, socket `/var/run/quickchr-net-<slug>.sock`, log
+  `/var/log/quickchr/net-<slug>.log`, where slug is `shared` or `bridged-<iface>`.
+  Detection prefers these sockets over Homebrew/lima ones, so a stale Homebrew
+  `socket_vmnet` file cannot shadow a live quickchr network.
+- **The plist is the record.** There is no second registry: `networks status` reads
+  `/Library/LaunchDaemons/dev.tikoci.quickchr.net.*.plist`, `launchctl print`
+  (readable without sudo) and a connect to the socket. That separates "no service",
+  "service down" and "socket dead".
+- **`--vmnet-interface-id` is pinned** at first create and carried across re-creates,
+  because vmnet derives the host-side interface MAC from it.
+- **Root acts on nothing the user can still change.** The root script writes the plist
+  itself from content embedded in the script (a staged plist could be swapped while
+  sudo waits for the password), hash-checks the helper after copying it into place, and
+  refuses if any path from `/opt` to the helper, or the log dir, is a symlink, not
+  root-owned, or group/world-writable. `restart` bootstraps an unloaded job before
+  `kickstart`. (Codex review of #267.)
+- **Attachment is judged from what a VM attached to.** The `remove` guard reads a
+  running VM's QEMU argv for the socket path, since `bridged:auto` re-resolves by link.
+  Under `sudo -H` the data dir is root's, so `create`/`restart`/`remove` refuse unless
+  `QUICKCHR_DATA_DIR` names it.
+- **No socket, no root: refuse.** With no socket for `shared`/`bridged:`, the old
+  resolver fell back to native vmnet, which only works with QEMU as root. A normal
+  user now gets `NETWORK_UNAVAILABLE` naming `quickchr networks create <net>`;
+  running quickchr as root keeps the native path.
 
 ## Managed macOS networks and services — research direction (2026-11-07)
 

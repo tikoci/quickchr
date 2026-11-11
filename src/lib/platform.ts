@@ -432,6 +432,20 @@ const SOCKET_VMNET_SOCKET_DIRS = [
 	"/var/run",
 ];
 
+/** Socket of a quickchr-managed network (#256): `/var/run/quickchr-net-<slug>.sock`,
+ *  where slug is `shared` or `bridged-<iface>`. quickchr-owned names, so detection never
+ *  confuses them with a Homebrew or lima daemon's socket, and they win over those. */
+export const MANAGED_SOCKET_DIR = "/var/run";
+export function managedSocketPath(slug: string): string {
+	return `${MANAGED_SOCKET_DIR}/quickchr-net-${slug}.sock`;
+}
+const MANAGED_SOCKET_RE = /^quickchr-net-(shared|bridged-(.+))\.sock$/;
+
+/** True for a socket a quickchr-managed network service owns (`quickchr networks`). */
+export function isManagedSocketPath(path: string): boolean {
+	return path.startsWith(`${MANAGED_SOCKET_DIR}/`) && MANAGED_SOCKET_RE.test(path.slice(MANAGED_SOCKET_DIR.length + 1));
+}
+
 /** Install prefixes that hold socket_vmnet's `bin/` (Homebrew Apple Silicon and Intel,
  *  upstream `make install`, and the quickchr-labeled network service). */
 const SOCKET_VMNET_PREFIXES = [
@@ -462,6 +476,18 @@ export function detectSocketVmnet(): SocketVmnetInfo | undefined {
 
 	let sharedSocket: string | undefined;
 	const bridgedSockets: Record<string, string> = {};
+
+	try {
+		for (const entry of readdirSync(MANAGED_SOCKET_DIR)) {
+			const match = entry.match(MANAGED_SOCKET_RE);
+			const fullPath = `${MANAGED_SOCKET_DIR}/${entry}`;
+			if (!match || !isSocket(fullPath)) continue;
+			if (match[2]) bridgedSockets[match[2]] = fullPath;
+			else sharedSocket = fullPath;
+		}
+	} catch {
+		// directory not readable
+	}
 
 	for (const dir of SOCKET_VMNET_SOCKET_DIRS) {
 		if (!existsSync(dir)) continue;
