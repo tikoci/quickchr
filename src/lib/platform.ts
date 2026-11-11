@@ -665,13 +665,14 @@ export function resolveInterfaceAlias(
 
 	if (alias === "auto") {
 		// Ethernet before Wi-Fi, but a port with link before one without: an unplugged
-		// adapter must not win over working Wi-Fi. With no link anywhere, keep the
-		// Ethernet-first order rather than refusing to start.
-		const candidates = [
-			ifaces.find((i) => i.alias === "ethernet"),
-			ifaces.find((i) => i.alias === "wifi"),
-		].filter((i): i is HostInterface => i !== undefined);
-		const pick = candidates.find((i) => i.active === true) ?? candidates[0];
+		// adapter must not win over a second adapter or working Wi-Fi. Every Ethernet
+		// port counts, not only the one holding the `ethernet` alias. With no link
+		// anywhere, keep the old order (aliased Ethernet, then Wi-Fi) rather than refusing.
+		const isEthernet = (i: HostInterface) => i.alias === "ethernet" || i.name.toLowerCase().includes("ethernet");
+		const isWifi = (i: HostInterface) => i.alias === "wifi" || i.name.toLowerCase() === "wi-fi";
+		const linked = [...ifaces.filter(isEthernet), ...ifaces.filter(isWifi)].find((i) => i.active === true);
+		const fallback = ifaces.find((i) => i.alias === "ethernet") ?? ifaces.find((i) => i.alias === "wifi");
+		const pick = linked ?? fallback;
 		if (pick) return pick.device;
 		throw new QError(
 			"NETWORK_UNAVAILABLE",

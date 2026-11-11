@@ -733,6 +733,12 @@ describe("resolveInterfaceAlias", () => {
 		expect(resolveInterfaceAlias("auto", linked)).toBe("en5");
 	});
 
+	test("auto considers every ethernet port, not only the one with the alias", () => {
+		// Codex review of #264: first USB adapter unplugged, a second one linked, Wi-Fi down.
+		const second = { device: "en7", name: "Ethernet", active: true };
+		expect(resolveInterfaceAlias("auto", [{ ...wifiIface, active: false }, { ...ethernetIface, active: false }, second])).toBe("en7");
+	});
+
 	test("auto keeps the ethernet-first order when nothing has link", () => {
 		const down = [{ ...wifiIface, active: false }, { ...ethernetIface, active: false }];
 		expect(resolveInterfaceAlias("auto", down)).toBe("en5");
