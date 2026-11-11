@@ -166,11 +166,12 @@ export function findManagedNetwork(spec: ManagedNetworkSpec, dir?: string): Mana
 }
 
 const INTERFACE_ALIASES = new Set(["auto", "wifi", "ethernet"]);
+const LEGACY_WRAPPER_NETDEV = /-netdev socket,id=[^,\s]+,fd=\d/;
 
 /** Whether a machine uses a managed network, for the `remove` guard and the warnings.
  *
  *  A running machine is judged by what it actually attached to: `liveArgs` is its QEMU
- *  command line, which names the socket. The stored specifier is not enough, because
+ *  command line, which names the socket; when it is readable, a miss is a "no". The stored specifier is not enough, because
  *  `bridged:auto` re-resolves by link state, so a VM that started on en0 can resolve
  *  elsewhere later. Without `liveArgs` (stopped, or `ps` failed), a running machine with
  *  an alias counts as attached to every bridged network, erring toward requiring
@@ -180,7 +181,13 @@ export function machineUsesManagedNetwork(
 	spec: ManagedNetworkSpec,
 	opts: { socketPath?: string; liveArgs?: string; resolveAlias?: (alias: string) => string } = {},
 ): boolean {
-	if (opts.liveArgs !== undefined && opts.socketPath && opts.liveArgs.includes(opts.socketPath)) return true;
+	if (opts.liveArgs !== undefined && opts.socketPath) {
+		if (opts.liveArgs.includes(opts.socketPath)) return true;
+		// The argv names every `-netdev stream` socket, so a miss is a real "not on this
+		// network". Except under the pre-0.5.7 `socket_vmnet_client` wrapper: its QEMU got
+		// the connection as an fd, and the argv carries no path, so use the stored config.
+		if (!LEGACY_WRAPPER_NETDEV.test(opts.liveArgs)) return false;
+	}
 	const runningBlind = machine.status === "running" && opts.liveArgs === undefined;
 	const resolve = opts.resolveAlias ?? resolveInterfaceAlias;
 	return (machine.networks ?? []).some((n) => {
@@ -329,7 +336,9 @@ export function buildCreateScript(plan: ManagedNetworkPlan, stagedHelper?: strin
 		`install -d -o root -g wheel -m 755 ${q(helperDir)} ${q(MANAGED_LOG_DIR)}`,
 		...rootOwnedChecks([...helperPathChain(helperDir), MANAGED_LOG_DIR]),
 		...(stagedHelper ? [`install -o root -g wheel -m 755 ${q(stagedHelper)} ${q(plan.helperPath)}`] : []),
-		...rootOwnedChecks([plan.helperPath]),
+		// launchd opens the log as root for StandardOutPath/StandardErrorPath, so an
+		// existing log file gets the same check as the helper.
+		...rootOwnedChecks([plan.helperPath, plan.logPath]),
 		`test "$(shasum -a 256 ${q(plan.helperPath)} | cut -d ' ' -f 1)" = ${q(plan.asset.binarySha256)} || { echo ${q(`quickchr: ${plan.helperPath} does not match the pinned sha256`)} >&2; exit 1; }`,
 		`launchctl bootout ${q(`system/${plan.label}`)} 2>/dev/null || true`,
 		waitUnloaded(plan.label),

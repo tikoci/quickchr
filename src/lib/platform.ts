@@ -441,6 +441,11 @@ export function managedSocketPath(slug: string): string {
 }
 const MANAGED_SOCKET_RE = /^quickchr-net-(shared|bridged-(.+))\.sock$/;
 
+/** True for a socket a quickchr-managed network service owns (`quickchr networks`). */
+export function isManagedSocketPath(path: string): boolean {
+	return path.startsWith(`${MANAGED_SOCKET_DIR}/`) && MANAGED_SOCKET_RE.test(path.slice(MANAGED_SOCKET_DIR.length + 1));
+}
+
 /** Install prefixes that hold socket_vmnet's `bin/` (Homebrew Apple Silicon and Intel,
  *  upstream `make install`, and the quickchr-labeled network service). */
 const SOCKET_VMNET_PREFIXES = [

@@ -28,7 +28,7 @@ import {
 	type SocketEntry,
 } from "./socket-registry.ts";
 import { assertValidResourceName } from "./names.ts";
-import { resolveInterfaceAlias } from "./platform.ts";
+import { isManagedSocketPath, resolveInterfaceAlias } from "./platform.ts";
 
 /** Allocate a port block for a new instance, avoiding conflicts with existing machines. */
 export function allocatePortBlock(
@@ -784,7 +784,11 @@ export async function assertSocketVmnetReachable(
 	const paths = [...new Set(networks.flatMap((n) => n.resolved?.socketVmnetPath ?? []))];
 	for (const path of paths) {
 		const probe = await probeSocketVmnet(path, timeoutMs);
-		const fix = "Check it with: quickchr networks status   (restart a quickchr network with: quickchr networks restart <network>, needs sudo)";
+		// `networks status/restart` only know quickchr's own services; a Homebrew or lima
+		// socket belongs to whatever installed it.
+		const fix = isManagedSocketPath(path)
+			? "Check it with: quickchr networks status   (restart it with: quickchr networks restart <network>, needs sudo)"
+			: "This socket is not a quickchr-managed network: restart the service that owns it (Homebrew: sudo brew services restart socket_vmnet), or create a managed one with quickchr networks create <network>.";
 		switch (probe.state) {
 			case "accepting":
 				continue;

@@ -183,7 +183,8 @@ describe("generated plist and root scripts", () => {
 		const script = buildCreateScript(plan);
 		expect(script).not.toContain("/stage/");
 		expect(script).toContain(plan.asset.binarySha256);
-		expect(script).toContain(`for p in '${plan.helperPath}'; do`);
+		// launchd opens the log as root, so an existing log file is checked like the helper.
+		expect(script).toContain(`for p in '${plan.helperPath}' '${plan.logPath}'; do`);
 	});
 
 	test("remove and restart scripts are valid sh; restart loads an unloaded job first", () => {
@@ -232,6 +233,18 @@ describe("machineUsesManagedNetwork", () => {
 	test("a running VM is judged by the socket in its QEMU argv, not today's alias resolution", () => {
 		// Codex review of #267: started on en0 via auto; Ethernet en7 gained link since.
 		expect(machineUsesManagedNetwork(auto, en0, { socketPath: sock, liveArgs: `qemu ... addr.path=${sock},reconnect-ms=1000`, resolveAlias: toEn7 })).toBe(true);
+	});
+
+	test("a readable argv without the socket is a no, even when the stored config says en0", () => {
+		// Copilot review of #267: configured bridged:en0, actually on another socket.
+		const fixed = { status: "running" as const, networks: [{ id: "net1", specifier: { type: "bridged" as const, iface: "en0" } }] };
+		expect(machineUsesManagedNetwork(fixed, en0, { socketPath: sock, liveArgs: "qemu -netdev stream,id=net1,server=off,addr.type=unix,addr.path=/var/run/other.sock" })).toBe(false);
+	});
+
+	test("a VM still under the pre-0.5.7 socket_vmnet_client wrapper falls back to its stored config", () => {
+		// The wrapper hands QEMU an fd, so the argv names no socket path.
+		const fixed = { status: "running" as const, networks: [{ id: "net1", specifier: { type: "bridged" as const, iface: "en0" } }] };
+		expect(machineUsesManagedNetwork(fixed, en0, { socketPath: sock, liveArgs: "qemu-system-x86_64 -netdev socket,id=net1,fd=3 -device virtio-net-pci,netdev=net1" })).toBe(true);
 	});
 
 	test("a running alias user with no readable argv counts as attached", () => {
