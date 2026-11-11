@@ -2668,23 +2668,44 @@ async function showNetworkOverview() {
 	}
 }
 
-/** Machines whose stored networks attach to this managed network. Aliases are
- *  resolved the way the resolver resolves them, so `bridged:auto` counts for en0.
- *  Read-only on purpose (no status refresh, which saves machine.json): this also runs
- *  under `sudo quickchr …`, and must not leave root-owned files in the data dir. */
-async function machinesOnManagedNetwork(spec: import("../lib/vmnet-service.ts").ManagedNetworkSpec) {
-	const { resolveInterfaceAlias } = await import("../lib/platform.ts");
+/** Machines that use this managed network. Running ones are judged by their live QEMU
+ *  command line (see `machineUsesManagedNetwork`). Read-only on purpose, with no status
+ *  refresh (which saves machine.json): this also runs under `sudo quickchr …`, and
+ *  must not leave root-owned files in the data dir. */
+async function machinesOnManagedNetwork(spec: import("../lib/vmnet-service.ts").ManagedNetworkSpec, socketPath?: string) {
 	const { listMachineNames, loadMachine } = await import("../lib/state.ts");
-	const machines = listMachineNames().flatMap((n) => loadMachine(n) ?? []);
-	return machines.filter((m) => (m.networks ?? []).some((n) => {
-		if (spec.mode === "shared") return n.specifier === "shared";
-		if (typeof n.specifier !== "object" || n.specifier.type !== "bridged") return false;
-		try {
-			return resolveInterfaceAlias(n.specifier.iface) === spec.iface;
-		} catch {
-			return false;
-		}
-	}));
+	const { machineUsesManagedNetwork } = await import("../lib/vmnet-service.ts");
+	const liveArgs = (pid?: number): string | undefined => {
+		if (!pid) return undefined;
+		const ps = Bun.spawnSync(["ps", "-o", "args=", "-p", String(pid)], { stdout: "pipe", stderr: "pipe" });
+		return ps.exitCode === 0 ? new TextDecoder().decode(ps.stdout) : undefined;
+	};
+	return listMachineNames()
+		.flatMap((n) => loadMachine(n) ?? [])
+		.filter((m) => machineUsesManagedNetwork(m, spec, { socketPath, liveArgs: m.status === "running" ? liveArgs(m.pid) : undefined }));
+}
+
+/** Under `sudo -H` (or root's own login) HOME is root's, so the data dir quickchr reads
+ *  is root's and holds none of the invoking user's machines: the `remove` guard would
+ *  see nothing attached. Refuse unless the data dir was named explicitly. */
+async function assertInvokingUsersMachinesVisible(action: string): Promise<void> {
+	const sudoUid = process.env.SUDO_UID;
+	if (!sudoUid || process.env.QUICKCHR_DATA_DIR) return;
+	const { statSync } = await import("node:fs");
+	const { homedir } = await import("node:os");
+	let owner: number | undefined;
+	try {
+		owner = statSync(homedir()).uid;
+	} catch {
+		owner = undefined;
+	}
+	if (owner !== Number(sudoUid)) {
+		throw new QuickCHRError(
+			"INVALID_ARGUMENT",
+			`Under sudo with HOME=${homedir()}, quickchr cannot see ${process.env.SUDO_USER ?? "your"}'s machines, so it cannot tell which ones use this network.`,
+			`Run 'quickchr networks ${action}' without sudo: it asks for sudo itself for the root step.`,
+		);
+	}
 }
 
 /** Output for the managed-network commands. In a terminal the whole flow is clack
@@ -2810,7 +2831,8 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 	const spec = svc.parseManagedNetworkSpec(target);
 	const specifier = svc.managedNetworkSpecifier(spec);
 	const existing = svc.findManagedNetwork(spec);
-	const attached = await machinesOnManagedNetwork(spec);
+	await assertInvokingUsersMachinesVisible(action);
+	const attached = await machinesOnManagedNetwork(spec, existing?.socketPath);
 	const running = attached.filter((m) => m.status === "running").map((m) => m.name);
 	const out = await managedNetworkOutput(dryRun);
 
@@ -2868,7 +2890,7 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 	lines.push("", "Needs root once, for this step. Machines then attach without sudo:", `  quickchr add <name> --add-network user --add-network ${specifier}`);
 	out.plan(`Create ${specifier}`, lines.join("\n"));
 	if (dryRun) {
-		console.log(`Root script (staged files are downloaded and hash-checked first):\n\n${svc.buildCreateScript(plan, "<staged plist>", installed ? undefined : "<staged helper>")}`);
+		console.log(`Root script (the helper is downloaded and hash-checked first):\n\n${svc.buildCreateScript(plan, installed ? undefined : "<staged helper>")}`);
 		return;
 	}
 	if (!(await consentPrivileged(out, `Install ${specifier}?`, yes))) return;
@@ -2884,9 +2906,7 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 			helper = await svc.stageSocketVmnetHelper(plan, stage);
 			out.step(`Downloaded ${plan.asset.file}; tarball and binary sha256 match the pins.`);
 		}
-		const plist = join(stage, `${plan.label}.plist`);
-		await Bun.write(plist, svc.buildLaunchdPlist(plan));
-		await runPrivileged(svc.buildCreateScript(plan, plist, helper), out);
+		await runPrivileged(svc.buildCreateScript(plan, helper), out);
 	} finally {
 		rmSync(stage, { recursive: true, force: true });
 	}

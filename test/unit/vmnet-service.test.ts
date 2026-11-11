@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,12 +10,14 @@ import {
 	buildRemoveScript,
 	buildRestartScript,
 	describeManagedNetworkStatus,
+	machineUsesManagedNetwork,
 	managedNetworkLabel,
 	managedNetworkSlug,
 	parseLaunchctlPrint,
 	parseManagedNetworkSpec,
 	parseManagedPlist,
 	planManagedNetwork,
+	rootOwnedChecks,
 	shellQuote,
 	socketVmnetAsset,
 	socketVmnetAssetUrl,
@@ -143,7 +145,7 @@ describe("generated plist and root scripts", () => {
 	});
 
 	test("create script checks the pinned hash before loading, and clears both old and new sockets", () => {
-		const script = buildCreateScript(plan, "/stage/svc.plist", "/stage/socket_vmnet");
+		const script = buildCreateScript(plan, "/stage/socket_vmnet");
 		const lines = script.split("\n");
 		const hash = lines.findIndex((l) => l.includes(plan.asset.binarySha256));
 		const bootstrap = lines.findIndex((l) => l.startsWith("launchctl bootstrap system"));
@@ -154,21 +156,95 @@ describe("generated plist and root scripts", () => {
 		expect(Bun.spawnSync(["/bin/sh", "-n", "-c", script]).exitCode).toBe(0);
 	});
 
-	test("create skips the helper install when it is already in place, but still checks it", () => {
-		const script = buildCreateScript(plan, "/stage/svc.plist");
-		expect(script).not.toContain("/stage/socket_vmnet");
-		expect(script).toContain(plan.asset.binarySha256);
+	test("root takes nothing from a user-writable file unchecked: the plist is embedded, the helper re-hashed in place", () => {
+		// Codex review of #267: a staged plist in a user-owned temp dir could be swapped
+		// while sudo waits for the password, and root would install it unchecked.
+		const script = buildCreateScript(plan, "/stage/socket_vmnet");
+		const fromStage = script.split("\n").filter((l) => l.includes("/stage/"));
+		expect(fromStage).toEqual([`install -o root -g wheel -m 755 '/stage/socket_vmnet' '${plan.helperPath}'`]);
+		const lines = script.split("\n");
+		expect(lines.findIndex((l) => l.includes(plan.asset.binarySha256))).toBeGreaterThan(lines.indexOf(fromStage[0] as string));
+		// The embedded plist, written by the script's own printf, is byte-for-byte the plan.
+		const at = script.indexOf("printf '%s' ");
+		const end = script.indexOf(' > "$tmp"', at);
+		expect(at).toBeGreaterThan(0);
+		const printf = script.slice(at, end);
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-tmp-plist-"));
+		try {
+			const out = join(dir, "p.plist");
+			expect(Bun.spawnSync(["/bin/sh", "-c", `${printf} > ${shellQuote(out)}`]).exitCode).toBe(0);
+			expect(readFileSync(out, "utf8")).toBe(buildLaunchdPlist(plan));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
-	test("remove and restart scripts are valid sh", () => {
+	test("create skips the helper install when it is already in place, but still checks it", () => {
+		const script = buildCreateScript(plan);
+		expect(script).not.toContain("/stage/");
+		expect(script).toContain(plan.asset.binarySha256);
+		expect(script).toContain(`for p in '${plan.helperPath}'; do`);
+	});
+
+	test("remove and restart scripts are valid sh; restart loads an unloaded job first", () => {
 		for (const s of [buildRemoveScript(morpheus()), buildRestartScript(morpheus())]) {
 			expect(Bun.spawnSync(["/bin/sh", "-n", "-c", s]).exitCode).toBe(0);
 		}
 		expect(buildRemoveScript(morpheus())).toContain(`rm -f '${PLIST_PATH}' '/var/run/socket_vmnet.bridged.en0'`);
+		const restart = buildRestartScript(morpheus()).split("\n");
+		expect(restart[1]).toBe(`launchctl print 'system/${morpheus().label}' >/dev/null 2>&1 || launchctl bootstrap system '${PLIST_PATH}'`);
+		expect(restart[2]).toStartWith("launchctl kickstart -k");
 	});
-
 	test("shellQuote survives a single quote", () => {
 		expect(Bun.spawnSync(["/bin/sh", "-c", `printf %s ${shellQuote("a'b c")}`]).stdout.toString()).toBe("a'b c");
+	});
+});
+
+describe.skipIf(process.platform !== "darwin")("rootOwnedChecks (run for real, as the test user)", () => {
+	function run(paths: string[]) {
+		const r = Bun.spawnSync(["/bin/sh", "-c", ["set -eu", ...rootOwnedChecks(paths)].join("\n")], { stderr: "pipe" });
+		return { code: r.exitCode, err: r.stderr.toString() };
+	}
+
+	test("root-owned system paths pass and missing paths are skipped", () => {
+		expect(run(["/usr", "/usr/bin", "/usr/bin/true", "/opt/quickchr-does-not-exist"]).code).toBe(0);
+	});
+
+	test("a symlink, or a path the user owns, stops the script", () => {
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-tmp-own-"));
+		try {
+			mkdirSync(join(dir, "real"));
+			symlinkSync(join(dir, "real"), join(dir, "link"));
+			expect(run([join(dir, "link")])).toMatchObject({ code: 1, err: expect.stringContaining("is a symlink") });
+			expect(run([join(dir, "real")])).toMatchObject({ code: 1, err: expect.stringContaining("not owned by root") });
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("machineUsesManagedNetwork", () => {
+	const en0 = { mode: "bridged", iface: "en0" } as const;
+	const sock = "/var/run/quickchr-net-bridged-en0.sock";
+	const auto = { status: "running" as const, networks: [{ id: "net1", specifier: { type: "bridged" as const, iface: "auto" } }] };
+	const toEn7 = () => "en7";
+
+	test("a running VM is judged by the socket in its QEMU argv, not today's alias resolution", () => {
+		// Codex review of #267: started on en0 via auto; Ethernet en7 gained link since.
+		expect(machineUsesManagedNetwork(auto, en0, { socketPath: sock, liveArgs: `qemu ... addr.path=${sock},reconnect-ms=1000`, resolveAlias: toEn7 })).toBe(true);
+	});
+
+	test("a running alias user with no readable argv counts as attached", () => {
+		expect(machineUsesManagedNetwork(auto, en0, { socketPath: sock, resolveAlias: toEn7 })).toBe(true);
+	});
+
+	test("a stopped alias user is resolved now; fixed interfaces and shared match by name", () => {
+		expect(machineUsesManagedNetwork({ ...auto, status: "stopped" }, en0, { resolveAlias: toEn7 })).toBe(false);
+		expect(machineUsesManagedNetwork({ ...auto, status: "stopped" }, en0, { resolveAlias: () => "en0" })).toBe(true);
+		const fixed = { status: "stopped" as const, networks: [{ id: "net1", specifier: { type: "bridged" as const, iface: "en0" } }] };
+		expect(machineUsesManagedNetwork(fixed, en0)).toBe(true);
+		expect(machineUsesManagedNetwork(fixed, { mode: "bridged", iface: "en1" })).toBe(false);
+		expect(machineUsesManagedNetwork({ status: "stopped", networks: [{ id: "net1", specifier: "shared" }] }, { mode: "shared" })).toBe(true);
 	});
 });
 

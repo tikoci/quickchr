@@ -16,7 +16,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { QuickCHRError, type SocketVmnetProbe } from "./types.ts";
+import { QuickCHRError, type MachineState, type SocketVmnetProbe } from "./types.ts";
 import { managedSocketPath, resolveInterfaceAlias } from "./platform.ts";
 import { probeSocketVmnet } from "./network.ts";
 import { downloadToFile } from "./download.ts";
@@ -165,6 +165,37 @@ export function findManagedNetwork(spec: ManagedNetworkSpec, dir?: string): Mana
 	return listManagedNetworks(dir).find((n) => n.label === label);
 }
 
+const INTERFACE_ALIASES = new Set(["auto", "wifi", "ethernet"]);
+
+/** Whether a machine uses a managed network, for the `remove` guard and the warnings.
+ *
+ *  A running machine is judged by what it actually attached to: `liveArgs` is its QEMU
+ *  command line, which names the socket. The stored specifier is not enough, because
+ *  `bridged:auto` re-resolves by link state, so a VM that started on en0 can resolve
+ *  elsewhere later. Without `liveArgs` (stopped, or `ps` failed), a running machine with
+ *  an alias counts as attached to every bridged network, erring toward requiring
+ *  `--force`; otherwise the alias is resolved now. */
+export function machineUsesManagedNetwork(
+	machine: Pick<MachineState, "networks" | "status">,
+	spec: ManagedNetworkSpec,
+	opts: { socketPath?: string; liveArgs?: string; resolveAlias?: (alias: string) => string } = {},
+): boolean {
+	if (opts.liveArgs !== undefined && opts.socketPath && opts.liveArgs.includes(opts.socketPath)) return true;
+	const runningBlind = machine.status === "running" && opts.liveArgs === undefined;
+	const resolve = opts.resolveAlias ?? resolveInterfaceAlias;
+	return (machine.networks ?? []).some((n) => {
+		if (spec.mode === "shared") return n.specifier === "shared";
+		if (typeof n.specifier !== "object" || n.specifier.type !== "bridged") return false;
+		if (!INTERFACE_ALIASES.has(n.specifier.iface)) return n.specifier.iface === spec.iface;
+		if (runningBlind) return true;
+		try {
+			return resolve(n.specifier.iface) === spec.iface;
+		} catch {
+			return false;
+		}
+	});
+}
+
 /** What `create` will install. Everything here is disclosed before the sudo prompt. */
 export interface ManagedNetworkPlan {
 	spec: ManagedNetworkSpec;
@@ -258,26 +289,56 @@ function waitUnloaded(label: string): string {
 	return `i=0; while launchctl print ${target} >/dev/null 2>&1 && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done`;
 }
 
+/** Shell lines that stop the root script unless every path is a real (not symlinked),
+ *  root-owned, not group- or world-writable file or directory. The helper and its
+ *  directories are what a root LaunchDaemon executes, so a user-writable link anywhere
+ *  on the way would let the user swap the binary after its hash check (DESIGN.md:
+ *  "a plist always names a root-owned real path"). Missing paths are skipped. */
+export function rootOwnedChecks(paths: string[]): string[] {
+	const q = shellQuote;
+	return [
+		`for p in ${paths.map(q).join(" ")}; do`,
+		`	if [ -L "$p" ]; then echo "quickchr: $p is a symlink; refusing to use it as root" >&2; exit 1; fi`,
+		`	[ -e "$p" ] || continue`,
+		`	[ "$(stat -f %u "$p")" = 0 ] || { echo "quickchr: $p is not owned by root" >&2; exit 1; }`,
+		`	case "$(stat -f %Sp "$p")" in ?????w????|????????w?) echo "quickchr: $p is group- or world-writable" >&2; exit 1;; esac`,
+		"done",
+	];
+}
+
+/** Every path from `/opt` down to the helper, which the service will execute. */
+function helperPathChain(helperPath: string): string[] {
+	const parts = helperPath.split("/").filter(Boolean);
+	return parts.map((_, i) => `/${parts.slice(0, i + 1).join("/")}`);
+}
+
 /** The one privileged step of `create`. `stagedHelper` is undefined when the pinned
- *  helper is already installed with the pinned hash. */
-export function buildCreateScript(plan: ManagedNetworkPlan, stagedPlist: string, stagedHelper?: string): string {
+ *  helper is already installed with the pinned hash.
+ *
+ *  Nothing root acts on is taken from a user-writable file without a check: the helper
+ *  is copied and then hash-checked in its root-owned place, and the plist is written by
+ *  the script itself from content embedded in it. A staged plist file could be swapped
+ *  by any process running as the user while sudo waits for the password. */
+export function buildCreateScript(plan: ManagedNetworkPlan, stagedHelper?: string): string {
 	const q = shellQuote;
 	const helperDir = plan.helperPath.slice(0, plan.helperPath.lastIndexOf("/"));
 	const staleSockets = [plan.socketPath, ...(plan.replaces?.socketPath && plan.replaces.socketPath !== plan.socketPath ? [plan.replaces.socketPath] : [])];
 	return [
 		"set -eu",
-		...(stagedHelper
-			? [
-				`install -d -o root -g wheel -m 755 ${q(helperDir)}`,
-				`install -o root -g wheel -m 755 ${q(stagedHelper)} ${q(plan.helperPath)}`,
-			]
-			: []),
+		"umask 022",
+		`install -d -o root -g wheel -m 755 ${q(helperDir)} ${q(MANAGED_LOG_DIR)}`,
+		...rootOwnedChecks([...helperPathChain(helperDir), MANAGED_LOG_DIR]),
+		...(stagedHelper ? [`install -o root -g wheel -m 755 ${q(stagedHelper)} ${q(plan.helperPath)}`] : []),
+		...rootOwnedChecks([plan.helperPath]),
 		`test "$(shasum -a 256 ${q(plan.helperPath)} | cut -d ' ' -f 1)" = ${q(plan.asset.binarySha256)} || { echo ${q(`quickchr: ${plan.helperPath} does not match the pinned sha256`)} >&2; exit 1; }`,
-		`install -d -o root -g wheel -m 755 ${q(MANAGED_LOG_DIR)}`,
 		`launchctl bootout ${q(`system/${plan.label}`)} 2>/dev/null || true`,
 		waitUnloaded(plan.label),
 		`rm -f ${staleSockets.map(q).join(" ")}`,
-		`install -o root -g wheel -m 644 ${q(stagedPlist)} ${q(plan.plistPath)}`,
+		`tmp=$(mktemp ${q(`${LAUNCH_DAEMONS_DIR}/.quickchr.XXXXXX`)})`,
+		`printf '%s' ${q(buildLaunchdPlist(plan))} > "$tmp"`,
+		`chown root:wheel "$tmp"`,
+		`chmod 644 "$tmp"`,
+		`mv -f "$tmp" ${q(plan.plistPath)}`,
 		`launchctl bootstrap system ${q(plan.plistPath)}`,
 	].join("\n");
 }
@@ -292,8 +353,16 @@ export function buildRemoveScript(net: ManagedNetwork): string {
 	].join("\n");
 }
 
+/** Restart, and load the job first when launchd does not have it (a failed bootstrap,
+ *  or an admin's `bootout`): `kickstart` alone cannot start an unloaded job. */
 export function buildRestartScript(net: ManagedNetwork): string {
-	return `launchctl kickstart -k ${shellQuote(`system/${net.label}`)}`;
+	const q = shellQuote;
+	const target = q(`system/${net.label}`);
+	return [
+		"set -eu",
+		`launchctl print ${target} >/dev/null 2>&1 || launchctl bootstrap system ${q(net.plistPath)}`,
+		`launchctl kickstart -k ${target}`,
+	].join("\n");
 }
 
 /** sha256 of a file, hex. */
