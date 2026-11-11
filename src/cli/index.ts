@@ -2895,6 +2895,7 @@ async function handleManagedNetworks(action: "create" | "status" | "restart" | "
 		lines.push(`Replaces ${existing.label}, keeping its interface id${existing.socketPath && existing.socketPath !== plan.socketPath ? `;\n         its old socket ${existing.socketPath} is removed` : ""}`);
 		if (running.length > 0) lines.push(`         Running machines on it re-attach after a stop/start: ${running.join(", ")}`);
 	}
+	if (unreadableNote) lines.push(unreadableNote.trimStart());
 	lines.push("", "Needs root once, for this step. Machines then attach without sudo:", `  quickchr add <name> --add-network user --add-network ${specifier}`);
 	out.plan(`Create ${specifier}`, lines.join("\n"));
 	if (dryRun) {
