@@ -1,5 +1,6 @@
 import { check } from "../../lib.ts";
-import { command, pair, read, until, type Lab } from "./lab.ts";
+import { command, quote, read, until, type Lab } from "./lab.ts";
+import { observe, pairClient, pairWith } from "./pairing.ts";
 
 /**
  * Deliberate beta probes run after the demonstration, on disposable routers only.
@@ -10,7 +11,6 @@ export async function probes(lab: Lab, preserveWebhooks = false, result: Record<
 	if (!preserveWebhooks) {
 		for (const name of ["lab-down", "lab-connected"]) await command(controller, `/cmr/alert/set [find name=${name}] disabled=yes`);
 	}
-	const quote = (s: string) => `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("$", "\\$")}"`;
 	const auth = (await controller.descriptor()).services["rest-api"];
 	check(auth.available && auth.auth, "Controller login missing");
 	const matrix: Record<string, string>[] = [];
@@ -23,25 +23,46 @@ export async function probes(lab: Lab, preserveWebhooks = false, result: Record<
 			await command(local, `/cmr/client/set enabled=yes controller-addresses=203.0.113.1 pairing-requirement=${clientRequirement}`);
 			await until("fresh local device", async () => (await read(controller, "/cmr/device")).some(r => r.identity === "cmr-local"));
 			await command(controller, `/cmr/device/set [find identity=cmr-local] pairing-requirement=${serverRequirement}`);
-			const before = (await read(controller, "/cmr/device")).find(r => r.identity === "cmr-local");
+			const before = await observe(controller, local, "cmr-local");
+			let how: string;
 			if (serverRequirement === "password") {
 				// Local pair approves the client side, and proves knowledge of the server login.
 				await command(local, `/cmr/client/pair username=${quote(auth.auth.username)} password=${quote(auth.auth.password ?? "")}`);
+				how = "client pair with controller login";
 			} else if (clientRequirement === "password") {
-				await pair(controller, local);
-			} else if (serverRequirement === "confirm") {
-				await command(controller, "/cmr/device/pair [find identity=cmr-local]");
+				// The manual's one command; with server confirm this is the half-pair-prone path (FINDINGS.md).
+				await pairWith(controller, local, "cmr-local", "credentialed", 0);
+				how = "controller credentialed pair";
+			} else {
+				if (serverRequirement === "confirm") await command(controller, "/cmr/device/pair [find identity=cmr-local]");
+				how = serverRequirement === "confirm" ? "controller bare pair" : "automatic";
 			}
-			await until("matrix pairing", async () => (await read(local, "/cmr/client"))[0]?.status === "paired,connected");
-			matrix.push({ clientRequirement, serverRequirement, before: before?.state ?? "ok", after: "paired,connected" });
+			let after = before;
+			await until("matrix pairing settles", async () => {
+				after = await observe(controller, local, "cmr-local");
+				return after.verdict === "paired" || after.verdict === "half-paired";
+			});
+			let repaired = false;
+			if (after.verdict === "half-paired") {
+				await command(controller, "/cmr/device/pair [find identity=cmr-local]");
+				await until("half-pair finished", async () => (await observe(controller, local, "cmr-local")).verdict === "paired");
+				repaired = true;
+			}
+			matrix.push({ clientRequirement, serverRequirement, how, before: before.row?.state ?? "", settled: after.verdict, repaired: String(repaired) });
 		}
 	}
-	console.log("Pairing matrix verified: six fresh client/server combinations");
+	console.log("Pairing matrix: six fresh client/server combinations reached paired");
 	await command(controller, "/cmr/device/set [find identity=cmr-local] labels=lab,local");
 
 	// Capture the raw RouterOS result, including rejections. A future beta may fix these.
 	result.clientConfirmCompletion = await local.rest("/console/inspect", { method: "POST", body: JSON.stringify({ request: "completion", input: "/cmr/client/set pairing-requirement=" }) });
 	result.clientConfirm = (await local.exec("/cmr/client/set pairing-requirement=confirm")).output;
+	// 7.26beta5 accepts client confirm (beta1 refused it), and the change unpairs the client:
+	// restore the default requirement and pair again before the remaining probes.
+	await Bun.sleep(5000);
+	result.afterClientConfirm = await observe(controller, local, "cmr-local");
+	await command(local, "/cmr/client/set !pairing-requirement");
+	await pairClient(controller, local);
 	result.defaultRuleEdit = (await controller.exec("/cmr/upgrade/set [find name=default] channel=development")).output;
 	if (!(await read(controller, "/file")).some(r => r.name === "cmr-lab-packages")) {
 		await command(controller, "/file/add type=directory name=cmr-lab-packages");

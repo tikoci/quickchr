@@ -1,10 +1,15 @@
-# CMR beta lab evidence
+# CMR lab evidence: 7.26beta1
+
+> **Historical record.** This is the original 7.26beta1 lab report, kept as it
+> was measured. Current, per-build answers live in [FINDINGS.md](./FINDINGS.md);
+> several items below changed in 7.26beta3 (export, first-interface alert) and
+> pairing behaves differently from beta3 on.
 
 Tested 2026-10-05 local date (captures use 2026-10-06 UTC), **RouterOS
 7.26beta1 x86 CHR**, quickchr 0.4.8 at base commit `a258a7b`, Bun 1.4.2,
 QEMU 11.1.1, Intel macOS/HVF. All routers were disposable VMs; no physical
 router was contacted or upgraded. A second agent rechecked every finding on a
-fresh lab ([config/7.26beta1-recheck.json](./config/7.26beta1-recheck.json)).
+fresh lab ([evidence/7.26beta1/recheck.json](./evidence/7.26beta1/recheck.json)).
 
 ![CMR lab topology](./config/topology.svg)
 
@@ -40,9 +45,9 @@ address. Normal runs put the loopback on a bridge created before CMR starts.
 | Binary backup | Save, disable and load restored identical settings, device identities, labels and pairing IDs |
 
 Bounded results of the default demo are in
-[config/7.26beta1-demo.json](./config/7.26beta1-demo.json). Probe observations,
+[evidence/7.26beta1/demo.json](./evidence/7.26beta1/demo.json). Probe observations,
 and hashes of the original captures, are in
-[config/7.26beta1-probes.json](./config/7.26beta1-probes.json).
+[evidence/7.26beta1/probes.json](./evidence/7.26beta1/probes.json).
 [SUPPORT-REPORTS.md](./SUPPORT-REPORTS.md) has the findings written up for
 MikroTik.
 

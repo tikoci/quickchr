@@ -108,6 +108,7 @@ diskimage
 dispatchable
 dnf
 donny
+dont
 dotenv
 downscript
 dport
@@ -240,6 +241,7 @@ localappdata
 logappend
 logfile
 longterm
+loopbacks
 lpa
 lru
 lsb
@@ -336,6 +338,7 @@ pnet
 postrouting
 powerdown
 poweroff
+ppp
 pptp
 prereq
 prerouting
@@ -428,6 +431,7 @@ socat
 sockaddr
 softmmu
 srand
+srv
 ssbd
 ssbs
 sshfs
@@ -475,6 +479,7 @@ uefi
 uid
 uncharacterized
 unfiled
+unpairs
 unparseable
 unprovisioned
 unredacted

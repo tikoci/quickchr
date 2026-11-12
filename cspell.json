@@ -11,7 +11,8 @@
 		"coverage",
 		"dist",
 		".claude/**",
-		"**/*.svg"
+		"**/*.svg",
+		"examples/*/evidence/**"
 	],
 	"useGitignore": true,
 	"minWordLength": 3,

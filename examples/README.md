@@ -39,7 +39,7 @@ machine down on success *or* failure via `runExample()`.
 |---|---|
 | [`quickstart/`](./quickstart/) | boot one CHR, query REST, tear down *(was `vienk`)* |
 | [`grounding/`](./grounding/) | apply config with `exec()`, read back with `rest()` — the `bun:test` reference |
-| [`cmr/`](./cmr/) | four socket-linked CHRs, OSPF, CMR pairing, alerts and webhooks (7.26beta1 lab) |
+| [`cmr/`](./cmr/) | four socket-linked CHRs, OSPF, CMR pairing, alerts and webhooks; the CMR grounding lab, with per-build [findings](./cmr/FINDINGS.md) (7.26beta5) |
 | [`dude/`](./dude/) | install a package (`installPackage`), enable + read it back (x86 **and** arm64) |
 | [`harness/`](./harness/) | drive an external tool via `subprocessEnv()` / `descriptor()` |
 | [`rollback/`](./rollback/) | snapshot → change → restore (`snapshot.save/load/list`) |

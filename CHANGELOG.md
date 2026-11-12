@@ -13,6 +13,17 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Changed
 
+- `examples/cmr/` is now the CMR grounding lab and defaults to RouterOS
+  7.26beta5 (`--version` or `QUICKCHR_CMR_VERSION` selects another build).
+  `FINDINGS.md` records CMR behaviour per build, with its source. The new
+  `--study pairing|policy|recheck` modes each boot a two-CHR lab, answer one
+  question and write raw evidence with `--report`. Curated reports are in
+  `evidence/<build>/`. Labs pair clients with `pairClient()` in
+  `tool/pairing.ts`. It approves the controller side first and requires
+  `run-script` to select the client: on 7.26beta5 the manual's single
+  credentialed `pair` left 7 of 9 fresh clients half-paired. Teardown is by
+  machine-name prefix, and a failed removal is reported.
+
 - macOS `shared` and `bridged:<iface>` networks served by a socket_vmnet daemon
   now attach with QEMU's `-netdev stream` (QEMU 7.2+) instead of wrapping QEMU in
   `socket_vmnet_client`. A machine can have **more than one** socket_vmnet network

@@ -1,0 +1,131 @@
+{
+  "study": "policy",
+  "version": "7.26beta5",
+  "timestamp": "2026-11-12T16:48:25.064Z",
+  "arch": "x86",
+  "host": "linux/x64",
+  "question": "What may a CMR run-script do on a client, and which controller logins may dispatch it?",
+  "client": [
+    {
+      "id": "read-identity",
+      "policy": "read",
+      "script": ":put [/system/identity/get name]",
+      "manual": "ok",
+      "result": "success  cmr-client"
+    },
+    {
+      "id": "read-export",
+      "policy": "read",
+      "script": "/export file=cmr-policy-export",
+      "manual": "ok (export works; sensitive values left out)",
+      "result": "failed  not enough permissions (9) (:export; line 1)",
+      "sideEffect": "null"
+    },
+    {
+      "id": "write-file",
+      "policy": "write",
+      "script": "/file/add name=cmr-policy.txt contents=x",
+      "manual": "ok",
+      "result": "success",
+      "sideEffect": "{\".id\":\"**YHreAtYjW33K99wYO7mMXtndc\",\"contents\":\"x\",\"last-modified\":\"2026-11-12 16:51:31\",\"name\":\"cmr-policy.txt\",\"size\":\"1\",\"type\":\".txt file\"}"
+    },
+    {
+      "id": "write-script",
+      "policy": "write",
+      "script": "/system/script/add name=cmr-policy source=\":put 1\" policy=read,write,test,reboot,policy,sensitive",
+      "manual": "ok, saved policy=reboot,read,write,test owner *sys",
+      "result": "success",
+      "sideEffect": "{\".id\":\"*1\",\"dont-require-permissions\":\"false\",\"invalid\":\"false\",\"name\":\"cmr-policy\",\"owner\":\"*sys\",\"policy\":\"reboot,read,write,policy,test,sensitive\",\"run-count\":\"0\",\"source\":\":put 1\"}"
+    },
+    {
+      "id": "test-ping",
+      "policy": "test",
+      "script": "/ping 192.0.2.1 count=1",
+      "manual": "ok",
+      "result": "max-rtt=442us"
+    },
+    {
+      "id": "policy-user-add",
+      "policy": "policy",
+      "script": "/user/add name=cmr-policy group=read password=Cmr-Policy-12345",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "sideEffect": "{\".id\":\"*3\",\"address\":\"\",\"disabled\":\"false\",\"expired\":\"false\",\"group\":\"read\",\"inactivity-policy\":\"none\",\"inactivity-timeout\":\"10m\",\"name\":\"cmr-policy\"}"
+    },
+    {
+      "id": "policy-group-add",
+      "policy": "policy",
+      "script": "/user/group/add name=cmr-policy policy=read",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "sideEffect": "{\".id\":\"*4\",\"name\":\"cmr-policy\",\"policy\":\"read,!local,!telnet,!ssh,!ftp,!reboot,!write,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!api,!romon,!rest-api\",\"skin\":\"default\"}"
+    },
+    {
+      "id": "sensitive-set",
+      "policy": "write",
+      "script": "/ppp/secret/add name=cmr-policy password=abc",
+      "manual": "ok (sensitive values can be set)",
+      "result": "success",
+      "sideEffect": "{\".id\":\"*1\",\"caller-id\":\"\",\"disabled\":\"false\",\"ipv6-routes\":\"\",\"last-logged-out\":\"1970-01-01 00:00:00\",\"limit-bytes-in\":\"0\",\"limit-bytes-out\":\"0\",\"name\":\"cmr-policy\",\"password\":\"abc\",\"profile\":\"default\",\"routes\":\"\",\"service\":\"any\"}"
+    },
+    {
+      "id": "sensitive-get",
+      "policy": "sensitive",
+      "script": ":put [/ppp/secret/get cmr-policy password]",
+      "manual": "shows *",
+      "result": "success  abc"
+    },
+    {
+      "id": "client-local-id",
+      "policy": "sensitive?",
+      "script": ":put [/cmr/client/get local-id]",
+      "manual": "not documented",
+      "result": "success  26559B2CDCE762DFCECDCCB59DA1478184C016A890CA1905F702376B4DF915981463F1885EE4A3A52B98976EFF7BBD486F4928BF7565525B15C5CF2C346883BE"
+    },
+    {
+      "id": "sniff",
+      "policy": "sniff",
+      "script": "/tool/sniffer/start",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success"
+    },
+    {
+      "id": "backup-save",
+      "policy": "sensitive/ftp?",
+      "script": "/system/backup/save name=cmr-policy dont-encrypt=yes",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success  Configuration backup saved",
+      "sideEffect": "{\".id\":\"**cvjKCB5E63jWUFtSOkkF8kBWDD7D6\",\"last-modified\":\"2026-11-12 16:51:40\",\"name\":\"cmr-policy.backup\",\"size\":\"22862\",\"type\":\"backup\"}"
+    }
+  ],
+  "controllerLogins": [
+    {
+      "group": "cmr-read",
+      "policies": "read,test,api,rest-api",
+      "inventory": "2",
+      "runScript": "not enough permissions (9) (/cmr/device/run-script; line 1)",
+      "alertTest": "not enough permissions (9) (/cmr/alert/test; line 1)"
+    },
+    {
+      "group": "cmr-write",
+      "policies": "read,write,test,api,rest-api",
+      "inventory": "2",
+      "runScript": "not enough permissions (9) (/cmr/device/run-script; line 1)",
+      "alertTest": "not enough permissions (9) (/cmr/alert/test; line 1)"
+    },
+    {
+      "group": "cmr-reboot",
+      "policies": "read,reboot,test,api,rest-api",
+      "inventory": "2",
+      "runScript": "not enough permissions (9) (/cmr/device/run-script; line 1)",
+      "alertTest": "not enough permissions (9) (/cmr/alert/test; line 1)"
+    },
+    {
+      "group": "cmr-write-reboot",
+      "policies": "read,write,reboot,test,api,rest-api",
+      "inventory": "2",
+      "runScript": "cmr-client@192.0.2.2  success  pol-ab33d8",
+      "alertTest": ""
+    }
+  ]
+}

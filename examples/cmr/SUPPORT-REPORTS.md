@@ -1,6 +1,107 @@
-# CMR on RouterOS 7.26beta1: findings for MikroTik
+# CMR findings for MikroTik
 
-**Status:** beta field notes, work in progress. These are early observations
+Drafts written for MikroTik. **None has been sent**; submitting is a maintainer
+action. Current status of every item, per build, is in
+[FINDINGS.md](./FINDINGS.md).
+
+| # | Report | Status |
+|---|---|---|
+| 5 | [7.26beta5: one credentialed `pair` can leave the client half-paired](#5-726beta5-one-credentialed-pair-can-leave-the-client-half-paired) | Draft, candidate to send |
+| 6 | [7.26beta5: a `run-script` line has more than the documented policies](#6-726beta5-a-run-script-line-has-more-than-the-documented-policies) | Draft, candidate to send |
+| 1 | [Export omits the controller settings](#1-export-omits-the-controller-settings) | **Fixed** (beta3 changelog; beta5 lab: settings and labels exported). Do not send |
+| 2 | [Client `confirm` not accepted](#2-client-pairing-requirementconfirm-is-documented-but-not-accepted) | **Works on beta5**: client `confirm` is accepted. Do not send |
+| 3 | [First bridge does not fire `interface-change=added`](#3-the-first-bridge-added-to-a-device-does-not-fire-interface-changeadded) | beta3 changelog says fixed. beta5 lab: fired with a rule ~35 s old, but missed with a rule 5 s old. Re-test before sending anything |
+| 4 | [Client disable/enable clears pairing](#4-question-client-disableenable-clears-its-pairing-but-a-reboot-does-not) | Vendor: intended; still true on beta5. Only a manual wording issue remains |
+
+## 5. 7.26beta5: one credentialed `pair` can leave the client half-paired
+
+The manual's command for a server `confirm` / client `password` pairing (the
+7.26beta5 defaults) is one `/cmr/device/pair` with the client's credentials. On
+7.26beta5 that command often reports success while the controller never stores
+its own approval.
+
+Reproduce on two fresh 7.26beta5 x86 CHRs on one link, both at defaults:
+
+```routeros
+# controller (cmr package)
+/cmr/set enabled=yes
+# client
+/cmr/client/set enabled=yes controller-addresses=192.0.2.1
+# controller, once the client is listed with flag P
+/cmr/device/pair [find identity=cmr-client] username=<client user> password=<client password>
+```
+
+When it fails, the command's last table reads `device:ok, cmr:ok`, not
+`paired`:
+
+```text
+cmr-client@192.0.2.2  device:password required, cmr:waiting confirmation
+
+cmr-client@192.0.2.2  device:ok, cmr:ok
+```
+
+Afterwards:
+
+- The client shows `status: paired,connected`.
+- The controller row is `connected=true` but keeps
+  `state="pair: device:ok, cmr:ok"` and has no `upgrade-rule` or `channel`.
+- `/cmr/device/run-script [find identity=cmr-client] script=":put 1"` fails
+  with `no devices selected`.
+- The session is idle: a client firewall rule resetting tcp/54321 matched 0
+  packets in 60 s.
+- After `/cmr set enabled=no` and `enabled=yes` on the controller, the row
+  comes back pending, `state="pair: device:ok, cmr:waiting confirmation"`,
+  and the client shows `waiting-for-pairing,connected`. The client kept its
+  approval; the controller's was never saved.
+- One bare `/cmr/device/pair [find identity=cmr-client]` then pairs it, and that
+  pairing survives the next restart.
+
+How often: 7 of 9 trials over three fresh boots (1/3, 1/3 and 0/3 committed), and
+3 of 5 in earlier runs the same day. The same boot can give either result.
+Interleaved on the same boots, every sequence that did not ask one command to
+satisfy both sides was committed, 27 of 27:
+
+- controller bare `pair` first, then the credentialed `pair` (9/9);
+- client `/cmr/client/pair` while the controller runs a bare `pair` (9/9);
+- client `pairing-requirement=none`, then a controller bare `pair` (9/9).
+
+**Expected:** the single credentialed `pair` either commits both approvals, or
+does not report success. Evidence:
+[FINDINGS.md → Pairing study](./FINDINGS.md#pairing-study-726beta5) and
+[evidence/7.26beta5/pairing.json](./evidence/7.26beta5/pairing.json).
+centrs measured the same state independently on beta3 to beta5
+([centrs#527](https://github.com/tikoci/centrs/issues/527)).
+
+## 6. 7.26beta5: a `run-script` line has more than the documented policies
+
+The manual says a CMR script runs on each client "with the `read`, `write`,
+`test`, and `reboot` policies", and lists `/user add`, `/user group add`,
+`/tool sniffer` and `/system backup save` as failing with
+`not enough permissions (9)`, and sensitive values as `*`. On 7.26beta5, from
+`/cmr/device/run-script` on the controller (admin login):
+
+| Line | Manual | 7.26beta5 |
+|---|---|---|
+| `/user/add name=cmr-policy group=read password=…` | not enough permissions (9) | success, user created |
+| `/user/group/add name=cmr-policy policy=read` | not enough permissions (9) | success, group created |
+| `:put [/ppp/secret/get cmr-policy password]` | `*` | prints the password |
+| `/system/backup/save name=cmr-policy dont-encrypt=yes` | not enough permissions (9) | success, `.backup` file created |
+| `/tool/sniffer/start` | not enough permissions (9) | success |
+| `/system/script/add … policy=read,write,test,reboot,policy,sensitive` | saved as `reboot,read,write,test` | saved with all six policies, owner `*sys` |
+| `/export file=cmr-policy-export` | `/export` works | not enough permissions (9) |
+
+On the controller, `run-script` needs a login with both `write` and `reboot`.
+So any login with those two policies can create users and read secrets on every
+client it selects. centrs saw `/user add` start working in 7.26beta4.
+
+**Expected:** either the documented four policies, or a manual that describes
+what a CMR script may do. Evidence:
+[FINDINGS.md → run-script and policy](./FINDINGS.md#run-script-and-policy),
+[evidence/7.26beta5/policy.json](./evidence/7.26beta5/policy.json).
+
+## 7.26beta1 findings (reports 1–4)
+
+**Status:** beta field notes. These are early observations
 from one release (7.26beta1) on x86 CHR. They are not a verdict on CMR, and a
 later beta may change any of them.
 
@@ -8,7 +109,7 @@ Everything here was reproduced on disposable CHRs built by this example
 (see [README.md](./README.md)). No physical router was used and no upgrade was
 run. Each finding was reproduced at least twice: once by the run that found it,
 and again on a fresh lab on 2026-10-06 (UTC). Raw evidence is in
-[REPORT.md](./REPORT.md) and [config/](./config/).
+[REPORT.md](./REPORT.md) and [evidence/7.26beta1/](./evidence/7.26beta1/).
 
 ![CMR lab topology](./config/topology.svg)
 
