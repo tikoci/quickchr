@@ -47,8 +47,13 @@ async function withPairLab<T>(context: StudyContext, body: (lab: PairLab) => Pro
  * selection, then restarts the controller's CMR service to see whether the pairing was committed.
  */
 async function pairing(context: StudyContext): Promise<void> {
-	const boots = Number(option(context.argv, "boots") ?? 2);
-	const trials = Number(option(context.argv, "trials") ?? 8);
+	const count = (name: string, fallback: number) => {
+		const value = Number(option(context.argv, name) ?? fallback);
+		check(Number.isInteger(value) && value >= 1 && value <= 100, `--${name} must be an integer from 1 to 100`);
+		return value;
+	};
+	const boots = count("boots", 2);
+	const trials = count("trials", 8);
 	const strategies = (option(context.argv, "strategies")?.split(",") ?? strategyNames) as Strategy[];
 	for (const s of strategies) check(strategyNames.includes(s), `Unknown strategy ${s}; known: ${strategyNames.join(", ")}`);
 	const results: Row[] = [];
@@ -138,17 +143,22 @@ async function policy(context: StudyContext): Promise<void> {
 			await command(controller, `/user/add name=${group} group=${group} password=${quote(password)}`);
 			logins[group] = { user: group, password };
 			const nonce = `pol-${crypto.randomUUID().slice(0, 6)}`;
-			const run = async (line: string) => {
+			const raw: Record<string, string> = {};
+			const run = async (key: string, line: string) => {
+				let output: string;
 				try {
-					return (await attempt(controller, line, logins[group])).replaceAll("\r", "").trim().split("\n").at(-1)?.trim() ?? "";
-				} catch (error) { return `error: ${error instanceof Error ? error.message : String(error)}`; }
+					output = (await attempt(controller, line, logins[group])).replaceAll("\r", "").trim();
+				} catch (error) { output = `error: ${error instanceof Error ? error.message : String(error)}`; }
+				raw[key] = output;
+				return output.split("\n").at(-1)?.trim() ?? "";
 			};
 			const row: Row = {
 				group, policies,
-				inventory: (await run(":put [:len [/cmr/device/find]]")),
-				runScript: await run(`/cmr/device/run-script ${find} script=":put ${nonce}"`),
-				alertTest: await run("/cmr/alert/test [find name=policy-test]"),
+				inventory: await run("inventory", ":put [:len [/cmr/device/find]]"),
+				runScript: await run("runScript", `/cmr/device/run-script ${find} script=":put ${nonce}"`),
+				alertTest: await run("alertTest", "/cmr/alert/test [find name=policy-test]"),
 			};
+			row.output = JSON.stringify(raw);
 			controllerCases.push(row);
 			console.log(`  ${group.padEnd(17)} run-script: ${row.runScript} | alert test: ${row.alertTest}`);
 		}
@@ -184,7 +194,7 @@ async function policy(context: StudyContext): Promise<void> {
 				} catch (error) { output = `error: ${error instanceof Error ? error.message : String(error)}`; }
 				const result = output.trim().split("\n").at(-1)?.trim().replace(/^\S+\s+/, "") ?? "";
 				const sideEffect = c.verify ? await c.verify(client) : undefined;
-				clientCases.push({ sender, id: c.id, policy: c.policy, script: c.script, manual: c.manual, result, ...(sideEffect !== undefined ? { sideEffect: JSON.stringify(sideEffect) } : {}) });
+				clientCases.push({ sender, id: c.id, policy: c.policy, script: c.script, manual: c.manual, result, output: output.trim(), ...(sideEffect !== undefined ? { sideEffect: JSON.stringify(sideEffect) } : {}) });
 				console.log(`  ${sender.padEnd(17)} ${c.id.padEnd(21)} ${result}${c.verify ? (sideEffect ? "  [created]" : "  [not created]") : ""}`);
 			}
 			await attempt(client, "/tool/sniffer/stop");

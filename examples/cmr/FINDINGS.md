@@ -65,7 +65,7 @@ definitions (`observe()`, `verdict()`, `selectable()`, `restartController()`).
 | A half-paired session is idle | — | — | — | yes: a client tcp-reset rule saw 0 packets in 60 s, so it never disconnects (lab) |
 | A half-paired pairing is not committed | — | — | — | yes: after a controller CMR restart the row is `pending`, `state="pair: device:ok, cmr:waiting confirmation"` (lab, centrs) |
 | A bare `/cmr/device/pair` finishes a half-paired client | — | yes (centrs) | yes (centrs) | yes, before or after the restart (lab, centrs) |
-| Committing the controller's approval first (bare `pair`, then credentialed) avoids the half-pair | — | — | — | yes, 9/9 committed (lab); centrs 3/3 |
+| Committing the controller's approval first (bare `pair`, then credentialed) avoids the half-pair | works: 3/3 clients paired, demo passed ([demo-2026-11-12.json](./evidence/7.26beta1/demo-2026-11-12.json)); centrs suite passed | — | — | yes, 9/9 committed (lab); centrs 3/3 |
 | A client-side `/cmr/client/pair`, then a bare controller `pair`, avoids it | — | — | — | yes, 9/9 (lab); centrs 7/7 |
 | Client `pairing-requirement=none`, then a bare controller `pair`, avoids it | — | — | — | yes, 9/9 (lab); centrs 3/3 |
 | Client `pairing-requirement=confirm` accepted | no: syntax error at column 37 (lab) | — | — | **yes**: accepted, and the paired client drops to `waiting-for-pairing` with `device:waiting confirmation` until approved locally (lab). Vendor said it was [frozen before release](https://forum.mikrotik.com/t/claude-and-codex-try-out-cmr-in-7-26beta-mostly-successful/273613/4) |
@@ -102,15 +102,18 @@ What the run shows:
 
 - **Only the single credentialed `pair` half-pairs.** Every other sequence was
   committed, interleaved on the same boots (27/27). Earlier runs the same day
-  agree: `credentialed` 2 committed / 3 half-paired, `confirm-first` 3/3.
-- **The `pair` command's output predicts the outcome.** In all 14 credentialed
-  trials, a last table of `device:ok, cmr:ok` meant half-paired and `paired`
-  meant committed. A caller can check that output instead of polling.
+  agreed (`credentialed` 2 committed / 3 half-paired, `confirm-first` 3/3), but
+  those runs were development runs and their reports were not kept.
+- **The `pair` command's output predicts the outcome.** In all 9 captured
+  credentialed trials (and the 5 earlier, uncaptured ones), a last table of
+  `device:ok, cmr:ok` meant half-paired and `paired` meant committed. A caller
+  can check that output instead of polling.
 - **It is not only per boot.** One boot gave committed and half-paired results
   on the same strategy. Boot 3 was 0/3, like centrs' "bad boot".
 - **Recovery is a bare `pair`.** After a restart, every half-paired client was
   pending with `device:ok, cmr:waiting confirmation`, and one bare `pair`
-  finished and committed it (7/7).
+  restored the pairing (7/7). The study did not restart again to prove the
+  repaired pairing was committed; centrs saw one survive a second reconnect.
 - The `confirm-first` transcript shows why it works. The bare `pair` prints
   `confirmed, waiting for device`; the credentialed one then prints
   `device:password required, cmr:ok`, followed by `paired`.
@@ -200,7 +203,7 @@ the manual should say what a CMR script may do.
 | Claim | beta1 | beta3 | beta4 | beta5 |
 |---|---|---|---|---|
 | `/cmr/export` includes the server settings (`/cmr set …`) | no (lab) | log: "fix /cmr configuration missing from the export" | — | yes: `/cmr set` with every value that was set (lab) |
-| `/cmr/device/export` exists | no (lab) | log: "fix missing device export command" | — | yes: `add identity= ids= pairing-requirement=` per row; `/cmr/export` includes it (lab) |
+| `/cmr/device/export` exists | no (lab; the demo skips its check there) | log: "fix missing device export command" | — | yes: `add identity= ids= pairing-requirement=` per row; `/cmr/export` includes it (lab) |
 | Device labels are exported | no (lab) | — | — | yes: `labels=` on the device `add` line (lab) |
 | Binary backup restores controller settings, labels and pairing IDs | yes (lab) | — | — | yes (lab, `--probe`) |
 | `/cmr/device/set identity=` renames the client | — | log: "fix device identity changes not syncing with the server" | — | yes, both ways: the controller renames the client, and a client rename updates the row (lab) |

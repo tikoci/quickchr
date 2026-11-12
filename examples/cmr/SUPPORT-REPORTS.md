@@ -53,11 +53,11 @@ Afterwards:
   comes back pending, `state="pair: device:ok, cmr:waiting confirmation"`,
   and the client shows `waiting-for-pairing,connected`. The client kept its
   approval; the controller's was never saved.
-- One bare `/cmr/device/pair [find identity=cmr-client]` then pairs it, and that
-  pairing survives the next restart.
+- One bare `/cmr/device/pair [find identity=cmr-client]` then pairs it again
+  (7/7). centrs saw such a pairing survive a second reconnect.
 
-How often: 7 of 9 trials over three fresh boots (1/3, 1/3 and 0/3 committed), and
-3 of 5 in earlier runs the same day. The same boot can give either result.
+How often: 7 of 9 trials over three fresh boots (1/3, 1/3 and 0/3 committed).
+Earlier, uncaptured runs the same day gave 3 of 5. The same boot can give either result.
 Interleaved on the same boots, every sequence that did not ask one command to
 satisfy both sides was committed, 27 of 27:
 

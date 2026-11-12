@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { QuickCHR } from "../../src/index.ts";
 import { check, exampleMachineName, runExample } from "../lib.ts";
-import { cancellation, command, createLab, labVersion, read, removeByPrefix, untracked, until, type Lab, type Row } from "./tool/lab.ts";
+import { attempt, cancellation, command, createLab, labVersion, read, removeByPrefix, untracked, until, type Lab, type Row } from "./tool/lab.ts";
 import { pairClient } from "./tool/pairing.ts";
 import { probes } from "./tool/probes.ts";
 import { STUDIES } from "./tool/studies.ts";
@@ -75,9 +75,13 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 		return (await read(controller, "/cmr/layout/link")).length === 3;
 	});
 	evidence.layout = { nodes, links: await read(controller, "/cmr/layout/link") };
-	// 7.26beta3 added /cmr/device/export; the rows carry ids and pairing-requirement, not live state.
-	const deviceExport = await command(controller, "/cmr/device/export");
-	check(/add identity=cmr-remote ids=/.test(deviceExport.replaceAll(/\\\r?\n\s*/g, "")), "Device export is missing the remote");
+	// 7.26beta3 added /cmr/device/export (beta1 has no such command); rows carry ids and
+	// pairing-requirement, not live state. Check by capability so --version 7.26beta1 still runs.
+	const deviceExport = await attempt(controller, "/cmr/device/export");
+	evidence.deviceExport = /^bad command name/m.test(deviceExport) ? "unavailable on this build" : "present";
+	if (evidence.deviceExport === "present") {
+		check(/add identity=cmr-remote ids=/.test(deviceExport.replaceAll(/\\\r?\n\s*/g, "")), "Device export is missing the remote");
+	}
 	const received: { body: string; contentType: string | null }[] = [];
 	const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
 		received.push({ body: await request.text(), contentType: request.headers.get("content-type") });
