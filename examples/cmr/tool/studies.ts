@@ -12,7 +12,7 @@
  */
 import type { ChrInstance } from "../../../src/index.ts";
 import { check } from "../../lib.ts";
-import { attempt, command, createPairLab, identityOf, quote, read, removeByPrefix, until, type PairLab, type Row } from "./lab.ts";
+import { attempt, command, createPairLab, identityOf, operand, quote, read, removeByPrefix, until, type PairLab, type Row } from "./lab.ts";
 import { observe, pairClient, pairWith, resetPairing, restartController, selectable, strategyNames, waitPending, type Strategy } from "./pairing.ts";
 
 export interface StudyContext {
@@ -24,10 +24,6 @@ export interface StudyContext {
 	evidence: Record<string, unknown>;
 }
 
-function option(argv: string[], name: string): string | undefined {
-	const index = argv.indexOf(`--${name}`);
-	return index >= 0 ? argv[index + 1] : undefined;
-}
 
 /** Boot a pair lab, run `body`, and remove the lab whatever happens. */
 let labCount = 0;
@@ -48,13 +44,13 @@ async function withPairLab<T>(context: StudyContext, body: (lab: PairLab) => Pro
  */
 async function pairing(context: StudyContext): Promise<void> {
 	const count = (name: string, fallback: number) => {
-		const value = Number(option(context.argv, name) ?? fallback);
+		const value = Number(operand(context.argv, name) ?? fallback);
 		check(Number.isInteger(value) && value >= 1 && value <= 100, `--${name} must be an integer from 1 to 100`);
 		return value;
 	};
 	const boots = count("boots", 2);
 	const trials = count("trials", 8);
-	const strategies = (option(context.argv, "strategies")?.split(",") ?? strategyNames) as Strategy[];
+	const strategies = (operand(context.argv, "strategies")?.split(",") ?? strategyNames) as Strategy[];
 	for (const s of strategies) check(strategyNames.includes(s), `Unknown strategy ${s}; known: ${strategyNames.join(", ")}`);
 	const results: Row[] = [];
 	context.evidence.question = "Which pairing sequences leave a fresh client half-paired, and is it per boot?";
@@ -233,7 +229,9 @@ async function recheck(context: StudyContext): Promise<void> {
 		check(!(await read(client, "/interface/bridge")).length, "Recheck client must start with no bridges");
 		await command(controller, `/cmr/alert/add name=first-bridge labels=${identity} interface-type=bridge interface-change=added action.log="IFACE [identity] [iface-name]"`);
 		// Give the rule time to cover the device before the first event, so a miss is not a startup window.
-		await until("bridge rule covers the client", async () => Number((await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge")?.devices ?? 0) > 0, 30_000).catch(() => undefined);
+		// A rule that never covered the client cannot miss its event: record coverage, and read
+		// firstBridgeFired only when it is true.
+		results.ruleCovered = await until("bridge rule covers the client", async () => Number((await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge")?.devices ?? 0) > 0, 30_000).then(() => true, () => false);
 		await Bun.sleep(30_000);
 		results.firstBridgeRuleBefore = (await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge");
 		await command(client, "/interface/bridge/add name=first-probe");

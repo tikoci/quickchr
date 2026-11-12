@@ -108,7 +108,6 @@ diskimage
 dispatchable
 dnf
 donny
-dont
 dotenv
 downscript
 dport

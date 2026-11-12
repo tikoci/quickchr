@@ -1,13 +1,13 @@
 {
   "study": "recheck",
   "version": "7.26beta5",
-  "timestamp": "2026-11-12T17:05:11.988Z",
+  "timestamp": "2026-11-12T19:35:51.699Z",
   "arch": "x86",
   "host": "linux/x64",
   "question": "Do the 7.26beta1 lab findings still hold on this build?",
   "checks": {
     "directoryWithoutSlash": "input does not match any value of packages-directory (/cmr/set (packages-directory); line 1)",
-    "export": "# 2026-11-12 17:08:27 by RouterOS 7.26beta5\n# system id = 5L4gukCXkZJ\n#\n/cmr\nset auto-labels=model,identity enabled=yes fetch-comments=no \\\n    packages-directory=cmr-lab-packages/ track-topology=yes\n/cmr device\nadd identity=cmr-controller ids=\"257E360F813DEAAAF05680701B0ADBCEEA8CFAE9DE424\\\n    2A36E608DF7F99DF37A/B9879D025FDCFD94047C0F0523312FCC144364EB34A4D4958842E4\\\n    8742D63413\" pairing-requirement=none\nadd identity=cmr-client ids=\"D721310C79FAEB177B1D62B073BFAD3231D84D5071CFC6ECF\\\n    CF8A02F19DDCC78/B9879D025FDCFD94047C0F0523312FCC144364EB34A4D4958842E48742\\\n    D63413\" labels=lab,recheck pairing-requirement=none",
+    "export": "# 2026-11-12 19:39:06 by RouterOS 7.26beta5\n# system id = 7EMXIYzC6wH\n#\n/cmr\nset auto-labels=model,identity enabled=yes fetch-comments=no \\\n    packages-directory=cmr-lab-packages/ track-topology=yes\n/cmr device\nadd identity=cmr-controller ids=\"843E50EC5A720B24931ED4D0741BDD63BF6461E90D2FB\\\n    FE998DBA2604E86BE34/1BDD48D0D96E3E5F7CAC17A33B7DC0071E643FE730EDC0E53AA37F\\\n    97BE8BFA45\" pairing-requirement=none\nadd identity=cmr-client ids=\"3707E3ED505D0E9A01BBED4515AE0A429A419AFA8ABDBB4EB\\\n    CBB421ABBA81611/1BDD48D0D96E3E5F7CAC17A33B7DC0071E643FE730EDC0E53AA37F97BE\\\n    8BFA45\" labels=lab,recheck pairing-requirement=none",
     "exportHasServerSettings": true,
     "exportHasDeviceLabels": true,
     "cmrPrint": "             enabled: yes              \r\n  packages-directory: cmr-lab-packages/\r\n      track-topology: yes              \r\n      fetch-comments: no               \r\n         auto-labels: model            \r\n                      identity         ",
@@ -15,12 +15,13 @@
       "auto-labels": "model,identity",
       "enabled": "yes",
       "fetch-comments": "false",
-      "local-id": "B9879D025FDCFD94047C0F0523312FCC144364EB34A4D4958842E48742D63413B67C8664A203DD01AEE1AD4BCDA60059DEE61B617D32045A35F3412858874507",
+      "local-id": "1BDD48D0D96E3E5F7CAC17A33B7DC0071E643FE730EDC0E53AA37F97BE8BFA450F2A9F67358B46536CFC0947FFBF1A6BE0DF331E65C4262F6F3B0F9E244AEDBB",
       "packages-directory": "cmr-lab-packages/",
-      "self-client-id": "257E360F813DEAAAF05680701B0ADBCEEA8CFAE9DE4242A36E608DF7F99DF37A1401384F26078902538CA9B3E6E6F8C7481615056BC0CFE3EB154C717201AE59",
+      "self-client-id": "843E50EC5A720B24931ED4D0741BDD63BF6461E90D2FBFE998DBA2604E86BE34C2BFB3E0840141DCD3F13FD12586EFB2170020121E3D068D4B68FE170A651C59",
       "track-topology": "true"
     },
     "clientPrint": "               enabled: yes             \r\n  controller-addresses: 192.0.2.1       \r\n                status: paired,connected\r\n   controller-identity: cmr-controller  \r\n    controller-address: 192.0.2.1       ",
+    "ruleCovered": true,
     "firstBridgeRuleBefore": {
       ".id": "*9",
       "action-failures": "0",

@@ -9,13 +9,22 @@ import { check, exampleMachineName } from "../../lib.ts";
  */
 export const DEFAULT_VERSION = "7.26beta5";
 export function labVersion(argv = process.argv): string {
-	const index = argv.indexOf("--version");
-	if (index >= 0) {
-		const value = argv[index + 1];
-		check(value, "--version needs a RouterOS version");
-		return value;
-	}
-	return process.env.QUICKCHR_CMR_VERSION?.trim() || DEFAULT_VERSION;
+	return operand(argv, "version") ?? (process.env.QUICKCHR_CMR_VERSION?.trim() || DEFAULT_VERSION);
+}
+
+/** The runner's flags. An operand may not be one of them: `--report --probe` is a missing path. */
+export const FLAGS = new Set(["--cli", "--hold", "--probe", "--first-bridge", "--version", "--report", "--study", "--boots", "--trials", "--strategies"]);
+
+/**
+ * The value after `--<name>`: undefined when the flag is absent, an error when it is present
+ * without a value. Any other value is accepted, including a path that starts with `-`.
+ */
+export function operand(argv: string[], name: string): string | undefined {
+	const index = argv.indexOf(`--${name}`);
+	if (index < 0) return undefined;
+	const value = argv[index + 1];
+	check(value !== undefined && value !== "" && !FLAGS.has(value), `--${name} needs a value`);
+	return value;
 }
 
 const cliMode = process.argv.includes("--cli");
@@ -44,8 +53,12 @@ export async function read(chr: ChrInstance, path: string): Promise<Row[]> {
 	return rows(await chr.rest(path));
 }
 
-/** RouterOS rejection text that `/rest/execute` returns with HTTP 200 (quickchr #142). */
-export const REJECTED = /^(failure:|syntax error|bad command name|expected |input does not match|no such item|not enough permissions)/m;
+/**
+ * RouterOS rejection text that `/rest/execute` returns with HTTP 200 (quickchr #142). The last
+ * alternative is a `/cmr/device/run-script` row whose STATUS is `failed`
+ * (`cmr-client@192.0.2.2  failed  not enough permissions (9) …`).
+ */
+export const REJECTED = /^(failure:|syntax error|bad command name|expected |input does not match|no such item|not enough permissions|\S+\s+failed\s)/m;
 
 /** Run one console line; throw if RouterOS rejected it. */
 export async function command(chr: ChrInstance, script: string): Promise<string> {

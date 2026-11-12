@@ -10,7 +10,7 @@ action. Current status of every item, per build, is in
 | 6 | [7.26beta5: a `run-script` line has more than the documented policies](#6-726beta5-a-run-script-line-has-more-than-the-documented-policies) | Draft, candidate to send |
 | 1 | [Export omits the controller settings](#1-export-omits-the-controller-settings) | **Fixed** (beta3 changelog; beta5 lab: settings and labels exported). Do not send |
 | 2 | [Client `confirm` not accepted](#2-client-pairing-requirementconfirm-is-documented-but-not-accepted) | **Works on beta5**: client `confirm` is accepted. Do not send |
-| 3 | [First bridge does not fire `interface-change=added`](#3-the-first-bridge-added-to-a-device-does-not-fire-interface-changeadded) | beta3 changelog says fixed. beta5 lab: fired with a rule ~35 s old, but missed with a rule 5 s old. Re-test before sending anything |
+| 3 | [First bridge does not fire `interface-change=added`](#3-the-first-bridge-added-to-a-device-does-not-fire-interface-changeadded) | beta3 changelog says fixed. beta5 lab: fired once the rule covered the client (2/2). An earlier miss came from a 5 s-old rule whose coverage was not confirmed. Do not send |
 | 4 | [Client disable/enable clears pairing](#4-question-client-disableenable-clears-its-pairing-but-a-reboot-does-not) | Vendor: intended; still true on beta5. Only a manual wording issue remains |
 
 ## 5. 7.26beta5: one credentialed `pair` can leave the client half-paired
@@ -20,14 +20,18 @@ The manual's command for a server `confirm` / client `password` pairing (the
 7.26beta5 that command often reports success while the controller never stores
 its own approval.
 
-Reproduce on two fresh 7.26beta5 x86 CHRs on one link, both at defaults:
+Reproduce on two fresh 7.26beta5 x86 CHRs joined by one link (`ether2` on
+both), with CMR settings at their defaults:
 
 ```routeros
 # controller (cmr package)
+/ip/address/add address=192.0.2.1/30 interface=ether2
 /cmr/set enabled=yes
 # client
+/system/identity/set name=cmr-client
+/ip/address/add address=192.0.2.2/30 interface=ether2
 /cmr/client/set enabled=yes controller-addresses=192.0.2.1
-# controller, once the client is listed with flag P
+# controller, once the client is listed with flag P (about 85 s on a fresh boot)
 /cmr/device/pair [find identity=cmr-client] username=<client user> password=<client password>
 ```
 

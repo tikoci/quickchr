@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { QuickCHR } from "../../src/index.ts";
 import { check, exampleMachineName, runExample } from "../lib.ts";
-import { attempt, cancellation, command, createLab, labVersion, read, removeByPrefix, untracked, until, type Lab, type Row } from "./tool/lab.ts";
+import { attempt, cancellation, command, createLab, labVersion, operand, read, removeByPrefix, untracked, until, type Lab, type Row } from "./tool/lab.ts";
 import { pairClient } from "./tool/pairing.ts";
 import { probes } from "./tool/probes.ts";
 import { STUDIES } from "./tool/studies.ts";
@@ -138,7 +138,19 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 	return evidence;
 }
 
-if (import.meta.main) {
+// Validate every operand before anything boots: `--report --probe` must fail now, not after a run.
+function operandsValid(): boolean {
+	try {
+		for (const name of ["report", "study", "version", "boots", "trials", "strategies"]) operand(process.argv, name);
+		return true;
+	} catch (error) {
+		console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
+		process.exitCode = 1;
+		return false;
+	}
+}
+
+if (import.meta.main && operandsValid()) {
 	const webhookStops: (() => Promise<void>)[] = [];
 	const prefix = exampleMachineName("cmr");
 	// Remove by name, not by handle: --probe restarts the remote, and only a fresh lookup
@@ -163,8 +175,8 @@ if (import.meta.main) {
 		// the remote under a new PID, and studies boot several labs.
 		await runExample(async () => {
 			try {
-				const studyIndex = process.argv.indexOf("--study");
-				if (studyIndex >= 0) await runStudy(untracked, process.argv[studyIndex + 1]);
+				const study = operand(process.argv, "study");
+				if (study) await runStudy(untracked, study);
 				else await runLab(untracked);
 			} finally {
 				await removeLab();
@@ -175,10 +187,8 @@ if (import.meta.main) {
 	}
 
 	async function writeReport(evidence: Record<string, unknown>) {
-		const reportIndex = process.argv.indexOf("--report");
-		if (reportIndex < 0) return;
-		const reportPath = process.argv[reportIndex + 1];
-		check(reportPath, "--report needs a path");
+		const reportPath = operand(process.argv, "report");
+		if (!reportPath) return;
 		await Bun.write(reportPath, `${JSON.stringify(evidence, null, 2)}\n`);
 		console.log(`Report written to ${reportPath}`);
 	}

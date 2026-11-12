@@ -136,7 +136,7 @@ Lab mechanics that matter for anyone scripting this:
 Results are in the claim tables: client `confirm` and disable/enable above,
 export and identity below, the first-interface alert and the default upgrade
 rule further down. Of the four beta1 reports, export is fixed and client
-`confirm` now works. The first-bridge alert fired once the rule was not new.
+`confirm` now works. The first-bridge alert fired once the rule covered the client.
 Disable/enable still clears the pairing.
 
 ## run-script and policy
@@ -214,7 +214,7 @@ the manual should say what a CMR script may do.
 
 | Claim | beta1 | beta3 | beta4 | beta5 |
 |---|---|---|---|---|
-| The first `interface-change=added` on a device with no interface of that type fires | no: missed on three devices; the second fires (lab) | log: "fix the first interface-change alert not firing" | — | yes when the rule was ~35 s old (1/1). With a rule 5 s old, the first bridge was missed and the second fired (1/1). New rules may have a startup window; not narrowed (lab) |
+| The first `interface-change=added` on a device with no interface of that type fires | no: missed on three devices; the second fires (lab) | log: "fix the first interface-change alert not firing" | — | yes, 2/2 runs where the rule already covered the client (`ruleCovered`, `devices=1`). In an earlier run with the rule 5 s old, the first bridge was missed and the second fired, but that run did not confirm the rule covered the client yet. The study now records `ruleCovered` (lab) |
 | Log-regex, bridge-added, connected, disconnected-more-than, rebooted alerts and HTTP webhooks | yes (lab) | — | — | yes, `action-failures=0` (lab, [demo-probe.json](./evidence/7.26beta5/demo-probe.json)) |
 | `rebooted=no` / `unpaired-device-connected=no` create no condition | — | log | — | — |
 
