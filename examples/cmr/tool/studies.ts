@@ -229,15 +229,18 @@ async function recheck(context: StudyContext): Promise<void> {
 		check(!(await read(client, "/interface/bridge")).length, "Recheck client must start with no bridges");
 		await command(controller, `/cmr/alert/add name=first-bridge labels=${identity} interface-type=bridge interface-change=added action.log="IFACE [identity] [iface-name]"`);
 		// Give the rule time to cover the device before the first event, so a miss is not a startup window.
+		// Coverage is read from the snapshot taken just before the event: a rule that did not cover the
+		// client then cannot miss it, so firstBridgeFired is null (inconclusive) rather than false.
 		await until("bridge rule covers the client", async () => Number((await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge")?.devices ?? 0) > 0, 30_000).catch(() => undefined);
 		await Bun.sleep(30_000);
 		const ruleBefore = (await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge");
+		const ruleCovered = Number(ruleBefore?.devices ?? 0) > 0;
 		results.firstBridgeRuleBefore = ruleBefore;
-		results.ruleCovered = Number(ruleBefore?.devices ?? 0) > 0;
+		results.ruleCovered = ruleCovered;
 		await command(client, "/interface/bridge/add name=first-probe");
 		const fired = async () => Number((await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge")?.fired ?? 0);
 		const firstBridgeObserved = await until("first bridge alert", async () => await fired() > 0, 60_000).then(() => true, () => false);
-		results.firstBridgeFired = results.ruleCovered ? firstBridgeObserved : null;
+		results.firstBridgeFired = ruleCovered ? firstBridgeObserved : null;
 		const firstBridgeAlertCount = await fired();
 		results.firstBridgeAlertCount = firstBridgeAlertCount;
 		await command(client, "/interface/bridge/add name=second-probe");
@@ -273,7 +276,7 @@ async function recheck(context: StudyContext): Promise<void> {
 		await Bun.sleep(5000);
 		results.afterDisableEnable = await observe(controller, client, identity);
 		for (const [key, value] of Object.entries(results)) {
-			if (typeof value !== "object") console.log(`  ${key}: ${String(value).replaceAll("\r", "").trim().split("\n").at(-1)}`);
+			if (value === null || typeof value !== "object") console.log(`  ${key}: ${String(value).replaceAll("\r", "").trim().split("\n").at(-1)}`);
 		}
 	});
 }
