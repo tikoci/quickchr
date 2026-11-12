@@ -114,6 +114,11 @@ bun run cmr.ts --study recheck --report /tmp/recheck.json
 | `policy` | What may a `run-script` line do on a client, compared with the manual's permission table, and which controller login groups may send one? |
 | `recheck` | Do the 7.26beta1 findings (export, client `confirm`, first-interface alert, identity sync, default upgrade rule, disable/enable) still hold? |
 
+In recheck reports, `firstBridgeFired` is `null` (inconclusive) when the rule
+did not cover the client immediately before the first bridge was added
+(`ruleCovered=false`). `firstBridgeAlertCount` keeps the observed counter;
+the second-bridge check requires a further increment from that count.
+
 Curated reports are kept under [`evidence/<build>/`](./evidence/).
 [FINDINGS.md → Re-grounding a new build](./FINDINGS.md#re-grounding-a-new-build)
 is the checklist for a new beta. To add a study, write a function in
