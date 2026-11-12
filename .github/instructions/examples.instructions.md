@@ -18,7 +18,7 @@ against a CHR, showing both the **CLI and the library API**.
 | `<name>.py` | Python CLI driver, run with `uv run` (stdlib only). | where a non-TS audience adds value |
 | `<name>.test.ts` | `bun:test` — only when assertions ARE the documentation. | `grounding` only |
 | `README.md` | from `_template/README.md`. | always |
-| `<subdir>/` | supporting files (configs, tools). | as needed |
+| `<subdir>/` | supporting files: `config/`, `tool/`, and `evidence/<build>/` for curated run reports (`cmr`). | as needed |
 
 Start from [`_template/`](../../examples/_template/). New capability coverage goes
 in [`COVERAGE.md`](../../examples/COVERAGE.md) (mark docs/test-only with a reason).

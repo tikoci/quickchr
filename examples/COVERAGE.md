@@ -70,7 +70,7 @@ Legend: ✅ example · 📘 docs/MANUAL only · 🧪 covered by `test/` only.
 | `StartOptions.user` / `disableAdmin` | 📘 | provisioning detail in MANUAL |
 | `StartOptions.excludePorts` | 📘 | `--no-winbox`/`--no-api-ssl`; niche |
 | `StartOptions.bootSize` / `extraDisks` | 📘 | disk sizing; covered by MANUAL + `test/` |
-| `StartOptions.version` (pin) | ✅ cmr | beta feature pinned to 7.26beta1 |
+| `StartOptions.version` (pin) | ✅ cmr | beta feature pinned to 7.26beta5; `--version` reruns other builds |
 
 ## Deferred (planned)
 

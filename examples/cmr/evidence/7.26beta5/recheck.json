@@ -1,0 +1,112 @@
+{
+  "study": "recheck",
+  "version": "7.26beta5",
+  "timestamp": "2026-11-12T19:35:51.699Z",
+  "arch": "x86",
+  "host": "linux/x64",
+  "question": "Do the 7.26beta1 lab findings still hold on this build?",
+  "checks": {
+    "directoryWithoutSlash": "input does not match any value of packages-directory (/cmr/set (packages-directory); line 1)",
+    "export": "# 2026-11-12 19:39:06 by RouterOS 7.26beta5\n# system id = 7EMXIYzC6wH\n#\n/cmr\nset auto-labels=model,identity enabled=yes fetch-comments=no \\\n    packages-directory=cmr-lab-packages/ track-topology=yes\n/cmr device\nadd identity=cmr-controller ids=\"843E50EC5A720B24931ED4D0741BDD63BF6461E90D2FB\\\n    FE998DBA2604E86BE34/1BDD48D0D96E3E5F7CAC17A33B7DC0071E643FE730EDC0E53AA37F\\\n    97BE8BFA45\" pairing-requirement=none\nadd identity=cmr-client ids=\"3707E3ED505D0E9A01BBED4515AE0A429A419AFA8ABDBB4EB\\\n    CBB421ABBA81611/1BDD48D0D96E3E5F7CAC17A33B7DC0071E643FE730EDC0E53AA37F97BE\\\n    8BFA45\" labels=lab,recheck pairing-requirement=none",
+    "exportHasServerSettings": true,
+    "exportHasDeviceLabels": true,
+    "cmrPrint": "             enabled: yes              \r\n  packages-directory: cmr-lab-packages/\r\n      track-topology: yes              \r\n      fetch-comments: no               \r\n         auto-labels: model            \r\n                      identity         ",
+    "cmrGet": {
+      "auto-labels": "model,identity",
+      "enabled": "yes",
+      "fetch-comments": "false",
+      "local-id": "1BDD48D0D96E3E5F7CAC17A33B7DC0071E643FE730EDC0E53AA37F97BE8BFA450F2A9F67358B46536CFC0947FFBF1A6BE0DF331E65C4262F6F3B0F9E244AEDBB",
+      "packages-directory": "cmr-lab-packages/",
+      "self-client-id": "843E50EC5A720B24931ED4D0741BDD63BF6461E90D2FBFE998DBA2604E86BE34C2BFB3E0840141DCD3F13FD12586EFB2170020121E3D068D4B68FE170A651C59",
+      "track-topology": "true"
+    },
+    "clientPrint": "               enabled: yes             \r\n  controller-addresses: 192.0.2.1       \r\n                status: paired,connected\r\n   controller-identity: cmr-controller  \r\n    controller-address: 192.0.2.1       ",
+    "ruleCovered": true,
+    "firstBridgeRuleBefore": {
+      ".id": "*9",
+      "action-failures": "0",
+      "action.log": "IFACE [identity] [iface-name]",
+      "category": "network",
+      "devices": "1",
+      "devices-on": "0",
+      "fired": "0",
+      "interface-change": "added",
+      "interface-type": "bridge",
+      "labels": "cmr-client",
+      "name": "first-bridge",
+      "severity": "medium"
+    },
+    "firstBridgeFired": true,
+    "secondBridgeFired": true,
+    "bridgeAlertFired": 2,
+    "identityFromController": true,
+    "identityFromClient": true,
+    "upgradeRules": [
+      {
+        ".id": "*1",
+        "channel": "stable",
+        "dynamic": "true",
+        "fail-policy": "stop",
+        "labels": "all",
+        "name": "default",
+        "strategy": "parallel"
+      }
+    ],
+    "deviceUpgradeView": [
+      {
+        "identity": "cmr-controller",
+        "version": "7.26beta5",
+        "channel": "stable",
+        "upgrade-available": "false",
+        "upgrade-rule": "default"
+      },
+      {
+        "identity": "cmr-client",
+        "version": "7.26beta5",
+        "channel": "stable",
+        "upgrade-available": "false",
+        "upgrade-rule": "default"
+      }
+    ],
+    "defaultRuleEdit": "failure: can't edit default rule (/cmr/upgrade/set *0) (/cmr/upgrade/set; line 1)",
+    "clientConfirm": "",
+    "afterClientConfirm": {
+      "clientStatus": "waiting-for-pairing,connected",
+      "pairingStatus": "192.0.2.1: cmr:ok, device:waiting confirmation",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "true",
+        "remote-pending": "true",
+        "state": "pair: device:waiting confirmation, cmr:ok",
+        "pairing-requirement": "none"
+      },
+      "verdict": "pending"
+    },
+    "afterConfirmRestored": {
+      "clientStatus": "paired,connected",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "true",
+        "pairing-requirement": "none",
+        "upgrade-rule": "default",
+        "channel": "stable"
+      },
+      "verdict": "paired"
+    },
+    "afterDisableEnable": {
+      "clientStatus": "waiting-for-pairing,connected",
+      "pairingStatus": "192.0.2.1: cmr:ok, device:password required",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "true",
+        "remote-pending": "true",
+        "state": "pair: device:password required, cmr:ok",
+        "pairing-requirement": "none"
+      },
+      "verdict": "pending"
+    }
+  }
+}

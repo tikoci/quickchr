@@ -1,0 +1,294 @@
+{
+  "study": "policy",
+  "version": "7.26beta5",
+  "timestamp": "2026-11-12T18:24:44.794Z",
+  "arch": "x86",
+  "host": "linux/x64",
+  "question": "What may a CMR run-script do on a client, and which controller logins may dispatch it?",
+  "controllerLogins": [
+    {
+      "group": "cmr-read",
+      "policies": "read,test,api,rest-api",
+      "inventory": "2",
+      "runScript": "not enough permissions (9) (/cmr/device/run-script; line 1)",
+      "alertTest": "not enough permissions (9) (/cmr/alert/test; line 1)",
+      "output": "{\"inventory\":\"2\",\"runScript\":\"not enough permissions (9) (/cmr/device/run-script; line 1)\",\"alertTest\":\"not enough permissions (9) (/cmr/alert/test; line 1)\"}"
+    },
+    {
+      "group": "cmr-write",
+      "policies": "read,write,test,api,rest-api",
+      "inventory": "2",
+      "runScript": "not enough permissions (9) (/cmr/device/run-script; line 1)",
+      "alertTest": "not enough permissions (9) (/cmr/alert/test; line 1)",
+      "output": "{\"inventory\":\"2\",\"runScript\":\"not enough permissions (9) (/cmr/device/run-script; line 1)\",\"alertTest\":\"not enough permissions (9) (/cmr/alert/test; line 1)\"}"
+    },
+    {
+      "group": "cmr-reboot",
+      "policies": "read,reboot,test,api,rest-api",
+      "inventory": "2",
+      "runScript": "not enough permissions (9) (/cmr/device/run-script; line 1)",
+      "alertTest": "not enough permissions (9) (/cmr/alert/test; line 1)",
+      "output": "{\"inventory\":\"2\",\"runScript\":\"not enough permissions (9) (/cmr/device/run-script; line 1)\",\"alertTest\":\"not enough permissions (9) (/cmr/alert/test; line 1)\"}"
+    },
+    {
+      "group": "cmr-write-reboot",
+      "policies": "read,write,reboot,test,api,rest-api",
+      "inventory": "2",
+      "runScript": "cmr-client@192.0.2.2  success  pol-69819d",
+      "alertTest": "",
+      "output": "{\"inventory\":\"2\",\"runScript\":\"Columns: DEVICE, STATUS\\nDEVICE                STATUS \\ncmr-client@192.0.2.2  running\\n\\nColumns: DEVICE, STATUS, OUTPUT\\nDEVICE                STATUS   OUTPUT    \\ncmr-client@192.0.2.2  success  pol-69819d\",\"alertTest\":\"\"}"
+    }
+  ],
+  "client": [
+    {
+      "sender": "admin",
+      "id": "read-identity",
+      "policy": "read",
+      "script": ":put [/system/identity/get name]",
+      "manual": "ok",
+      "result": "success  cmr-client",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  cmr-client"
+    },
+    {
+      "sender": "admin",
+      "id": "read-export",
+      "policy": "read",
+      "script": "/export file=cmr-policy-export",
+      "manual": "ok (export works; sensitive values left out)",
+      "result": "failed  not enough permissions (9) (:export; line 1)",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS  OUTPUT                                      \ncmr-client@192.0.2.2  failed  not enough permissions (9) (:export; line 1)",
+      "sideEffect": "null"
+    },
+    {
+      "sender": "admin",
+      "id": "write-file",
+      "policy": "write",
+      "script": "/file/add name=cmr-policy.txt contents=x",
+      "manual": "ok",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"**YHreAtYjW33K99wYO7mMXtndc\",\"contents\":\"x\",\"last-modified\":\"2026-11-12 18:28:02\",\"name\":\"cmr-policy.txt\",\"size\":\"1\",\"type\":\".txt file\"}"
+    },
+    {
+      "sender": "admin",
+      "id": "write-script",
+      "policy": "write",
+      "script": "/system/script/add name=cmr-policy source=\":put 1\" policy=read,write,test,reboot,policy,sensitive",
+      "manual": "ok, saved policy=reboot,read,write,test owner *sys",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*1\",\"dont-require-permissions\":\"false\",\"invalid\":\"false\",\"name\":\"cmr-policy\",\"owner\":\"*sys\",\"policy\":\"reboot,read,write,policy,test,sensitive\",\"run-count\":\"0\",\"source\":\":put 1\"}"
+    },
+    {
+      "sender": "admin",
+      "id": "test-ping",
+      "policy": "test",
+      "script": "/ping 192.0.2.1 count=1",
+      "manual": "ok",
+      "result": "max-rtt=610us",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT                                          \ncmr-client@192.0.2.2  success    SEQ HOST                                     SIZE TTL TIME       STATUS\n                                   0 192.0.2.1                                  56  64 610us\n                                   sent=1 received=1 packet-loss=0% min-rtt=610us avg-rtt=610us\n                                  max-rtt=610us"
+    },
+    {
+      "sender": "admin",
+      "id": "policy-user-add",
+      "policy": "policy",
+      "script": "/user/add name=cmr-policy group=read password=Cmr-Policy-12345",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*3\",\"address\":\"\",\"disabled\":\"false\",\"expired\":\"false\",\"group\":\"read\",\"inactivity-policy\":\"none\",\"inactivity-timeout\":\"10m\",\"name\":\"cmr-policy\"}"
+    },
+    {
+      "sender": "admin",
+      "id": "policy-user-add-full",
+      "policy": "policy",
+      "script": "/user/add name=cmr-policy-full group=full password=Cmr-Policy-12345",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*4\",\"address\":\"\",\"disabled\":\"false\",\"expired\":\"false\",\"group\":\"full\",\"inactivity-policy\":\"none\",\"inactivity-timeout\":\"10m\",\"name\":\"cmr-policy-full\"}"
+    },
+    {
+      "sender": "admin",
+      "id": "policy-group-add",
+      "policy": "policy",
+      "script": "/user/group/add name=cmr-policy policy=read",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*4\",\"name\":\"cmr-policy\",\"policy\":\"read,!local,!telnet,!ssh,!ftp,!reboot,!write,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!api,!romon,!rest-api\",\"skin\":\"default\"}"
+    },
+    {
+      "sender": "admin",
+      "id": "sensitive-set",
+      "policy": "write",
+      "script": "/ppp/secret/add name=cmr-policy password=abc",
+      "manual": "ok (sensitive values can be set)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*1\",\"caller-id\":\"\",\"disabled\":\"false\",\"ipv6-routes\":\"\",\"last-logged-out\":\"1970-01-01 00:00:00\",\"limit-bytes-in\":\"0\",\"limit-bytes-out\":\"0\",\"name\":\"cmr-policy\",\"password\":\"abc\",\"profile\":\"default\",\"routes\":\"\",\"service\":\"any\"}"
+    },
+    {
+      "sender": "admin",
+      "id": "sensitive-get",
+      "policy": "sensitive",
+      "script": ":put [/ppp/secret/get cmr-policy password]",
+      "manual": "shows *",
+      "result": "success  abc",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT\ncmr-client@192.0.2.2  success  abc"
+    },
+    {
+      "sender": "admin",
+      "id": "client-local-id",
+      "policy": "sensitive?",
+      "script": ":put [/cmr/client/get local-id]",
+      "manual": "not documented",
+      "result": "success  B4362226FA207F55CB4BB11AC58D5A3329B5465DB36A16F1089CF3D410224D86FB799C11012A8975EAB6265853E1E156271FE9D587F2600B52AD79381E52EEC0",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT                                          \ncmr-client@192.0.2.2  success  B4362226FA207F55CB4BB11AC58D5A3329B5465DB36A16F1089CF3D410224D86FB799C11012A8975EAB6265853E1E156271FE9D587F2600B52AD79381E52EEC0"
+    },
+    {
+      "sender": "admin",
+      "id": "sniff",
+      "policy": "sniff",
+      "script": "/tool/sniffer/start",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success"
+    },
+    {
+      "sender": "admin",
+      "id": "backup-save",
+      "policy": "sensitive/ftp?",
+      "script": "/system/backup/save name=cmr-policy dont-encrypt=yes",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success  Configuration backup saved",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT                    \ncmr-client@192.0.2.2  success  Configuration backup saved",
+      "sideEffect": "{\".id\":\"**cvjKCB5E63jWUFtSOkkF8kBWDD7D6\",\"last-modified\":\"2026-11-12 18:28:12\",\"name\":\"cmr-policy.backup\",\"size\":\"23026\",\"type\":\"backup\"}"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "read-identity",
+      "policy": "read",
+      "script": ":put [/system/identity/get name]",
+      "manual": "ok",
+      "result": "success  cmr-client",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  cmr-client"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "read-export",
+      "policy": "read",
+      "script": "/export file=cmr-wr-export",
+      "manual": "ok (export works; sensitive values left out)",
+      "result": "failed  not enough permissions (9) (:export; line 1)",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS  OUTPUT                                      \ncmr-client@192.0.2.2  failed  not enough permissions (9) (:export; line 1)",
+      "sideEffect": "null"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "write-file",
+      "policy": "write",
+      "script": "/file/add name=cmr-wr.txt contents=x",
+      "manual": "ok",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"**7JSDYAib0Mcq0bjuOLiO\",\"contents\":\"x\",\"last-modified\":\"2026-11-12 18:28:15\",\"name\":\"cmr-wr.txt\",\"size\":\"1\",\"type\":\".txt file\"}"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "write-script",
+      "policy": "write",
+      "script": "/system/script/add name=cmr-wr source=\":put 1\" policy=read,write,test,reboot,policy,sensitive",
+      "manual": "ok, saved policy=reboot,read,write,test owner *sys",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*2\",\"dont-require-permissions\":\"false\",\"invalid\":\"false\",\"name\":\"cmr-wr\",\"owner\":\"*sys\",\"policy\":\"reboot,read,write,policy,test,sensitive\",\"run-count\":\"0\",\"source\":\":put 1\"}"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "test-ping",
+      "policy": "test",
+      "script": "/ping 192.0.2.1 count=1",
+      "manual": "ok",
+      "result": "max-rtt=336us",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT                                          \ncmr-client@192.0.2.2  success    SEQ HOST                                     SIZE TTL TIME       STATUS\n                                   0 192.0.2.1                                  56  64 336us\n                                   sent=1 received=1 packet-loss=0% min-rtt=336us avg-rtt=336us\n                                  max-rtt=336us"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "policy-user-add",
+      "policy": "policy",
+      "script": "/user/add name=cmr-wr group=read password=Cmr-Policy-12345",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*5\",\"address\":\"\",\"disabled\":\"false\",\"expired\":\"false\",\"group\":\"read\",\"inactivity-policy\":\"none\",\"inactivity-timeout\":\"10m\",\"name\":\"cmr-wr\"}"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "policy-user-add-full",
+      "policy": "policy",
+      "script": "/user/add name=cmr-wr-full group=full password=Cmr-Policy-12345",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*6\",\"address\":\"\",\"disabled\":\"false\",\"expired\":\"false\",\"group\":\"full\",\"inactivity-policy\":\"none\",\"inactivity-timeout\":\"10m\",\"name\":\"cmr-wr-full\"}"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "policy-group-add",
+      "policy": "policy",
+      "script": "/user/group/add name=cmr-wr policy=read",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*5\",\"name\":\"cmr-wr\",\"policy\":\"read,!local,!telnet,!ssh,!ftp,!reboot,!write,!policy,!test,!winbox,!password,!web,!sniff,!sensitive,!api,!romon,!rest-api\",\"skin\":\"default\"}"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "sensitive-set",
+      "policy": "write",
+      "script": "/ppp/secret/add name=cmr-wr password=abc",
+      "manual": "ok (sensitive values can be set)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success",
+      "sideEffect": "{\".id\":\"*2\",\"caller-id\":\"\",\"disabled\":\"false\",\"ipv6-routes\":\"\",\"last-logged-out\":\"1970-01-01 00:00:00\",\"limit-bytes-in\":\"0\",\"limit-bytes-out\":\"0\",\"name\":\"cmr-wr\",\"password\":\"abc\",\"profile\":\"default\",\"routes\":\"\",\"service\":\"any\"}"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "sensitive-get",
+      "policy": "sensitive",
+      "script": ":put [/ppp/secret/get cmr-wr password]",
+      "manual": "shows *",
+      "result": "success  abc",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT\ncmr-client@192.0.2.2  success  abc"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "client-local-id",
+      "policy": "sensitive?",
+      "script": ":put [/cmr/client/get local-id]",
+      "manual": "not documented",
+      "result": "success  B4362226FA207F55CB4BB11AC58D5A3329B5465DB36A16F1089CF3D410224D86FB799C11012A8975EAB6265853E1E156271FE9D587F2600B52AD79381E52EEC0",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT                                          \ncmr-client@192.0.2.2  success  B4362226FA207F55CB4BB11AC58D5A3329B5465DB36A16F1089CF3D410224D86FB799C11012A8975EAB6265853E1E156271FE9D587F2600B52AD79381E52EEC0"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "sniff",
+      "policy": "sniff",
+      "script": "/tool/sniffer/start",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  success"
+    },
+    {
+      "sender": "cmr-write-reboot",
+      "id": "backup-save",
+      "policy": "sensitive/ftp?",
+      "script": "/system/backup/save name=cmr-wr dont-encrypt=yes",
+      "manual": "fail: not enough permissions (9)",
+      "result": "success  Configuration backup saved",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT                    \ncmr-client@192.0.2.2  success  Configuration backup saved",
+      "sideEffect": "{\".id\":\"**8IrC9PwDkwlD4CAdGack7afA\",\"last-modified\":\"2026-11-12 18:28:25\",\"name\":\"cmr-wr.backup\",\"size\":\"23690\",\"type\":\"backup\"}"
+    }
+  ]
+}

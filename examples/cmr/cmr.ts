@@ -1,18 +1,38 @@
 #!/usr/bin/env bun
 import { QuickCHR } from "../../src/index.ts";
 import { check, exampleMachineName, runExample } from "../lib.ts";
-import { cancellation, command, configureClients, createLab, read, until, type Lab, type Row } from "./tool/lab.ts";
+import { attempt, cancellation, command, createLab, labVersion, operand, read, removeByPrefix, untracked, until, type Lab, type Row } from "./tool/lab.ts";
+import { pairClient } from "./tool/pairing.ts";
 import { probes } from "./tool/probes.ts";
+import { STUDIES } from "./tool/studies.ts";
+
+/**
+ * Pair the three clients the way FINDINGS.md recommends, then label all four routers.
+ * Returns how each pairing went, so a build that needed the half-pair repair shows in the report.
+ */
+export async function configureClients(lab: Lab): Promise<Row[]> {
+	const { controller, transit, remote, local } = lab;
+	await command(transit, "/cmr/client/set enabled=yes controller-addresses=192.0.2.1");
+	await command(remote, "/cmr/client/set enabled=yes controller-addresses=10.255.0.1");
+	// No CMR address or DHCP CMR option: this client must discover its L2 neighbor.
+	await command(local, "/cmr/client/set enabled=yes");
+	const pairing: Row[] = [];
+	for (const [role, client] of [["transit", transit], ["remote", remote], ["local", local]] as const) {
+		const { result, repaired } = await pairClient(controller, client);
+		pairing.push({ role, strategy: result.strategy, pairStatus: result.pairStatus, settled: result.settled.verdict, repaired: String(repaired) });
+	}
+	for (const role of ["controller", "transit", "remote", "local"]) {
+		await command(controller, `/cmr/device/set [find identity=cmr-${role}] labels=lab,${role}`);
+	}
+	await until("four managed devices", async () => (await read(controller, "/cmr/device")).filter(r => r.identity?.startsWith("cmr-")).length === 4);
+	return pairing;
+}
 
 export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void>) => void, extended = false, evidence: Record<string, unknown> = {}) {
-	const { controller, local, all, version } = lab;
+	const { controller, local, version } = lab;
 	let remote = lab.remote;
 	Object.assign(evidence, { version, timestamp: new Date().toISOString() });
-	for (const chr of all) {
-		const resource = (await read(chr, "/system/resource"))[0];
-		check(resource?.version?.split(" ")[0] === version, `Unexpected RouterOS version: ${resource?.version}`);
-	}
-	await configureClients(lab);
+	evidence.pairing = await configureClients(lab);
 	const service = (await read(controller, "/ip/service")).find(r => r.name === "cmr");
 	check(service?.port === "54321", "CMR TCP service missing");
 	evidence.service = service;
@@ -22,7 +42,7 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 	check((await read(remote, "/cmr/client"))[0]?.["controller-address"] === "10.255.0.1", "Remote client did not use the routed loopback");
 	console.log("OSPF route and CMR pairing verified; local client discovered controller without an address");
 
-	await command(controller, "/cmr/upgrade/add name=lab-pinned labels=lab channel=7.26beta1 strategy=sequential fail-policy=stop");
+	await command(controller, `/cmr/upgrade/add name=lab-pinned labels=lab channel=${version} strategy=sequential fail-policy=stop`);
 	await until("pinned rule selected", async () => (await read(controller, "/cmr/device")).every(r => r["upgrade-rule"] === "lab-pinned"));
 	evidence.upgradeRules = await read(controller, "/cmr/upgrade");
 
@@ -55,6 +75,13 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 		return (await read(controller, "/cmr/layout/link")).length === 3;
 	});
 	evidence.layout = { nodes, links: await read(controller, "/cmr/layout/link") };
+	// 7.26beta3 added /cmr/device/export (beta1 has no such command); rows carry ids and
+	// pairing-requirement, not live state. Check by capability so --version 7.26beta1 still runs.
+	const deviceExport = await attempt(controller, "/cmr/device/export");
+	evidence.deviceExport = /^bad command name/m.test(deviceExport) ? "unavailable on this build" : "present";
+	if (evidence.deviceExport === "present") {
+		check(/add identity=cmr-remote ids=/.test(deviceExport.replaceAll(/\\\r?\n\s*/g, "")), "Device export is missing the remote");
+	}
 	const received: { body: string; contentType: string | null }[] = [];
 	const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
 		received.push({ body: await request.text(), contentType: request.headers.get("content-type") });
@@ -111,16 +138,25 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 	return evidence;
 }
 
-if (import.meta.main) {
+// Validate every operand before anything boots: `--report --probe` must fail now, not after a run.
+function operandsValid(): boolean {
+	try {
+		for (const name of ["report", "study", "version", "boots", "trials", "strategies"]) operand(process.argv, name);
+		return true;
+	} catch (error) {
+		console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
+		process.exitCode = 1;
+		return false;
+	}
+}
+
+if (import.meta.main && operandsValid()) {
 	const webhookStops: (() => Promise<void>)[] = [];
 	const prefix = exampleMachineName("cmr");
 	// Remove by name, not by handle: --probe restarts the remote, and only a fresh lookup
 	// carries the restarted QEMU's PID. Also catches a VM whose start failed after spawning.
-	const removeLab = async () => {
-		for (const machine of QuickCHR.list().filter(m => m.name.startsWith(`${prefix}-`))) {
-			try { await QuickCHR.get(machine.name)?.remove(); } catch { /* best-effort teardown */ }
-		}
-	};
+	// Study labs are named <prefix>-<n>-<role>, so this prefix covers them too.
+	const removeLab = async () => removeByPrefix(prefix);
 	let releaseHold: (() => void) | undefined;
 	const onSignal = () => {
 		if (releaseHold) return releaseHold();
@@ -135,9 +171,13 @@ if (import.meta.main) {
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
 	try {
-		await runExample(async track => {
+		// Teardown is by name prefix (removeLab), not runExample's handle tracking: --probe restarts
+		// the remote under a new PID, and studies boot several labs.
+		await runExample(async () => {
 			try {
-				await runLab(track);
+				const study = operand(process.argv, "study");
+				if (study) await runStudy(untracked, study);
+				else await runLab(untracked);
 			} finally {
 				await removeLab();
 			}
@@ -146,8 +186,31 @@ if (import.meta.main) {
 		for (const stop of webhookStops) await stop();
 	}
 
-	async function runLab(track: Parameters<Parameters<typeof runExample>[0]>[0]) {
-		const lab = await createLab(track, "7.26beta1", !process.argv.includes("--first-bridge"), prefix);
+	async function writeReport(evidence: Record<string, unknown>) {
+		const reportPath = operand(process.argv, "report");
+		if (!reportPath) return;
+		await Bun.write(reportPath, `${JSON.stringify(evidence, null, 2)}\n`);
+		console.log(`Report written to ${reportPath}`);
+	}
+
+	async function runStudy(track: typeof untracked, name: string | undefined) {
+		const study = name ? STUDIES[name] : undefined;
+		check(study, `--study needs one of: ${Object.keys(STUDIES).join(", ")}`);
+		const version = labVersion();
+		const evidence: Record<string, unknown> = { study: name, version, timestamp: new Date().toISOString(), arch: "x86", host: `${process.platform}/${process.arch}` };
+		try {
+			await study({ version, prefix, argv: process.argv, track, evidence });
+			console.log(`Study ${name} finished on ${version}`);
+		} catch (error) {
+			evidence.failure = String(error);
+			throw error;
+		} finally {
+			await writeReport(evidence);
+		}
+	}
+
+	async function runLab(track: typeof untracked) {
+		const lab = await createLab(track, { initialBridge: !process.argv.includes("--first-bridge"), prefix });
 		const hold = process.argv.includes("--hold");
 		const evidence: Record<string, unknown> = {};
 		let failure: unknown;
@@ -165,12 +228,7 @@ if (import.meta.main) {
 			}
 			evidence.failureState = state;
 		}
-		const reportIndex = process.argv.indexOf("--report");
-		if (reportIndex >= 0) {
-			const reportPath = process.argv[reportIndex + 1];
-			check(reportPath, "--report needs a path");
-			await Bun.write(reportPath, `${JSON.stringify(evidence, null, 2)}\n`);
-		}
+		await writeReport(evidence);
 		if (failure) throw failure;
 		if (hold) {
 			console.log("Lab is running; open the controller in WinBox 4. Ctrl-C removes all four VMs.");

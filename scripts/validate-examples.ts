@@ -20,7 +20,7 @@ const ALLOWED_EXT = new Set([".ts", ".sh", ".ps1", ".py", ".md"]);
 // `__pycache__` is gitignored, so it never reaches CI and can never be a real
 // violation — but any local `python3 -m py_compile` / import of a .py example
 // creates one, and flagging it turns `bun run check` red for a build artifact.
-const SKIP_DIRS = new Set(["_template", "config", "tool", "node_modules", "__pycache__"]);
+const SKIP_DIRS = new Set(["_template", "config", "tool", "evidence", "node_modules", "__pycache__"]);
 // (Top-level files like README.md / lib.ts / common.sh are skipped implicitly:
 // the dir scan below only descends into directories, never stat's loose files.)
 
@@ -70,7 +70,7 @@ for (const name of dirs) {
 	for (const f of files) {
 		const p = join(dir, f);
 		if (statSync(p).isDirectory()) {
-			if (!SKIP_DIRS.has(f)) err(where, `unexpected subdir "${f}/" (allowed: config/, tool/)`);
+			if (!SKIP_DIRS.has(f)) err(where, `unexpected subdir "${f}/" (allowed: config/, tool/, evidence/)`);
 			continue;
 		}
 		if (f === "Makefile") err(where, "Makefile is not allowed — use <name>.sh / <name>.ps1");

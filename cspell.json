@@ -11,7 +11,8 @@
 		"coverage",
 		"dist",
 		".claude/**",
-		"**/*.svg"
+		"**/*.svg",
+		"examples/*/evidence/**"
 	],
 	"useGitignore": true,
 	"minWordLength": 3,
@@ -24,6 +25,7 @@
 		"behaviour",
 		"centralises",
 		"divi",
+		"dont",
 		"findme",
 		"getglobalstate",
 		"getstealthmode",

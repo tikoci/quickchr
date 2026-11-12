@@ -242,6 +242,7 @@ localappdata
 logappend
 logfile
 longterm
+loopbacks
 lpa
 lru
 lsb
@@ -341,6 +342,7 @@ pointopoint
 postrouting
 powerdown
 poweroff
+ppp
 pptp
 prereq
 prerouting
@@ -435,6 +437,7 @@ sockaddr
 socketfilterfw
 softmmu
 srand
+srv
 ssbd
 ssbs
 sshfs
@@ -482,6 +485,7 @@ uefi
 uid
 uncharacterized
 unfiled
+unpairs
 unparseable
 unprovisioned
 unredacted
