@@ -229,16 +229,19 @@ async function recheck(context: StudyContext): Promise<void> {
 		check(!(await read(client, "/interface/bridge")).length, "Recheck client must start with no bridges");
 		await command(controller, `/cmr/alert/add name=first-bridge labels=${identity} interface-type=bridge interface-change=added action.log="IFACE [identity] [iface-name]"`);
 		// Give the rule time to cover the device before the first event, so a miss is not a startup window.
-		// A rule that never covered the client cannot miss its event: record coverage, and read
-		// firstBridgeFired only when it is true.
-		results.ruleCovered = await until("bridge rule covers the client", async () => Number((await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge")?.devices ?? 0) > 0, 30_000).then(() => true, () => false);
+		await until("bridge rule covers the client", async () => Number((await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge")?.devices ?? 0) > 0, 30_000).catch(() => undefined);
 		await Bun.sleep(30_000);
-		results.firstBridgeRuleBefore = (await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge");
+		const ruleBefore = (await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge");
+		results.firstBridgeRuleBefore = ruleBefore;
+		results.ruleCovered = Number(ruleBefore?.devices ?? 0) > 0;
 		await command(client, "/interface/bridge/add name=first-probe");
 		const fired = async () => Number((await read(controller, "/cmr/alert")).find(r => r.name === "first-bridge")?.fired ?? 0);
-		results.firstBridgeFired = await until("first bridge alert", async () => await fired() > 0, 60_000).then(() => true, () => false);
+		const firstBridgeObserved = await until("first bridge alert", async () => await fired() > 0, 60_000).then(() => true, () => false);
+		results.firstBridgeFired = results.ruleCovered ? firstBridgeObserved : null;
+		const firstBridgeAlertCount = await fired();
+		results.firstBridgeAlertCount = firstBridgeAlertCount;
 		await command(client, "/interface/bridge/add name=second-probe");
-		results.secondBridgeFired = await until("second bridge alert", async () => await fired() > (results.firstBridgeFired ? 1 : 0), 60_000).then(() => true, () => false);
+		results.secondBridgeFired = await until("second bridge alert", async () => await fired() > firstBridgeAlertCount, 60_000).then(() => true, () => false);
 		results.bridgeAlertFired = await fired();
 
 		// 3. Identity sync both ways (beta3 changelog: fixed).
