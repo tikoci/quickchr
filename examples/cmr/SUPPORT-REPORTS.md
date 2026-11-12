@@ -77,24 +77,31 @@ centrs measured the same state independently on beta3 to beta5
 The manual says a CMR script runs on each client "with the `read`, `write`,
 `test`, and `reboot` policies", and lists `/user add`, `/user group add`,
 `/tool sniffer` and `/system backup save` as failing with
-`not enough permissions (9)`, and sensitive values as `*`. On 7.26beta5, from
-`/cmr/device/run-script` on the controller (admin login):
+`not enough permissions (9)`, and sensitive values as `*`.
 
-| Line | Manual | 7.26beta5 |
+On 7.26beta5 the controller requires `write` and `reboot` on the login that
+sends `run-script`. That gate is consistent. We sent the same lines from two
+controller logins: full `admin`, and a group with
+`read,write,reboot,test,api,rest-api` (no `policy`, no `sensitive`). Both gave
+the same results on the client:
+
+| Line | Manual | 7.26beta5, either sender |
 |---|---|---|
-| `/user/add name=cmr-policy group=read password=…` | not enough permissions (9) | success, user created |
-| `/user/group/add name=cmr-policy policy=read` | not enough permissions (9) | success, group created |
-| `:put [/ppp/secret/get cmr-policy password]` | `*` | prints the password |
-| `/system/backup/save name=cmr-policy dont-encrypt=yes` | not enough permissions (9) | success, `.backup` file created |
+| `/user/add name=… group=full password=…` | not enough permissions (9) | success, full user created |
+| `/user/add name=… group=read password=…` | not enough permissions (9) | success, user created |
+| `/user/group/add name=… policy=read` | not enough permissions (9) | success, group created |
+| `:put [/ppp/secret/get … password]` | `*` | prints the password |
+| `/system/backup/save name=… dont-encrypt=yes` | not enough permissions (9) | success, `.backup` file created |
 | `/tool/sniffer/start` | not enough permissions (9) | success |
 | `/system/script/add … policy=read,write,test,reboot,policy,sensitive` | saved as `reboot,read,write,test` | saved with all six policies, owner `*sys` |
-| `/export file=cmr-policy-export` | `/export` works | not enough permissions (9) |
+| `/export file=…` | `/export` works | not enough permissions (9) |
 
-On the controller, `run-script` needs a login with both `write` and `reboot`.
-So any login with those two policies can create users and read secrets on every
-client it selects. centrs saw `/user add` start working in 7.26beta4.
+So a controller login without `policy` or `sensitive` can, through CMR, create
+a full user and read secrets on every client it selects. centrs saw
+`/user add` start working in 7.26beta4.
 
-**Expected:** either the documented four policies, or a manual that describes
+**Question:** which is intended? Either the client limits a CMR script to the
+documented four policies (or to the sender's), or the manual should describe
 what a CMR script may do. Evidence:
 [FINDINGS.md → run-script and policy](./FINDINGS.md#run-script-and-policy),
 [evidence/7.26beta5/policy.json](./evidence/7.26beta5/policy.json).

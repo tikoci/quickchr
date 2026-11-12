@@ -156,18 +156,21 @@ placed the fix in beta2, which was never published.
 
 ### What a script may do on the client
 
-Policy study, 7.26beta5, admin controller login
+Policy study, 7.26beta5
 ([evidence/7.26beta5/policy.json](./evidence/7.26beta5/policy.json)). Each line
-was sent with `/cmr/device/run-script`, and its side effect was read back over
-the client's REST API.
+was sent with `/cmr/device/run-script` twice: once from the full `admin` login
+and once from the smallest login that may send a script (`read,write,reboot,
+test,api,rest-api`, no `policy` or `sensitive`). Side effects were read back
+over the client's REST API. **Both logins gave identical results.**
 
-| Script line | Manual says | beta5 (lab) |
+| Script line | Manual says | beta5, either login (lab) |
 |---|---|---|
 | `:put [/system/identity/get name]` | ok | ok |
 | `/file/add name=… contents=x` | ok | ok, file created |
 | `/system/script/add … policy=read,write,test,reboot,policy,sensitive` | ok, saved as `policy=reboot,read,write,test`, owner `*sys` | ok, owner `*sys`, but **saved with all six requested policies** |
 | `/ping … count=1` | ok | ok |
 | `/user/add … group=read` | fail, `not enough permissions (9)` | **ok, user created** (centrs: since beta4) |
+| `/user/add … group=full` | fail, `not enough permissions (9)` | **ok, full user created** |
 | `/user/group/add … policy=read` | fail, `not enough permissions (9)` | **ok, group created** |
 | `/ppp/secret/add … password=abc` | ok (sensitive values can be set) | ok |
 | `:put [/ppp/secret/get … password]` | shows `*` | **prints `abc`** |
@@ -176,13 +179,21 @@ the client's REST API.
 | `/system/backup/save … dont-encrypt=yes` | fail, `not enough permissions (9)` | **ok, `.backup` file created** |
 | `/export file=…` | `/export` works | **fail, `not enough permissions (9)`** |
 
-On beta5, a client runs a CMR script with more than the manual's
-`read,write,test,reboot`. The script can manage users and groups, read
-sensitive values, sniff and save backups. Only `/export file=` was refused.
-So the controller login that can send `run-script` (it needs `write` and
-`reboot`) can create users on every selected client. Whether `/user/add
-group=full` works was not tested. This is a candidate report (see
-[SUPPORT-REPORTS.md](./SUPPORT-REPORTS.md)).
+What this means:
+
+- **The controller account is the gate.** RouterOS requires `write` and
+  `reboot` on the controller login to send a script. A tool should follow
+  that (centrs does: it uses the RouterOS policy of the login it was given).
+- **On the client, a script is not bounded by the sender's policy**, nor by the
+  manual's `read,write,test,reboot`. A sender without `policy` or `sensitive`
+  created a `group=full` user and read a secret on the client. In practice, a
+  `write`+`reboot` controller login has close to full control of every
+  client it can select.
+- Only `/export file=` was refused, by either login.
+
+This is candidate report #6 in [SUPPORT-REPORTS.md](./SUPPORT-REPORTS.md):
+either the client should apply the documented policies (or the sender's), or
+the manual should say what a CMR script may do.
 
 ## Export, backup, identity
 

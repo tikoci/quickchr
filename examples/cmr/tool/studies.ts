@@ -120,32 +120,8 @@ async function policy(context: StudyContext): Promise<void> {
 		const identity = await identityOf(client);
 		const find = `[find identity=${quote(identity)}]`;
 		const named = (path: string, name: string) => async (chr: ChrInstance) => (await read(chr, path)).find(r => r.name === name) ?? null;
-		const cases: PolicyCase[] = [
-			{ id: "read-identity", policy: "read", script: ":put [/system/identity/get name]", manual: "ok" },
-			{ id: "read-export", policy: "read", script: "/export file=cmr-policy-export", manual: "ok (export works; sensitive values left out)", verify: named("/file", "cmr-policy-export.rsc") },
-			{ id: "write-file", policy: "write", script: "/file/add name=cmr-policy.txt contents=x", manual: "ok", verify: named("/file", "cmr-policy.txt") },
-			{ id: "write-script", policy: "write", script: '/system/script/add name=cmr-policy source=":put 1" policy=read,write,test,reboot,policy,sensitive', manual: "ok, saved policy=reboot,read,write,test owner *sys", verify: named("/system/script", "cmr-policy") },
-			{ id: "test-ping", policy: "test", script: "/ping 192.0.2.1 count=1", manual: "ok" },
-			{ id: "policy-user-add", policy: "policy", script: "/user/add name=cmr-policy group=read password=Cmr-Policy-12345", manual: "fail: not enough permissions (9)", verify: named("/user", "cmr-policy") },
-			{ id: "policy-group-add", policy: "policy", script: "/user/group/add name=cmr-policy policy=read", manual: "fail: not enough permissions (9)", verify: named("/user/group", "cmr-policy") },
-			{ id: "sensitive-set", policy: "write", script: "/ppp/secret/add name=cmr-policy password=abc", manual: "ok (sensitive values can be set)", verify: named("/ppp/secret", "cmr-policy") },
-			{ id: "sensitive-get", policy: "sensitive", script: ":put [/ppp/secret/get cmr-policy password]", manual: "shows *" },
-			{ id: "client-local-id", policy: "sensitive?", script: ":put [/cmr/client/get local-id]", manual: "not documented" },
-			{ id: "sniff", policy: "sniff", script: "/tool/sniffer/start", manual: "fail: not enough permissions (9)" },
-			{ id: "backup-save", policy: "sensitive/ftp?", script: "/system/backup/save name=cmr-policy dont-encrypt=yes", manual: "fail: not enough permissions (9)", verify: named("/file", "cmr-policy.backup") },
-		];
-		const clientCases: Row[] = [];
-		context.evidence.client = clientCases;
-		for (const c of cases) {
-			const output = (await attempt(controller, `/cmr/device/run-script ${find} script=${quote(c.script)}`)).replaceAll("\r", "");
-			const result = output.trim().split("\n").at(-1)?.trim().replace(/^\S+\s+/, "") ?? "";
-			const sideEffect = c.verify ? await c.verify(client) : undefined;
-			clientCases.push({ id: c.id, policy: c.policy, script: c.script, manual: c.manual, result, ...(sideEffect !== undefined ? { sideEffect: JSON.stringify(sideEffect) } : {}) });
-			console.log(`  ${c.id.padEnd(17)} ${result}`);
-		}
-		await attempt(client, "/tool/sniffer/stop");
 
-		// Controller logins. REST /execute carries the line as that user.
+		// Controller logins first: the client cases run once per login that may send run-script.
 		await command(controller, '/cmr/alert/add name=policy-test labels=all rebooted=yes action.log="policy test [identity]"');
 		const groups: Record<string, string> = {
 			"cmr-read": "read,test,api,rest-api",
@@ -153,17 +129,18 @@ async function policy(context: StudyContext): Promise<void> {
 			"cmr-reboot": "read,reboot,test,api,rest-api",
 			"cmr-write-reboot": "read,write,reboot,test,api,rest-api",
 		};
+		const logins: Record<string, { user: string; password: string }> = {};
 		const controllerCases: Row[] = [];
 		context.evidence.controllerLogins = controllerCases;
 		for (const [group, policies] of Object.entries(groups)) {
 			await command(controller, `/user/group/add name=${group} policy=${policies}`);
 			const password = `Cmr-${crypto.randomUUID().slice(0, 12)}`;
 			await command(controller, `/user/add name=${group} group=${group} password=${quote(password)}`);
-			const login = { user: group, password };
+			logins[group] = { user: group, password };
 			const nonce = `pol-${crypto.randomUUID().slice(0, 6)}`;
 			const run = async (line: string) => {
 				try {
-					return (await attempt(controller, line, login)).replaceAll("\r", "").trim().split("\n").at(-1)?.trim() ?? "";
+					return (await attempt(controller, line, logins[group])).replaceAll("\r", "").trim().split("\n").at(-1)?.trim() ?? "";
 				} catch (error) { return `error: ${error instanceof Error ? error.message : String(error)}`; }
 			};
 			const row: Row = {
@@ -174,6 +151,43 @@ async function policy(context: StudyContext): Promise<void> {
 			};
 			controllerCases.push(row);
 			console.log(`  ${group.padEnd(17)} run-script: ${row.runScript} | alert test: ${row.alertTest}`);
+		}
+
+		// Client cases, sent by the full admin login and by the least login that may send run-script.
+		// The question is whether the client side is bounded by the sender's policy (e.g. `policy`).
+		const cases = (tag: string): PolicyCase[] => {
+			const n = `cmr-${tag}`;
+			return [
+				{ id: "read-identity", policy: "read", script: ":put [/system/identity/get name]", manual: "ok" },
+				{ id: "read-export", policy: "read", script: `/export file=${n}-export`, manual: "ok (export works; sensitive values left out)", verify: named("/file", `${n}-export.rsc`) },
+				{ id: "write-file", policy: "write", script: `/file/add name=${n}.txt contents=x`, manual: "ok", verify: named("/file", `${n}.txt`) },
+				{ id: "write-script", policy: "write", script: `/system/script/add name=${n} source=":put 1" policy=read,write,test,reboot,policy,sensitive`, manual: "ok, saved policy=reboot,read,write,test owner *sys", verify: named("/system/script", n) },
+				{ id: "test-ping", policy: "test", script: "/ping 192.0.2.1 count=1", manual: "ok" },
+				{ id: "policy-user-add", policy: "policy", script: `/user/add name=${n} group=read password=Cmr-Policy-12345`, manual: "fail: not enough permissions (9)", verify: named("/user", n) },
+				{ id: "policy-user-add-full", policy: "policy", script: `/user/add name=${n}-full group=full password=Cmr-Policy-12345`, manual: "fail: not enough permissions (9)", verify: named("/user", `${n}-full`) },
+				{ id: "policy-group-add", policy: "policy", script: `/user/group/add name=${n} policy=read`, manual: "fail: not enough permissions (9)", verify: named("/user/group", n) },
+				{ id: "sensitive-set", policy: "write", script: `/ppp/secret/add name=${n} password=abc`, manual: "ok (sensitive values can be set)", verify: named("/ppp/secret", n) },
+				{ id: "sensitive-get", policy: "sensitive", script: `:put [/ppp/secret/get ${n} password]`, manual: "shows *" },
+				{ id: "client-local-id", policy: "sensitive?", script: ":put [/cmr/client/get local-id]", manual: "not documented" },
+				{ id: "sniff", policy: "sniff", script: "/tool/sniffer/start", manual: "fail: not enough permissions (9)" },
+				{ id: "backup-save", policy: "sensitive/ftp?", script: `/system/backup/save name=${n} dont-encrypt=yes`, manual: "fail: not enough permissions (9)", verify: named("/file", `${n}.backup`) },
+			];
+		};
+		const senders: [string, { user: string; password: string } | undefined][] = [["admin", undefined], ["cmr-write-reboot", logins["cmr-write-reboot"]]];
+		const clientCases: Row[] = [];
+		context.evidence.client = clientCases;
+		for (const [sender, login] of senders) {
+			for (const c of cases(sender === "admin" ? "policy" : "wr")) {
+				let output: string;
+				try {
+					output = (await attempt(controller, `/cmr/device/run-script ${find} script=${quote(c.script)}`, login)).replaceAll("\r", "");
+				} catch (error) { output = `error: ${error instanceof Error ? error.message : String(error)}`; }
+				const result = output.trim().split("\n").at(-1)?.trim().replace(/^\S+\s+/, "") ?? "";
+				const sideEffect = c.verify ? await c.verify(client) : undefined;
+				clientCases.push({ sender, id: c.id, policy: c.policy, script: c.script, manual: c.manual, result, ...(sideEffect !== undefined ? { sideEffect: JSON.stringify(sideEffect) } : {}) });
+				console.log(`  ${sender.padEnd(17)} ${c.id.padEnd(21)} ${result}${c.verify ? (sideEffect ? "  [created]" : "  [not created]") : ""}`);
+			}
+			await attempt(client, "/tool/sniffer/stop");
 		}
 	});
 }
