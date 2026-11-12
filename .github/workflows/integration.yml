@@ -1168,6 +1168,7 @@ jobs:
             ~/.local/share/quickchr/failures/*.json
             ~/.local/share/quickchr/machines/**/*.json
             ~/.local/share/quickchr/machines/**/*.log
+            ~/.local/share/quickchr/test-evidence/**
           retention-days: 7
 
       - name: Upload integration logs (Windows)
@@ -1191,6 +1192,7 @@ jobs:
             ~/AppData/Local/quickchr/failures/*.json
             ~/AppData/Local/quickchr/machines/**/*.json
             ~/AppData/Local/quickchr/machines/**/*.log
+            ~/AppData/Local/quickchr/test-evidence/**
           retention-days: 7
 
   # ── aggregate: push metrics to the ci-data branch ────────────────────────────

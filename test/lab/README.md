@@ -19,6 +19,7 @@ Each subdirectory is a self-contained lab covering one subsystem:
 | `www-abort-damage/` | Does an aborted REST probe damage RouterOS `www`? (#79) | 5 | `qemu.instructions.md` |
 | `scripting-patterns/` | RouterOS scripting via REST `/execute` | — | — |
 | `full-suite-resource-trend/` | Does full-suite cost inflate with position, or stay flat? (#76) | — | `ci.instructions.md` |
+| `managed-bridged/` | Managed `bridged:<iface>` network on hosted runners vs a real LAN (#270) | 1 | `testing.instructions.md` |
 
 Each directory contains:
 

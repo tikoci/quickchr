@@ -31,7 +31,7 @@ import type {
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION, HOST_GATEWAY_IP, PORTS_PER_BLOCK } from "./types.ts";
 import { assertValidResourceName, assertPathSafeName, shellQuote } from "./names.ts";
 import packageJson from "../../package.json";
-import { bunRuntimeCheck, detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, isSocketVmnetDaemonRunning, findCommandOnPath, accelDoctorCheck, proxyDoctorCheck } from "./platform.ts";
+import { bunRuntimeCheck, detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, findCommandOnPath, accelDoctorCheck, proxyDoctorCheck } from "./platform.ts";
 import {
 	resolveVersion,
 	isValidVersion,
@@ -42,7 +42,7 @@ import {
 	isRouterOs6,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
-import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport, assertSocketVmnetReachable } from "./network.ts";
+import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport, assertSocketVmnetReachable, probeSocketVmnetSockets, describeSocketVmnetProbe } from "./network.ts";
 import {
 	getUsedPortBases,
 	getUsedMacs,
@@ -3498,41 +3498,37 @@ export class QuickCHR {
 			});
 		}
 
-		// socket_vmnet (macOS only — rootless shared/bridged networking)
+		// socket_vmnet (macOS only — rootless shared/bridged networking). Keyed on the
+		// sockets, each probed with a real connect (#262); the binaries are informational.
 		if (process.platform === "darwin") {
 			const vmnet = detectSocketVmnet();
-			if (vmnet) {
-				const sharedRunning = vmnet.sharedSocket
-					? isSocketVmnetDaemonRunning(vmnet.sharedSocket)
-					: false;
-				const parts = [vmnet.client];
-				if (vmnet.sharedSocket) parts.push(`shared: ${vmnet.sharedSocket}`);
-				const bridgedIfaces = Object.keys(vmnet.bridgedSockets);
-				if (bridgedIfaces.length > 0) parts.push(`bridged: ${bridgedIfaces.join(", ")}`);
-				if (sharedRunning) {
-					checks.push({
-						label: "socket_vmnet",
-						status: "ok",
-						detail: parts.join(" — "),
-					});
-				} else if (vmnet.sharedSocket) {
-					checks.push({
-						label: "socket_vmnet",
-						status: "warn",
-						detail: `${vmnet.client} — installed but daemon not running. Start: sudo brew services start socket_vmnet`,
-					});
-				} else {
-					checks.push({
-						label: "socket_vmnet",
-						status: "warn",
-						detail: `${vmnet.client} — client found but no socket (daemon not started). Start: sudo brew services start socket_vmnet`,
-					});
-				}
+			const probed = vmnet ? await probeSocketVmnetSockets(vmnet) : [];
+			const binaries = [vmnet?.daemon, vmnet?.client].filter((b): b is string => !!b);
+			const sockets = probed.map((s) => `${s.specifier}: ${describeSocketVmnetProbe(s.probe)} (${s.path})`);
+			const detail = [...sockets, ...(binaries.length > 0 ? [`binaries: ${binaries.join(", ")}`] : [])].join("\n");
+			if (probed.some((s) => s.probe.state === "accepting")) {
+				checks.push({
+					label: "socket_vmnet",
+					status: probed.every((s) => s.probe.state === "accepting") ? "ok" : "warn",
+					detail,
+				});
+			} else if (probed.length > 0) {
+				checks.push({
+					label: "socket_vmnet",
+					status: "warn",
+					detail: `${detail}\nno socket accepts connections. quickchr networks status shows why; quickchr networks restart <net> (sudo) restarts a quickchr network.`,
+				});
+			} else if (vmnet) {
+				checks.push({
+					label: "socket_vmnet",
+					status: "warn",
+					detail: `${detail}\nno socket found. Create a network: quickchr networks create shared (or bridged:<iface>; one sudo step)`,
+				});
 			} else {
 				checks.push({
 					label: "socket_vmnet",
 					status: "warn",
-					detail: "not found (optional, for rootless shared/bridged networking — brew install socket_vmnet)",
+					detail: "not found (optional, for rootless shared/bridged networking — quickchr networks create shared, one sudo step)",
 				});
 			}
 		}

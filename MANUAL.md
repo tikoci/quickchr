@@ -529,6 +529,42 @@ named L2 sockets and the transport each one uses; `networks sockets create <name
 registers a new link, taking `--mode` to pick that transport (the default needs no
 port at all).
 
+**Managed host networks (macOS).** `shared` and `bridged:<iface>` need a root network
+service. quickchr installs one per network, and only that step needs sudo:
+
+| Command | Needs sudo | Does |
+|---|---|---|
+| `networks status [<net>] [--json]` | no | service state (launchd) and whether its socket accepts; exits 1 if any is not serving |
+| `networks create <net>` | once | installs the pinned helper and a LaunchDaemon, starts it |
+| `networks restart <net>` | yes | `launchctl kickstart -k`; machines on QEMU 9.2+ re-attach by themselves |
+| `networks remove <net>` | yes | unloads and deletes the service (refuses while machines on it run, unless `--force`) |
+
+The `remove` guard only sees **your** machines, the ones in the quickchr data dir you
+are running with. A network service is host-wide: any local user (group `staff`), another
+`QUICKCHR_DATA_DIR`, or a QEMU started outside quickchr can be attached to it too, and
+`remove` disconnects them without warning.
+
+`<net>` is the specifier machines use: `shared` or `bridged:<iface>` (`wifi`,
+`ethernet` and `auto` resolve to a device at create time). Before it asks, `create`
+shows the socket_vmnet version, release URL, tarball and binary sha256, and every
+path it writes. The helper is lima-vm's upstream release, not Homebrew.
+`--dry-run` prints the root script and stops; `--yes` skips the question (sudo
+still asks for the password). Without a terminal, `--yes` runs the root step under
+`sudo -n`, so a script or CI job needs passwordless sudo (or a cached `sudo -v`).
+If the service does not come up, `create` and `restart` print the end of its log
+(`/var/log/quickchr/net-<slug>.log`, readable without sudo); the service stays
+installed until `remove`.
+
+```bash
+quickchr networks create bridged:en0      # one sudo step
+quickchr add lab --add-network user --add-network bridged:en0 # no sudo; user first, for REST/SSH
+quickchr networks status
+```
+
+A service with the same label made by hand before (Morpheus's bridged-en0) is
+replaced in place, keeping its `--vmnet-interface-id` so the host-side vmnet MAC
+does not change. Machines attached to the old socket need a `stop`/`start`.
+
 #### `version [--json]`
 
 Print quickchr version (matches `package.json`) plus the latest RouterOS
@@ -1350,12 +1386,12 @@ Picking among the specifiers/forwards by *goal* — full guide with recipes in
 | `shared` | NAT'd L3 with DHCP from the host | yes (or `socket_vmnet` rootless) | yes | yes |
 | `bridged:<iface>` | L2 bridged onto host iface | yes (or `socket_vmnet` rootless) | yes | yes |
 | `tap:<iface>` | pre-created TAP, no quickchr setup | depends | yes | yes |
-| `wifi`, `ethernet`, `auto` (alias) | resolves to detected host iface | as above | | |
+| `wifi`, `ethernet`, `auto` (alias) | resolves to detected host iface; `auto` takes Ethernet before Wi-Fi, but a port with link before one without | as above | | |
 
 Resolution chains:
 
-- **`shared`** on macOS: socket_vmnet daemon → vmnet-shared (root-only QEMU). On Linux: pre-created TAP owned by the user, else root-created TAP+bridge.
-- **`bridged:<iface>`** on macOS: socket_vmnet bridged → vmnet-bridged (root). On Linux: TAP attached to a bridge containing the named iface.
+- **`shared`** on macOS: socket_vmnet daemon → vmnet-shared only when quickchr itself runs as root; otherwise `NETWORK_UNAVAILABLE` naming `quickchr networks create shared`. On Linux: pre-created TAP owned by the user, else root-created TAP+bridge.
+- **`bridged:<iface>`** on macOS: socket_vmnet bridged → vmnet-bridged only as root; otherwise `NETWORK_UNAVAILABLE` naming `quickchr networks create bridged:<iface>`. On Linux: TAP attached to a bridge containing the named iface.
 
 **socket_vmnet networks (macOS).** When a socket_vmnet daemon serves `shared` or
 `bridged:<iface>`, QEMU attaches to its socket directly with `-netdev stream`:
@@ -1366,9 +1402,15 @@ Resolution chains:
 - **Daemon restarts:** on **QEMU 9.2+** each such NIC re-attaches by itself, with no
   VM restart. On 7.2–9.1, or when quickchr cannot read the QEMU version, the NIC stays
   down after a daemon restart until the machine restarts.
+- **A daemon is found by its socket**: first a quickchr-managed
+  `/var/run/quickchr-net-<shared|bridged-<iface>>.sock`, then `socket_vmnet` (shared) or
+  `socket_vmnet.bridged.<iface>` in `/usr/local/var/run`, `/opt/homebrew/var/run` or
+  `/var/run`. Neither `socket_vmnet_client` nor Homebrew is needed.
 - **The socket is checked before boot.** `start` connects to each socket first and
   fails with `NETWORK_UNAVAILABLE` when the socket is missing, stale (its daemon is
   gone) or not permitted. QEMU itself would boot with the link down instead.
+  `quickchr networks` and `doctor` make the same connection and report each socket
+  as accepting, stale, missing or not permitted.
 - **Machines started by quickchr 0.5.6 or earlier** still run under
   `socket_vmnet_client` and do not re-attach. Restart them (`stop`/`start`) to pick up
   the new attachment.

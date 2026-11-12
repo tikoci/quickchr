@@ -11,6 +11,20 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Added
+
+- `quickchr networks create | status | restart | remove <net>` manage macOS host
+  networks. `<net>` is `shared` or `bridged:<iface>`, the same specifier machines
+  use. `create` installs lima-vm's upstream socket_vmnet (pinned version and
+  sha256, not Homebrew) and one LaunchDaemon per network, after showing everything
+  it will install; that one step needs sudo, and machines then attach without it.
+  `status` needs no sudo and tells "service not loaded", "service not running" and
+  "socket not accepting" apart. `remove` warns that the service is host-wide and
+  its confirm defaults to no. (#256)
+- `quickchr networks status --json`: one object per managed network (launchd state,
+  pid, socket probe, plist/socket/log paths), with the same exit status as the text
+  form. (#270)
+
 ### Changed
 
 - `examples/cmr/` is now the CMR grounding lab and defaults to RouterOS
@@ -24,6 +38,14 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   credentialed `pair` left 7 of 9 fresh clients half-paired. Teardown is by
   machine-name prefix, and a failed removal is reported.
 
+- A `networks create` or `restart` whose service does not come up now prints the
+  end of the helper's log, which is world-readable, instead of a `sudo tail` hint,
+  and names both `restart` and `remove` as the way out. (#270)
+
+- On macOS, `shared` or `bridged:<iface>` with no socket_vmnet daemon now fails with
+  `NETWORK_UNAVAILABLE` naming `quickchr networks create <net>`, instead of falling
+  back to native vmnet, which only works with QEMU as root. Running quickchr as root
+  keeps the native path. (#256)
 - macOS `shared` and `bridged:<iface>` networks served by a socket_vmnet daemon
   now attach with QEMU's `-netdev stream` (QEMU 7.2+) instead of wrapping QEMU in
   `socket_vmnet_client`. A machine can have **more than one** socket_vmnet network
@@ -40,6 +62,25 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   Machines already running under `socket_vmnet_client` need a restart to switch.
   Library: the
   optional `ResolvedNetwork.wrapper` field is gone, since nothing sets it. (#256)
+- macOS socket_vmnet networks are found by their **socket**, not by the
+  `socket_vmnet_client` binary, so a daemon installed without Homebrew works.
+  `quickchr networks` and `doctor` now connect to each socket and report it as
+  accepting, stale, missing or not permitted. The wizard checks the same way for
+  `shared` and `bridged:<iface>`, and offers `shared` even before it exists, with the
+  `networks create` step to run.
+  Library: in `PlatformInfo.socketVmnet`, `client` is now optional and `daemon` is
+  new. (#262)
+- `bridged:auto` prefers a port with link: an unplugged Ethernet adapter no longer
+  wins over working Wi-Fi. Every wired adapter counts, including USB and dock
+  adapters named by chip or vendor ("USB 10/100/1000 LAN"). With no link anywhere it
+  keeps the Ethernet-first order.
+  `networks interfaces` shows a Link column. (#256)
+
+### Fixed
+
+- `quickchr networks` no longer reports a dead socket_vmnet daemon as running. The
+  old check took any `socket_vmnet` process as proof, so a leftover Homebrew socket
+  read as running while only a bridged daemon was up. (#262)
 
 ## [0.5.6] — 2026-11-07
 

@@ -1,6 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import type { HostInterface } from "../../src/lib/types.ts";
 import {
 	detectAccel,
 	detectPackageManager,
@@ -23,6 +25,10 @@ import {
 	requireQemu,
 	requireFirmware,
 	resolveInterfaceAlias,
+	parseIfconfigLinkState,
+	findManagedHelper,
+	managedSocketSpecifier,
+	isWiredPortName,
 	isCrossArchEmulation,
 	accelDoctorCheck,
 	proxyDoctorCheck,
@@ -657,6 +663,19 @@ describe("detectPhysicalInterfaces", () => {
 	test("parses macOS networksetup output, filters virtual ports, and assigns aliases once", () => {
 		setPlatform("darwin");
 		mockSpawnSync((cmd) => {
+			if (cmd[0] === "ifconfig") {
+				expect(cmd).toEqual(["ifconfig", "-a"]);
+				return {
+					exitCode: 0,
+					stdout: [
+						"en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500",
+						"\tether aa:bb:cc:dd:ee:ff",
+						"\tstatus: active",
+						"en5: flags=8822<BROADCAST,SMART,SIMPLEX,MULTICAST> mtu 1500",
+						"\tstatus: inactive",
+					].join("\n"),
+				};
+			}
 			expect(cmd).toEqual(["networksetup", "-listallhardwareports"]);
 			return {
 				exitCode: 0,
@@ -681,9 +700,9 @@ describe("detectPhysicalInterfaces", () => {
 		});
 
 		expect(detectPhysicalInterfaces()).toEqual([
-			{ device: "en0", name: "Wi-Fi", mac: "aa:bb:cc:dd:ee:ff", alias: "wifi" },
-			{ device: "en5", name: "USB Ethernet", mac: "11:22:33:44:55:66", alias: "ethernet" },
-			{ device: "en7", name: "Ethernet", mac: "77:88:99:aa:bb:cc", alias: undefined },
+			{ device: "en0", name: "Wi-Fi", mac: "aa:bb:cc:dd:ee:ff", alias: "wifi", active: true },
+			{ device: "en5", name: "USB Ethernet", mac: "11:22:33:44:55:66", alias: "ethernet", active: false },
+			{ device: "en7", name: "Ethernet", mac: "77:88:99:aa:bb:cc", alias: undefined, active: undefined },
 		]);
 	});
 
@@ -709,6 +728,38 @@ describe("resolveInterfaceAlias", () => {
 		expect(resolveInterfaceAlias("auto", [wifiIface])).toBe("en0");
 	});
 
+	test("auto passes over an unplugged ethernet port for wifi with link", () => {
+		const linked = [{ ...wifiIface, active: true }, { ...ethernetIface, active: false }];
+		expect(resolveInterfaceAlias("auto", linked)).toBe("en0");
+	});
+
+	test("auto takes ethernet with link over wifi with link", () => {
+		const linked = [{ ...wifiIface, active: true }, { ...ethernetIface, active: true }];
+		expect(resolveInterfaceAlias("auto", linked)).toBe("en5");
+	});
+
+	test("auto considers every ethernet port, not only the one with the alias", () => {
+		// Codex review of #264: first USB adapter unplugged, a second one linked, Wi-Fi down.
+		const second = { device: "en7", name: "Ethernet", active: true };
+		expect(resolveInterfaceAlias("auto", [{ ...wifiIface, active: false }, { ...ethernetIface, active: false }, second])).toBe("en7");
+	});
+
+	test("auto counts USB and dock adapters named by chip or vendor as wired", () => {
+		const usb: HostInterface = { device: "en8", name: "USB 10/100/1000 LAN", active: true };
+		const tbPort: HostInterface = { device: "en2", name: "Thunderbolt 1", active: true };
+		const iphone: HostInterface = { device: "en9", name: "iPhone USB", active: true };
+		const wifiUp = { ...wifiIface, active: true };
+		expect(resolveInterfaceAlias("auto", [wifiUp, { ...ethernetIface, active: false }, usb])).toBe("en8");
+		expect(resolveInterfaceAlias("auto", [tbPort, iphone, wifiUp])).toBe("en0");
+		expect(isWiredPortName("AX88179A")).toBe(true);
+		expect(isWiredPortName("Thunderbolt Ethernet Slot 1")).toBe(true);
+	});
+
+	test("auto keeps the ethernet-first order when nothing has link", () => {
+		const down = [{ ...wifiIface, active: false }, { ...ethernetIface, active: false }];
+		expect(resolveInterfaceAlias("auto", down)).toBe("en5");
+	});
+
 	test("throws NETWORK_UNAVAILABLE when an alias has no match", () => {
 		expect(() => resolveInterfaceAlias("ethernet", [wifiIface])).toThrow(
 			expect.objectContaining({
@@ -716,6 +767,51 @@ describe("resolveInterfaceAlias", () => {
 				message: expect.stringContaining("ethernet"),
 			}),
 		);
+	});
+});
+
+describe("managedSocketSpecifier", () => {
+	test("names the network a quickchr socket serves, and nothing for other sockets", () => {
+		expect(managedSocketSpecifier("/var/run/quickchr-net-shared.sock")).toBe("shared");
+		expect(managedSocketSpecifier("/var/run/quickchr-net-bridged-en0.sock")).toBe("bridged:en0");
+		expect(managedSocketSpecifier("/var/run/socket_vmnet.bridged.en0")).toBeUndefined();
+		expect(managedSocketSpecifier("/tmp/quickchr-net-shared.sock")).toBeUndefined();
+	});
+});
+
+describe("findManagedHelper", () => {
+	test("finds the newest installed version, ignoring non-version entries and empty versions", () => {
+		// Copilot review of #264: detection looked in /opt/quickchr/bin while the installer
+		// writes /opt/quickchr/socket_vmnet/<version>/bin, so a stopped managed network
+		// read as "not installed".
+		const root = mkdtempSync(join(tmpdir(), "quickchr-tmp-helper-"));
+		try {
+			expect(findManagedHelper(root)).toBeUndefined();
+			for (const v of ["1.2.2", "1.10.0", "notes"]) mkdirSync(join(root, v, "bin"), { recursive: true });
+			writeFileSync(join(root, "1.2.2", "bin", "socket_vmnet"), "");
+			expect(findManagedHelper(root)).toBe(join(root, "1.2.2", "bin", "socket_vmnet"));
+			writeFileSync(join(root, "1.10.0", "bin", "socket_vmnet"), "");
+			expect(findManagedHelper(root)).toBe(join(root, "1.10.0", "bin", "socket_vmnet"));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("parseIfconfigLinkState", () => {
+	test("maps each device's status line; devices without one are absent", () => {
+		const links = parseIfconfigLinkState([
+			"lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384",
+			"\tinet 127.0.0.1 netmask 0xff000000",
+			"en0: flags=8b63<UP,BROADCAST,SMART,RUNNING,PROMISC,ALLMULTI,SIMPLEX,MULTICAST> mtu 1500",
+			"\tether 14:7d:da:0a:07:a1",
+			"\tmedia: autoselect",
+			"\tstatus: active",
+			"en1: flags=8822<BROADCAST,SMART,SIMPLEX,MULTICAST> mtu 1500",
+			"\tstatus: inactive",
+			"utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1500",
+		].join("\n"));
+		expect([...links]).toEqual([["en0", true], ["en1", false]]);
 	});
 });
 

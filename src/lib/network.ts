@@ -17,6 +17,7 @@ import {
 	type ResolvedNetwork,
 	type ServiceName,
 	type SocketVmnetInfo,
+	type SocketVmnetProbe,
 	SERVICE_PORTS,
 	QuickCHRError,
 } from "./types.ts";
@@ -27,7 +28,7 @@ import {
 	type SocketEntry,
 } from "./socket-registry.ts";
 import { assertValidResourceName } from "./names.ts";
-import { resolveInterfaceAlias, isSocketVmnetDaemonRunning } from "./platform.ts";
+import { managedSocketSpecifier, resolveInterfaceAlias } from "./platform.ts";
 
 /** Allocate a port block for a new instance, avoiding conflicts with existing machines. */
 export function allocatePortBlock(
@@ -520,20 +521,28 @@ function resolveUser(
 	};
 }
 
+/** With no socket_vmnet socket, `shared`/`bridged:` fall back to QEMU's native vmnet,
+ *  which needs QEMU itself to run as root: every vmnet mode does (DESIGN.md, #256). As
+ *  any other user that boot can only fail inside QEMU, so refuse here and name the
+ *  one-sudo fix instead. Running quickchr as root keeps the native path. */
+function requireRootForNativeVmnet(specifier: string): void {
+	if (process.getuid?.() === 0) return;
+	throw new QuickCHRError(
+		"NETWORK_UNAVAILABLE",
+		`No socket_vmnet daemon serves ${specifier}, and without one QEMU would need to run as root.`,
+		`Create the network once (one sudo step): quickchr networks create ${specifier}`,
+	);
+}
+
 function resolveShared(
 	config: NetworkConfig,
 	ctx: ResolutionContext,
 ): ResolvedNetwork {
 	if (ctx.platform.os === "darwin") {
 		const svn = ctx.socketVmnet ?? ctx.platform.socketVmnet;
+		// Whether the daemon behind the socket is up is checked by a real connect just
+		// before spawn (`assertSocketVmnetReachable`), not here.
 		if (svn?.sharedSocket) {
-			if (!isSocketVmnetDaemonRunning(svn.sharedSocket)) {
-				throw new QuickCHRError(
-					"NETWORK_UNAVAILABLE",
-					`socket_vmnet daemon is not running (socket not found: ${svn.sharedSocket})`,
-					"Start it with: sudo brew services start socket_vmnet",
-				);
-			}
 			return {
 				qemuNetdevArgs: [
 					"-netdev", socketVmnetNetdev(config.id, svn.sharedSocket, ctx.qemuVersion),
@@ -542,6 +551,7 @@ function resolveShared(
 				socketVmnetPath: svn.sharedSocket,
 			};
 		}
+		requireRootForNativeVmnet("shared");
 		return {
 			qemuNetdevArgs: [
 				"-netdev", `vmnet-shared,id=${config.id}`,
@@ -586,14 +596,7 @@ function resolveBridged(
 		const resolved = resolveInterfaceAlias(iface);
 		const svn = ctx.socketVmnet ?? ctx.platform.socketVmnet;
 		const bridgeSocket = svn?.bridgedSockets[resolved];
-		if (svn && bridgeSocket) {
-			if (!isSocketVmnetDaemonRunning(bridgeSocket)) {
-				throw new QuickCHRError(
-					"NETWORK_UNAVAILABLE",
-					`socket_vmnet bridged daemon is not running (socket not found: ${bridgeSocket})`,
-					"Start it with: sudo brew services start socket_vmnet",
-				);
-			}
+		if (bridgeSocket) {
 			return {
 				qemuNetdevArgs: [
 					"-netdev", socketVmnetNetdev(config.id, bridgeSocket, ctx.qemuVersion),
@@ -602,6 +605,7 @@ function resolveBridged(
 				socketVmnetPath: bridgeSocket,
 			};
 		}
+		requireRootForNativeVmnet(`bridged:${resolved}`);
 		return {
 			qemuNetdevArgs: [
 				"-netdev", `vmnet-bridged,id=${config.id},ifname=${resolved}`,
@@ -716,6 +720,58 @@ function probeUnixSocket(path: string, timeoutMs: number): Promise<string | unde
 	});
 }
 
+/** Connect once to a socket_vmnet socket and say what answered. This is the only
+ *  liveness check for socket_vmnet: `start`, `doctor`, `networks` and the wizard all
+ *  use it. A socket file outlives its daemon, and a process-table check (`pgrep`)
+ *  is satisfied by any other socket_vmnet on the host (#262). */
+export async function probeSocketVmnet(
+	path: string,
+	timeoutMs = SOCKET_VMNET_PROBE_TIMEOUT_MS,
+): Promise<SocketVmnetProbe> {
+	const code = await probeUnixSocket(path, timeoutMs);
+	if (code === undefined) return { state: "accepting" };
+	if (code === "ENOENT") return { state: "missing", code };
+	if (code === "EACCES" || code === "EPERM") return { state: "denied", code };
+	if (code === "ETIMEDOUT") return { state: "timeout", code };
+	return { state: "refused", code };
+}
+
+/** One line for a probed socket, for `doctor`, `networks` and the wizard. */
+export function describeSocketVmnetProbe(probe: SocketVmnetProbe): string {
+	switch (probe.state) {
+		case "accepting":
+			return "accepting connections";
+		case "missing":
+			return "socket file gone";
+		case "refused":
+			return `stale socket, no daemon listening (${probe.code})`;
+		case "denied":
+			return `not permitted (${probe.code}): the daemon's --socket-group must include your user`;
+		case "timeout":
+			return "daemon not answering";
+	}
+}
+
+/** Every socket_vmnet socket detection found, each probed, labeled with the
+ *  specifier that attaches to it (`shared`, `bridged:<iface>`). */
+export async function probeSocketVmnetSockets(
+	info: SocketVmnetInfo,
+	timeoutMs = SOCKET_VMNET_PROBE_TIMEOUT_MS,
+): Promise<Array<{ specifier: string; path: string; probe: SocketVmnetProbe }>> {
+	const sockets = [
+		...(info.sharedSocket ? [{ specifier: "shared", path: info.sharedSocket }] : []),
+		...Object.entries(info.bridgedSockets).map(([iface, path]) => ({ specifier: `bridged:${iface}`, path })),
+	];
+	return Promise.all(sockets.map(async (s) => ({ ...s, probe: await probeSocketVmnet(s.path, timeoutMs) })));
+}
+
+/** The specifier of the network that resolved to `path`, as `networks create` takes it. */
+function socketVmnetSpecifier(networks: NetworkConfig[], path: string): string {
+	const spec = networks.find((n) => n.resolved?.socketVmnetPath === path)?.specifier;
+	if (typeof spec === "object" && spec.type === "bridged") return `bridged:${spec.iface}`;
+	return "shared";
+}
+
 /** Refuse a launch whose socket_vmnet sockets do not accept a connection.
  *
  *  The `socket_vmnet_client` wrapper used to fail the spawn when its `connect()` failed.
@@ -734,30 +790,42 @@ export async function assertSocketVmnetReachable(
 ): Promise<void> {
 	const paths = [...new Set(networks.flatMap((n) => n.resolved?.socketVmnetPath ?? []))];
 	for (const path of paths) {
-		const code = await probeUnixSocket(path, timeoutMs);
-		if (code === undefined) continue;
-		if (code === "EACCES" || code === "EPERM") {
-			throw new QuickCHRError(
-				"NETWORK_UNAVAILABLE",
-				`Not permitted to connect to socket_vmnet socket ${path} (${code})`,
-				"The daemon's --socket-group (socket_vmnet default: staff) must include your user.",
-			);
+		const probe = await probeSocketVmnet(path, timeoutMs);
+		// `networks status/restart` only know quickchr's own services; a Homebrew or lima
+		// socket belongs to whatever installed it. Each hint names the network, so it is a
+		// command the user can run as printed.
+		const managed = managedSocketSpecifier(path);
+		const fix = managed
+			? `Check it with: quickchr networks status ${managed}   (restart it with: quickchr networks restart ${managed}, needs sudo)`
+			: `This socket is not a quickchr-managed network: restart the service that owns it (Homebrew: sudo brew services restart socket_vmnet), or create a managed one with: quickchr networks create ${socketVmnetSpecifier(networks, path)}`;
+		switch (probe.state) {
+			case "accepting":
+				continue;
+			case "denied":
+				throw new QuickCHRError(
+					"NETWORK_UNAVAILABLE",
+					`Not permitted to connect to socket_vmnet socket ${path} (${probe.code})`,
+					"The daemon's --socket-group (socket_vmnet default: staff) must include your user.",
+				);
+			case "missing":
+				throw new QuickCHRError(
+					"NETWORK_UNAVAILABLE",
+					`socket_vmnet socket ${path} does not exist`,
+					fix,
+				);
+			case "timeout":
+				throw new QuickCHRError(
+					"NETWORK_UNAVAILABLE",
+					`socket_vmnet socket ${path} did not accept a connection within ${timeoutMs} ms`,
+					fix,
+				);
+			case "refused":
+				throw new QuickCHRError(
+					"NETWORK_UNAVAILABLE",
+					`socket_vmnet socket ${path} refused the connection (${probe.code}): the socket file is stale, its daemon is not running`,
+					fix,
+				);
 		}
-		if (code === "ENOENT") {
-			throw new QuickCHRError(
-				"NETWORK_UNAVAILABLE",
-				`socket_vmnet socket ${path} does not exist`,
-				"Start the socket_vmnet daemon that serves this network.",
-			);
-		}
-		const why = code === "ETIMEDOUT"
-			? `did not accept a connection within ${timeoutMs} ms`
-			: `refused the connection (${code}): the socket file is stale, its daemon is not running`;
-		throw new QuickCHRError(
-			"NETWORK_UNAVAILABLE",
-			`socket_vmnet socket ${path} ${why}`,
-			"Start or restart the socket_vmnet daemon that serves this network.",
-		);
 	}
 }
 
