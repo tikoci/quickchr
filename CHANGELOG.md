@@ -78,10 +78,6 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
-- The CMR recheck study reports an inconclusive first-bridge alert result
-  (`firstBridgeFired=null`) when rule coverage was not confirmed before the
-  event. Its second-bridge check uses the actual alert counter as its baseline.
-  (#274)
 - `quickchr networks` no longer reports a dead socket_vmnet daemon as running. The
   old check took any `socket_vmnet` process as proof, so a leftover Homebrew socket
   read as running while only a bridged daemon was up. (#262)
