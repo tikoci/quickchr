@@ -1,0 +1,5213 @@
+{
+  "study": "wire",
+  "version": "7.26beta5",
+  "timestamp": "2026-11-14T16:26:28.919Z",
+  "arch": "x86",
+  "host": "linux/x64",
+  "question": "What crosses the link while a client connects and pairs, and do discovery method or enable timing change the first connect or the half-pair?",
+  "parameters": {
+    "boots": 1,
+    "trials": 8,
+    "delays": [
+      0,
+      5,
+      30,
+      75
+    ],
+    "methods": [
+      "address",
+      "discovery"
+    ],
+    "pair": "credentialed"
+  },
+  "trials": [
+    {
+      "boot": "1",
+      "trial": "1",
+      "method": "address",
+      "delaySeconds": "0",
+      "freshBoot": "true",
+      "neighborRunning": "cmr",
+      "mndpRunning": "02",
+      "mndpAgeMs": "5",
+      "firstSynMs": "1027",
+      "syns": "2",
+      "resets": "0",
+      "establishedMs": "84653",
+      "pendingMs": "85409",
+      "pairStatus": "device:ok, cmr:ok",
+      "verdict": "half-paired",
+      "controllerSegmentsAfterPair": "0",
+      "controllerBytesAfterPair": "0"
+    },
+    {
+      "boot": "1",
+      "trial": "2",
+      "method": "discovery",
+      "delaySeconds": "0",
+      "freshBoot": "false",
+      "neighborRunning": "cmr",
+      "mndpRunning": "02",
+      "mndpAgeMs": "3",
+      "firstSynMs": "11",
+      "syns": "1",
+      "resets": "0",
+      "establishedMs": "11",
+      "pendingMs": "1018",
+      "pairStatus": "paired",
+      "verdict": "paired",
+      "controllerSegmentsAfterPair": "7",
+      "controllerBytesAfterPair": "5924"
+    },
+    {
+      "boot": "1",
+      "trial": "3",
+      "method": "address",
+      "delaySeconds": "5",
+      "freshBoot": "false",
+      "neighborRunning": "cmr",
+      "mndpRunning": "02",
+      "mndpAgeMs": "5006",
+      "firstSynMs": "10",
+      "syns": "1",
+      "resets": "0",
+      "establishedMs": "11",
+      "pendingMs": "1018",
+      "pairStatus": "device:ok, cmr:ok",
+      "verdict": "half-paired",
+      "controllerSegmentsAfterPair": "0",
+      "controllerBytesAfterPair": "0"
+    },
+    {
+      "boot": "1",
+      "trial": "4",
+      "method": "discovery",
+      "delaySeconds": "5",
+      "freshBoot": "false",
+      "neighborRunning": "cmr",
+      "mndpRunning": "02",
+      "mndpAgeMs": "5007",
+      "firstSynMs": "11",
+      "syns": "1",
+      "resets": "0",
+      "establishedMs": "11",
+      "pendingMs": "1017",
+      "pairStatus": "device:ok, cmr:ok",
+      "verdict": "half-paired",
+      "controllerSegmentsAfterPair": "0",
+      "controllerBytesAfterPair": "0"
+    },
+    {
+      "boot": "1",
+      "trial": "5",
+      "method": "address",
+      "delaySeconds": "30",
+      "freshBoot": "false",
+      "neighborRunning": "cmr",
+      "mndpRunning": "02",
+      "mndpAgeMs": "3",
+      "firstSynMs": "24",
+      "syns": "1",
+      "resets": "0",
+      "establishedMs": "24",
+      "pendingMs": "1036",
+      "pairStatus": "device:ok, cmr:ok",
+      "verdict": "half-paired",
+      "controllerSegmentsAfterPair": "0",
+      "controllerBytesAfterPair": "0"
+    },
+    {
+      "boot": "1",
+      "trial": "6",
+      "method": "discovery",
+      "delaySeconds": "30",
+      "freshBoot": "false",
+      "neighborRunning": "cmr",
+      "mndpRunning": "02",
+      "mndpAgeMs": "5",
+      "firstSynMs": "24",
+      "syns": "1",
+      "resets": "0",
+      "establishedMs": "24",
+      "pendingMs": "1021",
+      "pairStatus": "paired",
+      "verdict": "paired",
+      "controllerSegmentsAfterPair": "7",
+      "controllerBytesAfterPair": "3484"
+    },
+    {
+      "boot": "1",
+      "trial": "7",
+      "method": "address",
+      "delaySeconds": "75",
+      "freshBoot": "false",
+      "neighborRunning": "cmr",
+      "mndpRunning": "02",
+      "mndpAgeMs": "15002",
+      "firstSynMs": "13",
+      "syns": "1",
+      "resets": "0",
+      "establishedMs": "13",
+      "pendingMs": "1021",
+      "pairStatus": "device:ok, cmr:ok",
+      "verdict": "half-paired",
+      "controllerSegmentsAfterPair": "0",
+      "controllerBytesAfterPair": "0"
+    },
+    {
+      "boot": "1",
+      "trial": "8",
+      "method": "discovery",
+      "delaySeconds": "75",
+      "freshBoot": "false",
+      "neighborRunning": "cmr",
+      "mndpRunning": "02",
+      "mndpAgeMs": "15009",
+      "firstSynMs": "23",
+      "syns": "1",
+      "resets": "0",
+      "establishedMs": "24",
+      "pendingMs": "274",
+      "pairStatus": "paired",
+      "verdict": "paired",
+      "controllerSegmentsAfterPair": "8",
+      "controllerBytesAfterPair": "3890"
+    }
+  ],
+  "detail": [
+    {
+      "boot": 1,
+      "trial": 1,
+      "method": "address",
+      "delay": 0,
+      "connect": [
+        [
+          1027,
+          ">",
+          "S",
+          0
+        ],
+        [
+          84653,
+          ">",
+          "S",
+          0
+        ],
+        [
+          84653,
+          "<",
+          "SA",
+          0
+        ],
+        [
+          84654,
+          ">",
+          "A",
+          0
+        ],
+        [
+          84703,
+          ">",
+          "PA",
+          145
+        ],
+        [
+          84703,
+          "<",
+          "A",
+          0
+        ],
+        [
+          84708,
+          "<",
+          "PA",
+          539
+        ],
+        [
+          84708,
+          ">",
+          "A",
+          0
+        ],
+        [
+          84719,
+          ">",
+          "PA",
+          499
+        ],
+        [
+          84720,
+          "<",
+          "A",
+          0
+        ],
+        [
+          84725,
+          "<",
+          "PA",
+          51
+        ],
+        [
+          84726,
+          ">",
+          "A",
+          0
+        ],
+        [
+          84726,
+          "<",
+          "PA",
+          43
+        ],
+        [
+          84726,
+          ">",
+          "A",
+          0
+        ],
+        [
+          84726,
+          ">",
+          "PA",
+          43
+        ],
+        [
+          84726,
+          "<",
+          "A",
+          0
+        ],
+        [
+          84726,
+          ">",
+          "PA",
+          59
+        ],
+        [
+          84727,
+          "<",
+          "PA",
+          64
+        ],
+        [
+          84727,
+          "<",
+          "A",
+          0
+        ],
+        [
+          84727,
+          ">",
+          "A",
+          0
+        ],
+        [
+          84727,
+          "<",
+          "PA",
+          39
+        ],
+        [
+          84727,
+          ">",
+          "A",
+          0
+        ],
+        [
+          84727,
+          ">",
+          "PA",
+          90
+        ],
+        [
+          84727,
+          "<",
+          "A",
+          0
+        ],
+        [
+          84727,
+          ">",
+          "PA",
+          39
+        ],
+        [
+          84727,
+          "<",
+          "A",
+          0
+        ],
+        [
+          84728,
+          "<",
+          "PA",
+          154
+        ],
+        [
+          84728,
+          ">",
+          "A",
+          0
+        ],
+        [
+          84729,
+          ">",
+          "PA",
+          251
+        ],
+        [
+          84729,
+          "<",
+          "A",
+          0
+        ]
+      ],
+      "pending": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "remote-pending": "true",
+          "state": "pair: device:password required, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*2",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10043
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 2,
+      "method": "discovery",
+      "delay": 0,
+      "connect": [
+        [
+          11,
+          ">",
+          "S",
+          0
+        ],
+        [
+          11,
+          "<",
+          "SA",
+          0
+        ],
+        [
+          12,
+          ">",
+          "A",
+          0
+        ],
+        [
+          12,
+          ">",
+          "PA",
+          145
+        ],
+        [
+          12,
+          "<",
+          "A",
+          0
+        ],
+        [
+          19,
+          "<",
+          "PA",
+          539
+        ],
+        [
+          19,
+          ">",
+          "A",
+          0
+        ],
+        [
+          29,
+          ">",
+          "PA",
+          499
+        ],
+        [
+          30,
+          "<",
+          "A",
+          0
+        ],
+        [
+          35,
+          "<",
+          "PA",
+          51
+        ],
+        [
+          35,
+          ">",
+          "A",
+          0
+        ],
+        [
+          35,
+          "<",
+          "PA",
+          43
+        ],
+        [
+          36,
+          ">",
+          "A",
+          0
+        ],
+        [
+          36,
+          ">",
+          "PA",
+          43
+        ],
+        [
+          36,
+          "<",
+          "A",
+          0
+        ],
+        [
+          36,
+          "<",
+          "PA",
+          64
+        ],
+        [
+          36,
+          ">",
+          "PA",
+          59
+        ],
+        [
+          36,
+          "<",
+          "A",
+          0
+        ],
+        [
+          36,
+          ">",
+          "A",
+          0
+        ],
+        [
+          36,
+          "<",
+          "PA",
+          39
+        ],
+        [
+          37,
+          ">",
+          "A",
+          0
+        ],
+        [
+          37,
+          ">",
+          "PA",
+          90
+        ],
+        [
+          37,
+          "<",
+          "A",
+          0
+        ],
+        [
+          37,
+          ">",
+          "PA",
+          39
+        ],
+        [
+          37,
+          "<",
+          "A",
+          0
+        ],
+        [
+          38,
+          "<",
+          "PA",
+          154
+        ],
+        [
+          38,
+          ">",
+          "A",
+          0
+        ],
+        [
+          38,
+          ">",
+          "PA",
+          251
+        ],
+        [
+          38,
+          "<",
+          "A",
+          0
+        ]
+      ],
+      "pending": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "remote-pending": "true",
+          "state": "pair: device:password required, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired"
+          }
+        ],
+        "pairStatus": "paired",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*3",
+            "identity": "cmr-client",
+            "connected": "true",
+            "pairing-requirement": "none",
+            "channel": "stable"
+          },
+          "verdict": "paired"
+        },
+        "settleMs": 3
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 3,
+      "method": "address",
+      "delay": 5,
+      "connect": [
+        [
+          10,
+          ">",
+          "S",
+          0
+        ],
+        [
+          11,
+          "<",
+          "SA",
+          0
+        ],
+        [
+          11,
+          ">",
+          "A",
+          0
+        ],
+        [
+          17,
+          ">",
+          "PA",
+          145
+        ],
+        [
+          17,
+          "<",
+          "A",
+          0
+        ],
+        [
+          22,
+          "<",
+          "PA",
+          539
+        ],
+        [
+          22,
+          ">",
+          "A",
+          0
+        ],
+        [
+          32,
+          ">",
+          "PA",
+          499
+        ],
+        [
+          33,
+          "<",
+          "A",
+          0
+        ],
+        [
+          38,
+          "<",
+          "PA",
+          51
+        ],
+        [
+          38,
+          ">",
+          "A",
+          0
+        ],
+        [
+          39,
+          "<",
+          "PA",
+          43
+        ],
+        [
+          39,
+          ">",
+          "A",
+          0
+        ],
+        [
+          39,
+          ">",
+          "PA",
+          43
+        ],
+        [
+          39,
+          "<",
+          "A",
+          0
+        ],
+        [
+          39,
+          "<",
+          "PA",
+          64
+        ],
+        [
+          39,
+          ">",
+          "PA",
+          59
+        ],
+        [
+          39,
+          "<",
+          "A",
+          0
+        ],
+        [
+          39,
+          ">",
+          "A",
+          0
+        ],
+        [
+          39,
+          "<",
+          "PA",
+          39
+        ],
+        [
+          40,
+          ">",
+          "A",
+          0
+        ],
+        [
+          40,
+          ">",
+          "PA",
+          90
+        ],
+        [
+          40,
+          "<",
+          "A",
+          0
+        ],
+        [
+          40,
+          ">",
+          "PA",
+          39
+        ],
+        [
+          40,
+          "<",
+          "A",
+          0
+        ],
+        [
+          41,
+          "<",
+          "PA",
+          154
+        ],
+        [
+          41,
+          ">",
+          "A",
+          0
+        ],
+        [
+          41,
+          ">",
+          "PA",
+          251
+        ],
+        [
+          41,
+          "<",
+          "A",
+          0
+        ]
+      ],
+      "pending": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+        "row": {
+          ".id": "*4",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "remote-pending": "true",
+          "state": "pair: device:password required, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*4",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10043
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 4,
+      "method": "discovery",
+      "delay": 5,
+      "connect": [
+        [
+          11,
+          ">",
+          "S",
+          0
+        ],
+        [
+          11,
+          "<",
+          "SA",
+          0
+        ],
+        [
+          12,
+          ">",
+          "A",
+          0
+        ],
+        [
+          14,
+          ">",
+          "PA",
+          145
+        ],
+        [
+          14,
+          "<",
+          "A",
+          0
+        ],
+        [
+          22,
+          "<",
+          "PA",
+          539
+        ],
+        [
+          22,
+          ">",
+          "A",
+          0
+        ],
+        [
+          32,
+          ">",
+          "PA",
+          499
+        ],
+        [
+          32,
+          "<",
+          "A",
+          0
+        ],
+        [
+          37,
+          "<",
+          "PA",
+          51
+        ],
+        [
+          38,
+          ">",
+          "A",
+          0
+        ],
+        [
+          38,
+          "<",
+          "PA",
+          43
+        ],
+        [
+          38,
+          ">",
+          "PA",
+          43
+        ],
+        [
+          38,
+          "<",
+          "A",
+          0
+        ],
+        [
+          38,
+          ">",
+          "A",
+          0
+        ],
+        [
+          38,
+          "<",
+          "PA",
+          64
+        ],
+        [
+          38,
+          ">",
+          "PA",
+          59
+        ],
+        [
+          38,
+          "<",
+          "A",
+          0
+        ],
+        [
+          39,
+          ">",
+          "A",
+          0
+        ],
+        [
+          39,
+          "<",
+          "PA",
+          39
+        ],
+        [
+          39,
+          ">",
+          "A",
+          0
+        ],
+        [
+          39,
+          ">",
+          "PA",
+          90
+        ],
+        [
+          39,
+          "<",
+          "A",
+          0
+        ],
+        [
+          40,
+          ">",
+          "PA",
+          39
+        ],
+        [
+          40,
+          "<",
+          "A",
+          0
+        ],
+        [
+          40,
+          "<",
+          "PA",
+          154
+        ],
+        [
+          40,
+          ">",
+          "A",
+          0
+        ],
+        [
+          41,
+          ">",
+          "PA",
+          252
+        ],
+        [
+          41,
+          "<",
+          "A",
+          0
+        ]
+      ],
+      "pending": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "remote-pending": "true",
+          "state": "pair: device:password required, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*5",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10044
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 5,
+      "method": "address",
+      "delay": 30,
+      "connect": [
+        [
+          24,
+          ">",
+          "S",
+          0
+        ],
+        [
+          24,
+          "<",
+          "SA",
+          0
+        ],
+        [
+          25,
+          ">",
+          "A",
+          0
+        ],
+        [
+          39,
+          ">",
+          "PA",
+          145
+        ],
+        [
+          40,
+          "<",
+          "A",
+          0
+        ],
+        [
+          45,
+          "<",
+          "PA",
+          539
+        ],
+        [
+          45,
+          ">",
+          "A",
+          0
+        ],
+        [
+          56,
+          ">",
+          "PA",
+          499
+        ],
+        [
+          56,
+          "<",
+          "A",
+          0
+        ],
+        [
+          62,
+          "<",
+          "PA",
+          51
+        ],
+        [
+          62,
+          ">",
+          "A",
+          0
+        ],
+        [
+          62,
+          "<",
+          "PA",
+          43
+        ],
+        [
+          62,
+          ">",
+          "A",
+          0
+        ],
+        [
+          62,
+          ">",
+          "PA",
+          43
+        ],
+        [
+          62,
+          "<",
+          "A",
+          0
+        ],
+        [
+          63,
+          "<",
+          "PA",
+          64
+        ],
+        [
+          63,
+          ">",
+          "PA",
+          59
+        ],
+        [
+          63,
+          ">",
+          "A",
+          0
+        ],
+        [
+          63,
+          "<",
+          "A",
+          0
+        ],
+        [
+          63,
+          "<",
+          "PA",
+          39
+        ],
+        [
+          63,
+          ">",
+          "A",
+          0
+        ],
+        [
+          63,
+          ">",
+          "PA",
+          90
+        ],
+        [
+          63,
+          "<",
+          "A",
+          0
+        ],
+        [
+          63,
+          ">",
+          "PA",
+          39
+        ],
+        [
+          64,
+          "<",
+          "A",
+          0
+        ],
+        [
+          64,
+          "<",
+          "PA",
+          154
+        ],
+        [
+          64,
+          ">",
+          "A",
+          0
+        ],
+        [
+          65,
+          ">",
+          "PA",
+          253
+        ],
+        [
+          65,
+          "<",
+          "A",
+          0
+        ]
+      ],
+      "pending": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+        "row": {
+          ".id": "*6",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "remote-pending": "true",
+          "state": "pair: device:password required, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*6",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10042
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 6,
+      "method": "discovery",
+      "delay": 30,
+      "connect": [
+        [
+          24,
+          ">",
+          "S",
+          0
+        ],
+        [
+          24,
+          "<",
+          "SA",
+          0
+        ],
+        [
+          24,
+          ">",
+          "A",
+          0
+        ],
+        [
+          35,
+          ">",
+          "PA",
+          145
+        ],
+        [
+          35,
+          "<",
+          "A",
+          0
+        ],
+        [
+          46,
+          "<",
+          "PA",
+          539
+        ],
+        [
+          46,
+          ">",
+          "A",
+          0
+        ],
+        [
+          70,
+          ">",
+          "PA",
+          499
+        ],
+        [
+          70,
+          "<",
+          "A",
+          0
+        ],
+        [
+          82,
+          "<",
+          "PA",
+          51
+        ],
+        [
+          83,
+          ">",
+          "A",
+          0
+        ],
+        [
+          83,
+          "<",
+          "PA",
+          43
+        ],
+        [
+          83,
+          ">",
+          "A",
+          0
+        ],
+        [
+          83,
+          ">",
+          "PA",
+          43
+        ],
+        [
+          83,
+          "<",
+          "A",
+          0
+        ],
+        [
+          83,
+          "<",
+          "PA",
+          64
+        ],
+        [
+          83,
+          ">",
+          "PA",
+          59
+        ],
+        [
+          83,
+          "<",
+          "A",
+          0
+        ],
+        [
+          83,
+          ">",
+          "A",
+          0
+        ],
+        [
+          83,
+          "<",
+          "PA",
+          39
+        ],
+        [
+          83,
+          ">",
+          "A",
+          0
+        ],
+        [
+          84,
+          ">",
+          "PA",
+          90
+        ],
+        [
+          84,
+          "<",
+          "A",
+          0
+        ],
+        [
+          84,
+          ">",
+          "PA",
+          39
+        ],
+        [
+          84,
+          "<",
+          "A",
+          0
+        ],
+        [
+          84,
+          "<",
+          "PA",
+          154
+        ],
+        [
+          85,
+          ">",
+          "A",
+          0
+        ],
+        [
+          85,
+          ">",
+          "PA",
+          253
+        ],
+        [
+          85,
+          "<",
+          "A",
+          0
+        ]
+      ],
+      "pending": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "remote-pending": "true",
+          "state": "pair: device:password required, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired"
+          }
+        ],
+        "pairStatus": "paired",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*7",
+            "identity": "cmr-client",
+            "connected": "true",
+            "pairing-requirement": "none",
+            "channel": "stable"
+          },
+          "verdict": "paired"
+        },
+        "settleMs": 3
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 7,
+      "method": "address",
+      "delay": 75,
+      "connect": [
+        [
+          13,
+          ">",
+          "S",
+          0
+        ],
+        [
+          13,
+          "<",
+          "SA",
+          0
+        ],
+        [
+          14,
+          ">",
+          "A",
+          0
+        ],
+        [
+          26,
+          ">",
+          "PA",
+          145
+        ],
+        [
+          26,
+          "<",
+          "A",
+          0
+        ],
+        [
+          32,
+          "<",
+          "PA",
+          539
+        ],
+        [
+          32,
+          ">",
+          "A",
+          0
+        ],
+        [
+          42,
+          ">",
+          "PA",
+          499
+        ],
+        [
+          43,
+          "<",
+          "A",
+          0
+        ],
+        [
+          48,
+          "<",
+          "PA",
+          51
+        ],
+        [
+          49,
+          ">",
+          "A",
+          0
+        ],
+        [
+          49,
+          "<",
+          "PA",
+          43
+        ],
+        [
+          49,
+          ">",
+          "A",
+          0
+        ],
+        [
+          49,
+          ">",
+          "PA",
+          43
+        ],
+        [
+          49,
+          "<",
+          "A",
+          0
+        ],
+        [
+          49,
+          ">",
+          "PA",
+          59
+        ],
+        [
+          50,
+          "<",
+          "A",
+          0
+        ],
+        [
+          50,
+          "<",
+          "PA",
+          64
+        ],
+        [
+          50,
+          ">",
+          "A",
+          0
+        ],
+        [
+          50,
+          "<",
+          "PA",
+          39
+        ],
+        [
+          50,
+          ">",
+          "A",
+          0
+        ],
+        [
+          50,
+          ">",
+          "PA",
+          90
+        ],
+        [
+          50,
+          "<",
+          "A",
+          0
+        ],
+        [
+          51,
+          ">",
+          "PA",
+          39
+        ],
+        [
+          51,
+          "<",
+          "A",
+          0
+        ],
+        [
+          51,
+          "<",
+          "PA",
+          154
+        ],
+        [
+          51,
+          ">",
+          "A",
+          0
+        ],
+        [
+          52,
+          ">",
+          "PA",
+          253
+        ],
+        [
+          52,
+          "<",
+          "A",
+          0
+        ]
+      ],
+      "pending": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+        "row": {
+          ".id": "*8",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "remote-pending": "true",
+          "state": "pair: device:password required, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*8",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10044
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 8,
+      "method": "discovery",
+      "delay": 75,
+      "connect": [
+        [
+          23,
+          ">",
+          "S",
+          0
+        ],
+        [
+          24,
+          "<",
+          "SA",
+          0
+        ],
+        [
+          24,
+          ">",
+          "A",
+          0
+        ],
+        [
+          32,
+          ">",
+          "PA",
+          145
+        ],
+        [
+          32,
+          "<",
+          "A",
+          0
+        ],
+        [
+          40,
+          "<",
+          "PA",
+          539
+        ],
+        [
+          41,
+          ">",
+          "A",
+          0
+        ],
+        [
+          51,
+          ">",
+          "PA",
+          499
+        ],
+        [
+          51,
+          "<",
+          "A",
+          0
+        ],
+        [
+          56,
+          "<",
+          "PA",
+          51
+        ],
+        [
+          56,
+          ">",
+          "A",
+          0
+        ],
+        [
+          56,
+          "<",
+          "PA",
+          43
+        ],
+        [
+          57,
+          ">",
+          "A",
+          0
+        ],
+        [
+          57,
+          ">",
+          "PA",
+          43
+        ],
+        [
+          57,
+          "<",
+          "A",
+          0
+        ],
+        [
+          57,
+          "<",
+          "PA",
+          64
+        ],
+        [
+          57,
+          ">",
+          "PA",
+          59
+        ],
+        [
+          57,
+          "<",
+          "A",
+          0
+        ],
+        [
+          57,
+          ">",
+          "A",
+          0
+        ],
+        [
+          58,
+          "<",
+          "PA",
+          39
+        ],
+        [
+          58,
+          ">",
+          "A",
+          0
+        ],
+        [
+          58,
+          ">",
+          "PA",
+          90
+        ],
+        [
+          58,
+          "<",
+          "A",
+          0
+        ],
+        [
+          59,
+          ">",
+          "PA",
+          39
+        ],
+        [
+          59,
+          "<",
+          "A",
+          0
+        ],
+        [
+          59,
+          "<",
+          "PA",
+          154
+        ],
+        [
+          59,
+          ">",
+          "A",
+          0
+        ],
+        [
+          60,
+          ">",
+          "PA",
+          253
+        ],
+        [
+          60,
+          "<",
+          "A",
+          0
+        ]
+      ],
+      "pending": {
+        "clientStatus": "searching",
+        "row": {
+          ".id": "*9",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "remote-pending": "true",
+          "state": "pair: device:password required, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired"
+          }
+        ],
+        "pairStatus": "paired",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*9",
+            "identity": "cmr-client",
+            "connected": "true",
+            "pairing-requirement": "none",
+            "channel": "stable"
+          },
+          "verdict": "paired"
+        },
+        "settleMs": 4
+      }
+    },
+    {
+      "boot": 1,
+      "neighbors": {
+        "controller": [
+          {
+            ".id": "*1",
+            "address": "192.0.2.2",
+            "address4": "192.0.2.2",
+            "address6": "fe80::d:67ff:fea2:7059",
+            "age": "0s",
+            "board": "CHR",
+            "discovered-by": "lldp,mndp",
+            "identity": "cmr-client",
+            "interface": "ether2",
+            "interface-name": "ether2",
+            "ipv6": "true",
+            "mac-address": "02:0D:67:A2:70:59",
+            "platform": "MikroTik",
+            "software-id": "UUm6wO8d8gC",
+            "system-caps": "bridge,router",
+            "system-caps-enabled": "router",
+            "system-description": "MikroTik RouterOS 7.26beta5 2026-10-30 11:13:55 CHR",
+            "unpack": "none",
+            "uptime": "10m10s",
+            "version": "7.26beta5 2026-10-30 11:13:55"
+          }
+        ],
+        "client": [
+          {
+            ".id": "*1",
+            "address": "192.0.2.1",
+            "address4": "192.0.2.1",
+            "address6": "fe80::db:b1ff:fe23:5138",
+            "age": "11s",
+            "board": "CHR",
+            "discovered-by": "lldp,mndp",
+            "identity": "cmr-controller",
+            "interface": "ether2",
+            "interface-name": "ether2",
+            "ipv6": "true",
+            "mac-address": "02:DB:B1:23:51:38",
+            "platform": "MikroTik",
+            "running": "cmr",
+            "software-id": "TcIol1XnBkI",
+            "system-caps": "bridge,router",
+            "system-caps-enabled": "router",
+            "system-description": "MikroTik RouterOS 7.26beta5 2026-10-30 11:13:55 CHR",
+            "unpack": "none",
+            "uptime": "10m26s",
+            "version": "7.26beta5 2026-10-30 11:13:55"
+          }
+        ]
+      }
+    }
+  ],
+  "wire": {
+    "startedAt": "2026-11-14T16:26:28.919Z",
+    "clock": "ms since startedAt",
+    "routers": {
+      "examples-cmr-1w8pvec961e57-1-controller": {
+        "port": 47354,
+        "interfaces": [
+          "ether2"
+        ],
+        "attachedAt": [
+          51912
+        ],
+        "frames": 777
+      },
+      "examples-cmr-1w8pvec961e57-1-client": {
+        "port": 53718,
+        "interfaces": [
+          "ether2"
+        ],
+        "attachedAt": [
+          94828
+        ],
+        "frames": 751
+      }
+    },
+    "marks": [
+      {
+        "t": 51912,
+        "label": "sniffer on examples-cmr-1w8pvec961e57-1-controller",
+        "data": {
+          "interfaces": [
+            "ether2"
+          ]
+        }
+      },
+      {
+        "t": 94828,
+        "label": "sniffer on examples-cmr-1w8pvec961e57-1-client",
+        "data": {
+          "interfaces": [
+            "ether2"
+          ]
+        }
+      },
+      {
+        "t": 95092,
+        "label": "trial 1.1 address delay=0s: controller enable"
+      },
+      {
+        "t": 95140,
+        "label": "trial 1.1 address delay=0s: client enable"
+      },
+      {
+        "t": 180552,
+        "label": "pair cmr-client: credentialed start"
+      },
+      {
+        "t": 181563,
+        "label": "pair cmr-client: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+          "status": "device:ok, cmr:ok"
+        }
+      },
+      {
+        "t": 191606,
+        "label": "pair cmr-client: settled half-paired"
+      },
+      {
+        "t": 216614,
+        "label": "trial 1.2 discovery delay=0s: reset"
+      },
+      {
+        "t": 216628,
+        "label": "trial 1.2 discovery delay=0s: controller enable"
+      },
+      {
+        "t": 216671,
+        "label": "trial 1.2 discovery delay=0s: client enable"
+      },
+      {
+        "t": 217690,
+        "label": "pair cmr-client: credentialed start"
+      },
+      {
+        "t": 218694,
+        "label": "pair cmr-client: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+          "status": "paired"
+        }
+      },
+      {
+        "t": 218697,
+        "label": "pair cmr-client: settled paired"
+      },
+      {
+        "t": 243708,
+        "label": "trial 1.3 address delay=5s: reset"
+      },
+      {
+        "t": 243722,
+        "label": "trial 1.3 address delay=5s: controller enable"
+      },
+      {
+        "t": 248743,
+        "label": "trial 1.3 address delay=5s: client enable"
+      },
+      {
+        "t": 249762,
+        "label": "pair cmr-client: credentialed start"
+      },
+      {
+        "t": 250773,
+        "label": "pair cmr-client: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+          "status": "device:ok, cmr:ok"
+        }
+      },
+      {
+        "t": 260816,
+        "label": "pair cmr-client: settled half-paired"
+      },
+      {
+        "t": 285824,
+        "label": "trial 1.4 discovery delay=5s: reset"
+      },
+      {
+        "t": 285837,
+        "label": "trial 1.4 discovery delay=5s: controller enable"
+      },
+      {
+        "t": 290860,
+        "label": "trial 1.4 discovery delay=5s: client enable"
+      },
+      {
+        "t": 291880,
+        "label": "pair cmr-client: credentialed start"
+      },
+      {
+        "t": 292878,
+        "label": "pair cmr-client: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+          "status": "device:ok, cmr:ok"
+        }
+      },
+      {
+        "t": 302922,
+        "label": "pair cmr-client: settled half-paired"
+      },
+      {
+        "t": 327931,
+        "label": "trial 1.5 address delay=30s: reset"
+      },
+      {
+        "t": 327977,
+        "label": "trial 1.5 address delay=30s: controller enable"
+      },
+      {
+        "t": 358025,
+        "label": "trial 1.5 address delay=30s: client enable"
+      },
+      {
+        "t": 359060,
+        "label": "pair cmr-client: credentialed start"
+      },
+      {
+        "t": 360072,
+        "label": "pair cmr-client: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+          "status": "device:ok, cmr:ok"
+        }
+      },
+      {
+        "t": 370114,
+        "label": "pair cmr-client: settled half-paired"
+      },
+      {
+        "t": 395124,
+        "label": "trial 1.6 discovery delay=30s: reset"
+      },
+      {
+        "t": 395136,
+        "label": "trial 1.6 discovery delay=30s: controller enable"
+      },
+      {
+        "t": 425185,
+        "label": "trial 1.6 discovery delay=30s: client enable"
+      },
+      {
+        "t": 426207,
+        "label": "pair cmr-client: credentialed start"
+      },
+      {
+        "t": 427208,
+        "label": "pair cmr-client: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+          "status": "paired"
+        }
+      },
+      {
+        "t": 427211,
+        "label": "pair cmr-client: settled paired"
+      },
+      {
+        "t": 452225,
+        "label": "trial 1.7 address delay=75s: reset"
+      },
+      {
+        "t": 452277,
+        "label": "trial 1.7 address delay=75s: controller enable"
+      },
+      {
+        "t": 527308,
+        "label": "trial 1.7 address delay=75s: client enable"
+      },
+      {
+        "t": 528334,
+        "label": "pair cmr-client: credentialed start"
+      },
+      {
+        "t": 529333,
+        "label": "pair cmr-client: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+          "status": "device:ok, cmr:ok"
+        }
+      },
+      {
+        "t": 539377,
+        "label": "pair cmr-client: settled half-paired"
+      },
+      {
+        "t": 564388,
+        "label": "trial 1.8 discovery delay=75s: reset"
+      },
+      {
+        "t": 564399,
+        "label": "trial 1.8 discovery delay=75s: controller enable"
+      },
+      {
+        "t": 639433,
+        "label": "trial 1.8 discovery delay=75s: client enable"
+      },
+      {
+        "t": 639704,
+        "label": "pair cmr-client: credentialed start"
+      },
+      {
+        "t": 640703,
+        "label": "pair cmr-client: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+          "status": "paired"
+        }
+      },
+      {
+        "t": 640707,
+        "label": "pair cmr-client: settled paired"
+      }
+    ],
+    "mndp": [
+      {
+        "t": 52115,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "24",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "020000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000418000000000b000b5463496f6c31586e426b49000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 52115,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "24",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "020000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000418000000000b000b5463496f6c31586e426b49000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 71734,
+        "sender": "CHR/ether2/v6",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:0d:67:a2:70:59",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "UUm6wO8d8gC",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79"
+        },
+        "payloadHex": "0000000000010006020d67a27059000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b55556d36774f3864386743000c0003434852000e0001010010000665746865723200120001000013000179"
+      },
+      {
+        "t": 71734,
+        "sender": "CHR/ether2/v4",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:0d:67:a2:70:59",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "UUm6wO8d8gC",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79"
+        },
+        "payloadHex": "0000000000010006020d67a27059000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b55556d36774f3864386743000c0003434852000e0001010010000665746865723200120001000013000179"
+      },
+      {
+        "t": 71734,
+        "sender": "CHR/ether2/v6",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:0d:67:a2:70:59",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "UUm6wO8d8gC",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::d:67ff:fea2:7059"
+        },
+        "payloadHex": "0100000000010006020d67a27059000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b55556d36774f3864386743000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000000d67fffea27059"
+      },
+      {
+        "t": 71734,
+        "sender": "CHR/ether2/v4",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:0d:67:a2:70:59",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "UUm6wO8d8gC",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::d:67ff:fea2:7059"
+        },
+        "payloadHex": "0100000000010006020d67a27059000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b55556d36774f3864386743000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000000d67fffea27059"
+      },
+      {
+        "t": 73007,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 73007,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "03000000"
+      },
+      {
+        "t": 82112,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "04000000"
+      },
+      {
+        "t": 82112,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "04000000"
+      },
+      {
+        "t": 95038,
+        "sender": "cmr-client/ether2/v6",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:0d:67:a2:70:59",
+          "5:identity": "cmr-client",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "UUm6wO8d8gC",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::d:67ff:fea2:7059"
+        },
+        "payloadHex": "0200000000010006020d67a270590005000a636d722d636c69656e740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b55556d36774f3864386743000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000000d67fffea27059"
+      },
+      {
+        "t": 95038,
+        "sender": "cmr-client/ether2/v4",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:0d:67:a2:70:59",
+          "5:identity": "cmr-client",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "UUm6wO8d8gC",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::d:67ff:fea2:7059"
+        },
+        "payloadHex": "0200000000010006020d67a270590005000a636d722d636c69656e740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b55556d36774f3864386743000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000000d67fffea27059"
+      },
+      {
+        "t": 95132,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "05000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "67",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "050000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000443000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 95132,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "05000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "67",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "050000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000443000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 95268,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "06000000"
+      },
+      {
+        "t": 95268,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "06000000"
+      },
+      {
+        "t": 95277,
+        "sender": "cmr-client/ether2/v6",
+        "header": "03000000",
+        "tlvs": {
+          "1:mac": "02:0d:67:a2:70:59",
+          "5:identity": "cmr-client",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "UUm6wO8d8gC",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.2",
+          "15:ipv6": "fe80::d:67ff:fea2:7059"
+        },
+        "payloadHex": "0300000000010006020d67a270590005000a636d722d636c69656e740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b55556d36774f3864386743000c0003434852000e000101001000066574686572320012000100001300017900110004c0000202000f0010fe80000000000000000d67fffea27059"
+      },
+      {
+        "t": 95277,
+        "sender": "cmr-client/ether2/v4",
+        "header": "03000000",
+        "tlvs": {
+          "1:mac": "02:0d:67:a2:70:59",
+          "5:identity": "cmr-client",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "UUm6wO8d8gC",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.2",
+          "15:ipv6": "fe80::d:67ff:fea2:7059"
+        },
+        "payloadHex": "0300000000010006020d67a270590005000a636d722d636c69656e740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b55556d36774f3864386743000c0003434852000e000101001000066574686572320012000100001300017900110004c0000202000f0010fe80000000000000000d67fffea27059"
+      },
+      {
+        "t": 125038,
+        "sender": "cmr-client/ether2/v6",
+        "header": "04000000"
+      },
+      {
+        "t": 125038,
+        "sender": "cmr-client/ether2/v4",
+        "header": "04000000"
+      },
+      {
+        "t": 125132,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "07000000"
+      },
+      {
+        "t": 125132,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "07000000"
+      },
+      {
+        "t": 155036,
+        "sender": "cmr-client/ether2/v6",
+        "header": "05000000"
+      },
+      {
+        "t": 155036,
+        "sender": "cmr-client/ether2/v4",
+        "header": "05000000"
+      },
+      {
+        "t": 155136,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "08000000"
+      },
+      {
+        "t": 155136,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "08000000"
+      },
+      {
+        "t": 185040,
+        "sender": "cmr-client/ether2/v6",
+        "header": "06000000"
+      },
+      {
+        "t": 185040,
+        "sender": "cmr-client/ether2/v4",
+        "header": "06000000"
+      },
+      {
+        "t": 185141,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "09000000"
+      },
+      {
+        "t": 185141,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "09000000"
+      },
+      {
+        "t": 215038,
+        "sender": "cmr-client/ether2/v6",
+        "header": "07000000"
+      },
+      {
+        "t": 215038,
+        "sender": "cmr-client/ether2/v4",
+        "header": "07000000"
+      },
+      {
+        "t": 215139,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0a000000"
+      },
+      {
+        "t": 215139,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0a000000"
+      },
+      {
+        "t": 216624,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0b000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "188",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "0b0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004bc000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 216624,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0b000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "188",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "0b0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004bc000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 216665,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0c000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "188",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "0c0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004bc000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 216665,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0c000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "188",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "0c0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004bc000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 243719,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0d000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "216",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "0d0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004d8000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 243719,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0d000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "216",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "0d0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004d8000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 243734,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0e000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "216",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "0e0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004d8000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 243734,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0e000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "216",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "0e0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004d8000000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 245040,
+        "sender": "cmr-client/ether2/v6",
+        "header": "08000000"
+      },
+      {
+        "t": 245040,
+        "sender": "cmr-client/ether2/v4",
+        "header": "08000000"
+      },
+      {
+        "t": 273740,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0f000000"
+      },
+      {
+        "t": 273740,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0f000000"
+      },
+      {
+        "t": 275040,
+        "sender": "cmr-client/ether2/v6",
+        "header": "09000000"
+      },
+      {
+        "t": 275040,
+        "sender": "cmr-client/ether2/v4",
+        "header": "09000000"
+      },
+      {
+        "t": 285834,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "10000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "258",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "100000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000402010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 285834,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "10000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "258",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "100000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000402010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 285850,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "11000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "258",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "110000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000402010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 285850,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "11000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "258",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "110000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000402010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 305035,
+        "sender": "cmr-client/ether2/v6",
+        "header": "0a000000"
+      },
+      {
+        "t": 305035,
+        "sender": "cmr-client/ether2/v4",
+        "header": "0a000000"
+      },
+      {
+        "t": 315848,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "12000000"
+      },
+      {
+        "t": 315848,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "12000000"
+      },
+      {
+        "t": 327973,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "13000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "300",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "130000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00042c010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 327973,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "13000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "300",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "130000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00042c010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 328009,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "14000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "300",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "140000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00042c010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 328009,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "14000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "300",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "140000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00042c010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 335041,
+        "sender": "cmr-client/ether2/v6",
+        "header": "0b000000"
+      },
+      {
+        "t": 335041,
+        "sender": "cmr-client/ether2/v4",
+        "header": "0b000000"
+      },
+      {
+        "t": 358015,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "15000000"
+      },
+      {
+        "t": 358015,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "15000000"
+      },
+      {
+        "t": 365043,
+        "sender": "cmr-client/ether2/v6",
+        "header": "0c000000"
+      },
+      {
+        "t": 365043,
+        "sender": "cmr-client/ether2/v4",
+        "header": "0c000000"
+      },
+      {
+        "t": 388021,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "16000000"
+      },
+      {
+        "t": 388021,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "16000000"
+      },
+      {
+        "t": 395044,
+        "sender": "cmr-client/ether2/v6",
+        "header": "0d000000"
+      },
+      {
+        "t": 395044,
+        "sender": "cmr-client/ether2/v4",
+        "header": "0d000000"
+      },
+      {
+        "t": 395132,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "17000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "367",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "170000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00046f010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 395132,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "17000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "367",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "170000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00046f010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 395174,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "18000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "367",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "180000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00046f010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 395174,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "18000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "367",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "180000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00046f010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 425041,
+        "sender": "cmr-client/ether2/v6",
+        "header": "0e000000"
+      },
+      {
+        "t": 425041,
+        "sender": "cmr-client/ether2/v4",
+        "header": "0e000000"
+      },
+      {
+        "t": 425172,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "19000000"
+      },
+      {
+        "t": 425172,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "19000000"
+      },
+      {
+        "t": 452274,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "1a000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "424",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "1a0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004a8010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 452274,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "1a000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "424",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "1a0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004a8010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 452289,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "1b000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "424",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "1b0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004a8010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 452289,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "1b000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "424",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "1b0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004a8010000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 455037,
+        "sender": "cmr-client/ether2/v6",
+        "header": "0f000000"
+      },
+      {
+        "t": 455037,
+        "sender": "cmr-client/ether2/v4",
+        "header": "0f000000"
+      },
+      {
+        "t": 482290,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "1c000000"
+      },
+      {
+        "t": 482290,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "1c000000"
+      },
+      {
+        "t": 485046,
+        "sender": "cmr-client/ether2/v6",
+        "header": "10000000"
+      },
+      {
+        "t": 485046,
+        "sender": "cmr-client/ether2/v4",
+        "header": "10000000"
+      },
+      {
+        "t": 512299,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "1d000000"
+      },
+      {
+        "t": 512299,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "1d000000"
+      },
+      {
+        "t": 515049,
+        "sender": "cmr-client/ether2/v6",
+        "header": "11000000"
+      },
+      {
+        "t": 515049,
+        "sender": "cmr-client/ether2/v4",
+        "header": "11000000"
+      },
+      {
+        "t": 542305,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "1e000000"
+      },
+      {
+        "t": 542305,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "1e000000"
+      },
+      {
+        "t": 545052,
+        "sender": "cmr-client/ether2/v6",
+        "header": "12000000"
+      },
+      {
+        "t": 545052,
+        "sender": "cmr-client/ether2/v4",
+        "header": "12000000"
+      },
+      {
+        "t": 564396,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "1f000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "536",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "1f0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000418020000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 564396,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "1f000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "536",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "1f0000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000418020000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 564413,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "20000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "536",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "200000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000418020000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 564413,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "20000000",
+        "tlvs": {
+          "1:mac": "02:db:b1:23:51:38",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "536",
+          "11:software-id": "TcIol1XnBkI",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::db:b1ff:fe23:5138"
+        },
+        "payloadHex": "200000000001000602dbb12351380005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000418020000000b000b5463496f6c31586e426b49000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000dbb1fffe235138"
+      },
+      {
+        "t": 575051,
+        "sender": "cmr-client/ether2/v6",
+        "header": "13000000"
+      },
+      {
+        "t": 575051,
+        "sender": "cmr-client/ether2/v4",
+        "header": "13000000"
+      },
+      {
+        "t": 594411,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "21000000"
+      },
+      {
+        "t": 594411,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "21000000"
+      },
+      {
+        "t": 605054,
+        "sender": "cmr-client/ether2/v6",
+        "header": "14000000"
+      },
+      {
+        "t": 605054,
+        "sender": "cmr-client/ether2/v4",
+        "header": "14000000"
+      },
+      {
+        "t": 624412,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "22000000"
+      },
+      {
+        "t": 624412,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "22000000"
+      },
+      {
+        "t": 635055,
+        "sender": "cmr-client/ether2/v6",
+        "header": "15000000"
+      },
+      {
+        "t": 635055,
+        "sender": "cmr-client/ether2/v4",
+        "header": "15000000"
+      },
+      {
+        "t": 654420,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "23000000"
+      },
+      {
+        "t": 654420,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "23000000"
+      },
+      {
+        "t": 665054,
+        "sender": "cmr-client/ether2/v6",
+        "header": "16000000"
+      },
+      {
+        "t": 665054,
+        "sender": "cmr-client/ether2/v4",
+        "header": "16000000"
+      }
+    ],
+    "mndpIntervals": {
+      "cmr-controller/ether2/v6": {
+        "count": 34,
+        "lifetimes": 1,
+        "minMs": 15,
+        "medianMs": 27054,
+        "maxMs": 30009
+      },
+      "cmr-controller/ether2/v4": {
+        "count": 34,
+        "lifetimes": 1,
+        "minMs": 15,
+        "medianMs": 27054,
+        "maxMs": 30009
+      },
+      "CHR/ether2/v6": {
+        "count": 2,
+        "lifetimes": 1,
+        "minMs": 0,
+        "medianMs": 0,
+        "maxMs": 0
+      },
+      "CHR/ether2/v4": {
+        "count": 2,
+        "lifetimes": 1,
+        "minMs": 0,
+        "medianMs": 0,
+        "maxMs": 0
+      },
+      "cmr-client/ether2/v6": {
+        "count": 21,
+        "lifetimes": 1,
+        "minMs": 239,
+        "medianMs": 30000.5,
+        "maxMs": 30009
+      },
+      "cmr-client/ether2/v4": {
+        "count": 21,
+        "lifetimes": 1,
+        "minMs": 239,
+        "medianMs": 30000.5,
+        "maxMs": 30009
+      }
+    },
+    "cmr": [
+      {
+        "client": "10.0.2.15:50538",
+        "server": "192.0.2.1:54321",
+        "first": 96164,
+        "last": 96164,
+        "bareAcks": 0,
+        "segments": [
+          [
+            96164,
+            ">",
+            "S",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:40252",
+        "server": "192.0.2.1:54321",
+        "first": 179790,
+        "last": 216617,
+        "bareAcks": 23,
+        "segments": [
+          [
+            179790,
+            ">",
+            "S",
+            0
+          ],
+          [
+            179790,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            179840,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            179845,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            179856,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            179862,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            179863,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            179863,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            179863,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            179864,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            179864,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            179864,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            179864,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            179865,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            179866,
+            ">",
+            "PA",
+            251
+          ],
+          [
+            180558,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            180801,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            180805,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            180929,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            180930,
+            "<",
+            "PA",
+            69
+          ],
+          [
+            180930,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            216616,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            216616,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            216617,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:40254",
+        "server": "192.0.2.1:54321",
+        "first": 216679,
+        "last": 243710,
+        "bareAcks": 41,
+        "segments": [
+          [
+            216679,
+            ">",
+            "S",
+            0
+          ],
+          [
+            216679,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            216680,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            216687,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            216697,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            216703,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            216703,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            216704,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            216704,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            216704,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            216704,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            216705,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            216705,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            216706,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            216706,
+            ">",
+            "PA",
+            251
+          ],
+          [
+            217693,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            217938,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            217942,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            218066,
+            ">",
+            "PA",
+            71
+          ],
+          [
+            218066,
+            ">",
+            "PA",
+            66
+          ],
+          [
+            218067,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            218067,
+            "<",
+            "PA",
+            46
+          ],
+          [
+            218068,
+            "<",
+            "PA",
+            983
+          ],
+          [
+            218068,
+            "<",
+            "PA",
+            937
+          ],
+          [
+            218068,
+            "<",
+            "PA",
+            111
+          ],
+          [
+            218072,
+            ">",
+            "PA",
+            534
+          ],
+          [
+            218121,
+            ">",
+            "PA",
+            497
+          ],
+          [
+            228068,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            228068,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            228069,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            228070,
+            ">",
+            "PA",
+            430
+          ],
+          [
+            228071,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            228071,
+            ">",
+            "PA",
+            172
+          ],
+          [
+            228072,
+            ">",
+            "PA",
+            161
+          ],
+          [
+            228072,
+            ">",
+            "PA",
+            200
+          ],
+          [
+            229074,
+            "<",
+            "PA",
+            116
+          ],
+          [
+            229076,
+            ">",
+            "PA",
+            46
+          ],
+          [
+            238067,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            238067,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            238067,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            238069,
+            ">",
+            "PA",
+            430
+          ],
+          [
+            238070,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            238071,
+            ">",
+            "PA",
+            304
+          ],
+          [
+            238071,
+            ">",
+            "PA",
+            200
+          ],
+          [
+            243710,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            243710,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            243710,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:40256",
+        "server": "192.0.2.1:54321",
+        "first": 248750,
+        "last": 285827,
+        "bareAcks": 23,
+        "segments": [
+          [
+            248750,
+            ">",
+            "S",
+            0
+          ],
+          [
+            248751,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            248757,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            248762,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            248772,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            248778,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            248779,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            248779,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            248779,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            248779,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            248779,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            248780,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            248780,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            248781,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            248781,
+            ">",
+            "PA",
+            251
+          ],
+          [
+            249766,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            250009,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            250014,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            250138,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            250139,
+            "<",
+            "PA",
+            69
+          ],
+          [
+            250181,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            285826,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            285826,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            285827,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:40258",
+        "server": "192.0.2.1:54321",
+        "first": 290868,
+        "last": 327933,
+        "bareAcks": 24,
+        "segments": [
+          [
+            290868,
+            ">",
+            "S",
+            0
+          ],
+          [
+            290868,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            290871,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            290879,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            290889,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            290894,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            290895,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            290895,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            290895,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            290895,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            290896,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            290896,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            290897,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            290897,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            290898,
+            ">",
+            "PA",
+            252
+          ],
+          [
+            291884,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            292127,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            292131,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            292255,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            292255,
+            "<",
+            "PA",
+            69
+          ],
+          [
+            292256,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            327933,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            327933,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            327933,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:40260",
+        "server": "192.0.2.1:54321",
+        "first": 358042,
+        "last": 395126,
+        "bareAcks": 23,
+        "segments": [
+          [
+            358042,
+            ">",
+            "S",
+            0
+          ],
+          [
+            358042,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            358057,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            358063,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            358074,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            358080,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            358080,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            358080,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            358081,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            358081,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            358081,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            358081,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            358081,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            358082,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            358083,
+            ">",
+            "PA",
+            253
+          ],
+          [
+            359066,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            359310,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            359315,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            359439,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            359440,
+            "<",
+            "PA",
+            69
+          ],
+          [
+            359440,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            395125,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            395125,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            395125,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:40262",
+        "server": "192.0.2.1:54321",
+        "first": 425201,
+        "last": 452227,
+        "bareAcks": 41,
+        "segments": [
+          [
+            425201,
+            ">",
+            "S",
+            0
+          ],
+          [
+            425201,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            425212,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            425223,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            425247,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            425259,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            425260,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            425260,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            425260,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            425260,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            425260,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            425261,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            425261,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            425261,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            425262,
+            ">",
+            "PA",
+            253
+          ],
+          [
+            426211,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            426455,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            426459,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            426584,
+            ">",
+            "PA",
+            71
+          ],
+          [
+            426584,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            426584,
+            ">",
+            "PA",
+            66
+          ],
+          [
+            426585,
+            "<",
+            "PA",
+            46
+          ],
+          [
+            426585,
+            "<",
+            "PA",
+            1116
+          ],
+          [
+            426586,
+            "<",
+            "PA",
+            915
+          ],
+          [
+            426590,
+            ">",
+            "PA",
+            538
+          ],
+          [
+            426636,
+            ">",
+            "PA",
+            475
+          ],
+          [
+            436582,
+            "<",
+            "PA",
+            133
+          ],
+          [
+            436583,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            436583,
+            "<",
+            "PA",
+            107
+          ],
+          [
+            436583,
+            "<",
+            "PA",
+            199
+          ],
+          [
+            436585,
+            ">",
+            "PA",
+            114
+          ],
+          [
+            436585,
+            ">",
+            "PA",
+            345
+          ],
+          [
+            436586,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            436587,
+            ">",
+            "PA",
+            282
+          ],
+          [
+            436587,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            436587,
+            ">",
+            "PA",
+            202
+          ],
+          [
+            437580,
+            "<",
+            "PA",
+            116
+          ],
+          [
+            437580,
+            ">",
+            "PA",
+            46
+          ],
+          [
+            446583,
+            "<",
+            "PA",
+            65
+          ],
+          [
+            446584,
+            ">",
+            "PA",
+            82
+          ],
+          [
+            446584,
+            "<",
+            "PA",
+            1416
+          ],
+          [
+            446586,
+            ">",
+            "PA",
+            61
+          ],
+          [
+            446586,
+            ">",
+            "PA",
+            345
+          ],
+          [
+            446587,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            446588,
+            ">",
+            "PA",
+            172
+          ],
+          [
+            446588,
+            ">",
+            "PA",
+            161
+          ],
+          [
+            446589,
+            ">",
+            "PA",
+            202
+          ],
+          [
+            452226,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            452226,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            452227,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:40264",
+        "server": "192.0.2.1:54321",
+        "first": 527314,
+        "last": 564390,
+        "bareAcks": 23,
+        "segments": [
+          [
+            527314,
+            ">",
+            "S",
+            0
+          ],
+          [
+            527314,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            527327,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            527333,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            527343,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            527349,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            527350,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            527350,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            527350,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            527351,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            527351,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            527351,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            527352,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            527352,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            527353,
+            ">",
+            "PA",
+            253
+          ],
+          [
+            528338,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            528582,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            528586,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            528711,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            528711,
+            "<",
+            "PA",
+            69
+          ],
+          [
+            528712,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            564390,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            564390,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            564390,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:40266",
+        "server": "192.0.2.1:54321",
+        "first": 639444,
+        "last": 660096,
+        "bareAcks": 40,
+        "segments": [
+          [
+            639444,
+            ">",
+            "S",
+            0
+          ],
+          [
+            639445,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            639453,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            639461,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            639472,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            639477,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            639477,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            639478,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            639478,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            639478,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            639479,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            639479,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            639480,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            639480,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            639481,
+            ">",
+            "PA",
+            253
+          ],
+          [
+            639708,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            639951,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            639955,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            640081,
+            ">",
+            "PA",
+            71
+          ],
+          [
+            640081,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            640082,
+            ">",
+            "PA",
+            66
+          ],
+          [
+            640082,
+            "<",
+            "PA",
+            46
+          ],
+          [
+            640083,
+            "<",
+            "PA",
+            983
+          ],
+          [
+            640083,
+            "<",
+            "PA",
+            836
+          ],
+          [
+            640083,
+            "<",
+            "PA",
+            212
+          ],
+          [
+            640085,
+            ">",
+            "PA",
+            178
+          ],
+          [
+            640130,
+            ">",
+            "PA",
+            1085
+          ],
+          [
+            650087,
+            "<",
+            "PA",
+            105
+          ],
+          [
+            650088,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            650088,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            650088,
+            "<",
+            "PA",
+            295
+          ],
+          [
+            650090,
+            ">",
+            "PA",
+            244
+          ],
+          [
+            650091,
+            ">",
+            "PA",
+            215
+          ],
+          [
+            650092,
+            ">",
+            "PA",
+            172
+          ],
+          [
+            650092,
+            ">",
+            "PA",
+            161
+          ],
+          [
+            650093,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            650094,
+            ">",
+            "PA",
+            202
+          ],
+          [
+            651086,
+            "<",
+            "PA",
+            116
+          ],
+          [
+            651087,
+            ">",
+            "PA",
+            46
+          ],
+          [
+            660091,
+            "<",
+            "PA",
+            111
+          ],
+          [
+            660091,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            660091,
+            "<",
+            "PA",
+            328
+          ],
+          [
+            660092,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            660093,
+            ">",
+            "PA",
+            414
+          ],
+          [
+            660094,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            660095,
+            ">",
+            "PA",
+            304
+          ],
+          [
+            660095,
+            ">",
+            "PA",
+            202
+          ]
+        ]
+      }
+    ],
+    "other": {
+      "examples-cmr-1w8pvec961e57-1-controller cdp": {
+        "count": 55,
+        "first": 52115,
+        "last": 665054
+      },
+      "examples-cmr-1w8pvec961e57-1-controller lldp": {
+        "count": 62,
+        "first": 52115,
+        "last": 665054
+      },
+      "examples-cmr-1w8pvec961e57-1-controller icmp6": {
+        "count": 1,
+        "first": 69092,
+        "last": 69092
+      },
+      "examples-cmr-1w8pvec961e57-1-client cdp": {
+        "count": 52,
+        "first": 95038,
+        "last": 665054
+      },
+      "examples-cmr-1w8pvec961e57-1-client lldp": {
+        "count": 52,
+        "first": 95038,
+        "last": 665054
+      },
+      "examples-cmr-1w8pvec961e57-1-controller arp": {
+        "count": 14,
+        "first": 96164,
+        "last": 564094
+      },
+      "examples-cmr-1w8pvec961e57-1-client arp": {
+        "count": 14,
+        "first": 96164,
+        "last": 564094
+      }
+    },
+    "mndpIntervalsNote": "Recomputed after review (2026-11-14): one series per sender lifetime, split where the MNDP header counter restarts; median of an even count is the mean of the middle two."
+  }
+}

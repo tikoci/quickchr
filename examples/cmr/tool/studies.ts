@@ -6,6 +6,7 @@
  *   bun run cmr.ts --study pairing [--boots 3] [--trials 8] [--strategies credentialed,confirm-first]
  *   bun run cmr.ts --study policy
  *   bun run cmr.ts --study recheck
+ *   bun run cmr.ts --study wire [--boots 1] [--trials 8] [--delays 0,5,30,75]
  *
  * Add a study: write `async function <name>(context)` below, register it in STUDIES, and add
  * its question and result rows to FINDINGS.md.
@@ -14,6 +15,7 @@ import type { ChrInstance } from "../../../src/index.ts";
 import { check } from "../../lib.ts";
 import { attempt, command, createPairLab, identityOf, operand, quote, read, removeByPrefix, until, type PairLab, type Row } from "./lab.ts";
 import { observe, pairClient, pairWith, resetPairing, restartController, selectable, strategyNames, waitPending, type Strategy } from "./pairing.ts";
+import { CMR_PORT, wire as wireCapture } from "./wire.ts";
 
 export interface StudyContext {
 	version: string;
@@ -25,12 +27,19 @@ export interface StudyContext {
 }
 
 
+/** An integer operand from 1 to 100, or the fallback when the flag is absent. */
+function count(context: StudyContext, name: string, fallback: number): number {
+	const value = Number(operand(context.argv, name) ?? fallback);
+	check(Number.isInteger(value) && value >= 1 && value <= 100, `--${name} must be an integer from 1 to 100`);
+	return value;
+}
+
 /** Boot a pair lab, run `body`, and remove the lab whatever happens. */
 let labCount = 0;
-async function withPairLab<T>(context: StudyContext, body: (lab: PairLab) => Promise<T>): Promise<T> {
+async function withPairLab<T>(context: StudyContext, body: (lab: PairLab) => Promise<T>, enable = true): Promise<T> {
 	const prefix = `${context.prefix}-${++labCount}`;
 	try {
-		const lab = await createPairLab(context.track, { version: context.version, prefix });
+		const lab = await createPairLab(context.track, { version: context.version, prefix, enable });
 		return await body(lab);
 	} finally {
 		await removeByPrefix(prefix);
@@ -43,13 +52,8 @@ async function withPairLab<T>(context: StudyContext, body: (lab: PairLab) => Pro
  * selection, then restarts the controller's CMR service to see whether the pairing was committed.
  */
 async function pairing(context: StudyContext): Promise<void> {
-	const count = (name: string, fallback: number) => {
-		const value = Number(operand(context.argv, name) ?? fallback);
-		check(Number.isInteger(value) && value >= 1 && value <= 100, `--${name} must be an integer from 1 to 100`);
-		return value;
-	};
-	const boots = count("boots", 2);
-	const trials = count("trials", 8);
+	const boots = count(context, "boots", 2);
+	const trials = count(context, "trials", 8);
 	const strategies = (operand(context.argv, "strategies")?.split(",") ?? strategyNames) as Strategy[];
 	for (const s of strategies) check(strategyNames.includes(s), `Unknown strategy ${s}; known: ${strategyNames.join(", ")}`);
 	const results: Row[] = [];
@@ -281,4 +285,110 @@ async function recheck(context: StudyContext): Promise<void> {
 	});
 }
 
-export const STUDIES: Record<string, (context: StudyContext) => Promise<void>> = { pairing, policy, recheck };
+/**
+ * Q: what crosses the link while a client finds the controller and pairs? Does MNDP carry CMR
+ * state, does the way the client finds the controller (a configured address, or MNDP discovery
+ * with no address) change the half-pair, and is the 85 s first connect caused by enabling the
+ * client too soon after the controller?
+ *
+ * Every trial: controller CMR off, client reset to never-seen; set the method; enable the
+ * controller; wait `delay`; enable the client; time the connect on the wire; pair with the single
+ * credentialed `pair` (the sequence that half-pairs); then watch 25 s for the controller's polls.
+ * Trials rotate method fastest, then delay, so the default 8 trials cover every combination. The
+ * first trial on each boot also measures the fresh-boot first connect. Always captures (--sniff).
+ */
+async function wire(context: StudyContext): Promise<void> {
+	const capture = wireCapture.capture;
+	check(capture, "The wire study needs the capture the runner creates");
+	const boots = count(context, "boots", 1);
+	const trials = count(context, "trials", 8);
+	const delays = (operand(context.argv, "delays") ?? "0,5,30,75").split(",").map(Number);
+	for (const d of delays) check(Number.isInteger(d) && d >= 0 && d <= 600, "--delays must be integers from 0 to 600 (seconds)");
+	const methods = ["address", "discovery"] as const;
+	const results: Row[] = [];
+	const detail: unknown[] = [];
+	context.evidence.question = "What crosses the link while a client connects and pairs, and do discovery method or enable timing change the first connect or the half-pair?";
+	context.evidence.parameters = { boots, trials, delays, methods, pair: "credentialed" };
+	context.evidence.trials = results;
+	context.evidence.detail = detail;
+	for (let boot = 1; boot <= boots; boot++) {
+		await withPairLab(context, async ({ controller, client }) => {
+			const identity = await identityOf(client);
+			const controllerIdentity = await identityOf(controller);
+			for (let trial = 1; trial <= trials; trial++) {
+				const method = methods[(trial - 1) % methods.length] as (typeof methods)[number];
+				const delay = delays[Math.floor((trial - 1) / methods.length) % delays.length] as number;
+				const label = `trial ${boot}.${trial} ${method} delay=${delay}s`;
+				if (trial > 1) {
+					capture.mark(`${label}: reset`);
+					await command(client, "/cmr/client/set enabled=no");
+					await command(client, "/cmr/client/forget");
+					await command(client, "/cmr/client/set !pairing-requirement");
+					await attempt(controller, `/cmr/device/remove [find identity=${quote(identity)}]`);
+					await command(controller, "/cmr/set enabled=no");
+				}
+				await command(client, `/cmr/client/set controller-addresses=${method === "address" ? "192.0.2.1" : '""'}`);
+				capture.mark(`${label}: controller enable`);
+				await command(controller, "/cmr/set enabled=yes");
+				if (delay) await Bun.sleep(delay * 1000);
+				// What a discovering client can know: its neighbor row and the last announcement heard.
+				const neighbor = (await read(client, "/ip/neighbor")).find(r => r.identity === controllerIdentity);
+				const clientEnabled = capture.now();
+				const announcement = capture.lastMndp(controllerIdentity, clientEnabled);
+				capture.mark(`${label}: client enable`);
+				await command(client, "/cmr/client/set enabled=yes");
+				// Only the deadline is a result ("timeout"); a REST failure or Ctrl-C must fail the study.
+				const pending = await waitPending(controller, client, identity, 240_000).catch((error: unknown) => {
+					if (error instanceof Error && error.message.startsWith("Timed out")) return undefined;
+					throw error;
+				});
+				const pendingAt = capture.now();
+				const connect = capture.cmrBetween(clientEnabled, pendingAt);
+				const syns = connect.filter(s => s.packet.flags === "S");
+				const established = connect.find(s => s.packet.flags === "SA");
+				const row: Row = {
+					boot: String(boot), trial: String(trial), method, delaySeconds: String(delay), freshBoot: String(trial === 1),
+					neighborRunning: neighbor ? (neighbor.running ?? "") : "no neighbor row",
+					mndpRunning: announcement?.packet.mndp?.fields.running ?? "none heard",
+					mndpAgeMs: announcement ? String(clientEnabled - announcement.t) : "",
+					firstSynMs: syns[0] ? String(syns[0].t - clientEnabled) : "none",
+					// The fresh-boot 85 s first connect was a SYN sourced from ether1's 10.0.2.15.
+					firstSynFrom: syns[0]?.packet.src ?? "",
+					syns: String(syns.length),
+					resets: String(connect.filter(s => s.packet.flags?.includes("R")).length),
+					establishedMs: established ? String(established.t - clientEnabled) : "none",
+					pendingMs: pending ? String(pendingAt - clientEnabled) : "timeout",
+				};
+				let result: Awaited<ReturnType<typeof pairWith>> | undefined;
+				if (pending) {
+					const pairStart = capture.now();
+					result = await pairWith(controller, client, identity, "credentialed");
+					const pairDone = capture.now();
+					// The pairing messages, "<" from the controller and ">" from the client, payload bytes,
+					// from the start of the pair command until pairWith() settled (paired, or 10 s). On
+					// 7.26beta5 the client's reply to the third controller message matched the outcome:
+					// one 108 B segment half-paired, 71 B + 66 B paired (FINDINGS.md → Wire).
+					const exchange = capture.cmrBetween(pairStart, pairDone).filter(s => s.packet.length > 0)
+						.map(s => `${s.packet.srcPort === CMR_PORT ? "<" : ">"}${s.packet.length}`).join(" ");
+					await Bun.sleep(25_000);
+					const after = capture.cmrBetween(pairDone).filter(s => s.packet.srcPort === CMR_PORT && s.packet.length > 0);
+					Object.assign(row, {
+						pairStatus: result.pairStatus,
+						exchange,
+						exchangeWindowMs: String(pairDone - pairStart),
+						verdict: (await observe(controller, client, identity)).verdict,
+						controllerSegmentsAfterPair: String(after.length),
+						controllerBytesAfterPair: String(after.reduce((sum, s) => sum + s.packet.length, 0)),
+					});
+				}
+				results.push(row);
+				detail.push({ boot, trial, method, delay, connect: connect.map(s => [s.t - clientEnabled, s.packet.srcPort === CMR_PORT ? "<" : ">", s.packet.flags, s.packet.length]), pending, result });
+				console.log(`  ${label}: first SYN ${row.firstSynMs} ms, pending ${row.pendingMs} ms, pair→${row.pairStatus ?? "-"}, ${row.verdict ?? "-"}, controller sent ${row.controllerBytesAfterPair ?? "-"} B after pair`);
+			}
+			// Unfiltered neighbor rows, to tie MNDP TLVs to the fields RouterOS shows for them.
+			detail.push({ boot, neighbors: { controller: await read(controller, "/ip/neighbor"), client: await read(client, "/ip/neighbor") } });
+		}, false);
+	}
+}
+
+export const STUDIES: Record<string, (context: StudyContext) => Promise<void>> = { pairing, policy, recheck, wire };

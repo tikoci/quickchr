@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { QuickCHR, type ChrInstance, type NetworkSpecifier } from "../../../src/index.ts";
 import { check, exampleMachineName } from "../../lib.ts";
+import { wire } from "./wire.ts";
 
 /**
  * The RouterOS build the lab boots. CMR exists only in 7.26 development builds and changes
@@ -13,7 +14,7 @@ export function labVersion(argv = process.argv): string {
 }
 
 /** The runner's flags. An operand may not be one of them: `--report --probe` is a missing path. */
-export const FLAGS = new Set(["--cli", "--hold", "--probe", "--first-bridge", "--version", "--report", "--study", "--boots", "--trials", "--strategies"]);
+export const FLAGS = new Set(["--cli", "--hold", "--probe", "--first-bridge", "--sniff", "--version", "--report", "--study", "--boots", "--trials", "--strategies", "--delays"]);
 
 /**
  * The value after `--<name>`: undefined when the flag is absent, an error when it is present
@@ -146,6 +147,8 @@ async function bootRouter(options: BootOptions, role: string, networks: NetworkS
 	}
 	const running = (await read(chr, "/system/resource"))[0]?.version?.split(" ")[0];
 	check(running === version, `${name}: expected RouterOS ${version}, got ${running}`);
+	// --sniff: stream every topology link (ether2…) to the host before anything is configured.
+	await wire.capture?.attach(chr, networks.map((_, index) => `ether${index + 2}`));
 	await command(chr, `/system/identity/set name=cmr-${role}`);
 	await command(chr, '/system/note/set note="Disposable quickchr CMR lab"');
 	if (options.initialBridge) await command(chr, "/interface/bridge/add name=cmr-lab-loopback");
@@ -162,6 +165,8 @@ export interface LabOptions {
 	/** Put each loopback on a bridge created before CMR starts (FINDINGS.md: first-interface alert). */
 	initialBridge?: boolean;
 	prefix?: string;
+	/** Pair lab only: false leaves CMR disabled on both routers, for a study that times enabling. */
+	enable?: boolean;
 }
 
 /**
@@ -222,8 +227,10 @@ export async function createPairLab(track: BootOptions["track"], options: LabOpt
 	const client = await bootRouter(boot, "client", [link]);
 	await command(controller, "/ip/address/add address=192.0.2.1/30 interface=ether2");
 	await command(client, "/ip/address/add address=192.0.2.2/30 interface=ether2");
-	await command(controller, "/cmr/set enabled=yes");
-	await command(client, "/cmr/client/set enabled=yes controller-addresses=192.0.2.1");
+	if (options.enable ?? true) {
+		await command(controller, "/cmr/set enabled=yes");
+		await command(client, "/cmr/client/set enabled=yes controller-addresses=192.0.2.1");
+	}
 	return { controller, client, all: [controller, client], version, prefix };
 }
 
