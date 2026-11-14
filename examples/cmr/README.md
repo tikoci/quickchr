@@ -147,7 +147,8 @@ host    one TzspReceiver per router, each on its own ephemeral port
 Each router is armed right after boot, before identities, addresses or CMR are
 configured. It is armed again after the lab's known reboots (the `--probe` backup
 restore and the remote restart), setting everything again rather than assuming
-the sniffer survives a reboot. That re-arm path has not been run yet.
+the sniffer survives a reboot. A `--probe --sniff` run verified both re-arms by
+the frames received afterwards (`routers.*.attached`).
 `ether1` is never sniffed, because it carries the stream and the lab's REST calls.
 
 The report's `wire` section uses one clock: milliseconds since `startedAt`, by host
@@ -156,26 +157,35 @@ to a few milliseconds of host jitter. It contains:
 
 | Field | Contents |
 |---|---|
+| `routers` | per router: its host port, sniffed interfaces, and each arming (`attached`) with the frames received before the next one, which shows whether a re-arm after a reboot really restarted the stream |
 | `marks` | lab events on the same clock: sniffer armed, clients enabled, each `pair` command returned (passwords redacted), settle verdicts, controller restarts, trial steps |
 | `mndp` | one row per announcement (`sender` = identity/interface/family, the 4-byte header). Decoded TLVs and the raw UDP payload hex appear only when they differ from that sender's previous announcement |
-| `mndpIntervals` | per sender: count and min/median/max gap |
+| `mndpIntervals` | per sender: announcements, lifetimes (one per machine and boot, from the MAC and the uptime TLV), and min/median/max gap within a lifetime |
 | `cmr` | one entry per TCP/54321 connection: every segment that is not a bare ACK as `[t, ">" to controller or "<" from it, flags, payload bytes]`, plus a count of bare ACKs (keepalives) |
 | `other` | per router and protocol: count, first and last time (OSPF, ARP, LLDP, CDP, anything new) |
 
-Both ends of a link see each packet. MNDP and TCP rows are deduplicated by
-content (the first sighting is kept); `other` counts each router's view.
+Both ends of a link see each packet, and a router that forwards it sees it on
+both of its links. MNDP and TCP rows are deduplicated (`dedupe()`): sightings of
+the same content from different **capture points** within 250 ms are one packet,
+and the first is kept. A capture point is a router plus the frame's source MAC,
+because RouterOS's TZSP carries no interface tag. A forwarded frame changes source
+MAC at each hop, while a retransmission repeats a capture point and is kept.
+`other` counts each router's view. A frame cut short in its IP or TCP header
+decodes as `truncated` rather than stopping the report.
 
 The code is split so the generic part can move:
 
 - [`tool/tzsp.ts`](./tool/tzsp.ts) has no quickchr or CMR imports, only
   `node:dgram`. It contains `TzspReceiver` (bind, collect, `close()`), `tzspPayload()`,
   `decodeEthernet()` (802.1Q, ARP, LLDP, CDP/LLC, IPv4/IPv6, UDP/TCP with flags and
-  sequence numbers, OSPF, ICMP) and `parseMndp()`. Every MNDP TLV keeps its raw bytes.
+  sequence numbers, OSPF, ICMP, never throwing on a truncated frame) and `parseMndp()`.
+  Every MNDP TLV keeps its raw bytes.
   Unit tests with captured RouterOS datagrams:
   [`test/unit/examples-cmr-tzsp.test.ts`](../../test/unit/examples-cmr-tzsp.test.ts).
 - [`tool/wire.ts`](./tool/wire.ts) is the lab glue: `Capture.attach()` runs the
   sniffer commands, `mark()` adds events, `cmrBetween()` and `lastMndp()` serve the
-  study, and `report()` builds the section above.
+  study, and `report()` builds the section above. `dedupe()` and `spread()` are
+  pure and unit-tested; a shared package would want them too.
 
 Notes for a shared TZSP package (quickchr, centrs or a new tikoci repo):
 

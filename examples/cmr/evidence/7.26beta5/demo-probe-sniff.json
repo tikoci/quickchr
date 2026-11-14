@@ -1,0 +1,7266 @@
+{
+  "version": "7.26beta5",
+  "timestamp": "2026-11-14T17:51:19.567Z",
+  "pairing": [
+    {
+      "role": "transit",
+      "strategy": "confirm-first",
+      "pairStatus": "paired",
+      "settled": "paired",
+      "repaired": "false"
+    },
+    {
+      "role": "remote",
+      "strategy": "confirm-first",
+      "pairStatus": "paired",
+      "settled": "paired",
+      "repaired": "false"
+    },
+    {
+      "role": "local",
+      "strategy": "confirm-first",
+      "pairStatus": "paired",
+      "settled": "paired",
+      "repaired": "false"
+    }
+  ],
+  "service": {
+    ".id": "*C",
+    "disabled": "false",
+    "dynamic": "true",
+    "invalid": "false",
+    "name": "cmr",
+    "port": "54321",
+    "proto": "tcp"
+  },
+  "remoteRoute": [
+    {
+      ".id": "*2018B000",
+      "active": "true",
+      "afi": "ip",
+      "belongs-to": "lab",
+      "contribution": "active",
+      "debug.fwp-ptr": "0x20282300",
+      "distance": "110",
+      "dst-address": "10.255.0.1/32",
+      "gateway": "198.51.100.1%ether2",
+      "immediate-gw": "198.51.100.1%ether2",
+      "nexthop-id": "*20282300",
+      "ospf": "true",
+      "ospf.metric": "3",
+      "ospf.type": "intra",
+      "routing-table": "main",
+      "scope": "20",
+      "target-scope": "10"
+    }
+  ],
+  "discovery": [
+    {
+      "controller-address": "203.0.113.1",
+      "controller-identity": "cmr-controller",
+      "enabled": "yes",
+      "local-id": "7A3C85B6EF2B36737A5516031293062C93D51B1FA285CA14300AD70BE0D876D0ACB7BFC95D68F593ADE56944AF6E411C5ECE5703572D27193FFEECB56128797E",
+      "saved-addresses": "203.0.113.1,fe80::33:aff:fe1e:7654",
+      "status": "paired,connected"
+    }
+  ],
+  "upgradeRules": [
+    {
+      ".id": "*2",
+      "channel": "7.26beta5",
+      "fail-policy": "stop",
+      "labels": "lab",
+      "name": "lab-pinned",
+      "strategy": "sequential"
+    },
+    {
+      ".id": "*1",
+      "channel": "stable",
+      "dynamic": "true",
+      "fail-policy": "stop",
+      "labels": "all",
+      "name": "default",
+      "strategy": "parallel"
+    }
+  ],
+  "fanOut": "Columns: DEVICE, STATUS\r\nDEVICE                   STATUS \r\ncmr-controller           running\r\ncmr-transit@192.0.2.2    running\r\ncmr-remote@198.51.100.2  running\r\ncmr-local@203.0.113.2    running\r\n\r\nColumns: DEVICE, STATUS, OUTPUT\r\nDEVICE                   STATUS   OUTPUT      \r\ncmr-controller           success  cmr-6c6dada2\r\ncmr-transit@192.0.2.2    success  cmr-6c6dada2\r\ncmr-remote@198.51.100.2  success  cmr-6c6dada2\r\ncmr-local@203.0.113.2    success  cmr-6c6dada2",
+  "layout": {
+    "nodes": [
+      {
+        ".id": "*1",
+        "device": "cmr-controller",
+        "layout": "lab",
+        "name": "cmr-controller"
+      },
+      {
+        ".id": "*2",
+        "device": "cmr-transit@192.0.2.2",
+        "layout": "lab",
+        "name": "cmr-transit"
+      },
+      {
+        ".id": "*3",
+        "device": "cmr-remote@198.51.100.2",
+        "layout": "lab",
+        "name": "cmr-remote"
+      },
+      {
+        ".id": "*4",
+        "device": "cmr-local@203.0.113.2",
+        "layout": "lab",
+        "name": "cmr-local"
+      }
+    ],
+    "links": [
+      {
+        ".id": "*1",
+        "layout": "lab",
+        "node1": "cmr-controller",
+        "node2": "cmr-local"
+      },
+      {
+        ".id": "*2",
+        "layout": "lab",
+        "node1": "cmr-controller",
+        "node2": "cmr-transit"
+      },
+      {
+        ".id": "*3",
+        "layout": "lab",
+        "node1": "cmr-remote",
+        "node2": "cmr-transit"
+      }
+    ]
+  },
+  "deviceExport": "present",
+  "webhooks": [
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    },
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    },
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    },
+    {
+      "body": "DOWN cmr-remote unknown",
+      "contentType": "text/plain"
+    },
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    }
+  ],
+  "probes": {
+    "pairingMatrix": [
+      {
+        "clientRequirement": "none",
+        "serverRequirement": "none",
+        "how": "automatic",
+        "before": "",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "none",
+        "serverRequirement": "password",
+        "how": "client pair with controller login",
+        "before": "pair: device:ok, cmr:password required",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "none",
+        "serverRequirement": "confirm",
+        "how": "controller bare pair",
+        "before": "pair: device:ok, cmr:waiting confirmation",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "password",
+        "serverRequirement": "none",
+        "how": "controller credentialed pair",
+        "before": "pair: device:password required, cmr:ok",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "password",
+        "serverRequirement": "password",
+        "how": "client pair with controller login",
+        "before": "pair: device:password required, cmr:password required",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "password",
+        "serverRequirement": "confirm",
+        "how": "controller credentialed pair",
+        "before": "pair: device:password required, cmr:waiting confirmation",
+        "settled": "half-paired",
+        "repaired": "true"
+      }
+    ],
+    "clientConfirmCompletion": [
+      {
+        "completion": " ",
+        "offset": "36",
+        "preference": "-1",
+        "show": "false",
+        "style": "none",
+        "text": "whitespace",
+        "type": "completion"
+      },
+      {
+        "completion": " ",
+        "offset": "36",
+        "preference": "64",
+        "show": "false",
+        "style": "none",
+        "text": "",
+        "type": "completion"
+      },
+      {
+        "completion": "[",
+        "offset": "36",
+        "preference": "75",
+        "show": "false",
+        "style": "syntax-meta",
+        "text": "start of command substitution",
+        "type": "completion"
+      },
+      {
+        "completion": "(",
+        "offset": "36",
+        "preference": "75",
+        "show": "false",
+        "style": "syntax-meta",
+        "text": "start of expression",
+        "type": "completion"
+      },
+      {
+        "completion": "$",
+        "offset": "36",
+        "preference": "75",
+        "show": "false",
+        "style": "syntax-meta",
+        "text": "substitution",
+        "type": "completion"
+      },
+      {
+        "completion": "\"",
+        "offset": "36",
+        "preference": "75",
+        "show": "false",
+        "style": "syntax-meta",
+        "text": "start of quoted string",
+        "type": "completion"
+      },
+      {
+        "completion": "confirm",
+        "offset": "36",
+        "preference": "96",
+        "show": "true",
+        "style": "none",
+        "text": "",
+        "type": "completion"
+      },
+      {
+        "completion": "none",
+        "offset": "36",
+        "preference": "96",
+        "show": "true",
+        "style": "none",
+        "text": "",
+        "type": "completion"
+      },
+      {
+        "completion": "password",
+        "offset": "36",
+        "preference": "96",
+        "show": "true",
+        "style": "none",
+        "text": "",
+        "type": "completion"
+      },
+      {
+        "completion": "*",
+        "offset": "36",
+        "preference": "-1",
+        "show": "false",
+        "style": "none",
+        "text": "id prefix",
+        "type": "completion"
+      }
+    ],
+    "clientConfirm": "",
+    "afterClientConfirm": {
+      "clientStatus": "waiting-for-pairing,connected",
+      "pairingStatus": "203.0.113.1: cmr:ok, device:waiting confirmation",
+      "row": {
+        ".id": "*A",
+        "identity": "cmr-local",
+        "connected": "true",
+        "remote-pending": "true",
+        "state": "pair: device:waiting confirmation, cmr:ok",
+        "pairing-requirement": "none"
+      },
+      "verdict": "pending"
+    },
+    "defaultRuleEdit": "failure: can't edit default rule (/cmr/upgrade/set *0) (/cmr/upgrade/set; line 1)",
+    "directoryWithoutSlash": "input does not match any value of packages-directory (/cmr/set (packages-directory); line 1)",
+    "serverSettings": [
+      {
+        "auto-labels": "all",
+        "enabled": "yes",
+        "fetch-comments": "true",
+        "local-id": "A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0D9B661C4D6FCB1705F393290D435D61AC963E2B4B1C3C4EAAFBCFD98D9B78EE3",
+        "packages-directory": "cmr-lab-packages/",
+        "self-client-id": "B687EF95B4274E95B7EEE4CD22637C2BF8F178F5D19D64EEAAC366AE930876F23A838FFB1007F6E506FC9F62D0D3EBA2517413A530135A44DC9349D8937D89AE",
+        "track-topology": "true"
+      }
+    ],
+    "export": "# 2026-11-14 17:52:12 by RouterOS 7.26beta5\r\n# system id = n6WxwgjxhWD\r\n#\r\n/cmr\r\nset auto-labels=all enabled=yes fetch-comments=yes packages-directory=\\\r\n    cmr-lab-packages/ track-topology=yes\r\n/cmr alert\r\nadd action.log=\"CPU [identity] [cpu-usage]\" cpu-above=85 labels=lab name=\\\r\n    lab-cpu severity=high\r\nadd action.log=\"MEM [identity] [mem-usage]\" labels=lab mem-above=80 name=\\\r\n    lab-memory severity=high\r\nadd action.log=\"DISK [identity] [hdd-usage]\" hdd-above=80 labels=lab name=\\\r\n    lab-disk severity=high\r\nadd action.log=\"REBOOT [identity]\" labels=lab name=lab-reboot rebooted=yes\r\nadd action.log=\"IFACE [identity] [iface-name]\" interface-change=added \\\r\n    interface-type=bridge labels=remote name=lab-interface\r\nadd action.log=\"LOG [identity] [message]\" labels=remote log-regex=\\\r\n    CMR-LAB-PROBE log-topics=warning name=lab-log\r\nadd action.log=\"VERSION [identity] [available-version]\" labels=lab name=\\\r\n    lab-available upgrade-available=yes\r\nadd action.log=\"UPGRADE [identity] [upgrade-state]\" labels=lab name=\\\r\n    lab-upgrade-done upgrade-done=success\r\nadd action.http-body=\"DOWN [identity] [address]\" .http-headers=\\\r\n    \"Content-Type: text/plain\" .http-method=post .http-url=\\\r\n    http://10.0.2.2:35691/cmr .log=\"DOWN [identity] [address]\" \\\r\n    disconnected-more-than=10s labels=remote name=lab-down severity=high\r\nadd action.http-body=\"UP [identity] [address]\" .http-headers=\\\r\n    \"Content-Type: text/plain\" .http-method=post .http-url=\\\r\n    http://10.0.2.2:35691/cmr .log=\"UP [identity] [address]\" connected=yes \\\r\n    labels=remote name=lab-connected reset-on-disconnect=yes\r\n/cmr device\r\nadd identity=cmr-controller ids=\"B687EF95B4274E95B7EEE4CD22637C2BF8F178F5D19D6\\\r\n    4EEAAC366AE930876F2/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595D\\\r\n    F0FC7B10E0\" labels=lab,controller pairing-requirement=none\r\nadd identity=cmr-transit ids=\"E673CCCF44680C69A6DE08178872C89730CAF7649C67FAF5\\\r\n    1F963476D4A8BA70/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0F\\\r\n    C7B10E0\" labels=lab,transit pairing-requirement=none\r\nadd identity=cmr-remote ids=\"6BAC4EEDAB29958CEAB439C784889CDEC033EEE5B6C892D6D\\\r\n    C5C582EEB88A709/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC\\\r\n    7B10E0\" labels=lab,remote pairing-requirement=none\r\nadd identity=cmr-local ids=\"7A3C85B6EF2B36737A5516031293062C93D51B1FA285CA1430\\\r\n    0AD70BE0D876D0/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7\\\r\n    B10E0\" labels=lab,local pairing-requirement=none\r\n/cmr layout\r\nadd name=lab\r\n/cmr layout node\r\nadd device=cmr-controller layout=lab name=cmr-controller\r\nadd device=cmr-transit@192.0.2.2 layout=lab name=cmr-transit\r\nadd device=cmr-remote@198.51.100.2 layout=lab name=cmr-remote\r\n/cmr layout link\r\nadd layout=lab node1=cmr-controller node2=cmr-transit\r\nadd layout=lab node1=cmr-remote node2=cmr-transit\r\n/cmr upgrade\r\nadd channel=7.26beta5 fail-policy=stop labels=lab name=lab-pinned strategy=\\\r\n    sequential\r\n/cmr layout node\r\nadd device=*4 layout=lab name=cmr-local\r\n/cmr layout link\r\nadd layout=lab node1=cmr-controller node2=cmr-local",
+    "verboseExport": "# 2026-11-14 17:52:12 by RouterOS 7.26beta5\r\n# system id = n6WxwgjxhWD\r\n#\r\n/cmr\r\nset auto-labels=all enabled=yes fetch-comments=yes packages-directory=\\\r\n    cmr-lab-packages/ track-topology=yes\r\n/cmr alert\r\nadd action.log=\"CPU [identity] [cpu-usage]\" cpu-above=85 labels=lab name=\\\r\n    lab-cpu severity=high\r\nadd action.log=\"MEM [identity] [mem-usage]\" labels=lab mem-above=80 name=\\\r\n    lab-memory severity=high\r\nadd action.log=\"DISK [identity] [hdd-usage]\" hdd-above=80 labels=lab name=\\\r\n    lab-disk severity=high\r\nadd action.log=\"REBOOT [identity]\" labels=lab name=lab-reboot rebooted=yes\r\nadd action.log=\"IFACE [identity] [iface-name]\" interface-change=added \\\r\n    interface-type=bridge labels=remote name=lab-interface\r\nadd action.log=\"LOG [identity] [message]\" labels=remote log-regex=\\\r\n    CMR-LAB-PROBE log-topics=warning name=lab-log\r\nadd action.log=\"VERSION [identity] [available-version]\" labels=lab name=\\\r\n    lab-available upgrade-available=yes\r\nadd action.log=\"UPGRADE [identity] [upgrade-state]\" labels=lab name=\\\r\n    lab-upgrade-done upgrade-done=success\r\nadd action.http-body=\"DOWN [identity] [address]\" .http-headers=\\\r\n    \"Content-Type: text/plain\" .http-method=post .http-url=\\\r\n    http://10.0.2.2:35691/cmr .log=\"DOWN [identity] [address]\" \\\r\n    disconnected-more-than=10s labels=remote name=lab-down severity=high\r\nadd action.http-body=\"UP [identity] [address]\" .http-headers=\\\r\n    \"Content-Type: text/plain\" .http-method=post .http-url=\\\r\n    http://10.0.2.2:35691/cmr .log=\"UP [identity] [address]\" connected=yes \\\r\n    labels=remote name=lab-connected reset-on-disconnect=yes\r\n/cmr client\r\n# settings ignored because used by local controller, peer a8abb2e.\r\nset enabled=no\r\n/cmr device\r\nadd identity=cmr-controller ids=\"B687EF95B4274E95B7EEE4CD22637C2BF8F178F5D19D6\\\r\n    4EEAAC366AE930876F2/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595D\\\r\n    F0FC7B10E0\" labels=lab,controller pairing-requirement=none\r\nadd identity=cmr-transit ids=\"E673CCCF44680C69A6DE08178872C89730CAF7649C67FAF5\\\r\n    1F963476D4A8BA70/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0F\\\r\n    C7B10E0\" labels=lab,transit pairing-requirement=none\r\nadd identity=cmr-remote ids=\"6BAC4EEDAB29958CEAB439C784889CDEC033EEE5B6C892D6D\\\r\n    C5C582EEB88A709/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC\\\r\n    7B10E0\" labels=lab,remote pairing-requirement=none\r\nadd identity=cmr-local ids=\"7A3C85B6EF2B36737A5516031293062C93D51B1FA285CA1430\\\r\n    0AD70BE0D876D0/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7\\\r\n    B10E0\" labels=lab,local pairing-requirement=none\r\n/cmr layout\r\nadd name=lab\r\n/cmr layout node\r\nadd device=cmr-controller layout=lab name=cmr-controller\r\nadd device=cmr-transit@192.0.2.2 layout=lab name=cmr-transit\r\nadd device=cmr-remote@198.51.100.2 layout=lab name=cmr-remote\r\n/cmr layout link\r\nadd layout=lab node1=cmr-controller node2=cmr-transit\r\nadd layout=lab node1=cmr-remote node2=cmr-transit\r\n/cmr upgrade\r\nadd channel=7.26beta5 fail-policy=stop labels=lab name=lab-pinned strategy=\\\r\n    sequential\r\n/cmr layout node\r\nadd device=*4 layout=lab name=cmr-local\r\n/cmr layout link\r\nadd layout=lab node1=cmr-controller node2=cmr-local",
+    "fullVerboseExportHasServerSettings": true,
+    "binaryBackup": {
+      "before": {
+        "settings": [
+          {
+            "auto-labels": "all",
+            "enabled": "yes",
+            "fetch-comments": "true",
+            "local-id": "A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0D9B661C4D6FCB1705F393290D435D61AC963E2B4B1C3C4EAAFBCFD98D9B78EE3",
+            "packages-directory": "cmr-lab-packages/",
+            "self-client-id": "B687EF95B4274E95B7EEE4CD22637C2BF8F178F5D19D64EEAAC366AE930876F23A838FFB1007F6E506FC9F62D0D3EBA2517413A530135A44DC9349D8937D89AE",
+            "track-topology": "true"
+          }
+        ],
+        "devices": [
+          {
+            "identity": "cmr-controller",
+            "ids": "B687EF95B4274E95B7EEE4CD22637C2BF8F178F5D19D64EEAAC366AE930876F2/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+            "labels": "lab,controller"
+          },
+          {
+            "identity": "cmr-transit",
+            "ids": "E673CCCF44680C69A6DE08178872C89730CAF7649C67FAF51F963476D4A8BA70/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+            "labels": "lab,transit"
+          },
+          {
+            "identity": "cmr-remote",
+            "ids": "6BAC4EEDAB29958CEAB439C784889CDEC033EEE5B6C892D6DC5C582EEB88A709/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+            "labels": "lab,remote"
+          },
+          {
+            "identity": "cmr-local",
+            "ids": "7A3C85B6EF2B36737A5516031293062C93D51B1FA285CA14300AD70BE0D876D0/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+            "labels": "lab,local"
+          }
+        ]
+      },
+      "after": {
+        "settings": [
+          {
+            "auto-labels": "all",
+            "enabled": "yes",
+            "fetch-comments": "true",
+            "local-id": "A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0D9B661C4D6FCB1705F393290D435D61AC963E2B4B1C3C4EAAFBCFD98D9B78EE3",
+            "packages-directory": "cmr-lab-packages/",
+            "self-client-id": "B687EF95B4274E95B7EEE4CD22637C2BF8F178F5D19D64EEAAC366AE930876F23A838FFB1007F6E506FC9F62D0D3EBA2517413A530135A44DC9349D8937D89AE",
+            "track-topology": "true"
+          }
+        ],
+        "devices": [
+          {
+            "identity": "cmr-controller",
+            "ids": "B687EF95B4274E95B7EEE4CD22637C2BF8F178F5D19D64EEAAC366AE930876F2/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+            "labels": "lab,controller"
+          },
+          {
+            "identity": "cmr-transit",
+            "ids": "E673CCCF44680C69A6DE08178872C89730CAF7649C67FAF51F963476D4A8BA70/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+            "labels": "lab,transit"
+          },
+          {
+            "identity": "cmr-remote",
+            "ids": "6BAC4EEDAB29958CEAB439C784889CDEC033EEE5B6C892D6DC5C582EEB88A709/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+            "labels": "lab,remote"
+          },
+          {
+            "identity": "cmr-local",
+            "ids": "7A3C85B6EF2B36737A5516031293062C93D51B1FA285CA14300AD70BE0D876D0/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+            "labels": "lab,local"
+          }
+        ]
+      },
+      "restored": true
+    }
+  },
+  "automaticReconnect": true,
+  "devices": [
+    {
+      ".id": "*1",
+      "allowed-versions": "7.13+,6.49.8+",
+      "auto-labels": "7.26beta5,x86,CHR,cmr-controller",
+      "board": "CHR",
+      "channel": "7.26beta5",
+      "connected": "false",
+      "connected-time": "1m11s",
+      "controller": "true",
+      "identity": "cmr-controller",
+      "ids": "B687EF95B4274E95B7EEE4CD22637C2BF8F178F5D19D64EEAAC366AE930876F2/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+      "labels": "lab,controller",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros,cmr",
+      "pairing-requirement": "none",
+      "peer": "peer-b687",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "lab-pinned",
+      "uptime": "1m13s",
+      "version": "7.26beta5"
+    },
+    {
+      ".id": "*2",
+      "address": "192.0.2.2",
+      "allowed-versions": "7.13+,6.49.8+",
+      "auto-labels": "7.26beta5,x86,CHR,cmr-transit,192.0.2.2",
+      "board": "CHR",
+      "channel": "7.26beta5",
+      "connected": "true",
+      "connected-time": "1m6s",
+      "identity": "cmr-transit",
+      "ids": "E673CCCF44680C69A6DE08178872C89730CAF7649C67FAF51F963476D4A8BA70/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+      "labels": "lab,transit",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros",
+      "pairing-requirement": "none",
+      "peer": "peer-e673",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "lab-pinned",
+      "uptime": "4m30s",
+      "version": "7.26beta5"
+    },
+    {
+      ".id": "*3",
+      "address": "198.51.100.2",
+      "allowed-versions": "7.13+,6.49.8+",
+      "auto-labels": "7.26beta5,x86,CHR,cmr-remote,198.51.100.2",
+      "board": "CHR",
+      "channel": "7.26beta5",
+      "connected": "true",
+      "connected-time": "0s",
+      "identity": "cmr-remote",
+      "ids": "6BAC4EEDAB29958CEAB439C784889CDEC033EEE5B6C892D6DC5C582EEB88A709/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+      "labels": "lab,remote",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros",
+      "pairing-requirement": "none",
+      "peer": "peer-6bac",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "lab-pinned",
+      "uptime": "11s",
+      "version": "7.26beta5"
+    },
+    {
+      ".id": "*A",
+      "address": "203.0.113.2",
+      "allowed-versions": "7.13+,6.49.8+",
+      "auto-labels": "7.26beta5,x86,CHR,cmr-local,203.0.113.2",
+      "board": "CHR",
+      "channel": "7.26beta5",
+      "connected": "true",
+      "connected-time": "1m6s",
+      "identity": "cmr-local",
+      "ids": "7A3C85B6EF2B36737A5516031293062C93D51B1FA285CA14300AD70BE0D876D0/A8ABB2E8D6AB1634CF2ECE4BBB3B0591AD146F1F749B4EC477595DF0FC7B10E0",
+      "labels": "lab,local",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros",
+      "pairing-requirement": "none",
+      "peer": "peer-7a3c",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "lab-pinned",
+      "uptime": "3m4s",
+      "version": "7.26beta5"
+    }
+  ],
+  "alerts": [
+    {
+      ".id": "*1",
+      "action-failures": "0",
+      "action.log": "[device] CPU usage is above 95% ([cpu-usage]%)",
+      "action.log-topics": "cmr,warning",
+      "category": "performance",
+      "comment": "example",
+      "cpu-above": "95",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "cpu>95%",
+      "severity": "high"
+    },
+    {
+      ".id": "*2",
+      "action-failures": "0",
+      "action.log": "[device] memory usage is above 80% ([mem-usage]%)",
+      "action.log-topics": "cmr,warning",
+      "category": "performance",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "mem-above": "80",
+      "name": "memory>80%",
+      "severity": "high"
+    },
+    {
+      ".id": "*3",
+      "action-failures": "0",
+      "action.log": "[device] failed to upgrade from [version] to [upgrade-version], error: [upgrade-error]",
+      "action.log-topics": "cmr,warning",
+      "category": "version",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "upgrade failed",
+      "severity": "high",
+      "upgrade-done": "fail"
+    },
+    {
+      ".id": "*4",
+      "action-failures": "0",
+      "action.log": "[device] disconnected for more than 1h",
+      "action.log-topics": "cmr,warning",
+      "category": "availability",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "disconnected-more-than": "1h",
+      "fired": "0",
+      "labels": "all",
+      "name": "disconnected for more than 1h",
+      "severity": "high"
+    },
+    {
+      ".id": "*5",
+      "action-failures": "0",
+      "action.log": "[device] has new version available [available-version]",
+      "category": "version",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "upgrade available",
+      "severity": "medium",
+      "upgrade-available": "true"
+    },
+    {
+      ".id": "*6",
+      "action-failures": "0",
+      "action.log": "[device] has successfully upgraded to version [version]",
+      "category": "version",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "upgrade successful",
+      "severity": "medium",
+      "upgrade-done": "success"
+    },
+    {
+      ".id": "*7",
+      "action-failures": "0",
+      "action.log": "[device] is ready to be paired",
+      "category": "availability",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "unpaired device connected",
+      "severity": "medium",
+      "unpaired-device-connected": "true"
+    },
+    {
+      ".id": "*8",
+      "action-failures": "0",
+      "action.log": "[device] rebooted",
+      "category": "availability",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "rebooted",
+      "rebooted": "true",
+      "severity": "medium"
+    },
+    {
+      ".id": "*9",
+      "action-failures": "0",
+      "action.log": "CPU [identity] [cpu-usage]",
+      "category": "performance",
+      "cpu-above": "85",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "lab",
+      "name": "lab-cpu",
+      "severity": "high"
+    },
+    {
+      ".id": "*A",
+      "action-failures": "0",
+      "action.log": "MEM [identity] [mem-usage]",
+      "category": "performance",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "lab",
+      "mem-above": "80",
+      "name": "lab-memory",
+      "severity": "high"
+    },
+    {
+      ".id": "*B",
+      "action-failures": "0",
+      "action.log": "DISK [identity] [hdd-usage]",
+      "category": "performance",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "hdd-above": "80",
+      "labels": "lab",
+      "name": "lab-disk",
+      "severity": "high"
+    },
+    {
+      ".id": "*C",
+      "action-failures": "0",
+      "action.log": "REBOOT [identity]",
+      "category": "availability",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "1",
+      "labels": "lab",
+      "name": "lab-reboot",
+      "rebooted": "true",
+      "severity": "medium"
+    },
+    {
+      ".id": "*D",
+      "action-failures": "0",
+      "action.log": "IFACE [identity] [iface-name]",
+      "category": "network",
+      "devices": "1",
+      "devices-on": "0",
+      "fired": "0",
+      "interface-change": "added",
+      "interface-type": "bridge",
+      "labels": "remote",
+      "name": "lab-interface",
+      "severity": "medium"
+    },
+    {
+      ".id": "*E",
+      "action-failures": "0",
+      "action.log": "LOG [identity] [message]",
+      "category": "logging",
+      "devices": "1",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "remote",
+      "log-regex": "CMR-LAB-PROBE",
+      "log-topics": "warning",
+      "name": "lab-log",
+      "severity": "medium"
+    },
+    {
+      ".id": "*F",
+      "action-failures": "0",
+      "action.log": "VERSION [identity] [available-version]",
+      "category": "version",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "lab",
+      "name": "lab-available",
+      "severity": "medium",
+      "upgrade-available": "true"
+    },
+    {
+      ".id": "*10",
+      "action-failures": "0",
+      "action.log": "UPGRADE [identity] [upgrade-state]",
+      "category": "version",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "lab",
+      "name": "lab-upgrade-done",
+      "severity": "medium",
+      "upgrade-done": "success"
+    },
+    {
+      ".id": "*11",
+      "action-failures": "0",
+      "action.http-body": "DOWN [identity] [address]",
+      "action.http-headers": "Content-Type: text/plain",
+      "action.http-method": "post",
+      "action.http-url": "http://10.0.2.2:35691/cmr",
+      "action.log": "DOWN [identity] [address]",
+      "category": "availability",
+      "devices": "1",
+      "devices-on": "0",
+      "disconnected-more-than": "10s",
+      "fired": "1",
+      "labels": "remote",
+      "name": "lab-down",
+      "severity": "high"
+    },
+    {
+      ".id": "*12",
+      "action-failures": "0",
+      "action.http-body": "UP [identity] [address]",
+      "action.http-headers": "Content-Type: text/plain",
+      "action.http-method": "post",
+      "action.http-url": "http://10.0.2.2:35691/cmr",
+      "action.log": "UP [identity] [address]",
+      "category": "availability",
+      "connected": "true",
+      "devices": "1",
+      "devices-on": "1",
+      "fired": "2",
+      "labels": "remote",
+      "name": "lab-connected",
+      "reset-on-disconnect": "yes",
+      "severity": "medium"
+    }
+  ],
+  "wire": {
+    "startedAt": "2026-11-14T17:47:53.320Z",
+    "clock": "ms since startedAt",
+    "routers": {
+      "examples-cmr-1x31b92c54459-controller": {
+        "port": 42128,
+        "interfaces": [
+          "ether2",
+          "ether3"
+        ],
+        "attached": [
+          {
+            "t": 62209,
+            "framesAfter": 1172
+          },
+          {
+            "t": 266895,
+            "framesAfter": 466
+          }
+        ],
+        "frames": 1638
+      },
+      "examples-cmr-1x31b92c54459-transit": {
+        "port": 38562,
+        "interfaces": [
+          "ether2",
+          "ether3"
+        ],
+        "attached": [
+          {
+            "t": 105155,
+            "framesAfter": 1130
+          }
+        ],
+        "frames": 1130
+      },
+      "examples-cmr-1x31b92c54459-remote": {
+        "port": 54658,
+        "interfaces": [
+          "ether2"
+        ],
+        "attached": [
+          {
+            "t": 148077,
+            "framesAfter": 288
+          },
+          {
+            "t": 330184,
+            "framesAfter": 31
+          }
+        ],
+        "frames": 319
+      },
+      "examples-cmr-1x31b92c54459-local": {
+        "port": 38513,
+        "interfaces": [
+          "ether2"
+        ],
+        "attached": [
+          {
+            "t": 188687,
+            "framesAfter": 823
+          }
+        ],
+        "frames": 823
+      }
+    },
+    "marks": [
+      {
+        "t": 62209,
+        "label": "sniffer on examples-cmr-1x31b92c54459-controller",
+        "data": {
+          "interfaces": [
+            "ether2",
+            "ether3"
+          ]
+        }
+      },
+      {
+        "t": 105155,
+        "label": "sniffer on examples-cmr-1x31b92c54459-transit",
+        "data": {
+          "interfaces": [
+            "ether2",
+            "ether3"
+          ]
+        }
+      },
+      {
+        "t": 148077,
+        "label": "sniffer on examples-cmr-1x31b92c54459-remote",
+        "data": {
+          "interfaces": [
+            "ether2"
+          ]
+        }
+      },
+      {
+        "t": 188687,
+        "label": "sniffer on examples-cmr-1x31b92c54459-local",
+        "data": {
+          "interfaces": [
+            "ether2"
+          ]
+        }
+      },
+      {
+        "t": 206346,
+        "label": "clients enabled: transit and remote by address, local by discovery"
+      },
+      {
+        "t": 207379,
+        "label": "pair cmr-transit: confirm-first start"
+      },
+      {
+        "t": 207385,
+        "label": "pair cmr-transit: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-transit\"]",
+          "status": "confirmed, waiting for device"
+        }
+      },
+      {
+        "t": 208391,
+        "label": "pair cmr-transit: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-transit\"] username=\"quickchr\" password=\"…\"",
+          "status": "paired"
+        }
+      },
+      {
+        "t": 208396,
+        "label": "pair cmr-transit: settled paired"
+      },
+      {
+        "t": 209416,
+        "label": "pair cmr-remote: confirm-first start"
+      },
+      {
+        "t": 209421,
+        "label": "pair cmr-remote: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-remote\"]",
+          "status": "confirmed, waiting for device"
+        }
+      },
+      {
+        "t": 210424,
+        "label": "pair cmr-remote: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-remote\"] username=\"quickchr\" password=\"…\"",
+          "status": "paired"
+        }
+      },
+      {
+        "t": 210430,
+        "label": "pair cmr-remote: settled paired"
+      },
+      {
+        "t": 211453,
+        "label": "pair cmr-local: confirm-first start"
+      },
+      {
+        "t": 211456,
+        "label": "pair cmr-local: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-local\"]",
+          "status": "confirmed, waiting for device"
+        }
+      },
+      {
+        "t": 212469,
+        "label": "pair cmr-local: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-local\"] username=\"quickchr\" password=\"…\"",
+          "status": "paired"
+        }
+      },
+      {
+        "t": 212475,
+        "label": "pair cmr-local: settled paired"
+      },
+      {
+        "t": 235877,
+        "label": "pair cmr-local: credentialed start"
+      },
+      {
+        "t": 236885,
+        "label": "pair cmr-local: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-local\"] username=\"quickchr\" password=\"…\"",
+          "status": "paired"
+        }
+      },
+      {
+        "t": 236889,
+        "label": "pair cmr-local: settled paired"
+      },
+      {
+        "t": 239962,
+        "label": "pair cmr-local: credentialed start"
+      },
+      {
+        "t": 240960,
+        "label": "pair cmr-local: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-local\"] username=\"quickchr\" password=\"…\"",
+          "status": "device:ok, cmr:ok"
+        }
+      },
+      {
+        "t": 240964,
+        "label": "pair cmr-local: settled half-paired"
+      },
+      {
+        "t": 247025,
+        "label": "pair cmr-local: confirm-first start"
+      },
+      {
+        "t": 247027,
+        "label": "pair cmr-local: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-local\"]",
+          "status": "confirmed, waiting for device"
+        }
+      },
+      {
+        "t": 248035,
+        "label": "pair cmr-local: controller command returned",
+        "data": {
+          "command": "/cmr/device/pair [find identity=\"cmr-local\"] username=\"quickchr\" password=\"…\"",
+          "status": "paired"
+        }
+      },
+      {
+        "t": 248039,
+        "label": "pair cmr-local: settled paired"
+      },
+      {
+        "t": 266895,
+        "label": "sniffer on examples-cmr-1x31b92c54459-controller",
+        "data": {
+          "interfaces": [
+            "ether2",
+            "ether3"
+          ]
+        }
+      },
+      {
+        "t": 279973,
+        "label": "remote stopping"
+      },
+      {
+        "t": 330155,
+        "label": "remote started"
+      },
+      {
+        "t": 330184,
+        "label": "sniffer on examples-cmr-1x31b92c54459-remote",
+        "data": {
+          "interfaces": [
+            "ether2"
+          ]
+        }
+      }
+    ],
+    "mndp": [
+      {
+        "t": 62415,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "03000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "33",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "030000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000421000000000b000b6e36577877676a78685744000c0003434852000e0001010010000665746865723300120001000013000179000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 62415,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "03000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "33",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "030000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000421000000000b000b6e36577877676a78685744000c0003434852000e0001010010000665746865723300120001000013000179000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 62415,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "33",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "020000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000421000000000b000b6e36577877676a78685744000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 62415,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "33",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "020000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000421000000000b000b6e36577877676a78685744000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 81893,
+        "sender": "CHR/ether2/v6",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:31:c3:e9:ec:59",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::31:c3ff:fee9:ec59"
+        },
+        "payloadHex": "00000000000100060231c3e9ec59000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b4d6c7870794c7444506646000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe800000000000000031c3fffee9ec59"
+      },
+      {
+        "t": 81893,
+        "sender": "CHR/ether2/v4",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:31:c3:e9:ec:59",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::31:c3ff:fee9:ec59"
+        },
+        "payloadHex": "00000000000100060231c3e9ec59000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b4d6c7870794c7444506646000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe800000000000000031c3fffee9ec59"
+      },
+      {
+        "t": 83668,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 83668,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "03000000"
+      },
+      {
+        "t": 92412,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "04000000"
+      },
+      {
+        "t": 92412,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "04000000"
+      },
+      {
+        "t": 92412,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "04000000"
+      },
+      {
+        "t": 92412,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "04000000"
+      },
+      {
+        "t": 105352,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:31:c3:e9:ec:59",
+          "5:identity": "cmr-transit",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::31:c3ff:fee9:ec59"
+        },
+        "payloadHex": "01000000000100060231c3e9ec590005000b636d722d7472616e7369740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b4d6c7870794c7444506646000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe800000000000000031c3fffee9ec59"
+      },
+      {
+        "t": 105352,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:31:c3:e9:ec:59",
+          "5:identity": "cmr-transit",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::31:c3ff:fee9:ec59"
+        },
+        "payloadHex": "01000000000100060231c3e9ec590005000b636d722d7472616e7369740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b4d6c7870794c7444506646000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe800000000000000031c3fffee9ec59"
+      },
+      {
+        "t": 105352,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:2d:01:f7:e4:c3",
+          "5:identity": "cmr-transit",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::2d:1ff:fef7:e4c3"
+        },
+        "payloadHex": "0200000000010006022d01f7e4c30005000b636d722d7472616e7369740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b4d6c7870794c7444506646000c0003434852000e0001010010000665746865723300120001000013000179000f0010fe80000000000000002d01fffef7e4c3"
+      },
+      {
+        "t": 105352,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:2d:01:f7:e4:c3",
+          "5:identity": "cmr-transit",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::2d:1ff:fef7:e4c3"
+        },
+        "payloadHex": "0200000000010006022d01f7e4c30005000b636d722d7472616e7369740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b4d6c7870794c7444506646000c0003434852000e0001010010000665746865723300120001000013000179000f0010fe80000000000000002d01fffef7e4c3"
+      },
+      {
+        "t": 122410,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "05000000"
+      },
+      {
+        "t": 122410,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "05000000"
+      },
+      {
+        "t": 122410,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "05000000"
+      },
+      {
+        "t": 122410,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "05000000"
+      },
+      {
+        "t": 124912,
+        "sender": "CHR/ether2/v6",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79"
+        },
+        "payloadHex": "0000000000010006025b7b0a947a000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b6a342b4150744230354a48000c0003434852000e0001010010000665746865723200120001000013000179"
+      },
+      {
+        "t": 124912,
+        "sender": "CHR/ether2/v4",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79"
+        },
+        "payloadHex": "0000000000010006025b7b0a947a000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b6a342b4150744230354a48000c0003434852000e0001010010000665746865723200120001000013000179"
+      },
+      {
+        "t": 124912,
+        "sender": "CHR/ether2/v6",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::5b:7bff:fe0a:947a"
+        },
+        "payloadHex": "0100000000010006025b7b0a947a000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b6a342b4150744230354a48000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000005b7bfffe0a947a"
+      },
+      {
+        "t": 124912,
+        "sender": "CHR/ether2/v4",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "16",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::5b:7bff:fe0a:947a"
+        },
+        "payloadHex": "0100000000010006025b7b0a947a000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000410000000000b000b6a342b4150744230354a48000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000005b7bfffe0a947a"
+      },
+      {
+        "t": 126539,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 126539,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "03000000"
+      },
+      {
+        "t": 135353,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "04000000"
+      },
+      {
+        "t": 135353,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "04000000"
+      },
+      {
+        "t": 135353,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "02000000"
+      },
+      {
+        "t": 135353,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "02000000"
+      },
+      {
+        "t": 148285,
+        "sender": "cmr-remote/ether2/v6",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "cmr-remote",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::5b:7bff:fe0a:947a"
+        },
+        "payloadHex": "0200000000010006025b7b0a947a0005000a636d722d72656d6f74650007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b6a342b4150744230354a48000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000005b7bfffe0a947a"
+      },
+      {
+        "t": 148285,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "cmr-remote",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "40",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::5b:7bff:fe0a:947a"
+        },
+        "payloadHex": "0200000000010006025b7b0a947a0005000a636d722d72656d6f74650007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000428000000000b000b6a342b4150744230354a48000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000005b7bfffe0a947a"
+      },
+      {
+        "t": 152412,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "06000000"
+      },
+      {
+        "t": 152412,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "06000000"
+      },
+      {
+        "t": 152412,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "06000000"
+      },
+      {
+        "t": 152412,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "06000000"
+      },
+      {
+        "t": 165361,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "05000000"
+      },
+      {
+        "t": 165361,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "05000000"
+      },
+      {
+        "t": 165361,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 165361,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "03000000"
+      },
+      {
+        "t": 168823,
+        "sender": "CHR/ether2/v6",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:9e:8f:be:18:59",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "17",
+          "11:software-id": "q9PQmFrZsWJ",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::9e:8fff:febe:1859"
+        },
+        "payloadHex": "0000000000010006029e8fbe1859000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000411000000000b000b713950516d46725a73574a000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000009e8ffffebe1859"
+      },
+      {
+        "t": 168823,
+        "sender": "CHR/ether2/v4",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:9e:8f:be:18:59",
+          "5:identity": "CHR",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "17",
+          "11:software-id": "q9PQmFrZsWJ",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::9e:8fff:febe:1859"
+        },
+        "payloadHex": "0000000000010006029e8fbe1859000500034348520007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000411000000000b000b713950516d46725a73574a000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000009e8ffffebe1859"
+      },
+      {
+        "t": 169835,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "07000000"
+      },
+      {
+        "t": 169835,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "07000000"
+      },
+      {
+        "t": 178287,
+        "sender": "cmr-remote/ether2/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 178287,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "03000000"
+      },
+      {
+        "t": 182409,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "08000000"
+      },
+      {
+        "t": 182409,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "08000000"
+      },
+      {
+        "t": 182409,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "07000000"
+      },
+      {
+        "t": 182409,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "07000000"
+      },
+      {
+        "t": 188892,
+        "sender": "cmr-local/ether2/v6",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:9e:8f:be:18:59",
+          "5:identity": "cmr-local",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "37",
+          "11:software-id": "q9PQmFrZsWJ",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::9e:8fff:febe:1859"
+        },
+        "payloadHex": "0100000000010006029e8fbe185900050009636d722d6c6f63616c0007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000425000000000b000b713950516d46725a73574a000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000009e8ffffebe1859"
+      },
+      {
+        "t": 188892,
+        "sender": "cmr-local/ether2/v4",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:9e:8f:be:18:59",
+          "5:identity": "cmr-local",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "37",
+          "11:software-id": "q9PQmFrZsWJ",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "15:ipv6": "fe80::9e:8fff:febe:1859"
+        },
+        "payloadHex": "0100000000010006029e8fbe185900050009636d722d6c6f63616c0007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000425000000000b000b713950516d46725a73574a000c0003434852000e0001010010000665746865723200120001000013000179000f0010fe80000000000000009e8ffffebe1859"
+      },
+      {
+        "t": 189141,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "09000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "160",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "090000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004a0000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000100001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 189141,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "09000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "160",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "090000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004a0000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000100001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 189141,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "08000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "160",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "080000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004a0000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 189141,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "08000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "160",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "080000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004a0000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 189180,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "04000000",
+        "tlvs": {
+          "1:mac": "02:31:c3:e9:ec:59",
+          "5:identity": "cmr-transit",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "124",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.2",
+          "15:ipv6": "fe80::31:c3ff:fee9:ec59"
+        },
+        "payloadHex": "04000000000100060231c3e9ec590005000b636d722d7472616e7369740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00047c000000000b000b4d6c7870794c7444506646000c0003434852000e000101001000066574686572320012000100001300017900110004c0000202000f0010fe800000000000000031c3fffee9ec59"
+      },
+      {
+        "t": 189180,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "04000000",
+        "tlvs": {
+          "1:mac": "02:31:c3:e9:ec:59",
+          "5:identity": "cmr-transit",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "124",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.2",
+          "15:ipv6": "fe80::31:c3ff:fee9:ec59"
+        },
+        "payloadHex": "04000000000100060231c3e9ec590005000b636d722d7472616e7369740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00047c000000000b000b4d6c7870794c7444506646000c0003434852000e000101001000066574686572320012000100001300017900110004c0000202000f0010fe800000000000000031c3fffee9ec59"
+      },
+      {
+        "t": 189180,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "06000000",
+        "tlvs": {
+          "1:mac": "02:2d:01:f7:e4:c3",
+          "5:identity": "cmr-transit",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "124",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "198.51.100.1",
+          "15:ipv6": "fe80::2d:1ff:fef7:e4c3"
+        },
+        "payloadHex": "0600000000010006022d01f7e4c30005000b636d722d7472616e7369740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00047c000000000b000b4d6c7870794c7444506646000c0003434852000e000101001000066574686572330012000100001300017900110004c6336401000f0010fe80000000000000002d01fffef7e4c3"
+      },
+      {
+        "t": 189180,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "06000000",
+        "tlvs": {
+          "1:mac": "02:2d:01:f7:e4:c3",
+          "5:identity": "cmr-transit",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "124",
+          "11:software-id": "MlxpyLtDPfF",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "198.51.100.1",
+          "15:ipv6": "fe80::2d:1ff:fef7:e4c3"
+        },
+        "payloadHex": "0600000000010006022d01f7e4c30005000b636d722d7472616e7369740007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a00047c000000000b000b4d6c7870794c7444506646000c0003434852000e000101001000066574686572330012000100001300017900110004c6336401000f0010fe80000000000000002d01fffef7e4c3"
+      },
+      {
+        "t": 189202,
+        "sender": "cmr-remote/ether2/v6",
+        "header": "04000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "cmr-remote",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "81",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "198.51.100.2",
+          "15:ipv6": "fe80::5b:7bff:fe0a:947a"
+        },
+        "payloadHex": "0400000000010006025b7b0a947a0005000a636d722d72656d6f74650007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000451000000000b000b6a342b4150744230354a48000c0003434852000e000101001000066574686572320012000100001300017900110004c6336402000f0010fe80000000000000005b7bfffe0a947a"
+      },
+      {
+        "t": 189202,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "04000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "cmr-remote",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "81",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "198.51.100.2",
+          "15:ipv6": "fe80::5b:7bff:fe0a:947a"
+        },
+        "payloadHex": "0400000000010006025b7b0a947a0005000a636d722d72656d6f74650007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000451000000000b000b6a342b4150744230354a48000c0003434852000e000101001000066574686572320012000100001300017900110004c6336402000f0010fe80000000000000005b7bfffe0a947a"
+      },
+      {
+        "t": 189225,
+        "sender": "cmr-local/ether2/v6",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:9e:8f:be:18:59",
+          "5:identity": "cmr-local",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "38",
+          "11:software-id": "q9PQmFrZsWJ",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.2",
+          "15:ipv6": "fe80::9e:8fff:febe:1859"
+        },
+        "payloadHex": "0200000000010006029e8fbe185900050009636d722d6c6f63616c0007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000426000000000b000b713950516d46725a73574a000c0003434852000e000101001000066574686572320012000100001300017900110004cb007102000f0010fe80000000000000009e8ffffebe1859"
+      },
+      {
+        "t": 189225,
+        "sender": "cmr-local/ether2/v4",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:9e:8f:be:18:59",
+          "5:identity": "cmr-local",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "38",
+          "11:software-id": "q9PQmFrZsWJ",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.2",
+          "15:ipv6": "fe80::9e:8fff:febe:1859"
+        },
+        "payloadHex": "0200000000010006029e8fbe185900050009636d722d6c6f63616c0007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000426000000000b000b713950516d46725a73574a000c0003434852000e000101001000066574686572320012000100001300017900110004cb007102000f0010fe80000000000000009e8ffffebe1859"
+      },
+      {
+        "t": 195368,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "05000000"
+      },
+      {
+        "t": 195368,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "05000000"
+      },
+      {
+        "t": 195368,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "07000000"
+      },
+      {
+        "t": 195368,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "07000000"
+      },
+      {
+        "t": 206243,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "0a000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "177",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "0a0000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004b1000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000102001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 206243,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "0a000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "177",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "0a0000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004b1000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000102001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 206243,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "09000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "177",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "090000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004b1000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 206243,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "09000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "177",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "090000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004b1000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 208289,
+        "sender": "cmr-remote/ether2/v6",
+        "header": "05000000"
+      },
+      {
+        "t": 208289,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "05000000"
+      },
+      {
+        "t": 218896,
+        "sender": "cmr-local/ether2/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 218896,
+        "sender": "cmr-local/ether2/v4",
+        "header": "03000000"
+      },
+      {
+        "t": 225372,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "06000000"
+      },
+      {
+        "t": 225372,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "06000000"
+      },
+      {
+        "t": 225372,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "08000000"
+      },
+      {
+        "t": 225372,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "08000000"
+      },
+      {
+        "t": 236245,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "0b000000"
+      },
+      {
+        "t": 236245,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "0b000000"
+      },
+      {
+        "t": 236245,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0a000000"
+      },
+      {
+        "t": 236245,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0a000000"
+      },
+      {
+        "t": 238296,
+        "sender": "cmr-remote/ether2/v6",
+        "header": "06000000"
+      },
+      {
+        "t": 238296,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "06000000"
+      },
+      {
+        "t": 248892,
+        "sender": "cmr-local/ether2/v6",
+        "header": "04000000"
+      },
+      {
+        "t": 248892,
+        "sender": "cmr-local/ether2/v4",
+        "header": "04000000"
+      },
+      {
+        "t": 249060,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "0c000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "219",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "0c0000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004db000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000100001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 249060,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "0c000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "219",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "0c0000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004db000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000100001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 249060,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0b000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "219",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "0b0000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004db000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 249060,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0b000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "219",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "0b0000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004db000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 249113,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "0d000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "220",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "0d0000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004dc000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000102001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 249113,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "0d000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "220",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "0d0000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004dc000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000102001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 249113,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0c000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "220",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "0c0000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004dc000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 249113,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0c000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "220",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "0c0000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004dc000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 255367,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "07000000"
+      },
+      {
+        "t": 255367,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "07000000"
+      },
+      {
+        "t": 255367,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "09000000"
+      },
+      {
+        "t": 255367,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "09000000"
+      },
+      {
+        "t": 259632,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "0e000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "230",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "0e0000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004e6000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000100001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 259632,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "0e000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "230",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "0e0000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004e6000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000100001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 259632,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0d000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "230",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "0d0000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004e6000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 259632,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0d000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "230",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "0d0000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a0004e6000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000100001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 259638,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "0f000000"
+      },
+      {
+        "t": 259638,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "0f000000"
+      },
+      {
+        "t": 259638,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "0e000000"
+      },
+      {
+        "t": 259639,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "0e000000"
+      },
+      {
+        "t": 266208,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "3",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1"
+        },
+        "payloadHex": "000000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000403000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201"
+      },
+      {
+        "t": 266208,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "3",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1"
+        },
+        "payloadHex": "000000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000403000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000102001300017900110004cb007101"
+      },
+      {
+        "t": 266599,
+        "sender": "cmr-local/ether2/v6",
+        "header": "05000000"
+      },
+      {
+        "t": 266599,
+        "sender": "cmr-local/ether2/v4",
+        "header": "05000000"
+      },
+      {
+        "t": 267244,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "08000000"
+      },
+      {
+        "t": 267244,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "08000000"
+      },
+      {
+        "t": 267302,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "4",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "010000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000404000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000102001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 267302,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:33:0a:1e:76:54",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "4",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether3",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "203.0.113.1",
+          "15:ipv6": "fe80::33:aff:fe1e:7654"
+        },
+        "payloadHex": "010000000001000602330a1e76540005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000404000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572330012000102001300017900110004cb007101000f0010fe8000000000000000330afffe1e7654"
+      },
+      {
+        "t": 267302,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "4",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "010000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000404000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 267302,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "01000000",
+        "tlvs": {
+          "1:mac": "02:f2:fc:99:0e:7d",
+          "5:identity": "cmr-controller",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "4",
+          "11:software-id": "n6WxwgjxhWD",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "02",
+          "19:tlv-19": "79",
+          "17:ipv4": "192.0.2.1",
+          "15:ipv6": "fe80::f2:fcff:fe99:e7d"
+        },
+        "payloadHex": "010000000001000602f2fc990e7d0005000e636d722d636f6e74726f6c6c65720007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000404000000000b000b6e36577877676a78685744000c0003434852000e000101001000066574686572320012000102001300017900110004c0000201000f0010fe8000000000000000f2fcfffe990e7d"
+      },
+      {
+        "t": 268298,
+        "sender": "cmr-remote/ether2/v6",
+        "header": "07000000"
+      },
+      {
+        "t": 268298,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "07000000"
+      },
+      {
+        "t": 278893,
+        "sender": "cmr-local/ether2/v6",
+        "header": "06000000"
+      },
+      {
+        "t": 278893,
+        "sender": "cmr-local/ether2/v4",
+        "header": "06000000"
+      },
+      {
+        "t": 285373,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "09000000"
+      },
+      {
+        "t": 285373,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "09000000"
+      },
+      {
+        "t": 285373,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "0a000000"
+      },
+      {
+        "t": 285373,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "0a000000"
+      },
+      {
+        "t": 295168,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "02000000"
+      },
+      {
+        "t": 295168,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "02000000"
+      },
+      {
+        "t": 295168,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "02000000"
+      },
+      {
+        "t": 295168,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "02000000"
+      },
+      {
+        "t": 308896,
+        "sender": "cmr-local/ether2/v6",
+        "header": "07000000"
+      },
+      {
+        "t": 308896,
+        "sender": "cmr-local/ether2/v4",
+        "header": "07000000"
+      },
+      {
+        "t": 315366,
+        "sender": "cmr-transit/ether2/v6",
+        "header": "0a000000"
+      },
+      {
+        "t": 315366,
+        "sender": "cmr-transit/ether2/v4",
+        "header": "0a000000"
+      },
+      {
+        "t": 315366,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "0b000000"
+      },
+      {
+        "t": 315366,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "0b000000"
+      },
+      {
+        "t": 325168,
+        "sender": "cmr-controller/ether3/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 325168,
+        "sender": "cmr-controller/ether3/v4",
+        "header": "03000000"
+      },
+      {
+        "t": 325168,
+        "sender": "cmr-controller/ether2/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 325168,
+        "sender": "cmr-controller/ether2/v4",
+        "header": "03000000"
+      },
+      {
+        "t": 326434,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "00000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "cmr-remote",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "2",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79"
+        },
+        "payloadHex": "0000000000010006025b7b0a947a0005000a636d722d72656d6f74650007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000402000000000b000b6a342b4150744230354a48000c0003434852000e0001010010000665746865723200120001000013000179"
+      },
+      {
+        "t": 326436,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "01000000"
+      },
+      {
+        "t": 326820,
+        "sender": "cmr-transit/ether3/v6",
+        "header": "0c000000"
+      },
+      {
+        "t": 326820,
+        "sender": "cmr-transit/ether3/v4",
+        "header": "0c000000"
+      },
+      {
+        "t": 327313,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "02000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "cmr-remote",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "3",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "198.51.100.2"
+        },
+        "payloadHex": "0200000000010006025b7b0a947a0005000a636d722d72656d6f74650007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000403000000000b000b6a342b4150744230354a48000c0003434852000e000101001000066574686572320012000100001300017900110004c6336402"
+      },
+      {
+        "t": 328591,
+        "sender": "cmr-remote/ether2/v6",
+        "header": "03000000"
+      },
+      {
+        "t": 328591,
+        "sender": "cmr-remote/ether2/v4",
+        "header": "03000000",
+        "tlvs": {
+          "1:mac": "02:5b:7b:0a:94:7a",
+          "5:identity": "cmr-remote",
+          "7:version": "7.26beta5 2026-10-30 11:13:55",
+          "8:platform": "MikroTik",
+          "10:uptime": "4",
+          "11:software-id": "j4+APtB05JH",
+          "12:board": "CHR",
+          "14:unpack": "01",
+          "16:interface": "ether2",
+          "18:running": "00",
+          "19:tlv-19": "79",
+          "17:ipv4": "198.51.100.2",
+          "15:ipv6": "fe80::5b:7bff:fe0a:947a"
+        },
+        "payloadHex": "0300000000010006025b7b0a947a0005000a636d722d72656d6f74650007001d372e3236626574613520323032362d31302d33302031313a31333a3535000800084d696b726f54696b000a000404000000000b000b6a342b4150744230354a48000c0003434852000e000101001000066574686572320012000100001300017900110004c6336402000f0010fe80000000000000005b7bfffe0a947a"
+      }
+    ],
+    "mndpIntervals": {
+      "cmr-controller/ether3/v6": {
+        "count": 16,
+        "lifetimes": 2,
+        "minMs": 6,
+        "medianMs": 17262.5,
+        "maxMs": 30002
+      },
+      "cmr-controller/ether3/v4": {
+        "count": 17,
+        "lifetimes": 2,
+        "minMs": 6,
+        "medianMs": 17102,
+        "maxMs": 30002
+      },
+      "cmr-controller/ether2/v6": {
+        "count": 16,
+        "lifetimes": 2,
+        "minMs": 6,
+        "medianMs": 19177.5,
+        "maxMs": 30002
+      },
+      "cmr-controller/ether2/v4": {
+        "count": 17,
+        "lifetimes": 2,
+        "minMs": 7,
+        "medianMs": 17102,
+        "maxMs": 30002
+      },
+      "CHR/ether2/v6": {
+        "count": 4,
+        "lifetimes": 3,
+        "minMs": 0,
+        "medianMs": 0,
+        "maxMs": 0
+      },
+      "CHR/ether2/v4": {
+        "count": 4,
+        "lifetimes": 3,
+        "minMs": 0,
+        "medianMs": 0,
+        "maxMs": 0
+      },
+      "cmr-transit/ether2/v6": {
+        "count": 10,
+        "lifetimes": 1,
+        "minMs": 6188,
+        "medianMs": 29993,
+        "maxMs": 30008
+      },
+      "cmr-transit/ether2/v4": {
+        "count": 10,
+        "lifetimes": 1,
+        "minMs": 6188,
+        "medianMs": 29993,
+        "maxMs": 30008
+      },
+      "cmr-transit/ether3/v6": {
+        "count": 11,
+        "lifetimes": 1,
+        "minMs": 6188,
+        "medianMs": 26906,
+        "maxMs": 30008
+      },
+      "cmr-transit/ether3/v4": {
+        "count": 11,
+        "lifetimes": 1,
+        "minMs": 6188,
+        "medianMs": 26906,
+        "maxMs": 30008
+      },
+      "cmr-remote/ether2/v6": {
+        "count": 7,
+        "lifetimes": 2,
+        "minMs": 10915,
+        "medianMs": 30002,
+        "maxMs": 30007
+      },
+      "cmr-remote/ether2/v4": {
+        "count": 10,
+        "lifetimes": 2,
+        "minMs": 2,
+        "medianMs": 15001,
+        "maxMs": 30007
+      },
+      "cmr-local/ether2/v6": {
+        "count": 7,
+        "lifetimes": 1,
+        "minMs": 333,
+        "medianMs": 23689,
+        "maxMs": 30003
+      },
+      "cmr-local/ether2/v4": {
+        "count": 7,
+        "lifetimes": 1,
+        "minMs": 333,
+        "medianMs": 23689,
+        "maxMs": 30003
+      }
+    },
+    "cmr": [
+      {
+        "client": "192.0.2.2:43884",
+        "server": "192.0.2.1:54321",
+        "first": 206289,
+        "last": 249065,
+        "bareAcks": 73,
+        "segments": [
+          [
+            206289,
+            ">",
+            "S",
+            0
+          ],
+          [
+            206289,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            206367,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            206380,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            206405,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            206418,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            206419,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            206419,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            206419,
+            ">",
+            "PA",
+            60
+          ],
+          [
+            206419,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            206420,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            206420,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            206421,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            206422,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            206423,
+            ">",
+            "PA",
+            252
+          ],
+          [
+            207383,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            207390,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            207633,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            207639,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            207765,
+            ">",
+            "PA",
+            71
+          ],
+          [
+            207766,
+            ">",
+            "PA",
+            66
+          ],
+          [
+            207767,
+            "<",
+            "PA",
+            46
+          ],
+          [
+            207767,
+            "<",
+            "PA",
+            65
+          ],
+          [
+            207767,
+            "<",
+            "PA",
+            388
+          ],
+          [
+            207768,
+            "<",
+            "PA",
+            357
+          ],
+          [
+            207768,
+            "<",
+            "PA",
+            306
+          ],
+          [
+            207768,
+            "<",
+            "PA",
+            499
+          ],
+          [
+            207768,
+            "<",
+            "PA",
+            99
+          ],
+          [
+            207769,
+            "<",
+            "PA",
+            317
+          ],
+          [
+            207772,
+            ">",
+            "PA",
+            772
+          ],
+          [
+            207773,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            207773,
+            ">",
+            "PA",
+            262
+          ],
+          [
+            207774,
+            ">",
+            "PA",
+            211
+          ],
+          [
+            207778,
+            ">",
+            "PA",
+            67
+          ],
+          [
+            208406,
+            "<",
+            "PA",
+            101
+          ],
+          [
+            208407,
+            ">",
+            "PA",
+            79
+          ],
+          [
+            214539,
+            "<",
+            "PA",
+            102
+          ],
+          [
+            214540,
+            ">",
+            "PA",
+            77
+          ],
+          [
+            217761,
+            "<",
+            "PA",
+            101
+          ],
+          [
+            217761,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            217762,
+            "<",
+            "PA",
+            338
+          ],
+          [
+            217762,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            217764,
+            ">",
+            "PA",
+            114
+          ],
+          [
+            217765,
+            ">",
+            "PA",
+            571
+          ],
+          [
+            217766,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            217767,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            217767,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            217768,
+            ">",
+            "PA",
+            231
+          ],
+          [
+            217768,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            217769,
+            ">",
+            "PA",
+            211
+          ],
+          [
+            218761,
+            "<",
+            "PA",
+            116
+          ],
+          [
+            218762,
+            ">",
+            "PA",
+            46
+          ],
+          [
+            227761,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            227761,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            227761,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            227764,
+            ">",
+            "PA",
+            678
+          ],
+          [
+            227765,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            227765,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            227766,
+            ">",
+            "PA",
+            341
+          ],
+          [
+            227767,
+            ">",
+            "PA",
+            211
+          ],
+          [
+            237768,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            237768,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            237768,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            237771,
+            ">",
+            "PA",
+            678
+          ],
+          [
+            237772,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            237772,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            237773,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            237774,
+            ">",
+            "PA",
+            231
+          ],
+          [
+            237774,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            237774,
+            ">",
+            "PA",
+            201
+          ],
+          [
+            247764,
+            "<",
+            "PA",
+            65
+          ],
+          [
+            247764,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            247765,
+            "<",
+            "PA",
+            374
+          ],
+          [
+            247766,
+            ">",
+            "PA",
+            61
+          ],
+          [
+            247767,
+            ">",
+            "PA",
+            344
+          ],
+          [
+            247767,
+            ">",
+            "PA",
+            331
+          ],
+          [
+            247768,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            247769,
+            ">",
+            "PA",
+            253
+          ],
+          [
+            247770,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            247770,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            247771,
+            ">",
+            "PA",
+            201
+          ],
+          [
+            249062,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            249063,
+            ">",
+            "PA",
+            41
+          ],
+          [
+            249063,
+            "<",
+            "PA",
+            126
+          ],
+          [
+            249063,
+            ">",
+            "PA",
+            41
+          ],
+          [
+            249064,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            249065,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            249065,
+            "<",
+            "FA",
+            0
+          ],
+          [
+            249065,
+            ">",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "198.51.100.2:58594",
+        "server": "10.255.0.1:54321",
+        "first": 206325,
+        "last": 249066,
+        "bareAcks": 54,
+        "segments": [
+          [
+            206325,
+            ">",
+            "S",
+            0
+          ],
+          [
+            206328,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            206386,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            206400,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            206422,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            206436,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            206436,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            206437,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            206437,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            206437,
+            ">",
+            "PA",
+            59
+          ],
+          [
+            206438,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            206438,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            206439,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            206440,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            206441,
+            ">",
+            "PA",
+            251
+          ],
+          [
+            209420,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            209426,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            209669,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            209674,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            209798,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            209800,
+            "<",
+            "PA",
+            46
+          ],
+          [
+            209800,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            209801,
+            "<",
+            "PA",
+            472
+          ],
+          [
+            209801,
+            "<",
+            "PA",
+            111
+          ],
+          [
+            209806,
+            ">",
+            "PA",
+            920
+          ],
+          [
+            209851,
+            ">",
+            "PA",
+            279
+          ],
+          [
+            210438,
+            "<",
+            "PA",
+            101
+          ],
+          [
+            210439,
+            ">",
+            "PA",
+            79
+          ],
+          [
+            214539,
+            "<",
+            "PA",
+            102
+          ],
+          [
+            214540,
+            ">",
+            "PA",
+            77
+          ],
+          [
+            219801,
+            "<",
+            "PA",
+            99
+          ],
+          [
+            219802,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            219802,
+            "<",
+            "PA",
+            340
+          ],
+          [
+            219804,
+            ">",
+            "PA",
+            114
+          ],
+          [
+            219804,
+            ">",
+            "PA",
+            465
+          ],
+          [
+            219805,
+            ">",
+            "PA",
+            67
+          ],
+          [
+            219806,
+            ">",
+            "PA",
+            96
+          ],
+          [
+            219806,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            219807,
+            ">",
+            "PA",
+            180
+          ],
+          [
+            219808,
+            ">",
+            "PA",
+            308
+          ],
+          [
+            220807,
+            "<",
+            "PA",
+            201
+          ],
+          [
+            220808,
+            ">",
+            "PA",
+            46
+          ],
+          [
+            221580,
+            ">",
+            "PA",
+            81
+          ],
+          [
+            229800,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            229801,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            229801,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            229802,
+            ">",
+            "PA",
+            114
+          ],
+          [
+            229804,
+            ">",
+            "PA",
+            503
+          ],
+          [
+            229805,
+            ">",
+            "PA",
+            172
+          ],
+          [
+            229806,
+            ">",
+            "PA",
+            163
+          ],
+          [
+            229807,
+            ">",
+            "PA",
+            165
+          ],
+          [
+            229807,
+            ">",
+            "PA",
+            210
+          ],
+          [
+            239807,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            239807,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            239807,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            239810,
+            ">",
+            "PA",
+            588
+          ],
+          [
+            239811,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            239811,
+            ">",
+            "PA",
+            200
+          ],
+          [
+            239812,
+            ">",
+            "PA",
+            96
+          ],
+          [
+            239812,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            239813,
+            ">",
+            "PA",
+            210
+          ],
+          [
+            249063,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            249063,
+            ">",
+            "PA",
+            41
+          ],
+          [
+            249064,
+            "<",
+            "PA",
+            126
+          ],
+          [
+            249064,
+            ">",
+            "PA",
+            41
+          ],
+          [
+            249065,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            249065,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            249065,
+            "<",
+            "FA",
+            0
+          ],
+          [
+            249066,
+            ">",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47242",
+        "server": "203.0.113.1:54321",
+        "first": 206364,
+        "last": 230705,
+        "bareAcks": 43,
+        "segments": [
+          [
+            206364,
+            ">",
+            "S",
+            0
+          ],
+          [
+            206364,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            206456,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            206468,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            206492,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            206505,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            206505,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            206506,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            206506,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            206506,
+            ">",
+            "PA",
+            58
+          ],
+          [
+            206506,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            206507,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            206508,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            206509,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            206510,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            211455,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            211459,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            211703,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            211707,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            211831,
+            ">",
+            "PA",
+            71
+          ],
+          [
+            211881,
+            ">",
+            "PA",
+            66
+          ],
+          [
+            211883,
+            "<",
+            "PA",
+            46
+          ],
+          [
+            211883,
+            "<",
+            "PA",
+            810
+          ],
+          [
+            211883,
+            "<",
+            "PA",
+            904
+          ],
+          [
+            211884,
+            "<",
+            "PA",
+            317
+          ],
+          [
+            211888,
+            ">",
+            "PA",
+            814
+          ],
+          [
+            211889,
+            ">",
+            "PA",
+            211
+          ],
+          [
+            211889,
+            ">",
+            "PA",
+            159
+          ],
+          [
+            211894,
+            ">",
+            "PA",
+            67
+          ],
+          [
+            212482,
+            "<",
+            "PA",
+            101
+          ],
+          [
+            212483,
+            ">",
+            "PA",
+            79
+          ],
+          [
+            214539,
+            "<",
+            "PA",
+            102
+          ],
+          [
+            214540,
+            ">",
+            "PA",
+            77
+          ],
+          [
+            221879,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            221879,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            221880,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            221882,
+            ">",
+            "PA",
+            114
+          ],
+          [
+            221882,
+            ">",
+            "PA",
+            506
+          ],
+          [
+            221883,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            221884,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            221884,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            221885,
+            ">",
+            "PA",
+            178
+          ],
+          [
+            221885,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            221886,
+            ">",
+            "PA",
+            209
+          ],
+          [
+            222883,
+            "<",
+            "PA",
+            116
+          ],
+          [
+            222885,
+            ">",
+            "PA",
+            46
+          ],
+          [
+            230705,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            230705,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            230705,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47244",
+        "server": "203.0.113.1:54321",
+        "first": 230719,
+        "last": 231752,
+        "bareAcks": 17,
+        "segments": [
+          [
+            230719,
+            ">",
+            "S",
+            0
+          ],
+          [
+            230719,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            230721,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            230727,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            230738,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            230744,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            230744,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            230745,
+            ">",
+            "PA",
+            72
+          ],
+          [
+            230745,
+            "<",
+            "PA",
+            74
+          ],
+          [
+            230746,
+            ">",
+            "PA",
+            80
+          ],
+          [
+            230747,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            230748,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            231734,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            231734,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            231734,
+            "<",
+            "PA",
+            90
+          ],
+          [
+            231741,
+            ">",
+            "PA",
+            1166
+          ],
+          [
+            231752,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            231752,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            231752,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47246",
+        "server": "203.0.113.1:54321",
+        "first": 231764,
+        "last": 233798,
+        "bareAcks": 29,
+        "segments": [
+          [
+            231764,
+            ">",
+            "S",
+            0
+          ],
+          [
+            231764,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            231766,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            231771,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            231784,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            231789,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            231790,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            231790,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            231791,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            231791,
+            ">",
+            "PA",
+            58
+          ],
+          [
+            231791,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            231826,
+            ">",
+            "PA",
+            80
+          ],
+          [
+            231826,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            231828,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            232779,
+            "<",
+            "PA",
+            77
+          ],
+          [
+            232787,
+            ">",
+            "PA",
+            97
+          ],
+          [
+            233030,
+            "<",
+            "PA",
+            88
+          ],
+          [
+            233034,
+            ">",
+            "PA",
+            87
+          ],
+          [
+            233158,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            233158,
+            "<",
+            "PA",
+            160
+          ],
+          [
+            233159,
+            "<",
+            "PA",
+            1608
+          ],
+          [
+            233162,
+            ">",
+            "PA",
+            82
+          ],
+          [
+            233162,
+            ">",
+            "PA",
+            292
+          ],
+          [
+            233163,
+            ">",
+            "PA",
+            180
+          ],
+          [
+            233163,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            233164,
+            ">",
+            "PA",
+            268
+          ],
+          [
+            233164,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            233164,
+            ">",
+            "PA",
+            211
+          ],
+          [
+            233165,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            233165,
+            ">",
+            "PA",
+            141
+          ],
+          [
+            233165,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            233166,
+            ">",
+            "PA",
+            159
+          ],
+          [
+            233797,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            233797,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            233798,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47248",
+        "server": "203.0.113.1:54321",
+        "first": 233811,
+        "last": 234849,
+        "bareAcks": 18,
+        "segments": [
+          [
+            233811,
+            ">",
+            "S",
+            0
+          ],
+          [
+            233811,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            233813,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            233819,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            233830,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            233837,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            233838,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            233838,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            233838,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            233838,
+            ">",
+            "PA",
+            58
+          ],
+          [
+            233839,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            233839,
+            ">",
+            "PA",
+            70
+          ],
+          [
+            233840,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            233840,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            233841,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            234834,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            234834,
+            "<",
+            "PA",
+            118
+          ],
+          [
+            234834,
+            "<",
+            "PA",
+            1566
+          ],
+          [
+            234840,
+            ">",
+            "PA",
+            1168
+          ],
+          [
+            234846,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            234847,
+            "<",
+            "FA",
+            0
+          ],
+          [
+            234849,
+            ">",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47250",
+        "server": "203.0.113.1:54321",
+        "first": 234858,
+        "last": 236894,
+        "bareAcks": 30,
+        "segments": [
+          [
+            234858,
+            ">",
+            "S",
+            0
+          ],
+          [
+            234858,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            234859,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            234866,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            234876,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            234884,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            234884,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            234885,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            234885,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            234885,
+            ">",
+            "PA",
+            58
+          ],
+          [
+            234885,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            234886,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            234886,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            234887,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            234887,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            235873,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            235881,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            236124,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            236128,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            236252,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            236255,
+            "<",
+            "PA",
+            46
+          ],
+          [
+            236257,
+            "<",
+            "PA",
+            65
+          ],
+          [
+            236257,
+            "<",
+            "PA",
+            1149
+          ],
+          [
+            236257,
+            "<",
+            "PA",
+            132
+          ],
+          [
+            236258,
+            "<",
+            "PA",
+            139
+          ],
+          [
+            236258,
+            "<",
+            "PA",
+            334
+          ],
+          [
+            236258,
+            "<",
+            "PA",
+            212
+          ],
+          [
+            236259,
+            ">",
+            "PA",
+            211
+          ],
+          [
+            236301,
+            ">",
+            "PA",
+            1011
+          ],
+          [
+            236894,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            236894,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            236894,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47252",
+        "server": "203.0.113.1:54321",
+        "first": 236904,
+        "last": 238937,
+        "bareAcks": 32,
+        "segments": [
+          [
+            236904,
+            ">",
+            "S",
+            0
+          ],
+          [
+            236905,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            236906,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            236913,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            236924,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            236930,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            236931,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            236931,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            236931,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            236931,
+            ">",
+            "PA",
+            58
+          ],
+          [
+            236931,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            236965,
+            ">",
+            "PA",
+            100
+          ],
+          [
+            236965,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            236966,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            237921,
+            "<",
+            "PA",
+            77
+          ],
+          [
+            237929,
+            ">",
+            "PA",
+            134
+          ],
+          [
+            237931,
+            "<",
+            "PA",
+            66
+          ],
+          [
+            238172,
+            "<",
+            "PA",
+            88
+          ],
+          [
+            238175,
+            ">",
+            "PA",
+            87
+          ],
+          [
+            238300,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            238300,
+            "<",
+            "PA",
+            160
+          ],
+          [
+            238300,
+            "<",
+            "PA",
+            1608
+          ],
+          [
+            238303,
+            ">",
+            "PA",
+            82
+          ],
+          [
+            238303,
+            ">",
+            "PA",
+            292
+          ],
+          [
+            238304,
+            ">",
+            "PA",
+            181
+          ],
+          [
+            238304,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            238305,
+            ">",
+            "PA",
+            268
+          ],
+          [
+            238305,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            238306,
+            ">",
+            "PA",
+            214
+          ],
+          [
+            238306,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            238306,
+            ">",
+            "PA",
+            141
+          ],
+          [
+            238307,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            238307,
+            ">",
+            "PA",
+            159
+          ],
+          [
+            238936,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            238936,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            238936,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47254",
+        "server": "203.0.113.1:54321",
+        "first": 238948,
+        "last": 240986,
+        "bareAcks": 26,
+        "segments": [
+          [
+            238948,
+            ">",
+            "S",
+            0
+          ],
+          [
+            238948,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            238949,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            238956,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            238966,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            238972,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            238972,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            238972,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            238973,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            238973,
+            ">",
+            "PA",
+            58
+          ],
+          [
+            238973,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            238973,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            238973,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            238974,
+            "<",
+            "PA",
+            154
+          ],
+          [
+            238974,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            239966,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            240209,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            240213,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            240337,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            240338,
+            "<",
+            "PA",
+            69
+          ],
+          [
+            240339,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            240970,
+            "<",
+            "PA",
+            65
+          ],
+          [
+            240971,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            240971,
+            "<",
+            "PA",
+            102
+          ],
+          [
+            240971,
+            "<",
+            "PA",
+            416
+          ],
+          [
+            240972,
+            ">",
+            "PA",
+            211
+          ],
+          [
+            240985,
+            ">",
+            "FPA",
+            1068
+          ],
+          [
+            240986,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47256",
+        "server": "203.0.113.1:54321",
+        "first": 240991,
+        "last": 246007,
+        "bareAcks": 16,
+        "segments": [
+          [
+            240991,
+            ">",
+            "S",
+            0
+          ],
+          [
+            240991,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            240992,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            240997,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            241008,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            241013,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            241014,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            241014,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            241014,
+            "<",
+            "PA",
+            70
+          ],
+          [
+            241014,
+            ">",
+            "PA",
+            58
+          ],
+          [
+            241015,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            241015,
+            ">",
+            "PA",
+            93
+          ],
+          [
+            241015,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            241016,
+            "<",
+            "PA",
+            103
+          ],
+          [
+            241016,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            246006,
+            ">",
+            "PA",
+            57
+          ],
+          [
+            246006,
+            ">",
+            "FA",
+            0
+          ],
+          [
+            246007,
+            "<",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47258",
+        "server": "203.0.113.1:54321",
+        "first": 246013,
+        "last": 249066,
+        "bareAcks": 31,
+        "segments": [
+          [
+            246013,
+            ">",
+            "S",
+            0
+          ],
+          [
+            246013,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            246015,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            246024,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            246040,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            246046,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            246046,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            246047,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            246047,
+            "<",
+            "PA",
+            70
+          ],
+          [
+            246047,
+            ">",
+            "PA",
+            58
+          ],
+          [
+            246048,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            246048,
+            ">",
+            "PA",
+            90
+          ],
+          [
+            246048,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            246048,
+            "<",
+            "PA",
+            103
+          ],
+          [
+            246049,
+            ">",
+            "PA",
+            250
+          ],
+          [
+            247031,
+            "<",
+            "PA",
+            97
+          ],
+          [
+            247275,
+            ">",
+            "PA",
+            88
+          ],
+          [
+            247279,
+            "<",
+            "PA",
+            87
+          ],
+          [
+            247403,
+            ">",
+            "PA",
+            108
+          ],
+          [
+            247404,
+            "<",
+            "PA",
+            46
+          ],
+          [
+            247404,
+            "<",
+            "PA",
+            810
+          ],
+          [
+            247405,
+            "<",
+            "PA",
+            675
+          ],
+          [
+            247405,
+            "<",
+            "PA",
+            435
+          ],
+          [
+            247405,
+            "<",
+            "PA",
+            111
+          ],
+          [
+            247407,
+            ">",
+            "PA",
+            336
+          ],
+          [
+            247452,
+            ">",
+            "PA",
+            890
+          ],
+          [
+            248045,
+            "<",
+            "PA",
+            101
+          ],
+          [
+            248046,
+            ">",
+            "PA",
+            79
+          ],
+          [
+            249063,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            249064,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            249064,
+            ">",
+            "PA",
+            41
+          ],
+          [
+            249064,
+            ">",
+            "PA",
+            41
+          ],
+          [
+            249065,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            249065,
+            "<",
+            "FA",
+            0
+          ],
+          [
+            249066,
+            ">",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "198.51.100.2:58596",
+        "server": "10.255.0.1:54321",
+        "first": 249066,
+        "last": 249066,
+        "bareAcks": 0,
+        "segments": [
+          [
+            249066,
+            ">",
+            "S",
+            0
+          ],
+          [
+            249066,
+            "<",
+            "RA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:43886",
+        "server": "192.0.2.1:54321",
+        "first": 249066,
+        "last": 249066,
+        "bareAcks": 0,
+        "segments": [
+          [
+            249066,
+            ">",
+            "S",
+            0
+          ],
+          [
+            249066,
+            "<",
+            "RA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47260",
+        "server": "203.0.113.1:54321",
+        "first": 259064,
+        "last": 259636,
+        "bareAcks": 16,
+        "segments": [
+          [
+            259064,
+            ">",
+            "S",
+            0
+          ],
+          [
+            259064,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            259068,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            259077,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            259088,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            259100,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            259101,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            259102,
+            "<",
+            "PA",
+            78
+          ],
+          [
+            259102,
+            ">",
+            "PA",
+            106
+          ],
+          [
+            259103,
+            "<",
+            "PA",
+            141
+          ],
+          [
+            259104,
+            ">",
+            "PA",
+            235
+          ],
+          [
+            259105,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            259105,
+            "<",
+            "PA",
+            90
+          ],
+          [
+            259108,
+            ">",
+            "PA",
+            1160
+          ],
+          [
+            259634,
+            "<",
+            "PA",
+            85
+          ],
+          [
+            259634,
+            ">",
+            "PA",
+            53
+          ],
+          [
+            259635,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            259635,
+            "<",
+            "FA",
+            0
+          ],
+          [
+            259636,
+            ">",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "198.51.100.2:58598",
+        "server": "10.255.0.1:54321",
+        "first": 259070,
+        "last": 259636,
+        "bareAcks": 18,
+        "segments": [
+          [
+            259070,
+            ">",
+            "S",
+            0
+          ],
+          [
+            259070,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            259072,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            259087,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            259099,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            259113,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            259114,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            259114,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            259115,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            259115,
+            ">",
+            "PA",
+            66
+          ],
+          [
+            259116,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            259116,
+            ">",
+            "PA",
+            70
+          ],
+          [
+            259116,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            259122,
+            "<",
+            "PA",
+            131
+          ],
+          [
+            259147,
+            ">",
+            "PA",
+            226
+          ],
+          [
+            259148,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            259148,
+            "<",
+            "PA",
+            90
+          ],
+          [
+            259148,
+            "<",
+            "PA",
+            1538
+          ],
+          [
+            259152,
+            ">",
+            "PA",
+            1121
+          ],
+          [
+            259633,
+            "<",
+            "PA",
+            85
+          ],
+          [
+            259634,
+            ">",
+            "PA",
+            53
+          ],
+          [
+            259635,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            259635,
+            "<",
+            "FA",
+            0
+          ],
+          [
+            259636,
+            ">",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:43888",
+        "server": "192.0.2.1:54321",
+        "first": 259074,
+        "last": 259636,
+        "bareAcks": 21,
+        "segments": [
+          [
+            259074,
+            ">",
+            "S",
+            0
+          ],
+          [
+            259074,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            259080,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            259097,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            259116,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            259123,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            259124,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            259124,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            259125,
+            "<",
+            "PA",
+            64
+          ],
+          [
+            259125,
+            ">",
+            "PA",
+            67
+          ],
+          [
+            259125,
+            "<",
+            "PA",
+            39
+          ],
+          [
+            259125,
+            ">",
+            "PA",
+            70
+          ],
+          [
+            259126,
+            ">",
+            "PA",
+            39
+          ],
+          [
+            259126,
+            "<",
+            "PA",
+            131
+          ],
+          [
+            259127,
+            ">",
+            "PA",
+            227
+          ],
+          [
+            259128,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            259128,
+            "<",
+            "PA",
+            90
+          ],
+          [
+            259128,
+            "<",
+            "PA",
+            1538
+          ],
+          [
+            259134,
+            ">",
+            "PA",
+            1292
+          ],
+          [
+            259633,
+            "<",
+            "PA",
+            85
+          ],
+          [
+            259633,
+            ">",
+            "PA",
+            41
+          ],
+          [
+            259634,
+            ">",
+            "PA",
+            41
+          ],
+          [
+            259636,
+            "<",
+            "PA",
+            57
+          ],
+          [
+            259636,
+            "<",
+            "FA",
+            0
+          ],
+          [
+            259636,
+            ">",
+            "FA",
+            0
+          ]
+        ]
+      },
+      {
+        "client": "203.0.113.2:47262",
+        "server": "203.0.113.1:54321",
+        "first": 269633,
+        "last": 329742,
+        "bareAcks": 62,
+        "segments": [
+          [
+            269633,
+            ">",
+            "S",
+            0
+          ],
+          [
+            269633,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            269640,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            269704,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            269716,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            269728,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            269729,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            269729,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            269729,
+            ">",
+            "PA",
+            65
+          ],
+          [
+            269730,
+            "<",
+            "PA",
+            70
+          ],
+          [
+            269730,
+            "<",
+            "PA",
+            86
+          ],
+          [
+            269731,
+            ">",
+            "PA",
+            225
+          ],
+          [
+            269732,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            269732,
+            "<",
+            "PA",
+            90
+          ],
+          [
+            269732,
+            "<",
+            "PA",
+            1538
+          ],
+          [
+            269737,
+            ">",
+            "PA",
+            998
+          ],
+          [
+            279727,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            279727,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            279728,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            279729,
+            ">",
+            "PA",
+            354
+          ],
+          [
+            279729,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            279730,
+            ">",
+            "PA",
+            288
+          ],
+          [
+            279731,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            279731,
+            ">",
+            "PA",
+            212
+          ],
+          [
+            279733,
+            ">",
+            "PA",
+            268
+          ],
+          [
+            280733,
+            "<",
+            "PA",
+            116
+          ],
+          [
+            280734,
+            ">",
+            "PA",
+            46
+          ],
+          [
+            289730,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            289730,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            289730,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            289732,
+            ">",
+            "PA",
+            115
+          ],
+          [
+            289732,
+            ">",
+            "PA",
+            268
+          ],
+          [
+            289733,
+            ">",
+            "PA",
+            268
+          ],
+          [
+            289735,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            289735,
+            ">",
+            "PA",
+            139
+          ],
+          [
+            289736,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            289737,
+            ">",
+            "PA",
+            172
+          ],
+          [
+            289738,
+            ">",
+            "PA",
+            200
+          ],
+          [
+            299732,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            299732,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            299732,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            299734,
+            ">",
+            "PA",
+            594
+          ],
+          [
+            299735,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            299735,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            299736,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            299737,
+            ">",
+            "PA",
+            172
+          ],
+          [
+            299737,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            299737,
+            ">",
+            "PA",
+            200
+          ],
+          [
+            309729,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            309729,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            309729,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            309731,
+            ">",
+            "PA",
+            596
+          ],
+          [
+            309732,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            309733,
+            ">",
+            "PA",
+            139
+          ],
+          [
+            309734,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            309735,
+            ">",
+            "PA",
+            178
+          ],
+          [
+            309735,
+            ">",
+            "PA",
+            213
+          ],
+          [
+            319728,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            319728,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            319729,
+            ">",
+            "PA",
+            357
+          ],
+          [
+            319731,
+            ">",
+            "PA",
+            236
+          ],
+          [
+            319732,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            319733,
+            ">",
+            "PA",
+            172
+          ],
+          [
+            319733,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            319734,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            319735,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            319735,
+            ">",
+            "PA",
+            201
+          ],
+          [
+            329733,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            329733,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            329734,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            329736,
+            ">",
+            "PA",
+            373
+          ],
+          [
+            329738,
+            ">",
+            "PA",
+            268
+          ],
+          [
+            329739,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            329740,
+            ">",
+            "PA",
+            172
+          ],
+          [
+            329740,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            329741,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            329741,
+            ">",
+            "PA",
+            201
+          ]
+        ]
+      },
+      {
+        "client": "192.0.2.2:43890",
+        "server": "192.0.2.1:54321",
+        "first": 269636,
+        "last": 329742,
+        "bareAcks": 62,
+        "segments": [
+          [
+            269636,
+            ">",
+            "S",
+            0
+          ],
+          [
+            269636,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            269641,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            269707,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            269718,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            269729,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            269730,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            269732,
+            "<",
+            "PA",
+            84
+          ],
+          [
+            269732,
+            ">",
+            "PA",
+            67
+          ],
+          [
+            269733,
+            "<",
+            "PA",
+            86
+          ],
+          [
+            269734,
+            ">",
+            "PA",
+            227
+          ],
+          [
+            269735,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            269735,
+            "<",
+            "PA",
+            90
+          ],
+          [
+            269735,
+            "<",
+            "PA",
+            1538
+          ],
+          [
+            269739,
+            ">",
+            "PA",
+            1223
+          ],
+          [
+            279727,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            279727,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            279729,
+            ">",
+            "PA",
+            455
+          ],
+          [
+            279729,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            279729,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            279730,
+            ">",
+            "PA",
+            235
+          ],
+          [
+            279731,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            279732,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            279732,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            279732,
+            ">",
+            "PA",
+            214
+          ],
+          [
+            279734,
+            ">",
+            "PA",
+            252
+          ],
+          [
+            280731,
+            "<",
+            "PA",
+            116
+          ],
+          [
+            280732,
+            ">",
+            "PA",
+            46
+          ],
+          [
+            289730,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            289730,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            289733,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            289734,
+            ">",
+            "PA",
+            678
+          ],
+          [
+            289735,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            289735,
+            ">",
+            "PA",
+            139
+          ],
+          [
+            289736,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            289738,
+            ">",
+            "PA",
+            235
+          ],
+          [
+            289738,
+            ">",
+            "PA",
+            212
+          ],
+          [
+            299732,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            299732,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            299732,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            299734,
+            ">",
+            "PA",
+            455
+          ],
+          [
+            299735,
+            ">",
+            "PA",
+            252
+          ],
+          [
+            299736,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            299736,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            299737,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            299738,
+            ">",
+            "PA",
+            231
+          ],
+          [
+            299739,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            299739,
+            ">",
+            "PA",
+            202
+          ],
+          [
+            309729,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            309729,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            309729,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            309731,
+            ">",
+            "PA",
+            114
+          ],
+          [
+            309732,
+            ">",
+            "PA",
+            593
+          ],
+          [
+            309733,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            309734,
+            ">",
+            "PA",
+            231
+          ],
+          [
+            309734,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            309735,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            309735,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            309736,
+            ">",
+            "PA",
+            202
+          ],
+          [
+            319728,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            319728,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            319729,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            319731,
+            ">",
+            "PA",
+            648
+          ],
+          [
+            319732,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            319734,
+            ">",
+            "PA",
+            341
+          ],
+          [
+            319735,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            319735,
+            ">",
+            "PA",
+            202
+          ],
+          [
+            329733,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            329733,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            329735,
+            ">",
+            "PA",
+            456
+          ],
+          [
+            329736,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            329737,
+            ">",
+            "PA",
+            45
+          ],
+          [
+            329738,
+            ">",
+            "PA",
+            235
+          ],
+          [
+            329738,
+            ">",
+            "PA",
+            51
+          ],
+          [
+            329739,
+            ">",
+            "PA",
+            117
+          ],
+          [
+            329740,
+            ">",
+            "PA",
+            111
+          ],
+          [
+            329740,
+            ">",
+            "PA",
+            214
+          ],
+          [
+            329742,
+            ">",
+            "PA",
+            252
+          ]
+        ]
+      },
+      {
+        "client": "198.51.100.2:58602",
+        "server": "10.255.0.1:54321",
+        "first": 279637,
+        "last": 303422,
+        "bareAcks": 13,
+        "segments": [
+          [
+            279637,
+            ">",
+            "S",
+            0
+          ],
+          [
+            279638,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            279643,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            279649,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            279661,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            279667,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            279668,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            279668,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            279668,
+            "<",
+            "PA",
+            70
+          ],
+          [
+            279668,
+            ">",
+            "PA",
+            66
+          ],
+          [
+            279669,
+            "<",
+            "PA",
+            86
+          ],
+          [
+            279670,
+            ">",
+            "PA",
+            226
+          ],
+          [
+            279671,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            279671,
+            "<",
+            "PA",
+            90
+          ],
+          [
+            279671,
+            "<",
+            "PA",
+            1538
+          ],
+          [
+            279675,
+            ">",
+            "PA",
+            1141
+          ],
+          [
+            289670,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            289670,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            289670,
+            "<",
+            "PA",
+            1452
+          ],
+          [
+            289702,
+            "<",
+            "PA",
+            4
+          ],
+          [
+            289922,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            290352,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            291262,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            293022,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            296462,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            303422,
+            "<",
+            "A",
+            1448
+          ]
+        ]
+      },
+      {
+        "client": "198.51.100.2:43124",
+        "server": "10.255.0.1:54321",
+        "first": 335910,
+        "last": 335994,
+        "bareAcks": 13,
+        "segments": [
+          [
+            335910,
+            ">",
+            "S",
+            0
+          ],
+          [
+            335911,
+            "<",
+            "SA",
+            0
+          ],
+          [
+            335963,
+            ">",
+            "PA",
+            145
+          ],
+          [
+            335969,
+            "<",
+            "PA",
+            539
+          ],
+          [
+            335979,
+            ">",
+            "PA",
+            499
+          ],
+          [
+            335986,
+            "<",
+            "PA",
+            51
+          ],
+          [
+            335986,
+            "<",
+            "PA",
+            43
+          ],
+          [
+            335987,
+            ">",
+            "PA",
+            43
+          ],
+          [
+            335987,
+            "<",
+            "PA",
+            70
+          ],
+          [
+            335987,
+            ">",
+            "PA",
+            66
+          ],
+          [
+            335988,
+            "<",
+            "PA",
+            86
+          ],
+          [
+            335988,
+            ">",
+            "PA",
+            226
+          ],
+          [
+            335990,
+            "<",
+            "A",
+            1448
+          ],
+          [
+            335990,
+            "<",
+            "PA",
+            90
+          ],
+          [
+            335990,
+            "<",
+            "PA",
+            1538
+          ],
+          [
+            335994,
+            ">",
+            "PA",
+            1137
+          ]
+        ]
+      }
+    ],
+    "other": {
+      "examples-cmr-1x31b92c54459-controller cdp": {
+        "count": 47,
+        "first": 62415,
+        "last": 325168
+      },
+      "examples-cmr-1x31b92c54459-controller lldp": {
+        "count": 67,
+        "first": 62415,
+        "last": 325168
+      },
+      "examples-cmr-1x31b92c54459-controller icmp6": {
+        "count": 4,
+        "first": 70322,
+        "last": 267983
+      },
+      "examples-cmr-1x31b92c54459-transit cdp": {
+        "count": 42,
+        "first": 105352,
+        "last": 328591
+      },
+      "examples-cmr-1x31b92c54459-transit lldp": {
+        "count": 49,
+        "first": 105352,
+        "last": 328591
+      },
+      "examples-cmr-1x31b92c54459-transit icmp6": {
+        "count": 3,
+        "first": 122351,
+        "last": 329381
+      },
+      "examples-cmr-1x31b92c54459-remote cdp": {
+        "count": 11,
+        "first": 148285,
+        "last": 268298
+      },
+      "examples-cmr-1x31b92c54459-remote lldp": {
+        "count": 11,
+        "first": 148285,
+        "last": 268298
+      },
+      "examples-cmr-1x31b92c54459-local cdp": {
+        "count": 17,
+        "first": 188892,
+        "last": 325168
+      },
+      "examples-cmr-1x31b92c54459-local lldp": {
+        "count": 19,
+        "first": 188892,
+        "last": 325168
+      },
+      "examples-cmr-1x31b92c54459-controller ospf": {
+        "count": 146,
+        "first": 189143,
+        "last": 332504
+      },
+      "examples-cmr-1x31b92c54459-controller ip-2": {
+        "count": 5,
+        "first": 189170,
+        "last": 267022
+      },
+      "examples-cmr-1x31b92c54459-transit ospf": {
+        "count": 140,
+        "first": 189184,
+        "last": 332504
+      },
+      "examples-cmr-1x31b92c54459-remote ospf": {
+        "count": 50,
+        "first": 189204,
+        "last": 332504
+      },
+      "examples-cmr-1x31b92c54459-transit ip-2": {
+        "count": 4,
+        "first": 189213,
+        "last": 190103
+      },
+      "examples-cmr-1x31b92c54459-remote ip-2": {
+        "count": 2,
+        "first": 189226,
+        "last": 189847
+      },
+      "examples-cmr-1x31b92c54459-local ospf": {
+        "count": 73,
+        "first": 189229,
+        "last": 332504
+      },
+      "examples-cmr-1x31b92c54459-local ip-2": {
+        "count": 2,
+        "first": 189255,
+        "last": 189885
+      },
+      "examples-cmr-1x31b92c54459-controller arp": {
+        "count": 12,
+        "first": 199141,
+        "last": 269226
+      },
+      "examples-cmr-1x31b92c54459-transit arp": {
+        "count": 19,
+        "first": 199141,
+        "last": 334266
+      },
+      "examples-cmr-1x31b92c54459-local arp": {
+        "count": 6,
+        "first": 199141,
+        "last": 269226
+      },
+      "examples-cmr-1x31b92c54459-remote arp": {
+        "count": 8,
+        "first": 199184,
+        "last": 334266
+      },
+      "examples-cmr-1x31b92c54459-controller ip-0": {
+        "count": 8,
+        "first": 267102,
+        "last": 268141
+      },
+      "examples-cmr-1x31b92c54459-local icmp6": {
+        "count": 1,
+        "first": 267983,
+        "last": 267983
+      }
+    }
+  }
+}

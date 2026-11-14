@@ -9,8 +9,8 @@
  *
  * Why RouterOS's sniffer and not a host capture: the lab's links are `socket::<name>` pairs,
  * which the host cannot join (docs/mndp.md). Each router therefore reports its own links.
- * Both ends of a link see the same packet, so MNDP and TCP are deduplicated (`packets()`),
- * keeping retransmissions from the same router.
+ * Both ends of a link, and a forwarding router's two links, see the same packet, so MNDP and
+ * TCP are deduplicated (`dedupe()`), keeping retransmissions.
  */
 import type { ChrInstance } from "../../../src/index.ts";
 import { decodeTzsp, type Packet, TzspReceiver } from "./tzsp.ts";
@@ -81,20 +81,7 @@ export class Capture {
 				if (packet) all.push({ t: frame.t, router, packet });
 			}
 		}
-		all.sort((a, b) => a.t - b.t);
-		// The other end's copy of a packet arrives within milliseconds. A repeat from the same
-		// router is a real retransmission (a SYN that got no answer) and must stay.
-		const seen = new Map<string, { router: string; t: number }>();
-		return all.filter(({ t, router, packet: p }) => {
-			const key = p.mndp ? `mndp|${p.mndp.fields.identity}|${p.mndp.fields.interface}|${p.family}|${p.mndp.header}`
-				: p.proto === "tcp" ? `tcp|${p.src}:${p.srcPort}>${p.dst}:${p.dstPort}|${p.flags}|${p.seq}|${p.ack}|${p.length}`
-				: undefined;
-			if (!key) return true;
-			const first = seen.get(key);
-			if (first && first.router !== router && t - first.t < DUPLICATE_WINDOW_MS) return false;
-			seen.set(key, { router, t });
-			return true;
-		});
+		return dedupe(all);
 	}
 
 	/** CMR TCP segments between two capture times (ms), deduplicated. */
@@ -111,31 +98,45 @@ export class Capture {
 	report(): WireReport {
 		const packets = this.packets();
 		const routers: WireReport["routers"] = {};
-		for (const [name, { port, interfaces, attached, receiver }] of this.routers) routers[name] = { port, interfaces, attachedAt: attached, frames: receiver.frames.length };
+		for (const [name, { port, interfaces, attached, receiver }] of this.routers) {
+			// Frames received after each arming, until the next one: shows that a re-arm after a
+			// reboot really restarted the stream, not only that the start command was accepted.
+			const arms = attached.map((t, i) => ({ t, framesAfter: receiver.frames.filter(f => f.t >= t && f.t < (attached[i + 1] ?? Number.POSITIVE_INFINITY)).length }));
+			routers[name] = { port, interfaces, attached: arms, frames: receiver.frames.length };
+		}
 
 		// MNDP: one row per announcement. TLVs and raw bytes only when they differ from that
 		// sender's previous announcement on the same interface and family, so a report stays small.
 		const mndp: WireReport["mndp"] = [];
-		const previous = new Map<string, { t: number; signature: string }>();
-		const intervals = new Map<string, number[]>();
+		const previous = new Map<string, { t: number; signature: string; mac: string; uptime: number }>();
+		const series = new Map<string, { count: number; lifetimes: number; intervals: number[] }>();
 		for (const { t, packet: p } of packets) {
 			if (!p.mndp) continue;
 			const sender = `${p.mndp.fields.identity}/${p.mndp.fields.interface}/v${p.family}`;
 			const signature = p.mndp.tlvs.filter(tlv => tlv.name !== "uptime").map(tlv => `${tlv.type}=${tlv.hex}`).join(" ");
-			const last = previous.get(sender);
-			if (last) intervals.set(sender, [...(intervals.get(sender) ?? []), t - last.t]);
+			const mac = p.mndp.fields.mac ?? "";
+			const uptime = Number(p.mndp.fields.uptime ?? 0);
+			// Cadence is per machine: two routers can share a sender name (both are `CHR` before
+			// their identity is set), so the series is keyed by MAC too.
+			const machine = `${sender}|${mac}`;
+			const last = previous.get(machine);
+			const stats = series.get(sender) ?? { count: 0, lifetimes: 0, intervals: [] };
+			series.set(sender, stats);
+			stats.count++;
+			// A reboot (uptime went back) starts a new lifetime; the gap across it is downtime.
+			if (last && uptime >= last.uptime) stats.intervals.push(t - last.t);
+			else stats.lifetimes++;
 			const row: WireReport["mndp"][number] = { t, sender, header: p.mndp.header };
 			if (last?.signature !== signature) {
 				row.tlvs = Object.fromEntries(p.mndp.tlvs.map(tlv => [`${tlv.type}:${tlv.name}`, tlv.value]));
 				row.payloadHex = p.payloadHex;
 			}
 			mndp.push(row);
-			previous.set(sender, { t, signature });
+			previous.set(machine, { t, signature, mac, uptime });
 		}
 		const mndpIntervals: WireReport["mndpIntervals"] = {};
-		for (const [sender, list] of intervals) {
-			const sorted = [...list].sort((a, b) => a - b);
-			mndpIntervals[sender] = { count: list.length + 1, minMs: sorted[0] ?? 0, medianMs: sorted[Math.floor(sorted.length / 2)] ?? 0, maxMs: sorted.at(-1) ?? 0 };
+		for (const [sender, { count, lifetimes, intervals }] of series) {
+			mndpIntervals[sender] = { count, lifetimes, ...spread(intervals) };
 		}
 
 		// CMR sessions, keyed by the client's ephemeral port. Bare ACKs (keepalives included) are
@@ -170,11 +171,54 @@ export class Capture {
 export interface WireReport {
 	startedAt: string;
 	clock: string;
-	routers: Record<string, { port: number; interfaces: string[]; attachedAt: number[]; frames: number }>;
+	/** `attached`: each time the sniffer was armed, and how many frames arrived before the next arming. */
+	routers: Record<string, { port: number; interfaces: string[]; attached: { t: number; framesAfter: number }[]; frames: number }>;
 	marks: Mark[];
 	mndp: { t: number; sender: string; header: string; tlvs?: Record<string, string>; payloadHex?: string }[];
-	mndpIntervals: Record<string, { count: number; minMs: number; medianMs: number; maxMs: number }>;
+	/** Announcements, lifetimes (one per machine and boot), and the gaps within a lifetime. */
+	mndpIntervals: Record<string, { count: number; lifetimes: number; minMs: number; medianMs: number; maxMs: number }>;
 	/** Segments are [t, direction (> to the controller, < from it), TCP flags, payload bytes]. */
 	cmr: { client: string; server: string; first: number; last: number; bareAcks: number; segments: [number, string, string, number][] }[];
 	other: Record<string, { count: number; first: number; last: number }>;
+}
+
+/** Min, median (mean of the middle two for an even count) and max; zeros for no samples. */
+export function spread(values: number[]): { minMs: number; medianMs: number; maxMs: number } {
+	if (!values.length) return { minMs: 0, medianMs: 0, maxMs: 0 };
+	const sorted = [...values].sort((a, b) => a - b);
+	const mid = sorted.length >> 1;
+	const median = sorted.length % 2 ? (sorted[mid] as number) : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
+	return { minMs: sorted[0] as number, medianMs: median, maxMs: sorted.at(-1) as number };
+}
+
+/**
+ * Drop the copies of one packet that several capture points report, and keep retransmissions.
+ *
+ * A capture point is a router plus the frame's source MAC. RouterOS's TZSP carries no interface
+ * tag, so the MAC stands in for it: the two ends of a link differ by router, and a forwarding
+ * router's ingress and egress copies differ by source MAC (the previous hop vs the router itself).
+ * Sightings of one packet form a burst, each from a different capture point, within
+ * DUPLICATE_WINDOW_MS of the previous one. The first of a burst is kept. A capture point that
+ * repeats, or a gap longer than the window, starts a new burst: a real retransmission, such as a
+ * SYN that got no answer, even one sent sooner than the window.
+ * Only MNDP and TCP are merged; other protocols are kept per router.
+ */
+export function dedupe(sightings: Seen[]): Seen[] {
+	const sorted = [...sightings].sort((a, b) => a.t - b.t);
+	const bursts = new Map<string, { points: Set<string>; t: number }>();
+	return sorted.filter(({ t, router, packet: p }) => {
+		const key = p.mndp ? `mndp|${p.mndp.fields.identity}|${p.mndp.fields.interface}|${p.family}|${p.mndp.header}`
+			: p.proto === "tcp" ? `tcp|${p.src}:${p.srcPort}>${p.dst}:${p.dstPort}|${p.flags}|${p.seq}|${p.ack}|${p.length}`
+			: undefined;
+		if (!key) return true;
+		const point = `${router}|${p.srcMac}`;
+		const burst = bursts.get(key);
+		if (burst && t - burst.t < DUPLICATE_WINDOW_MS && !burst.points.has(point)) {
+			burst.points.add(point);
+			burst.t = t;
+			return false;
+		}
+		bursts.set(key, { points: new Set([point]), t });
+		return true;
+	});
 }

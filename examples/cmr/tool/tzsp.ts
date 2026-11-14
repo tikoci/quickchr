@@ -148,9 +148,15 @@ export function parseMndp(payload: Buffer): Mndp {
 }
 
 export interface Packet {
+	/** IP source for IP packets, else the source MAC. */
 	src: string;
 	dst: string;
-	/** `arp`, `lldp`, `cdp` (802.3/LLC to Cisco's multicast), `llc`, `ether-0x…`, `udp`, `tcp`, `ospf`, `icmp`, `icmp6`, `ip-<n>`. */
+	/** The Ethernet addresses, for every packet. A forwarded IP packet keeps its IP addresses and
+	 *  changes these at each hop, which tells one router's ingress and egress copies apart. */
+	srcMac: string;
+	dstMac: string;
+	/** `arp`, `lldp`, `cdp` (802.3/LLC to Cisco's multicast), `llc`, `ether-0x…`, `udp`, `tcp`, `ospf`,
+	 *  `icmp`, `icmp6`, `ip-<n>`, or `truncated` when a header is cut short. */
 	proto: string;
 	family?: 4 | 6;
 	srcPort?: number;
@@ -166,28 +172,40 @@ export interface Packet {
 	payloadHex?: string;
 }
 
-/** Decode one Ethernet frame into the fields a protocol timeline needs. */
+/**
+ * Decode one Ethernet frame into the fields a protocol timeline needs. Never throws: a frame whose
+ * IP or transport header is cut short decodes as `proto: "truncated"`, so one bad datagram cannot
+ * stop a report.
+ */
 export function decodeEthernet(frame: Buffer): Packet {
 	const dstMac = mac(frame.subarray(0, 6));
 	const srcMac = mac(frame.subarray(6, 12));
+	const l2 = (proto: string): Packet => ({ src: srcMac, dst: dstMac, srcMac, dstMac, proto, length: frame.length });
+	if (frame.length < 14) return l2("truncated");
 	let type = frame.readUInt16BE(12);
 	let o = 14;
-	if (type === 0x8100 && frame.length >= 18) { type = frame.readUInt16BE(16); o = 18; }
-	const l2 = (proto: string): Packet => ({ src: srcMac, dst: dstMac, proto, length: frame.length });
+	if (type === 0x8100) {
+		if (frame.length < 18) return l2("truncated");
+		type = frame.readUInt16BE(16);
+		o = 18;
+	}
 	if (type < 0x0600) return l2(dstMac === "01:00:0c:cc:cc:cc" ? "cdp" : "llc");
 	if (type === 0x0806) return l2("arp");
 	if (type === 0x88cc) return l2("lldp");
 	let src: string, dst: string, protocol: number, l4: number, l4End: number;
 	let family: 4 | 6;
 	if (type === 0x0800) {
+		if (frame.length < o + 20) return l2("truncated");
 		family = 4;
 		const ihl = ((frame[o] as number) & 0x0f) * 4;
+		if (ihl < 20 || frame.length < o + ihl) return l2("truncated");
 		protocol = frame[o + 9] as number;
 		src = ipv4(frame.subarray(o + 12, o + 16));
 		dst = ipv4(frame.subarray(o + 16, o + 20));
 		l4 = o + ihl;
 		l4End = Math.min(frame.length, o + frame.readUInt16BE(o + 2));
 	} else if (type === 0x86dd) {
+		if (frame.length < o + 40) return l2("truncated");
 		family = 6;
 		protocol = frame[o + 6] as number; // extension headers are not followed
 		src = ipv6(frame.subarray(o + 8, o + 24));
@@ -197,8 +215,10 @@ export function decodeEthernet(frame: Buffer): Packet {
 	} else {
 		return l2(`ether-0x${type.toString(16).padStart(4, "0")}`);
 	}
-	const base = { src, dst, family };
+	const base = { src, dst, srcMac, dstMac, family };
+	const truncated: Packet = { ...base, proto: "truncated", length: frame.length };
 	if (protocol === 17) {
+		if (l4End < l4 + 8) return truncated;
 		const srcPort = frame.readUInt16BE(l4), dstPort = frame.readUInt16BE(l4 + 2);
 		const payload = frame.subarray(l4 + 8, l4End);
 		const packet: Packet = { ...base, proto: "udp", srcPort, dstPort, length: payload.length };
@@ -209,18 +229,20 @@ export function decodeEthernet(frame: Buffer): Packet {
 		return packet;
 	}
 	if (protocol === 6) {
+		if (l4End < l4 + 20) return truncated;
 		const srcPort = frame.readUInt16BE(l4), dstPort = frame.readUInt16BE(l4 + 2);
 		const bits = frame[l4 + 13] as number;
 		const dataOffset = ((frame[l4 + 12] as number) >> 4) * 4;
+		if (dataOffset < 20 || l4End < l4 + dataOffset) return truncated;
 		const flags = [[0x02, "S"], [0x01, "F"], [0x04, "R"], [0x08, "P"], [0x10, "A"]].filter(([bit]) => bits & (bit as number)).map(([, l]) => l).join("");
-		return { ...base, proto: "tcp", srcPort, dstPort, flags, seq: frame.readUInt32BE(l4 + 4), ack: frame.readUInt32BE(l4 + 8), length: Math.max(0, l4End - l4 - dataOffset) };
+		return { ...base, proto: "tcp", srcPort, dstPort, flags, seq: frame.readUInt32BE(l4 + 4), ack: frame.readUInt32BE(l4 + 8), length: l4End - l4 - dataOffset };
 	}
 	const names: Record<number, string> = { 1: "icmp", 58: "icmp6", 89: "ospf" };
-	return { ...base, proto: names[protocol] ?? `ip-${protocol}`, length: l4End - l4 };
+	return { ...base, proto: names[protocol] ?? `ip-${protocol}`, length: Math.max(0, l4End - l4) };
 }
 
 /** Decode a TZSP datagram end to end; undefined when it does not carry Ethernet. */
 export function decodeTzsp(datagram: Buffer): Packet | undefined {
 	const frame = tzspPayload(datagram);
-	return frame && frame.length >= 14 ? decodeEthernet(frame) : undefined;
+	return frame && frame.length >= 12 ? decodeEthernet(frame) : undefined;
 }

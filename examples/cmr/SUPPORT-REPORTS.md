@@ -76,16 +76,17 @@ satisfy both sides was committed, 27 of 27:
 A second study captured the link during 32 more single credentialed pairs, on
 four fresh boots. 26 half-paired. What we saw:
 
-- **The client's reply decides it.** Every pair starts the same way: 97 bytes
+- **The client's reply matches the outcome.** Every pair starts the same way: 97 bytes
   from the controller, 88 from the client, 87 from the controller. Then the
   client sends either **one 108-byte message**, after which the controller sends
   69 and 57 bytes and nothing more (half-paired, 26/26), or **71 then 66 bytes**,
   after which the controller sends about 2 KB and polls every 10 s (paired, 6/6).
-  The connect before it has the same message sizes in both cases.
-- **How the client found the controller does not matter.** With
+  The connect before it has the same message sizes in both cases. The payload is
+  not plain text, so this is where the outcomes first differ, not why.
+- **No difference between discovery methods in these trials.** With
   `controller-addresses` set, 3 of 16 committed. With no address, found through
   neighbor discovery, also 3 of 16. Waiting 0, 5, 30 or 75 s between enabling
-  the controller and the client made no difference.
+  the controller and the client showed no consistent pattern.
 - A half-paired session carries only TCP keepalives (every 15 s, both ways).
   This matches the idle session above.
 

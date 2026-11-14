@@ -42,9 +42,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   (MNDP announcements, TCP/54321 segments, lab events on one clock). A new
   `--study wire` times the first connect and the half-pair by discovery method.
   On 7.26beta5, MNDP TLV 18 flags a CMR controller (`running=cmr`). The 85 s
-  first connect is a SYN sourced from the management NIC. The half-pair is
-  decided by the client's fourth pairing message, not by how it found the
-  controller. The TZSP/MNDP decoder (`tool/tzsp.ts`) has no quickchr imports, so
+  first connect is a SYN sourced from the management NIC. The half-pair
+  matched the client's fourth pairing message in every trial, and both
+  discovery methods committed 3 of 16. The TZSP/MNDP decoder (`tool/tzsp.ts`) has no quickchr imports, so
   it can move to a shared package.
 
 - A `networks create` or `restart` whose service does not come up now prints the

@@ -3455,40 +3455,46 @@
       }
     ],
     "mndpIntervals": {
-      "CHR/ether2/v6": {
-        "count": 2,
-        "minMs": 0,
-        "medianMs": 0,
-        "maxMs": 0
-      },
-      "CHR/ether2/v4": {
-        "count": 2,
-        "minMs": 0,
-        "medianMs": 0,
-        "maxMs": 0
-      },
       "cmr-controller/ether2/v6": {
         "count": 34,
+        "lifetimes": 1,
         "minMs": 15,
         "medianMs": 27054,
         "maxMs": 30009
       },
       "cmr-controller/ether2/v4": {
         "count": 34,
+        "lifetimes": 1,
         "minMs": 15,
         "medianMs": 27054,
         "maxMs": 30009
       },
+      "CHR/ether2/v6": {
+        "count": 2,
+        "lifetimes": 1,
+        "minMs": 0,
+        "medianMs": 0,
+        "maxMs": 0
+      },
+      "CHR/ether2/v4": {
+        "count": 2,
+        "lifetimes": 1,
+        "minMs": 0,
+        "medianMs": 0,
+        "maxMs": 0
+      },
       "cmr-client/ether2/v6": {
         "count": 21,
+        "lifetimes": 1,
         "minMs": 239,
-        "medianMs": 30001,
+        "medianMs": 30000.5,
         "maxMs": 30009
       },
       "cmr-client/ether2/v4": {
         "count": 21,
+        "lifetimes": 1,
         "minMs": 239,
-        "medianMs": 30001,
+        "medianMs": 30000.5,
         "maxMs": 30009
       }
     },
@@ -5201,6 +5207,7 @@
         "first": 96164,
         "last": 564094
       }
-    }
+    },
+    "mndpIntervalsNote": "Recomputed after review (2026-11-14): one series per sender lifetime, split where the MNDP header counter restarts; median of an even count is the mean of the middle two."
   }
 }

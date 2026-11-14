@@ -1,6 +1,7 @@
 // cspell:ignore sgsol Abxlr fefa -- fields of a captured RouterOS announcement (software-id, IPv6)
 import { describe, expect, test } from "bun:test";
-import { decodeTzsp, parseMndp, tzspPayload } from "../../examples/cmr/tool/tzsp.ts";
+import { decodeEthernet, decodeTzsp, type Packet, parseMndp, tzspPayload } from "../../examples/cmr/tool/tzsp.ts";
+import { dedupe, type Seen, spread } from "../../examples/cmr/tool/wire.ts";
 
 /**
  * The CMR lab's TZSP/MNDP decoder (examples/cmr/tool/tzsp.ts) against datagrams captured from
@@ -57,5 +58,49 @@ describe("tzsp", () => {
 	test("a truncated TLV ends the list instead of throwing", () => {
 		const mndp = parseMndp(Buffer.from("00000000000500ff6162", "hex"));
 		expect(mndp.tlvs).toEqual([]);
+	});
+
+	test("a frame cut short in its IP or TCP header decodes as truncated instead of throwing", () => {
+		const syn = tzspPayload(Buffer.from(CMR_SYN, "hex")) as Buffer;
+		for (const length of [12, 14, 20, 33, 40, 50]) {
+			expect(decodeEthernet(syn.subarray(0, length)).proto).toBe("truncated");
+		}
+		expect(decodeEthernet(syn).proto).toBe("tcp");
+	});
+});
+
+describe("wire capture helpers", () => {
+	const segment = (srcMac: string, seq = 1): Packet => ({
+		src: "198.51.100.2", dst: "10.255.0.1", srcMac, dstMac: "02:00:00:00:00:ff", proto: "tcp", family: 4,
+		srcPort: 40000, dstPort: 54321, flags: "PA", seq, ack: 1, length: 145,
+	});
+	const at = (t: number, router: string, packet: Packet): Seen => ({ t, router, packet });
+
+	test("one forwarded segment seen at four capture points is kept once", () => {
+		// remote sends; transit sees it arrive (remote's MAC) and leave (its own MAC); controller receives.
+		const kept = dedupe([
+			at(0, "remote", segment("02:00:00:00:00:0b")),
+			at(1, "transit", segment("02:00:00:00:00:0b")),
+			at(1, "transit", segment("02:00:00:00:00:0a")),
+			at(2, "controller", segment("02:00:00:00:00:0a")),
+		]);
+		expect(kept.map(s => s.router)).toEqual(["remote"]);
+	});
+
+	test("a retransmission is kept, even one sent sooner than the duplicate window", () => {
+		const kept = dedupe([
+			at(0, "client", segment("02:00:00:00:00:0b")),
+			at(1, "controller", segment("02:00:00:00:00:0b")),
+			at(200, "client", segment("02:00:00:00:00:0b")),
+			at(201, "controller", segment("02:00:00:00:00:0b")),
+			at(2000, "client", segment("02:00:00:00:00:0b")),
+		]);
+		expect(kept.map(s => s.t)).toEqual([0, 200, 2000]);
+	});
+
+	test("median averages the middle two for an even count", () => {
+		expect(spread([30, 10, 40, 20])).toEqual({ minMs: 10, medianMs: 25, maxMs: 40 });
+		expect(spread([3, 1, 2])).toEqual({ minMs: 1, medianMs: 2, maxMs: 3 });
+		expect(spread([])).toEqual({ minMs: 0, medianMs: 0, maxMs: 0 });
 	});
 });

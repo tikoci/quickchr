@@ -337,7 +337,11 @@ async function wire(context: StudyContext): Promise<void> {
 				const announcement = capture.lastMndp(controllerIdentity, clientEnabled);
 				capture.mark(`${label}: client enable`);
 				await command(client, "/cmr/client/set enabled=yes");
-				const pending = await waitPending(controller, client, identity, 240_000).then(o => o, () => undefined);
+				// Only the deadline is a result ("timeout"); a REST failure or Ctrl-C must fail the study.
+				const pending = await waitPending(controller, client, identity, 240_000).catch((error: unknown) => {
+					if (error instanceof Error && error.message.startsWith("Timed out")) return undefined;
+					throw error;
+				});
 				const pendingAt = capture.now();
 				const connect = capture.cmrBetween(clientEnabled, pendingAt);
 				const syns = connect.filter(s => s.packet.flags === "S");
@@ -360,16 +364,18 @@ async function wire(context: StudyContext): Promise<void> {
 					const pairStart = capture.now();
 					result = await pairWith(controller, client, identity, "credentialed");
 					const pairDone = capture.now();
-					// The pairing messages, "<" from the controller and ">" from the client, payload bytes.
-					// On 7.26beta5 the client's reply to the third controller message decided the outcome:
+					// The pairing messages, "<" from the controller and ">" from the client, payload bytes,
+					// from the start of the pair command until pairWith() settled (paired, or 10 s). On
+					// 7.26beta5 the client's reply to the third controller message matched the outcome:
 					// one 108 B segment half-paired, 71 B + 66 B paired (FINDINGS.md → Wire).
-					const exchange = capture.cmrBetween(pairStart, pairStart + 2000).filter(s => s.packet.length > 0)
+					const exchange = capture.cmrBetween(pairStart, pairDone).filter(s => s.packet.length > 0)
 						.map(s => `${s.packet.srcPort === CMR_PORT ? "<" : ">"}${s.packet.length}`).join(" ");
 					await Bun.sleep(25_000);
 					const after = capture.cmrBetween(pairDone).filter(s => s.packet.srcPort === CMR_PORT && s.packet.length > 0);
 					Object.assign(row, {
 						pairStatus: result.pairStatus,
 						exchange,
+						exchangeWindowMs: String(pairDone - pairStart),
 						verdict: (await observe(controller, client, identity)).verdict,
 						controllerSegmentsAfterPair: String(after.length),
 						controllerBytesAfterPair: String(after.reduce((sum, s) => sum + s.packet.length, 0)),
