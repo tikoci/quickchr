@@ -5,7 +5,7 @@ import { attempt, cancellation, command, createLab, labVersion, operand, read, r
 import { pairClient } from "./tool/pairing.ts";
 import { probes } from "./tool/probes.ts";
 import { STUDIES } from "./tool/studies.ts";
-import { Capture, wire } from "./tool/wire.ts";
+import { Capture, wire, type WireReport } from "./tool/wire.ts";
 
 /**
  * Pair the three clients the way FINDINGS.md recommends, then label all four routers.
@@ -198,9 +198,18 @@ if (import.meta.main && operandsValid()) {
 	async function writeReport(evidence: Record<string, unknown>) {
 		if (wire.capture) evidence.wire = wire.capture.report();
 		const reportPath = operand(process.argv, "report");
-		if (!reportPath) return;
-		await Bun.write(reportPath, `${JSON.stringify(evidence, null, 2)}\n`);
-		console.log(`Report written to ${reportPath}`);
+		if (reportPath) {
+			await Bun.write(reportPath, `${JSON.stringify(evidence, null, 2)}\n`);
+			console.log(`Report written to ${reportPath}`);
+		}
+		// After the report is written, so a failed run keeps its evidence. A sniffer re-armed after a
+		// reboot or restart (--probe) must stream again; an accepted start command alone is not proof.
+		const routers = (evidence.wire as WireReport | undefined)?.routers ?? {};
+		for (const [router, { attached }] of Object.entries(routers)) {
+			for (const [i, { framesAfter }] of attached.entries()) {
+				check(framesAfter > 0, `Wire capture: ${router} arming ${i + 1} of ${attached.length} received no frames`);
+			}
+		}
 	}
 
 	async function runStudy(track: typeof untracked, name: string | undefined) {

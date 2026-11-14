@@ -147,8 +147,9 @@ host    one TzspReceiver per router, each on its own ephemeral port
 Each router is armed right after boot, before identities, addresses or CMR are
 configured. It is armed again after the lab's known reboots (the `--probe` backup
 restore and the remote restart), setting everything again rather than assuming
-the sniffer survives a reboot. A `--probe --sniff` run verified both re-arms by
-the frames received afterwards (`routers.*.attached`).
+the sniffer survives a reboot. A run fails, after writing its report, if any
+arming received no frames before the next one (`routers.*.attached`), so a
+`--probe --sniff` run that passes has verified both re-arms.
 `ether1` is never sniffed, because it carries the stream and the lab's REST calls.
 
 The report's `wire` section uses one clock: milliseconds since `startedAt`, by host
