@@ -16,6 +16,7 @@
 aavmf
 accels
 ack
+acks
 acpi
 addrs
 aehd
@@ -61,6 +62,7 @@ cacheowner
 calea
 calltime
 catppuccin
+cdp
 centrs
 chardev
 checkpointed
@@ -199,6 +201,7 @@ ifdef
 ifdown
 ifname
 ifup
+igmp
 ihl
 imagekey
 img
@@ -215,6 +218,7 @@ iqr
 irm
 isa
 kbd
+keepalives
 kexec
 keygen
 keypair
@@ -455,6 +459,7 @@ sve
 svl
 svm
 swapusage
+syns
 syscall
 syscalls
 sysfs
@@ -469,6 +474,7 @@ tikbook
 tikoci
 tiktoml
 tlv
+tlvs
 toctou
 tonistiigi
 totalmem
@@ -536,6 +542,7 @@ winbox
 winget
 winsock
 wintun
+wireshark
 worktree
 wrappable
 writability

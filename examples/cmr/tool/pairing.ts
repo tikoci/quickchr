@@ -16,6 +16,7 @@
 import type { ChrInstance } from "../../../src/index.ts";
 import { check } from "../../lib.ts";
 import { attempt, command, identityOf, loginOf, quote, read, until, type Row } from "./lab.ts";
+import { wire } from "./wire.ts";
 
 export const HALF_PAIRED = "pair: device:ok, cmr:ok";
 
@@ -124,9 +125,13 @@ export async function pairWith(controller: ChrInstance, client: ChrInstance, ide
 		: strategy === "client-local" ? [[client, "client", "/cmr/client/pair"], [controller, "controller", bare]]
 		: [[client, "client", "/cmr/client/set pairing-requirement=none"], [controller, "controller", bare]];
 	const outputs: PairResult["outputs"] = [];
-	const record = (on: "controller" | "client", line: string, output: string) =>
+	wire.capture?.mark(`pair ${identity}: ${strategy} start`);
+	const record = (on: "controller" | "client", line: string, output: string) => {
 		// Never record the client's password, only that one was sent.
-		outputs.push({ on, command: line.replace(/password="[^"]*"/, 'password="…"'), output: output.replaceAll("\r", "") });
+		const entry = { on, command: line.replace(/password="[^"]*"/, 'password="…"'), output: output.replaceAll("\r", "") };
+		outputs.push(entry);
+		wire.capture?.mark(`pair ${identity}: ${on} command returned`, { command: entry.command, status: lastPairStatus(entry.output) });
+	};
 	if (strategy === "client-local") {
 		// A bare /cmr/client/pair blocks until the controller approves (a sequential call times
 		// out), so the controller's bare pair has to run while it waits.
@@ -157,6 +162,7 @@ export async function pairWith(controller: ChrInstance, client: ChrInstance, ide
 		await Bun.sleep(1000);
 		settled = await observe(controller, client, identity);
 	}
+	wire.capture?.mark(`pair ${identity}: settled ${settled.verdict}`);
 	return { strategy, outputs, pairStatus, settled, settleMs: Date.now() - started };
 }
 
@@ -170,6 +176,7 @@ export async function pairWith(controller: ChrInstance, client: ChrInstance, ide
  * disable/enable clears the pairing by design. Note this restarts CMR for every client.
  */
 export async function restartController(controller: ChrInstance, client: ChrInstance, identity: string): Promise<Observation> {
+	wire.capture?.mark("controller CMR restart");
 	await command(controller, "/cmr/set enabled=no");
 	await command(controller, "/cmr/set enabled=yes");
 	await until(`${identity} disconnected`, async () => !(await read(client, "/cmr/client"))[0]?.status?.endsWith(",connected"), 30_000)

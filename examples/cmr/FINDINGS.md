@@ -73,7 +73,7 @@ definitions (`observe()`, `verdict()`, `selectable()`, `restartController()`).
 | Clean reboot, power-off or controller reboot keeps the pairing | yes (lab) | — | — | power-off of the remote and a backup-load reboot of the controller: yes, no re-pairing (lab, `--probe`) |
 | In the six-combination matrix (client none/password × device none/password/confirm), only client `password` + device `confirm` half-pairs | — | — | — | yes: the same credentialed command against device `none` paired cleanly (1 run each, lab `--probe`) |
 | Changing a paired client's `pairing-requirement` makes it pair again | — | — | — | yes: `confirm`, and unsetting back to the default, each left the client pending (lab) |
-| A fresh client's first connect can take over a minute | — | — | — | yes: 85 s from `enabled=yes` to pending on each of 7 boots; about 1 s after a later `forget` (lab) |
+| A fresh client's first connect can take over a minute | — | — | — | yes: 85 s from `enabled=yes` to pending on each of 7 boots, and on 4 more with the wire capture; about 1 s after a later `forget` (lab). Cause: the first SYN is sourced from the management NIC's 10.0.2.15 and times out. See [Wire → first connect](#first-connect-the-85-s) |
 
 **Recommended lab sequence (beta5):** `pairClient()` in
 [`tool/pairing.ts`](./tool/pairing.ts): wait for the row to be pending, run the
@@ -138,6 +138,130 @@ export and identity below, the first-interface alert and the default upgrade
 rule further down. Of the four beta1 reports, export is fixed and client
 `confirm` now works. The first-bridge alert fired once the rule covered the client.
 Disable/enable still clears the pairing.
+
+## Wire
+
+What actually crosses the link, captured with `--study wire` and `--sniff`
+([README → Wire capture](./README.md#wire-capture)). Each router streams its own
+socket links to the host over TZSP. Evidence, all 7.26beta5 x86 CHR on a Linux KVM
+host, 2026-11-14:
+
+- [wire.json](./evidence/7.26beta5/wire.json): the `wire` study, 3 boots × 8 trials.
+- [wire-first-run.json](./evidence/7.26beta5/wire-first-run.json): the same study,
+  1 boot × 8 trials. Its capture predates the retransmission fix in `packets()`, so
+  its SYN counts are too low; every other field is right.
+- [demo-sniff.json](./evidence/7.26beta5/demo-sniff.json): the four-router demo with
+  `--sniff`. Two routers sniffed `ether2,ether3` at once.
+
+The `wire` study's trials each start from a client the controller has never seen.
+The controller's CMR is off. A trial sets the method: `address`
+(`controller-addresses=192.0.2.1`) or `discovery` (no address, so the client finds
+the controller through MNDP). It enables the controller, waits 0, 5, 30 or 75 s,
+enables the client, then runs the single credentialed `pair` that half-pairs.
+
+### MNDP
+
+| Claim | beta5 |
+|---|---|
+| Announcements follow `/ip/neighbor/discovery-settings discover-interval` | yes: default `30s`, median gap 30.0 s per interface and family (lab). The `routeros-mndp` skill's "~60 s cycle" is wrong for this build |
+| A CMR state change is announced at once, not on the next tick | yes: 7–49 ms after each controller `/cmr set enabled=…`, for all 32 enables and 28 disables in the two `wire` runs (lab). Off-cycle announcements also followed identity and address changes at boot (demo) |
+| A CMR controller announces itself in a new TLV 18 | yes: 1 byte, `00` normally, `02` while `/cmr` is enabled, back to `00` when disabled. The neighbor's `/ip/neighbor` row then shows `running=cmr` (lab). Probably a bitmask; no other bit was seen |
+| A client's CMR state is in MNDP | no: a client's TLV 18 stayed `00` while enabled, pending, half-paired and paired (lab) |
+| Pairing state is in MNDP | no: nothing in either router's announcements changed during pairing (lab) |
+| TLV 19 | 1 byte, `79` on every router, CMR or not. Meaning unknown. The same neighbor rows show `system-caps=bridge,router` and `system-caps-enabled=router`, but `discovered-by=lldp,mndp`, so those may come from LLDP |
+| Header byte 0 is a per-interface counter | yes: +1 per announcement on that interface; bytes 1–3 were `00 00 00` (lab). The skill puts a sequence number at bytes 2–3 |
+| A discovering client connects from its neighbor table | yes: its SYN left 11–35 ms after `enabled=yes`, with no MNDP announcement in between, in all 16 discovery trials (lab). The neighbor row had `running=cmr` each time |
+| CMR uses another discovery protocol on the link | no: only MNDP, LLDP, CDP, ARP, ICMPv6 and TCP/54321 in the pair lab; the demo adds OSPF and IGMP (lab) |
+
+Raw MNDP payloads are in each report's `wire.mndp[].payloadHex`, whenever an
+announcement differs from the sender's previous one.
+
+### First connect: the 85 s
+
+The first trial of each fresh boot is the `address` method with no delay, which is
+what `createPairLab()` and the pairing study do. On all 4 boots:
+
+1. About 1 s after `enabled=yes`, the client sent a SYN to `192.0.2.1:54321`
+   **from 10.0.2.15**, its user-mode `ether1` address, out of `ether2`.
+2. The controller answers 10.0.2.15 through its own default route (`ether1`), so
+   the client never gets the reply. It retransmitted at +2, +6, +15, +31 and +64 s.
+3. At about 84 s the client gave up and connected again from 192.0.2.2, which
+   worked at once. Pending followed within a second (85.4 s in total).
+
+Later trials on the same boot, and the four-router demo, connected from the link
+address within 35 ms. The lab's `ether1` reset rule cannot catch this SYN,
+because it leaves through `ether2`. Why the first connect picks 10.0.2.15 is not
+established. In the pair lab, the client is enabled within a second of its
+`ether2` address being added. The fleet lab enables clients minutes later.
+
+So the 85 s is a TCP connect timeout behind a source-address choice, not a CMR
+retry interval. It is the same trap as the OSPF case in the
+[README](./README.md#what-it-does), with a different trigger.
+
+### Discovery method, delay and the half-pair
+
+| Run | Boot | `address` committed | `discovery` committed |
+|---|---|---|---|
+| first run | 1 | 0/4 | 3/4 |
+| wire.json | 1 | 2/4 | 0/4 |
+| wire.json | 2 | 1/4 | 0/4 |
+| wire.json | 3 | 0/4 | 0/4 |
+| **total** | | **3/16** | **3/16** |
+
+How the client finds the controller does not explain the half-pair, and neither
+does the delay: committed trials came at 0, 30 and 75 s. Boot 3 of `wire.json`
+was a "bad boot" (0/8). The first run looked like discovery helped. The next 24
+trials did not repeat that.
+
+### The half-pair on the wire
+
+Every connect is the same exchange: segments of 145, 539, 499 B and so on,
+identical across methods. A credentialed `pair` then starts the same way every
+time, with a 97 B message from the controller, 88 B from the client and 87 B from
+the controller. The **client's** next message decides the outcome:
+
+| Client's reply | Then | Outcome |
+|---|---|---|
+| one 108 B segment | controller sends 69 B and 57 B, then nothing | **half-paired**, 26/26 |
+| 71 B, then 66 B | controller sends 57 B, 46 B, then about 2 KB (2031 B in every trial); client replies with about 1 KB | **paired**, 6/6 |
+
+Counts are the 24 `wire.json` trials, each with an `exchange` field, plus the
+first run's 8, read from their `cmr` segments. This morning's ad hoc capture
+matched too. After that:
+
+- A **half-paired** session carries only TCP keepalives (bare ACKs both ways,
+  about every 15 s). This is the idle session the pairing claims describe.
+- A **paired** session gets a controller message of about 1452 B every 10 s, and
+  the client answers with about 5 segments.
+- A later bare `/cmr/device/pair` on a half-paired session makes the controller
+  send about 1.5 KB at once, and the 10 s polling starts (ad hoc capture).
+
+The payload is not plain text, so what the 108 B message says is unknown. The
+client takes the other branch, and the controller only stops. The single
+credentialed `pair` sends the client login to the client while the client is in
+`device:password required`. That fits a client-side race between its own
+approval and the controller's, but that reading is unproven.
+
+### For other projects
+
+These are the facts to take from this section. Their trackers keep the follow-up
+work:
+
+- **m2ir#3 (MNDP grounding):** TLV 18 = `running` (`02` = CMR controller), TLV 19
+  = `79` (unknown), header byte 0 = per-interface counter. The bytes are in
+  `wire.json`, and three captured datagrams are in
+  `test/unit/examples-cmr-tzsp.test.ts`.
+- **centrs `discover`:** decode TLV 18 as `running`, and keep the raw bytes of TLVs
+  it cannot name (today it keeps type and length only). A controller can be found
+  by MNDP alone, but MNDP says nothing about pairing. Keep checking the `pair`
+  output and `run-script` selection.
+- **`routeros-mndp` skill:** interval (`discover-interval`, 30 s), the header
+  layout, TLVs 18 and 19.
+- **`routeros-cmr` skill:** discovery uses the neighbor table (`running=cmr`); the
+  85 s first connect is a SYN from the wrong source address. The half-pair is
+  decided by the client's fourth pairing message, whatever the discovery method.
+- **A TZSP package:** [README → Wire capture](./README.md#wire-capture) lists what
+  `tool/tzsp.ts` covers and what it does not.
 
 ## run-script and policy
 
@@ -247,8 +371,13 @@ lab's own CMR link). Known from elsewhere:
 - Does the half-pair need the client's `password` requirement, or does any
   single command that satisfies both sides at once trigger it? The study only
   covers the beta5 defaults.
-- Is the 85 s first connect a fixed retry interval after the client's first
-  attempt fails, or something in the lab? It was identical on every boot.
+- Why does the client's fourth pairing message differ (108 B vs 71 B + 66 B,
+  [Wire](#the-half-pair-on-the-wire))? Client-side CMR debug logging around
+  the `pair` is the next thing to try.
+- Why is a fresh client's first connect sourced from `ether1`'s 10.0.2.15
+  ([Wire](#first-connect-the-85-s))? Waiting after adding the link address
+  would test the timing guess.
+- What does MNDP TLV 19 (`79`) mean?
 - Push-button pairing, DNS-SRV discovery (`_cmr._tcp`), IPv6, NAT between
   client and controller, arm64 CHR.
 
@@ -264,6 +393,7 @@ lab's own CMR link). Known from elsewhere:
    bun run cmr.ts --version $v --study pairing --boots 3 --trials 12 --report evidence/$v/pairing.json
    bun run cmr.ts --version $v --study policy --report evidence/$v/policy.json
    bun run cmr.ts --version $v --study recheck --report evidence/$v/recheck.json
+   bun run cmr.ts --version $v --study wire --boots 3 --report evidence/$v/wire.json
    bun run cmr.ts --version $v --probe --report evidence/$v/demo-probe.json
    ```
 

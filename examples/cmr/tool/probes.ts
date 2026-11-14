@@ -1,5 +1,6 @@
 import { check } from "../../lib.ts";
 import { command, quote, read, until, type Lab } from "./lab.ts";
+import { wire } from "./wire.ts";
 import { observe, pairClient, pairWith } from "./pairing.ts";
 
 /**
@@ -90,6 +91,8 @@ export async function probes(lab: Lab, preserveWebhooks = false, result: Record<
 		try { return (await read(controller, "/cmr"))[0]?.enabled === "yes"; }
 		catch { return false; } // The restore reboots RouterOS; REST is expected to disconnect.
 	}, 120_000);
+	// The reboot stopped the controller's sniffer; the clients' sniffers saw the reconnects anyway.
+	await wire.capture?.attach(controller, ["ether2", "ether3"]);
 	const after = { settings: await read(controller, "/cmr"), devices: (await read(controller, "/cmr/device")).map(r => ({ identity: r.identity, ids: r.ids, labels: r.labels })) };
 	check(JSON.stringify(before) === JSON.stringify(after), "CMR settings or device pairing IDs changed across binary restore");
 	await until("clients reconnected after backup restore", async () => {

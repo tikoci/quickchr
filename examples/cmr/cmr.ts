@@ -5,6 +5,7 @@ import { attempt, cancellation, command, createLab, labVersion, operand, read, r
 import { pairClient } from "./tool/pairing.ts";
 import { probes } from "./tool/probes.ts";
 import { STUDIES } from "./tool/studies.ts";
+import { Capture, wire } from "./tool/wire.ts";
 
 /**
  * Pair the three clients the way FINDINGS.md recommends, then label all four routers.
@@ -16,6 +17,7 @@ export async function configureClients(lab: Lab): Promise<Row[]> {
 	await command(remote, "/cmr/client/set enabled=yes controller-addresses=10.255.0.1");
 	// No CMR address or DHCP CMR option: this client must discover its L2 neighbor.
 	await command(local, "/cmr/client/set enabled=yes");
+	wire.capture?.mark("clients enabled: transit and remote by address, local by discovery");
 	const pairing: Row[] = [];
 	for (const [role, client] of [["transit", transit], ["remote", remote], ["local", local]] as const) {
 		const { result, repaired } = await pairClient(controller, client);
@@ -116,12 +118,15 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 			const downHooksBefore = hooks("DOWN cmr-remote");
 			const upBefore = await fired("lab-connected");
 			const upHooksBefore = hooks("UP cmr-remote");
+			wire.capture?.mark("remote stopping");
 			await remote.stop();
 			await until("remote down alert and webhook", async () => await fired("lab-down") > downBefore && hooks("DOWN cmr-remote") > downHooksBefore, 120_000);
 			console.log("Remote disconnect alert and webhook verified");
 			remote = await QuickCHR.start({ name: remote.name });
 			lab.remote = remote;
 			lab.all[2] = remote;
+			wire.capture?.mark("remote started");
+			await wire.capture?.attach(remote, ["ether2"]);
 			await until("remote reconnected without re-pairing", async () => (await read(remote, "/cmr/client"))[0]?.status === "paired,connected");
 			await until("reconnected alert", async () => await fired("lab-connected") > upBefore && hooks("UP cmr-remote") > upHooksBefore, 120_000);
 			evidence.automaticReconnect = true;
@@ -141,7 +146,7 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 // Validate every operand before anything boots: `--report --probe` must fail now, not after a run.
 function operandsValid(): boolean {
 	try {
-		for (const name of ["report", "study", "version", "boots", "trials", "strategies"]) operand(process.argv, name);
+		for (const name of ["report", "study", "version", "boots", "trials", "strategies", "delays"]) operand(process.argv, name);
 		return true;
 	} catch (error) {
 		console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
@@ -170,6 +175,9 @@ if (import.meta.main && operandsValid()) {
 	};
 	process.on("SIGINT", onSignal);
 	process.on("SIGTERM", onSignal);
+	// --sniff (always on for the wire study): every router streams its links to the host; the
+	// report gains a `wire` section. See README.md → "Wire capture".
+	if (process.argv.includes("--sniff") || operand(process.argv, "study") === "wire") wire.capture = new Capture();
 	try {
 		// Teardown is by name prefix (removeLab), not runExample's handle tracking: --probe restarts
 		// the remote under a new PID, and studies boot several labs.
@@ -184,9 +192,11 @@ if (import.meta.main && operandsValid()) {
 		});
 	} finally {
 		for (const stop of webhookStops) await stop();
+		wire.capture?.close();
 	}
 
 	async function writeReport(evidence: Record<string, unknown>) {
+		if (wire.capture) evidence.wire = wire.capture.report();
 		const reportPath = operand(process.argv, "report");
 		if (!reportPath) return;
 		await Bun.write(reportPath, `${JSON.stringify(evidence, null, 2)}\n`);

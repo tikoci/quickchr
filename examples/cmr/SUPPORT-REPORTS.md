@@ -6,7 +6,7 @@ action. Current status of every item, per build, is in
 
 | # | Report | Status |
 |---|---|---|
-| 5 | [7.26beta5: one credentialed `pair` can leave the client half-paired](#5-726beta5-one-credentialed-pair-can-leave-the-client-half-paired) | Draft, candidate to send |
+| 5 | [7.26beta5: one credentialed `pair` can leave the client half-paired](#5-726beta5-one-credentialed-pair-can-leave-the-client-half-paired) | Draft, candidate to send. Wire capture added 2026-11-14 |
 | 6 | [7.26beta5: a `run-script` line has more than the documented policies](#6-726beta5-a-run-script-line-has-more-than-the-documented-policies) | Draft, candidate to send |
 | 1 | [Export omits the controller settings](#1-export-omits-the-controller-settings) | **Fixed** (beta3 changelog; beta5 lab: settings and labels exported). Do not send |
 | 2 | [Client `confirm` not accepted](#2-client-pairing-requirementconfirm-is-documented-but-not-accepted) | **Works on beta5**: client `confirm` is accepted. Do not send |
@@ -31,9 +31,13 @@ both), with CMR settings at their defaults:
 /system/identity/set name=cmr-client
 /ip/address/add address=192.0.2.2/30 interface=ether2
 /cmr/client/set enabled=yes controller-addresses=192.0.2.1
-# controller, once the client is listed with flag P (about 85 s on a fresh boot)
+# controller, once the client is listed with flag P
 /cmr/device/pair [find identity=cmr-client] username=<client user> password=<client password>
 ```
+
+In our lab, the client's first connect after a fresh boot took about 85 s. That
+delay comes from the lab's second NIC, and the half-pair happens without it (see
+[the note below](#also-seen-on-726beta5-not-a-report-yet)).
 
 When it fails, the command's last table reads `device:ok, cmr:ok`, not
 `paired`:
@@ -69,12 +73,43 @@ satisfy both sides was committed, 27 of 27:
 - client `/cmr/client/pair` while the controller runs a bare `pair` (9/9);
 - client `pairing-requirement=none`, then a controller bare `pair` (9/9).
 
+A second study captured the link during 32 more single credentialed pairs, on
+four fresh boots. 26 half-paired. What we saw:
+
+- **The client's reply decides it.** Every pair starts the same way: 97 bytes
+  from the controller, 88 from the client, 87 from the controller. Then the
+  client sends either **one 108-byte message**, after which the controller sends
+  69 and 57 bytes and nothing more (half-paired, 26/26), or **71 then 66 bytes**,
+  after which the controller sends about 2 KB and polls every 10 s (paired, 6/6).
+  The connect before it has the same message sizes in both cases.
+- **How the client found the controller does not matter.** With
+  `controller-addresses` set, 3 of 16 committed. With no address, found through
+  neighbor discovery, also 3 of 16. Waiting 0, 5, 30 or 75 s between enabling
+  the controller and the client made no difference.
+- A half-paired session carries only TCP keepalives (every 15 s, both ways).
+  This matches the idle session above.
+
 **Expected:** the single credentialed `pair` either commits both approvals, or
 does not report success. Evidence:
-[FINDINGS.md → Pairing study](./FINDINGS.md#pairing-study-726beta5) and
-[evidence/7.26beta5/pairing.json](./evidence/7.26beta5/pairing.json).
+[FINDINGS.md → Pairing study](./FINDINGS.md#pairing-study-726beta5),
+[FINDINGS.md → Wire](./FINDINGS.md#the-half-pair-on-the-wire),
+[evidence/7.26beta5/pairing.json](./evidence/7.26beta5/pairing.json) and
+[evidence/7.26beta5/wire.json](./evidence/7.26beta5/wire.json).
 centrs measured the same state independently on beta3 to beta5
 ([centrs#527](https://github.com/tikoci/centrs/issues/527)).
+
+### Also seen on 7.26beta5 (not a report yet)
+
+On every fresh boot, the client's first CMR connect to `192.0.2.1` left the
+link interface `ether2` with the source address **10.0.2.15**. That address
+belongs to the router's other NIC, `ether1`, which holds the DHCP default route.
+The replies went elsewhere, so the SYN was retransmitted for about 84 s. Then
+the client connected again from `192.0.2.2`, at once. Later connects on the same
+boot used `192.0.2.2` from the start. The client had been enabled within a
+second of its `192.0.2.2` address being added. We have not found out whether
+that timing is the cause, so this is not a report. It resembles the withdrawn
+OSPF item below: a connect that picks the default route's address.
+Evidence: [FINDINGS.md → Wire](./FINDINGS.md#first-connect-the-85-s).
 
 ## 6. 7.26beta5: a `run-script` line has more than the documented policies
 
