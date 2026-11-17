@@ -114,10 +114,34 @@ describe("licenseFromStartFlags — start passes only what was typed", () => {
 			.toEqual({ account: "a@example.com", password: "pw", level: "p10" });
 	});
 
-	test("half a credential pair is refused", () => {
-		expect(() => parse("--license-level", "p1", "--license-account", "a@example.com"))
-			.toThrow(expect.objectContaining({ code: "INVALID_ARGUMENT" }));
-		expect(() => parse("--license-password", "pw")).toThrow(/go together/);
+	describe("half a credential pair", () => {
+		const saved = { account: process.env.MIKROTIK_WEB_ACCOUNT, password: process.env.MIKROTIK_WEB_PASSWORD };
+		beforeEach(() => {
+			delete process.env.MIKROTIK_WEB_ACCOUNT;
+			delete process.env.MIKROTIK_WEB_PASSWORD;
+		});
+		afterEach(() => {
+			if (saved.account === undefined) delete process.env.MIKROTIK_WEB_ACCOUNT;
+			else process.env.MIKROTIK_WEB_ACCOUNT = saved.account;
+			if (saved.password === undefined) delete process.env.MIKROTIK_WEB_PASSWORD;
+			else process.env.MIKROTIK_WEB_PASSWORD = saved.password;
+		});
+
+		test("the other half comes from its own env var, as before #261", () => {
+			process.env.MIKROTIK_WEB_PASSWORD = "env-pw";
+			expect(parse("--license-level", "p10", "--license-account", "a@example.com"))
+				.toEqual({ account: "a@example.com", password: "env-pw", level: "p10" });
+			process.env.MIKROTIK_WEB_ACCOUNT = "env@example.com";
+			expect(parse("--license-password", "pw"))
+				.toEqual({ account: "env@example.com", password: "pw", level: undefined });
+		});
+
+		test("a half no env var completes is refused, naming what is missing", () => {
+			expect(() => parse("--license-level", "p1", "--license-account", "a@example.com"))
+				.toThrow(expect.objectContaining({ code: "INVALID_ARGUMENT" }));
+			expect(() => parse("--license-account", "a@example.com")).toThrow(/without --license-password.*MIKROTIK_WEB_PASSWORD/);
+			expect(() => parse("--license-password", "pw")).toThrow(/without --license-account.*MIKROTIK_WEB_ACCOUNT/);
+		});
 	});
 });
 

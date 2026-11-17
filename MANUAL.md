@@ -235,7 +235,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--secure-login` / `--no-secure-login` | unset | Provisioning, ≥ 7.20.8. The only way to get the managed SSH key that centrs and other descriptor consumers need for SSH/SFTP: it creates the `quickchr` account with a batch-verified key. Without it, or when combined with `--add-user`, no key is created. First boot only; an already-booted machine cannot add the key later, so pass it at `add`/`start` (#253) |
 | `--license-level <l>` | — | `p1`, `p10`, `p-unlimited` (`unlimited` is accepted as `p-unlimited`), ≥ 7.20.8. On `add` only the level is recorded; credentials are resolved at the first `start` |
 | `--license-account <a>` | — | `start` only. MikroTik.com email. Without it: env `MIKROTIK_WEB_ACCOUNT`, then the secret store |
-| `--license-password <p>` | — | `start` only. Pairs with `--license-account`. Without both, `start` refuses before booting when no credential is found |
+| `--license-password <p>` | — | `start` only. Pairs with `--license-account`; if you give one of the two, the other comes from its env var (never from the secret store). Without either, `start` refuses before booting when no credential is found |
 | `--device-mode <m>` | — | `rose`, `advanced`, `basic`, `home`, `auto`, `skip`, ≥ 7.20.8 |
 | `--device-mode-enable <f,...>` | — | Repeatable, comma-separated |
 | `--device-mode-disable <f,...>` | — | Repeatable, comma-separated |

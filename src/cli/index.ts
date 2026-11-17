@@ -143,20 +143,32 @@ function csvList(values: string[]): string[] {
 /** `start`'s `--license-*` flags as a {@link LicenseOptions}, or undefined when none
  *  was given.
  *
- *  Only what was typed is passed on. The env vars and the secret store are the
- *  library's fallbacks — the chain `set --license` uses — and `start()` checks them
- *  before booting. Requiring a flag or env var here skipped the store, so a credential
- *  every other path found was refused on the first boot (#261). */
+ *  With no credential flag, only the level is passed on: the env vars and the secret
+ *  store are the library's fallbacks — the chain `set --license` uses — and `start()`
+ *  checks them before booting. Requiring a flag or env var here skipped the store, so a
+ *  credential every other path found was refused on the first boot (#261).
+ *
+ *  With one credential flag, the other half comes from its own env var, as it always
+ *  has (`--license-account a@x` with `MIKROTIK_WEB_PASSWORD` set). It never comes from
+ *  the secret store: that holds a *pair*, and its password may belong to a different
+ *  account than the one typed, so a half that no env var completes is refused. */
 export function licenseFromStartFlags(flags: Record<string, string | boolean | string[]>): LicenseOptions | undefined {
 	const level = flag(flags, "license-level");
-	const account = flag(flags, "license-account");
-	const password = flag(flags, "license-password");
+	let account = flag(flags, "license-account");
+	let password = flag(flags, "license-password");
 	if (level === undefined && account === undefined && password === undefined) return undefined;
-	if ((account === undefined) !== (password === undefined)) {
-		throw new QuickCHRError(
-			"INVALID_ARGUMENT",
-			"--license-account and --license-password go together — or leave both out to use MIKROTIK_WEB_ACCOUNT/MIKROTIK_WEB_PASSWORD or the stored credentials.",
-		);
+	if (account !== undefined || password !== undefined) {
+		account ??= process.env.MIKROTIK_WEB_ACCOUNT || undefined;
+		password ??= process.env.MIKROTIK_WEB_PASSWORD || undefined;
+		if (account === undefined || password === undefined) {
+			const [given, missing, env] = account === undefined
+				? ["--license-password", "--license-account", "MIKROTIK_WEB_ACCOUNT"]
+				: ["--license-account", "--license-password", "MIKROTIK_WEB_PASSWORD"];
+			throw new QuickCHRError(
+				"INVALID_ARGUMENT",
+				`${given} was given without ${missing}: pass ${missing} or set ${env} — or leave both out to use the stored credentials.`,
+			);
+		}
 	}
 	// The level is passed as typed: `start()` normalizes it (`unlimited` → `p-unlimited`)
 	// and refuses an unknown one before any download.
