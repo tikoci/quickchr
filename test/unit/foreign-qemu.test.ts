@@ -130,6 +130,31 @@ describe("a QEMU owned by another user (#259)", () => {
 		expectStillRunning("foreign-remove");
 	});
 
+	test("clean and destroy are refused and the machine's state survives", async () => {
+		const state = machine("foreign-clean");
+		seed(state);
+		await expect(QuickCHR.get("foreign-clean")?.clean()).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+		await expect(QuickCHR.get("foreign-clean")?.destroy()).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+		expect(existsSync(state.machineDir)).toBe(true);
+		expectStillRunning("foreign-clean");
+	});
+
+	test("set device-mode is refused before it touches the guest or relaunches QEMU", async () => {
+		// Device-mode activation terminates and replaces QEMU. Before the refusal, a
+		// failed monitor quit fell to an exit probe that read EPERM as exited and
+		// spawned a replacement next to the live original.
+		seed(machine("foreign-device-mode"));
+		const instance = QuickCHR.get("foreign-device-mode");
+		await expect(instance?.setDeviceMode({ mode: "rose" })).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+		expectStillRunning("foreign-device-mode");
+	});
+
+	test("the hint quotes a legacy name so it pastes as one argument", async () => {
+		seed(machine("lab old"));
+		const error = await QuickCHR.get("lab old")?.stop().catch((e: unknown) => e);
+		expect(error).toMatchObject({ installHint: "Run it as the owning user, e.g.: sudo quickchr stop 'lab old'" });
+	});
+
 	test("the refusal names the machine and a command to run as its owner", async () => {
 		seed(machine("foreign-hint"));
 		const error = await QuickCHR.get("foreign-hint")?.stop().catch((e: unknown) => e);

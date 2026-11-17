@@ -67,6 +67,7 @@ import {
 import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
+import { pidLiveness } from "./pid.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
@@ -1101,6 +1102,9 @@ function createInstance(state: MachineState): ChrInstance {
 				// terminate. `state.provisioning` and `state.deviceMode` go stale the same
 				// way, and both feed `appliedDeviceModeRecord()`.
 				refreshMachineState(state);
+				// Activation terminates and replaces QEMU, which a foreign one cannot be
+				// (#259): refuse before touching the guest, not after the power-cut fails.
+				assertOwnQemu(state, "set");
 				// Inside the lock: the applicability check has to hold for the operation,
 				// not merely at the moment it was made.
 				assertDeviceModeApplicable(state);
@@ -1414,11 +1418,8 @@ function resolveArch(input: Arch | "auto" | undefined): Arch {
 async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		try {
-			process.kill(pid, 0);
-		} catch {
-			return true;
-		}
+		// Only a dead pid has exited: EPERM is a live process this user cannot signal (#259).
+		if (pidLiveness(pid) === "dead") return true;
 		await Bun.sleep(100);
 	}
 	return false;

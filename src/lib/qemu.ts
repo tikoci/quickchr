@@ -13,6 +13,7 @@ import { detectAccel, requireQemu, requireFirmware, requireQemuImg } from "./pla
 import { buildHostfwdString, deviceArgs } from "./network.ts";
 import { ensureDir } from "./state.ts";
 import { pidLiveness } from "./pid.ts";
+import { shellQuote } from "./names.ts";
 import { restGet } from "./rest.ts";
 import { apiLogin } from "./api-login.ts";
 import { isRouterOs6 } from "./versions.ts";
@@ -496,7 +497,7 @@ export function foreignQemuError(pid: number, name?: string, action = "stop"): Q
 	return new QuickCHRError(
 		"PERMISSION_DENIED",
 		`${who} as another user (PID ${pid}, likely started with sudo); this user cannot signal it, so nothing was changed.`,
-		name ? `Run it as the owning user, e.g.: sudo quickchr ${action} ${name}` : undefined,
+		name ? `Run it as the owning user, e.g.: sudo quickchr ${action} ${shellQuote(name)}` : undefined,
 	);
 }
 

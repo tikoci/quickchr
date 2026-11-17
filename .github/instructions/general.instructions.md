@@ -66,6 +66,17 @@ and flag arity for free; it has to opt into the other two.
 `machine.json`; `doctor` names `quickchr remove <name>`. Resource names
 (`src/lib/names.ts`) are validated before any write, since they become path segments.
 
+## Process Liveness
+
+Ask "is this pid alive?" only through `pidLiveness()` (`src/lib/pid.ts`): `alive`,
+`foreign` or `dead`. **`EPERM` from `process.kill(pid, 0)` means alive, owned by another
+user** (a root QEMU from `sudo quickchr start` for native vmnet). Never write a bare
+`try { process.kill(pid, 0) } catch { /* dead */ }`. That read EPERM as dead, so `list`
+persisted `stopped` over a running root QEMU, and the device-mode relaunch would have
+spawned a second QEMU beside it (#259). An operation that must signal or replace QEMU
+refuses a `foreign` one with `PERMISSION_DENIED` (`assertOwnQemu()`), before it changes
+anything.
+
 ## RouterOS "expired admin" Caveat
 
 The `expired: true` flag on the default admin account does NOT block REST API access.

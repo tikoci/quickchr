@@ -45,6 +45,7 @@ import {
 	type GuestSnapshot,
 } from "./guest-snapshot.ts";
 import type { PortMapping } from "./types.ts";
+import { pidLiveness } from "./pid.ts";
 
 /** Classification of a single REST readiness probe. */
 export type BootProbeOutcome =
@@ -381,14 +382,10 @@ export async function probeForwardedPorts(
 
 function isProcessAlive(pid: number | undefined): string {
 	if (pid === undefined) return "unknown (no pid recorded)";
-	try {
-		process.kill(pid, 0);
-		return `alive (pid ${pid})`;
-	} catch (e) {
-		const code = (e as NodeJS.ErrnoException).code;
-		if (code === "EPERM") return `alive but not signalable (pid ${pid})`;
-		return `not running (pid ${pid})`;
-	}
+	const liveness = pidLiveness(pid);
+	if (liveness === "alive") return `alive (pid ${pid})`;
+	if (liveness === "foreign") return `alive but not signalable (pid ${pid})`;
+	return `not running (pid ${pid})`;
 }
 
 function listMachineDir(machineDir: string): { name: string; bytes: number }[] {

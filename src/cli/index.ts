@@ -1733,6 +1733,7 @@ async function cmdList(argv: string[] = []) {
 
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { isMachineForeign } = await import("../lib/state.ts");
+	const { shellQuote } = await import("../lib/names.ts");
 
 	if (name) {
 		const { statusIcon, bold, dim, link, formatPorts, formatNetworks, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
@@ -1798,7 +1799,7 @@ async function cmdList(argv: string[] = []) {
 			}
 			console.log(`  Serial:     ${dim(`${s.machineDir}/serial.sock`)}`);
 			console.log();
-			console.log(`  ${dim("Tip:")} ${foreign ? "sudo " : ""}quickchr stop ${s.name}`);
+			console.log(`  ${dim("Tip:")} ${foreign ? `sudo quickchr stop ${shellQuote(s.name)}` : `quickchr stop ${s.name}`}`);
 		} else {
 			console.log();
 			console.log(`  ${dim("Tip:")} quickchr start ${s.name}  |  quickchr remove ${s.name}`);
