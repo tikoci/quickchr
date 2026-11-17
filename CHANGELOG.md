@@ -93,9 +93,12 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   stopped" while QEMU kept running, and a later `start` could launch a second QEMU on
   the same disk. It now stays `running`, `list` marks it `(other user)` (and
   `foreign: true` in `--json`), and `stop`/`shutdown`/`remove`/`clean` refuse with
-  the new `PERMISSION_DENIED` code and a `sudo quickchr <action> <name>` hint, as
-  does `set --device-mode`, whose power-cycle would otherwise have launched a
-  replacement QEMU beside the live one.
+  the new `PERMISSION_DENIED` code and a hint that runs the command as the owner
+  against the same data dir (`sudo env QUICKCHR_DATA_DIR=… quickchr <action> <name>`),
+  as does `set --device-mode`, whose power-cycle would otherwise have launched a
+  replacement QEMU beside the live one. A machine an older version already saved as
+  `stopped` has lost its pid and cannot be detected: stop that QEMU (as root) before
+  running `start`, `remove` or `clean` on it.
   `stop --all` reports such a machine, stops the rest, and exits 1. (#259)
 - `quickchr networks` no longer reports a dead socket_vmnet daemon as running. The
   old check took any `socket_vmnet` process as proof, so a leftover Homebrew socket

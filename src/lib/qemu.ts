@@ -11,7 +11,7 @@ import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, Po
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware, requireQemuImg } from "./platform.ts";
 import { buildHostfwdString, deviceArgs } from "./network.ts";
-import { ensureDir } from "./state.ts";
+import { ensureDir, getDataDir } from "./state.ts";
 import { pidLiveness } from "./pid.ts";
 import { shellQuote } from "./names.ts";
 import { restGet } from "./rest.ts";
@@ -490,6 +490,15 @@ export async function stopQemu(pid: number): Promise<boolean> {
 	return true;
 }
 
+/** The command that runs `action` on `name` as the user owning its QEMU (#259). It pins
+ *  `QUICKCHR_DATA_DIR`: `sudo` may reset `HOME`, and the same name under root's data
+ *  dir is a different machine, or none. */
+export function ownerCommand(action: string, name: string): string {
+	const command = `quickchr ${action} ${shellQuote(name)}`;
+	if (process.platform === "win32") return command;
+	return `sudo env QUICKCHR_DATA_DIR=${shellQuote(getDataDir())} ${command}`;
+}
+
 /** The refusal for a QEMU this user cannot signal (#259). `name`/`action` make the hint
  *  a runnable command when the caller knows them. */
 export function foreignQemuError(pid: number, name?: string, action = "stop"): QuickCHRError {
@@ -497,7 +506,7 @@ export function foreignQemuError(pid: number, name?: string, action = "stop"): Q
 	return new QuickCHRError(
 		"PERMISSION_DENIED",
 		`${who} as another user (PID ${pid}, likely started with sudo); this user cannot signal it, so nothing was changed.`,
-		name ? `Run it as the owning user, e.g.: sudo quickchr ${action} ${shellQuote(name)}` : undefined,
+		name ? `Run it as the user that owns that QEMU: ${ownerCommand(action, name)}` : undefined,
 	);
 }
 

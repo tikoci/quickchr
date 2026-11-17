@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { shellQuote } from "../../src/lib/names.ts";
 import { pidLiveness } from "../../src/lib/pid.ts";
 import { QuickCHR } from "../../src/lib/quickchr.ts";
 import { getMachineDir, isMachineForeign, isMachineRunning, loadMachine, refreshAllStatuses, saveMachine } from "../../src/lib/state.ts";
@@ -152,16 +153,18 @@ describe("a QEMU owned by another user (#259)", () => {
 	test("the hint quotes a legacy name so it pastes as one argument", async () => {
 		seed(machine("lab old"));
 		const error = await QuickCHR.get("lab old")?.stop().catch((e: unknown) => e);
-		expect(error).toMatchObject({ installHint: "Run it as the owning user, e.g.: sudo quickchr stop 'lab old'" });
+		expect((error as { installHint?: string }).installHint).toEndWith("quickchr stop 'lab old'");
 	});
 
 	test("the refusal names the machine and a command to run as its owner", async () => {
 		seed(machine("foreign-hint"));
 		const error = await QuickCHR.get("foreign-hint")?.stop().catch((e: unknown) => e);
-		expect(error).toMatchObject({
-			code: "PERMISSION_DENIED",
-			installHint: "Run it as the owning user, e.g.: sudo quickchr stop foreign-hint",
-		});
+		expect(error).toMatchObject({ code: "PERMISSION_DENIED" });
+		// sudo may reset HOME, so the hint pins this data dir rather than trusting it.
+		const expected = process.platform === "win32"
+			? "quickchr stop foreign-hint"
+			: `sudo env QUICKCHR_DATA_DIR=${shellQuote(TEST_DIR)} quickchr stop foreign-hint`;
+		expect((error as { installHint?: string }).installHint).toBe(`Run it as the user that owns that QEMU: ${expected}`);
 		expect((error as Error).message).toContain(`PID ${FOREIGN_PID}`);
 	});
 });
