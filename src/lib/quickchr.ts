@@ -396,15 +396,15 @@ async function resolveLicenseInput(input: LicenseInput): Promise<LicenseOptions 
 }
 
 /** `add()` records only the license level. Say so when the caller passed credentials
- *  that will not be kept, and when none can be found now — the first `start` resolves
- *  them again and refuses before booting if they are still missing. */
-async function warnLicenseIntent(license: LicenseInput, logger: ProgressLogger): Promise<void> {
+ *  that will not be kept.
+ *
+ *  Deliberately no credential lookup here: the secret store is the OS keychain, and on
+ *  macOS a read can raise an authorization dialog that blocks a non-interactive or
+ *  library `add`. `add` boots nothing, so it has nothing to protect; the first `start`
+ *  resolves credentials and refuses before booting if there are none. */
+function warnLicenseIntent(license: LicenseInput, logger: ProgressLogger): void {
 	if (typeof license !== "string" && (license.account || license.password)) {
 		logger.warn("License credentials are not stored with the machine — only the level is. The first start resolves them from MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or the secret store.");
-		return;
-	}
-	if (!(await resolveLicenseInput(license))) {
-		logger.warn(`No MikroTik.com credentials found yet. The license (${licenseLevelOf(license)}) is recorded; set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or save credentials before the first start, which refuses without them.`);
 	}
 }
 
@@ -2386,7 +2386,7 @@ export class QuickCHR {
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
-		if (opts.license !== undefined) await warnLicenseIntent(opts.license, createLogger(opts.onProgress));
+		if (opts.license !== undefined) warnLicenseIntent(opts.license, createLogger(opts.onProgress));
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
