@@ -1,0 +1,142 @@
+/**
+ * #259: a QEMU owned by another user (signal-0 answers EPERM) — typically one started
+ * with `sudo quickchr start` for native vmnet — was read as dead. `list` then persisted
+ * `stopped` over it, `stop` printed success and `shutdown` said "already stopped" while
+ * QEMU kept running, and a later `start` could put a second QEMU on the same disk.
+ *
+ * The foreign pid is simulated: `process.kill` answers EPERM for one pid that does not
+ * exist, and behaves normally for every other pid (the lock's own liveness checks).
+ */
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { pidLiveness } from "../../src/lib/pid.ts";
+import { QuickCHR } from "../../src/lib/quickchr.ts";
+import { getMachineDir, isMachineForeign, isMachineRunning, loadMachine, refreshAllStatuses, saveMachine } from "../../src/lib/state.ts";
+import type { MachineState } from "../../src/lib/types.ts";
+
+const TEST_DIR = join(import.meta.dir, ".tmp-foreign-qemu");
+const origDataDir = process.env.QUICKCHR_DATA_DIR;
+const FOREIGN_PID = 999_999_998;
+const realKill = process.kill;
+
+function machine(name: string, overrides: Partial<MachineState> = {}): MachineState {
+	return {
+		name,
+		version: "7.24.4",
+		arch: "x86",
+		cpu: 1,
+		mem: 512,
+		networks: [{ specifier: "user", id: "net0" }],
+		ports: {},
+		packages: [],
+		portBase: 9100,
+		excludePorts: [],
+		extraPorts: [],
+		createdAt: "2026-11-16T00:00:00.000Z",
+		status: "running",
+		pid: FOREIGN_PID,
+		machineDir: getMachineDir(name),
+		...overrides,
+	};
+}
+
+function seed(state: MachineState): void {
+	mkdirSync(state.machineDir, { recursive: true });
+	saveMachine(state);
+}
+
+/** Every signal to FOREIGN_PID, signal 0 included, is refused as it would be for a
+ *  root-owned process. */
+function denyForeignPid(): void {
+	process.kill = ((pid: number, signal?: string | number) => {
+		if (pid === FOREIGN_PID) {
+			throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+		}
+		return realKill(pid, signal);
+	}) as typeof process.kill;
+}
+
+function expectStillRunning(name: string): void {
+	const stored = loadMachine(name);
+	expect(stored?.status).toBe("running");
+	expect(stored?.pid).toBe(FOREIGN_PID);
+}
+
+beforeEach(() => {
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	mkdirSync(TEST_DIR, { recursive: true });
+	process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+	denyForeignPid();
+});
+
+afterEach(() => {
+	process.kill = realKill;
+	rmSync(TEST_DIR, { recursive: true, force: true });
+	if (origDataDir === undefined) delete process.env.QUICKCHR_DATA_DIR;
+	else process.env.QUICKCHR_DATA_DIR = origDataDir;
+});
+
+describe("pidLiveness", () => {
+	test("tells alive, foreign (EPERM) and dead apart", () => {
+		expect(pidLiveness(process.pid)).toBe("alive");
+		expect(pidLiveness(FOREIGN_PID)).toBe("foreign");
+		expect(pidLiveness(999_999_999)).toBe("dead");
+	});
+});
+
+describe("a QEMU owned by another user (#259)", () => {
+	test("counts as running, and as foreign", () => {
+		const state = machine("foreign-a");
+		expect(isMachineRunning(state)).toBe(true);
+		expect(isMachineForeign(state)).toBe(true);
+		expect(isMachineForeign({ ...state, pid: process.pid })).toBe(false);
+	});
+
+	test("refreshAllStatuses keeps the stored status running", () => {
+		seed(machine("foreign-list"));
+		const listed = refreshAllStatuses().find((m) => m.name === "foreign-list");
+		expect(listed?.status).toBe("running");
+		expect(listed?.pid).toBe(FOREIGN_PID);
+		expectStillRunning("foreign-list");
+	});
+
+	test("QuickCHR.get keeps the stored status running", () => {
+		seed(machine("foreign-get"));
+		expect(QuickCHR.get("foreign-get")?.state.status).toBe("running");
+		expectStillRunning("foreign-get");
+	});
+
+	test("stop is refused with PERMISSION_DENIED and claims nothing", async () => {
+		seed(machine("foreign-stop"));
+		const instance = QuickCHR.get("foreign-stop");
+		await expect(instance?.stop()).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+		expectStillRunning("foreign-stop");
+	});
+
+	test("shutdown is refused rather than reporting already-stopped", async () => {
+		seed(machine("foreign-shutdown"));
+		const instance = QuickCHR.get("foreign-shutdown");
+		await expect(instance?.shutdown({ timeoutMs: 1000 })).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+		expectStillRunning("foreign-shutdown");
+	});
+
+	test("remove is refused and the machine's state survives", async () => {
+		const state = machine("foreign-remove");
+		seed(state);
+		const instance = QuickCHR.get("foreign-remove");
+		await expect(instance?.remove()).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+		expect(existsSync(state.machineDir)).toBe(true);
+		expectStillRunning("foreign-remove");
+	});
+
+	test("the refusal names the machine and a command to run as its owner", async () => {
+		seed(machine("foreign-hint"));
+		const error = await QuickCHR.get("foreign-hint")?.stop().catch((e: unknown) => e);
+		expect(error).toMatchObject({
+			code: "PERMISSION_DENIED",
+			installHint: "Run it as the owning user, e.g.: sudo quickchr stop foreign-hint",
+		});
+		expect((error as Error).message).toContain(`PID ${FOREIGN_PID}`);
+	});
+});

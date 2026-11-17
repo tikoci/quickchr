@@ -87,6 +87,14 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- A machine whose QEMU belongs to another user (for example one started with
+  `sudo quickchr start` for native vmnet) is no longer read as dead. `list` used to
+  save it as `stopped`; after that `stop` claimed success, `shutdown` said "already
+  stopped" while QEMU kept running, and a later `start` could launch a second QEMU on
+  the same disk. It now stays `running`, `list` marks it `(other user)` (and
+  `foreign: true` in `--json`), and `stop`/`shutdown`/`remove`/`clean` refuse with
+  the new `PERMISSION_DENIED` code and a `sudo quickchr <action> <name>` hint.
+  `stop --all` reports such a machine, stops the rest, and exits 1. (#259)
 - `quickchr networks` no longer reports a dead socket_vmnet daemon as running. The
   old check took any `socket_vmnet` process as proof, so a leftover Homebrew socket
   read as running while only a bridged daemon was up. (#262)

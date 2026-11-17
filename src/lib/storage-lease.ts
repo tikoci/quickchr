@@ -22,6 +22,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync }
 import { dirname, join } from "node:path";
 import { acquireLockNow, type HeldLock } from "./lock.ts";
 import { ensureDir, getDataDir } from "./state.ts";
+import { pidLiveness } from "./pid.ts";
 import { renameWithRetry } from "./rename.ts";
 import { QuickCHRError } from "./types.ts";
 
@@ -59,12 +60,7 @@ function leaseDir(): string {
 }
 
 export function isPidAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === "EPERM";
-	}
+	return pidLiveness(pid) !== "dead";
 }
 
 /** Run `fn` holding the storage lock. Synchronous: holders keep it for milliseconds

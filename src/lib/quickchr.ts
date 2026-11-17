@@ -58,6 +58,7 @@ import {
 	listOrphanMachineDirs,
 	refreshAllStatuses,
 	isMachineRunning,
+	isMachineForeign,
 	ensureDir,
 	getCacheDir,
 	getDataDir,
@@ -66,7 +67,7 @@ import {
 import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
@@ -487,7 +488,15 @@ async function withMachineLock<T>(state: MachineState, op: LockOperation, fn: ()
 /** The body of `stop()`, for a caller that already holds the machine lock. The lock is
  *  not reentrant, so code inside a locked start or relaunch calls this, never
  *  `instance.stop()`. */
+/** Refuse a lifecycle operation on a QEMU another user owns (#259): it is running and
+ *  this process cannot signal it, so carrying on would record `stopped` (or delete
+ *  state) under a live VM and report a success that did not happen. */
+function assertOwnQemu(state: MachineState, action: string): void {
+	if (state.pid && isMachineForeign(state)) throw foreignQemuError(state.pid, state.name, action);
+}
+
 async function stopUnderLock(state: MachineState): Promise<void> {
+	assertOwnQemu(state, "stop");
 	if (state.pid) {
 		await stopQemu(state.pid);
 	}
@@ -600,6 +609,7 @@ async function continueUnderLock(state: MachineState, wait: boolean, timeoutExtr
 /** The body of `remove()`, for a caller that already holds the machine lock. The lock
  *  file goes with the directory. */
 async function removeUnderLock(state: MachineState): Promise<void> {
+	assertOwnQemu(state, "remove");
 	if (state.pid && isMachineRunning(state)) {
 		await stopQemu(state.pid);
 	}
@@ -611,6 +621,7 @@ async function removeUnderLock(state: MachineState): Promise<void> {
 
 /** The body of `clean()`, for a caller that already holds the machine lock. */
 async function cleanUnderLock(state: MachineState): Promise<void> {
+	assertOwnQemu(state, "clean");
 	if (state.pid && isMachineRunning(state)) {
 		await stopQemu(state.pid);
 	}
@@ -888,6 +899,7 @@ function createInstance(state: MachineState): ChrInstance {
 		async shutdown(options) {
 			const timeoutMs = validateShutdownTimeout(options?.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS);
 			return withMachineLock(state, "shutdown", async () => {
+				assertOwnQemu(state, "shutdown");
 				if (!state.pid || !isMachineRunning(state)) {
 					finalizeStoppedState(state);
 					return { outcome: "already-stopped" };
@@ -1243,6 +1255,7 @@ function createInstance(state: MachineState): ChrInstance {
 
 		async destroy(): Promise<void> {
 			await withMachineLock(state, "remove", async () => {
+				assertOwnQemu(state, "remove");
 				await stopUnderLock(state);
 				await removeUnderLock(state);
 			});

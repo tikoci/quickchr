@@ -1011,6 +1011,10 @@ export type ErrorCode =
 	// An operation that needs the REST API, on a guest that has none — RouterOS 6, a
 	// boot-only target (#182). Thrown up front instead of letting the request time out.
 	| "REST_UNAVAILABLE"
+	// A lifecycle operation on a QEMU owned by another user (signal-0 answers EPERM),
+	// typically one started with `sudo quickchr start` for native vmnet. The machine is
+	// running; this process cannot stop it, so nothing is changed or claimed (#259).
+	| "PERMISSION_DENIED"
 	| "INSUFFICIENT_DISK_SPACE"
 	| "STATE_ERROR"
 	| "INVALID_SIZE_STRING"
