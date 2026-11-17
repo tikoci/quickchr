@@ -45,6 +45,7 @@ export type {
 	ChrLoadSample,
 	LicenseInput,
 	LicenseLevel,
+	LicenseLevelInput,
 	LicenseOptions,
 	MachineConfig,
 	MachineState,
@@ -127,7 +128,7 @@ export type { ConsoleExecResult } from "./lib/console.ts";
 export { isQgaReady } from "./lib/channels.ts";
 
 // License utilities
-export { renewLicense, getLicenseInfo } from "./lib/license.ts";
+export { renewLicense, getLicenseInfo, normalizeLicenseLevel } from "./lib/license.ts";
 export type { LicenseInfo } from "./lib/license.ts";
 
 // Credential utilities

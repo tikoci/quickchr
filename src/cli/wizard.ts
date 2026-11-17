@@ -558,7 +558,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 				options: [
 					{ value: "p1", label: "p1 — 1 Gbps", hint: "trial, 60 days" },
 					{ value: "p10", label: "p10 — 10 Gbps", hint: "trial, 60 days" },
-					{ value: "unlimited", label: "unlimited — no cap", hint: "trial, 60 days" },
+					{ value: "p-unlimited", label: "p-unlimited — no cap", hint: "trial, 60 days" },
 				] as Array<{ value: LicenseLevel; label: string; hint: string }>,
 				initialValue: "p1" as LicenseLevel,
 			});

@@ -44,6 +44,7 @@ function seedProvisionedMachine(): MachineState {
 
 	const state: MachineState = {
 		name: NAME,
+		license: "p1",
 		licenseLevel: "p1",
 		provisioning: { at: new Date().toISOString(), steps: ["user", "secureLogin", "disableAdmin"] },
 		version: VERSION,
@@ -173,9 +174,9 @@ describe("clean() credential state (#79)", () => {
 		const instance = QuickCHR.get(NAME);
 		await (instance as NonNullable<typeof instance>).clean();
 
-		// A read-back of the old guest's license, never an intent quickchr can replay —
-		// the license *input* is not persisted. Left behind it would report a level the
+		// A read-back of the old guest's license. Left behind it would report a level the
 		// fresh image does not have, and read as "already applied" on a later request.
+		// The requested level (`license`) is intent and survives — see the next test.
 		expect(loadMachine(NAME)?.licenseLevel).toBeUndefined();
 	});
 
@@ -187,6 +188,8 @@ describe("clean() credential state (#79)", () => {
 
 		const after = loadMachine(NAME);
 		expect(after?.secureLogin).toBe(true);
+		// The requested license level, never its credentials: re-applied on the next start (#261).
+		expect(after?.license).toBe("p1");
 		expect(after?.version).toBe(VERSION);
 		expect(after?.portBase).toBe(9100);
 	});

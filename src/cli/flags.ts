@@ -20,6 +20,7 @@ const CREATE_FLAGS = [
 	"boot-disk-format", "boot-size", "add-disk",
 	"device-mode", "device-mode-enable", "device-mode-disable",
 	"add-user", "disable-admin", "secure-login",
+	"license-level",
 	"qemu-arg",
 ] as const;
 
@@ -27,7 +28,7 @@ const CREATE_FLAGS = [
 const START_ONLY_FLAGS = [
 	"all", "dry-run", "wait", "background", "bg", "fg", "foreground",
 	"timeout-extra", "frozen",
-	"license-level", "license-account", "license-password",
+	"license-account", "license-password",
 ] as const;
 
 /** `set` applies a change to a machine that has already booted, so it takes the

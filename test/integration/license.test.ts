@@ -115,6 +115,42 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		}
 	}, bootTestTimeout());
 
+	test("add() records the level and a plain first start() applies it (#261)", async () => {
+		// The add → start path: `add` stores only the level (in RouterOS spelling — the
+		// old `unlimited` is normalized), and a start with no license option applies it
+		// with credentials resolved at boot from the env vars.
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { getLicenseInfo } = await import("../../src/lib/license.ts");
+		const name = "integration-license-add";
+		await cleanupMachine(name);
+
+		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
+
+		try {
+			const added = await QuickCHR.add({ ...imageTarget(), arch, name, license: "unlimited" });
+			expect(added.license).toBe("p-unlimited");
+			expect(JSON.stringify(added)).not.toContain(process.env.MIKROTIK_WEB_PASSWORD as string);
+
+			try {
+				instance = await QuickCHR.start({ name, background: true });
+			} catch (error) {
+				if (isExternalLicenseFailure(error)) return;
+				throw error;
+			}
+
+			expect(instance.state.license).toBe("p-unlimited");
+			expect(instance.state.licenseLevel).toBe("p-unlimited");
+			const info = await getLicenseInfo(instance.ports.http);
+			expect(info.level).toBe("p-unlimited");
+		} finally {
+			if (instance) {
+				try { await instance.stop(); } catch { /* ignore */ }
+			}
+			await cleanupMachine(name);
+		}
+	}, bootTestTimeout());
+
 	test("instance.license() applies license to running CHR", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { getLicenseInfo } = await import("../../src/lib/license.ts");

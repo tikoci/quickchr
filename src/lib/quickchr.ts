@@ -74,7 +74,7 @@ import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFile
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { ensureEmptySshConfig, provision } from "./provision.ts";
-import { renewLicense, getLicenseInfo } from "./license.ts";
+import { renewLicense, getLicenseInfo, licenseLevelOf, normalizeLicenseInput, normalizeLicenseLevel } from "./license.ts";
 import { resolveAuth, resolveCreds } from "./auth.ts";
 import { type ScpOptions, scpPush, scpPull } from "./scp.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
@@ -103,6 +103,7 @@ import {
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 	pendingProvisioningFor,
+	withRecordedLicenseLevel,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
@@ -155,7 +156,12 @@ function hasProvisioningMutations(opts: {
  *  Returns a shallow copy so the caller's input object is not mutated. */
 function normalizeStartOptions(opts: StartOptions): StartOptions {
 	if (opts.noAuth === true && opts.secureLogin === undefined) {
-		return { ...opts, secureLogin: false };
+		opts = { ...opts, secureLogin: false };
+	}
+	// RouterOS spelling before anything else reads the level, so an unknown one is
+	// refused before a download and `unlimited` never reaches /system/license/renew (#261).
+	if (opts.license !== undefined) {
+		opts = { ...opts, license: normalizeLicenseInput(opts.license) };
 	}
 	return opts;
 }
@@ -368,24 +374,55 @@ function unregisterSocketMembers(state: MachineState): void {
 
 // --- License helpers ---
 
+const MISSING_LICENSE_CREDENTIALS =
+	"License requested but no MikroTik.com credentials were found. Pass them " +
+	"(--license-account/--license-password, or LicenseOptions account/password), set " +
+	"MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD, or save them to the secret store " +
+	"(the interactive 'quickchr set <name> --license' prompt offers to).";
+
 /** Resolve a LicenseInput to a full LicenseOptions, filling in credentials from
- *  env vars / secret store when not provided by the caller. Returns null with a
- *  warning when credentials cannot be found. */
+ *  env vars / secret store when not provided by the caller. Returns null when
+ *  credentials cannot be found. */
 async function resolveLicenseInput(input: LicenseInput): Promise<LicenseOptions | null> {
 	const opts: LicenseOptions = typeof input === "string" ? { level: input } : { ...input };
 	if (opts.account && opts.password) return opts;
-	// Try to fill in missing credentials.
 	const stored = await getStoredCredentials();
 	if (stored) {
 		if (!opts.account) opts.account = stored.account;
 		if (!opts.password) opts.password = stored.password;
 		return opts;
 	}
-	console.warn(
-		"License skipped: no MikroTik web credentials found. " +
-		"Set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or run 'quickchr login'.",
-	);
 	return null;
+}
+
+/** `add()` records only the license level. Say so when the caller passed credentials
+ *  that will not be kept.
+ *
+ *  Deliberately no credential lookup here: the secret store is the OS keychain, and on
+ *  macOS a read can raise an authorization dialog that blocks a non-interactive or
+ *  library `add`. `add` boots nothing, so it has nothing to protect; the first `start`
+ *  resolves credentials and refuses before booting if there are none. */
+function warnLicenseIntent(license: LicenseInput, logger: ProgressLogger): void {
+	if (typeof license !== "string" && (license.account || license.password)) {
+		logger.warn("License credentials are not stored with the machine — only the level is. The first start resolves them from MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or the secret store.");
+	}
+}
+
+/** Resolve a license step's credentials *before* the boot it would otherwise fail at
+ *  the end of, and hand the result to provisioning.
+ *
+ *  Resolved once, on purpose. The fallback after explicit options and the env-var pair
+ *  is the OS keychain (`Bun.secrets`), which can raise an authorization or unlock
+ *  dialog — a hang for an agent or CI caller. Looking it up here *and* again at the
+ *  license step doubled that exposure, so the caller swaps the request for this
+ *  explicit pair; the step then never reaches the store. The pair lives only in memory:
+ *  state records `licenseLevelOf()` of it, never the credentials. Explicit credentials
+ *  or both MIKROTIK_WEB_* env vars never reach the keychain at all. */
+async function resolveLicenseForBoot(license: LicenseInput | undefined): Promise<LicenseOptions | undefined> {
+	if (license === undefined) return undefined;
+	const resolved = await resolveLicenseInput(license);
+	if (!resolved) throw new QuickCHRError("PROCESS_FAILED", MISSING_LICENSE_CREDENTIALS);
+	return resolved;
 }
 
 /** Put a machine's disks back to the factory image and drop the credential material
@@ -652,12 +689,11 @@ async function cleanUnderLock(state: MachineState): Promise<void> {
 	// test). `disableAdmin` goes with them because it is read as a live fact
 	// about the guest (buildDescriptor's `disableAdminLockout`) and a fresh
 	// image has admin enabled again. `licenseLevel` goes with them for the same
-	// reason: it is a read-back of the license the erased disk held, not an
-	// intent — quickchr never persists the license *input* — so leaving it
+	// reason: it is a read-back of the license the erased disk held, so leaving it
 	// behind would report a level the fresh image does not have. Provisioning
-	// *intent* — packages, deviceMode, secureLogin — is not guest state and
-	// survives, and is what the next `start()` re-applies now that the window
-	// reopens.
+	// *intent* — packages, deviceMode, secureLogin, and the requested `license`
+	// level (never its credentials) — is not guest state and survives, and is what
+	// the next `start()` re-applies now that the window reopens.
 	// (`resetGuestToFactory()` has already dropped the secret-store entry and the
 	// managed keypair, which describe the same erased account.)
 
@@ -1070,16 +1106,24 @@ function createInstance(state: MachineState): ChrInstance {
 
 		async license(opts: LicenseOptions): Promise<void> {
 			assertProvisioningSupportedVersion(state.version, "apply a license");
+			const level = opts.level === undefined ? undefined : normalizeLicenseLevel(opts.level);
 			const auth = resolveAuth(state);
-			await renewLicense(ports.http, opts, undefined, undefined, undefined, auth.header);
-			// Persist the applied level in state
-			if (opts.level) {
+			await renewLicense(ports.http, { ...opts, level }, undefined, undefined, undefined, auth.header);
+			// Same contract as the first-boot step and as setDeviceMode(): the level is
+			// recorded as intent (so `clean()` replays it) and as fact, and the step joins
+			// the record the window reads (so a later `start --license-level` with the same
+			// level is "already applied", not refused). Credentials are never recorded.
+			// Without a level, renew does not verify one, so there is nothing to record.
+			if (level) {
 				const current = loadMachine(state.name);
 				if (current) {
-					current.licenseLevel = opts.level;
+					current.license = level;
+					current.licenseLevel = level;
 					saveMachine(current);
 				}
-				state.licenseLevel = opts.level;
+				state.license = level;
+				state.licenseLevel = level;
+				recordProvisioningStep(state, "license");
 			}
 		},
 
@@ -2356,6 +2400,7 @@ export class QuickCHR {
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
+		if (opts.license !== undefined) warnLicenseIntent(opts.license, createLogger(opts.onProgress));
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -2410,6 +2455,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
@@ -2561,7 +2607,7 @@ export class QuickCHR {
 				deviceMode: opts.deviceMode,
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
-				license: opts.license,
+				license: withRecordedLicenseLevel(opts.license, existing.license),
 				secureLogin: opts.secureLogin,
 			};
 			// Version before window: on a version that can never be provisioned, the
@@ -2610,6 +2656,7 @@ export class QuickCHR {
 					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
 					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
+					pendingOpts.license = await resolveLicenseForBoot(pendingOpts.license);
 					requireHostFor(existing.arch);
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger, opts.wait ?? true, sessionLaunch(opts));
 				}
@@ -2621,7 +2668,10 @@ export class QuickCHR {
 
 		assertRouterOs6Arch(version, arch);
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
-		if (!opts.dryRun) requireHostFor(arch);
+		if (!opts.dryRun) {
+			opts = { ...opts, license: await resolveLicenseForBoot(opts.license) };
+			requireHostFor(arch);
+		}
 
 		// Dry run — return instance handle without actually spawning. Nothing is
 		// claimed: a dry run persists nothing for another create to collide with.
@@ -2642,6 +2692,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
@@ -2735,6 +2786,7 @@ export class QuickCHR {
 			user: opts.user,
 			disableAdmin: opts.disableAdmin,
 			secureLogin: opts.secureLogin,
+			license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
 			extraPorts: opts.extraPorts ?? [],
@@ -3021,15 +3073,12 @@ export class QuickCHR {
 			log.status("Applying CHR license...");
 			const resolvedLicense = await resolveLicenseInput(opts.license);
 			if (!resolvedLicense) {
-				throw new QuickCHRError(
-					"PROCESS_FAILED",
-					"License requested but no MikroTik web credentials were available. Set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or run 'quickchr login'.",
-				);
+				throw new QuickCHRError("PROCESS_FAILED", MISSING_LICENSE_CREDENTIALS);
 			}
 			try {
 				await renewLicense(chrPorts.http, resolvedLicense, undefined, undefined, log);
 				// Read back the actual applied level — RouterOS is the source of truth.
-				let actualLevel: string = resolvedLicense.level ?? "p1";
+				let actualLevel: string = licenseLevelOf(resolvedLicense);
 				try {
 					const info = await getLicenseInfo(chrPorts.http);
 					if (info.level && info.level !== "free") actualLevel = info.level;
@@ -3037,11 +3086,17 @@ export class QuickCHR {
 				} catch (e) {
 					log.warn(`License read-back failed (using requested level): ${e instanceof Error ? e.message : String(e)}`);
 				}
+				// The requested level becomes the recorded intent too, so a level given on
+				// the first start (over or instead of `add`'s) is what `clean()` replays.
+				// A later step failing rolls this back with the rest of the record.
+				const requestedLevel = licenseLevelOf(resolvedLicense);
 				const current = loadMachine(machineState.name);
 				if (current) {
+					current.license = requestedLevel;
 					current.licenseLevel = actualLevel as LicenseLevel;
 					saveMachine(current);
 				}
+				machineState.license = requestedLevel;
 				machineState.licenseLevel = actualLevel as LicenseLevel;
 				applied.push("license");
 				log.status(`  License applied: free → ${actualLevel}`);

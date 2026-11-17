@@ -10,7 +10,7 @@ import { renewLicense, getLicenseInfo } from "../../src/lib/license.ts";
 
 describe("LicenseLevel constants", () => {
 	test("LICENSE_LEVELS contains all valid levels", () => {
-		expect(LICENSE_LEVELS).toEqual(["p1", "p10", "unlimited"]);
+		expect(LICENSE_LEVELS).toEqual(["p1", "p10", "p-unlimited"]);
 	});
 });
 

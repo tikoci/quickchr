@@ -83,7 +83,7 @@ is the thing that drifts.
 
 | step | post-boot? | why | route |
 |---|---|---|---|
-| `license` | yes | account-level, orthogonal to config | `quickchr set <name> --license` |
+| `license` | yes | account-level, orthogonal to config | `quickchr set <name> --license --level <level>` |
 | `deviceMode` | yes | capability flag — it gates whether a feature *can* run and describes nothing about how the guest is configured. Config it was blocking could not have been applied while it was off. | `quickchr set <name> --device-mode…` |
 | `packages` | yes | additive, but `installPackage()` has no install-all form | `quickchr set <name> --package …` (#24) |
 | `user` | **no** | additive in principle, but it collides with a user of the same name created since, and a login is exactly the config a post-boot path must not rewrite | `clean()` + replay |
@@ -208,6 +208,28 @@ answering something else" stay distinguishable.
 `"container": "true"`, not `true`. A reader that tests `value === true` finds nothing
 enabled however many are on — which `quickchr get <name> device-mode` did, printing a
 bare mode and no feature line at all. Normalize through `isDeviceModeFeatureEnabled()`.
+
+### License levels are RouterOS's spelling: `p1`, `p10`, `p-unlimited`
+
+`/system/license/renew level=` accepts exactly `p1`, `p10` and `p-unlimited`. This was
+grounded on CHR 7.20.8 and 7.25.1 (x86) with `/console/inspect`
+`request=completion input="/system/license/renew level="`, which needs no MikroTik.com
+account. `unlimited` gets HTTP 400 `input does not match any value of level`.
+quickchr documented `unlimited` until #261, so `normalizeLicenseLevel()` maps it and
+refuses any other value. Keep `LicenseLevel` in RouterOS spelling. `/system/license`
+reads the level back in that spelling, and the renew poll, `state.licenseLevel` and
+the provisioning-window "already applied" check all compare against it.
+
+`add --license-level` records only the level (`MachineState.license`, intent that
+survives `clean()`). A first-boot apply rewrites it to the level actually requested. So does a post-boot
+`instance.license()` (`set --license`), which also records the `license` step, as
+`setDeviceMode()` does.
+A request with credentials but no level means the recorded level, both at first boot
+and in the window check (`withRecordedLicenseLevel()`). Otherwise repeating that
+`start` is refused as a request for p1. MikroTik.com credentials are never persisted with a machine. They
+are resolved at boot in this order: explicit options, then `MIKROTIK_WEB_ACCOUNT` /
+`MIKROTIK_WEB_PASSWORD`, then the secret store. `start()` checks for them before it
+launches QEMU, so a missing credential is refused before the boot, not after it.
 
 ## RouterOS Post-Boot REST Race
 

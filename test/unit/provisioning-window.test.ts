@@ -6,6 +6,7 @@ import {
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 	pendingProvisioningFor,
+	withRecordedLicenseLevel,
 } from "../../src/lib/provisioning-window.ts";
 import { resolveDeviceModeOptions } from "../../src/lib/device-mode.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
@@ -172,7 +173,9 @@ describe("assertProvisioningWindow", () => {
 	});
 
 	test("license names the CLI route that already ships", () => {
-		expect(() => assertProvisioningWindow(booted(), { license: "p10" })).toThrow(/quickchr set pw-test --license/);
+		expect(() => assertProvisioningWindow(booted(), { license: "p10" })).toThrow(/quickchr set pw-test --license --level p10/);
+		// The route names the RouterOS spelling, so it runs as printed (#261).
+		expect(() => assertProvisioningWindow(booted(), { license: "unlimited" })).toThrow(/--license --level p-unlimited/);
 	});
 
 	test("a provisioning run that threw does not read as satisfied — the retry is refused", () => {
@@ -310,6 +313,34 @@ describe("assertProvisioningWindow", () => {
 			.toThrow(/already applied, unchanged: license \(p1\)/);
 	});
 
+	test("'unlimited' is satisfied by the p-unlimited RouterOS reads back (#261)", () => {
+		const state = machine({
+			lastStartedAt: new Date().toISOString(),
+			licenseLevel: "p-unlimited",
+			provisioning: { at: new Date().toISOString(), steps: ["license"] },
+		});
+		expect(assertProvisioningWindow(state, { license: "unlimited" }).map((ask) => ask.step)).toEqual(["license"]);
+	});
+
+	test("repeating a credentials-only start is satisfied by the recorded level, not refused as p1 (#261)", () => {
+		// add --license-level p10, then start --license-account A --license-password P
+		// applied p10. Running that same start again asks for nothing new.
+		const state = machine({
+			license: "p10",
+			lastStartedAt: new Date().toISOString(),
+			licenseLevel: "p10",
+			provisioning: { at: new Date().toISOString(), steps: ["license"] },
+		});
+		const request = { license: withRecordedLicenseLevel({ account: "a@example.com", password: "pw" }, state.license) };
+		expect(assertProvisioningWindow(state, request).map((ask) => ask.description)).toEqual(["license (p10)"]);
+	});
+
+	test("withRecordedLicenseLevel leaves an absent request absent — a plain restart asks for nothing", () => {
+		expect(withRecordedLicenseLevel(undefined, "p10")).toBeUndefined();
+		expect(withRecordedLicenseLevel("p1", "p10")).toBe("p1");
+		expect(withRecordedLicenseLevel({ account: "a", password: "b" }, undefined)).toEqual({ account: "a", password: "b" });
+	});
+
 	test("no provisioning options — a plain restart — passes untouched", () => {
 		expect(assertProvisioningWindow(booted(), {})).toEqual([]);
 		expect(assertProvisioningWindow(booted(), { disableAdmin: false, secureLogin: false, packages: [] })).toEqual([]);
@@ -405,8 +436,27 @@ describe("pendingProvisioningFor — first boot of an add()-created machine (#18
 		expect(pendingProvisioningFor(added, { packages: ["zerotier"] }).packages).toEqual(["zerotier"]);
 	});
 
-	test("license is never merged — quickchr does not persist license credentials", () => {
+	test("no recorded license and none requested: nothing to apply", () => {
 		expect(pendingProvisioningFor(added, {}).license).toBeUndefined();
 		expect(pendingProvisioningFor(added, { license: "p1" }).license).toBe("p1");
+	});
+
+	describe("license merges by level — add() records the level, never credentials (#261)", () => {
+		const withLicense = machine({ license: "p10" });
+
+		test("a plain start applies the recorded level", () => {
+			expect(pendingProvisioningFor(withLicense, {}).license).toBe("p10");
+		});
+
+		test("credentials without a level keep the recorded level", () => {
+			expect(pendingProvisioningFor(withLicense, { license: { account: "a@example.com", password: "pw" } }).license)
+				.toEqual({ account: "a@example.com", password: "pw", level: "p10" });
+		});
+
+		test("a level on start wins over the recorded one", () => {
+			expect(pendingProvisioningFor(withLicense, { license: "p-unlimited" }).license).toBe("p-unlimited");
+			expect(pendingProvisioningFor(withLicense, { license: { account: "a@example.com", password: "pw", level: "p1" } }).license)
+				.toEqual({ account: "a@example.com", password: "pw", level: "p1" });
+		});
 	});
 });

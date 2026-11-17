@@ -4,14 +4,14 @@
  * Free CHR runs at 1 Mbps. A trial license from MikroTik unlocks full speed:
  *   p1  → 1 Gbps
  *   p10 → 10 Gbps
- *   unlimited → no cap
+ *   p-unlimited → no cap  ("unlimited" is accepted as an alias — see normalizeLicenseLevel)
  *
  * License is applied by POST /rest/system/license/renew with MikroTik.com
  * account credentials. No reboot required — takes effect immediately.
  */
 
-import type { LicenseLevel, LicenseOptions } from "./types.ts";
-import { QuickCHRError } from "./types.ts";
+import type { LicenseInput, LicenseLevel, LicenseOptions } from "./types.ts";
+import { LICENSE_LEVELS, QuickCHRError } from "./types.ts";
 import { createLogger, type ProgressLogger } from "./log.ts";
 import { restGet, restPost } from "./rest.ts";
 
@@ -20,6 +20,36 @@ const LICENSE_VERIFY_TIMEOUT = 90_000;
 
 /** Max attempts for the renew POST itself (retried on post-boot REST quirk). */
 const MAX_RENEW_ATTEMPTS = 3;
+
+/** The RouterOS spelling of a license level, or a refusal before anything is sent.
+ *
+ *  quickchr documented `unlimited` from the start, but `/system/license/renew` only
+ *  takes `p1`, `p10` and `p-unlimited` (grounded on 7.20.8 and 7.25.1) and answers
+ *  `unlimited` with HTTP 400 "input does not match any value of level" (#261). The old
+ *  spelling stays accepted so existing scripts keep working; anything else is refused
+ *  here rather than by RouterOS after a boot. */
+export function normalizeLicenseLevel(level: string): LicenseLevel {
+	const trimmed = level.trim();
+	if (trimmed === "unlimited") return "p-unlimited";
+	if ((LICENSE_LEVELS as readonly string[]).includes(trimmed)) return trimmed as LicenseLevel;
+	throw new QuickCHRError(
+		"INVALID_ARGUMENT",
+		`Unknown license level "${level}" — use ${LICENSE_LEVELS.join(", ")} ("unlimited" is accepted as p-unlimited).`,
+	);
+}
+
+/** {@link LicenseInput} with its level, if any, in RouterOS spelling. */
+export function normalizeLicenseInput(input: LicenseInput): LicenseInput {
+	if (typeof input === "string") return normalizeLicenseLevel(input);
+	return input.level === undefined ? { ...input } : { ...input, level: normalizeLicenseLevel(input.level) };
+}
+
+/** The level a license request asks for: its own, or p1 — the level `renew` applies
+ *  when none is named. */
+export function licenseLevelOf(input: LicenseInput): LicenseLevel {
+	const level = typeof input === "string" ? input : input.level;
+	return level === undefined ? "p1" : normalizeLicenseLevel(level);
+}
 
 /** Classify the response body from POST /rest/system/license/renew.
  *
@@ -83,7 +113,8 @@ export async function renewLicense(
 	const body: Record<string, string> = {};
 	if (opts.account) body.account = opts.account;
 	if (opts.password) body.password = opts.password;
-	if (opts.level) body.level = opts.level;
+	const level = opts.level === undefined ? undefined : normalizeLicenseLevel(opts.level);
+	if (level) body.level = level;
 	// duration=10s: ask RouterOS to wait up to 10s for the MikroTik license server
 	// before responding. Without this, RouterOS does one short internal poll (~1-2s)
 	// and returns before the activation has propagated, forcing a long polling loop.
@@ -150,7 +181,7 @@ export async function renewLicense(
 			);
 		}
 
-		if (!opts.level) return; // fire-and-forget, no level verification needed
+		if (!level) return; // fire-and-forget, no level verification needed
 
 		// result is "done" or "pending" — poll until the level matches.
 		// "done" means the license server responded within the duration window;
@@ -161,8 +192,8 @@ export async function renewLicense(
 			try {
 				const info = await getLicenseInfo(httpPort, chrUser, chrPass, auth);
 				pollCount++;
-				log.debug(`License poll #${pollCount}: level=${info.level}, want=${opts.level}`);
-				if (info.level === opts.level) return;
+				log.debug(`License poll #${pollCount}: level=${info.level}, want=${level}`);
+				if (info.level === level) return;
 			} catch (e) {
 				pollCount++;
 				log.warn(`License poll #${pollCount} error: ${e instanceof Error ? e.message : String(e)}`);
@@ -171,7 +202,7 @@ export async function renewLicense(
 		}
 		throw new QuickCHRError(
 			"PROCESS_FAILED",
-			`License renewal accepted but level did not change to "${opts.level}" within ${LICENSE_VERIFY_TIMEOUT / 1000}s`,
+			`License renewal accepted but level did not change to "${level}" within ${LICENSE_VERIFY_TIMEOUT / 1000}s`,
 		);
 	}
 }
@@ -281,7 +312,7 @@ export async function getLicenseInfo(
 
 /** Parsed response from /rest/system/license/get */
 export interface LicenseInfo {
-	/** License level: "free", "p1", "p10", "unlimited", etc. */
+	/** License level: "free", "p1", "p10", "p-unlimited", etc. */
 	level?: LicenseLevel | "free" | string;
 	/** Deadline in ISO-8601 format if on a trial. */
 	deadline?: string;

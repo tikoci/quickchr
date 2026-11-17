@@ -267,6 +267,13 @@ export interface MachineConfig {
 	portBase: number;
 	excludePorts: ServiceName[];
 	extraPorts: PortMapping[];
+	/** License level requested at `add()`/`start()` — intent, applied on first boot
+	 *  and re-applied after `clean()`. Only the level is recorded: MikroTik.com
+	 *  credentials are never persisted here and are resolved at boot (env vars, then
+	 *  the secret store). */
+	license?: LicenseLevel;
+	/** License level read back from the guest after it was applied — a fact about the
+	 *  current disk, cleared by `clean()`. */
 	licenseLevel?: LicenseLevel;
 	/** Boot disk size override (e.g. "512M", "2G"). Requires `qemu-img` on the host.
 	 *  When set, the boot disk is converted from raw to qcow2. */
@@ -1152,9 +1159,18 @@ export type QgaFsFreezeStatus = "thawed" | "frozen";
 
 // --- CHR License ---
 
-/** CHR trial license levels (speed caps). free = 1 Mbps, p1 = 1 Gbps, p10 = 10 Gbps, unlimited = no cap. */
-export type LicenseLevel = "p1" | "p10" | "unlimited";
-export const LICENSE_LEVELS: LicenseLevel[] = ["p1", "p10", "unlimited"];
+/** CHR license levels (speed caps), spelled the way RouterOS spells them:
+ *  p1 = 1 Gbps, p10 = 10 Gbps, p-unlimited = no cap (free, the default, is 1 Mbps).
+ *  These are the only values `/system/license/renew level=` accepts, and what
+ *  `/system/license` reads back — grounded on CHR 7.20.8 and 7.25.1 via
+ *  `/console/inspect` completion (#261). */
+export type LicenseLevel = "p1" | "p10" | "p-unlimited";
+export const LICENSE_LEVELS: LicenseLevel[] = ["p1", "p10", "p-unlimited"];
+
+/** A license level as a caller may write it: a {@link LicenseLevel}, or `"unlimited"`,
+ *  the spelling quickchr documented before #261. RouterOS rejects `unlimited`, so it
+ *  is normalized to `"p-unlimited"` before anything is sent or recorded. */
+export type LicenseLevelInput = LicenseLevel | "unlimited";
 
 /** Options passed to /system/license/renew.
  *  `account` and `password` are optional: when omitted, quickchr resolves them
@@ -1163,14 +1179,14 @@ export const LICENSE_LEVELS: LicenseLevel[] = ["p1", "p10", "unlimited"];
 export interface LicenseOptions {
 	account?: string;
 	password?: string;
-	level?: LicenseLevel;
+	level?: LicenseLevelInput;
 }
 
 /** License shorthand accepted by StartOptions.license.
  *  A string value (e.g. "p1") auto-resolves MikroTik credentials from env vars
  *  or the secret store.  An object lets the caller supply credentials explicitly.
  */
-export type LicenseInput = LicenseLevel | LicenseOptions;
+export type LicenseInput = LicenseLevelInput | LicenseOptions;
 
 // --- Device-mode ---
 

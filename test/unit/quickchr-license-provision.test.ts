@@ -104,4 +104,30 @@ describe("QuickCHR._provisionInstance — license failures", () => {
 			message: expect.stringContaining("Unauthorized"),
 		});
 	}, 10_000);
+
+	test("the level applied on first start becomes the recorded intent (#261)", async () => {
+		// `add --license-level p1`, then the first `start --license-level p10`: what
+		// clean() replays afterwards must be p10, not the level add recorded.
+		let level = "free";
+		const started = await startMockServer((req, res) => {
+			res.writeHead(200, { "Content-Type": "application/json" });
+			if (req.url.includes("/rest/system/license/renew")) {
+				level = "p10";
+				res.end(JSON.stringify([{ ".section": "0", status: "connecting" }, { ".section": "1", status: "done" }]));
+				return;
+			}
+			res.end(JSON.stringify({ level, "system-id": "TEST" }));
+		});
+		server = started.server;
+
+		const state: MachineState = { ...makeMachineState(started.port), license: "p1" };
+		await QuickCHR._provisionInstance(
+			{} as ChrInstance,
+			state,
+			{ license: { account: "user@example.com", password: "pw", level: "p10" } },
+			{} as never,
+		);
+		expect(state.license).toBe("p10");
+		expect(state.licenseLevel).toBe("p10");
+	}, 30_000);
 });
