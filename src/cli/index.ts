@@ -3,7 +3,7 @@
  * quickchr CLI entry point — command router.
  */
 
-import type { StartOptions, Arch, Channel, DeviceModeOptions, ServiceName, NetworkSpecifier } from "../lib/types.ts";
+import type { StartOptions, Arch, Channel, DeviceModeOptions, LicenseLevelInput, LicenseOptions, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { join } from "node:path";
 import { parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
@@ -138,6 +138,29 @@ function flagList(flags: Record<string, string | boolean | string[]>, key: strin
 
 function csvList(values: string[]): string[] {
 	return [...new Set(values.flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean))];
+}
+
+/** `start`'s `--license-*` flags as a {@link LicenseOptions}, or undefined when none
+ *  was given.
+ *
+ *  Only what was typed is passed on. The env vars and the secret store are the
+ *  library's fallbacks — the chain `set --license` uses — and `start()` checks them
+ *  before booting. Requiring a flag or env var here skipped the store, so a credential
+ *  every other path found was refused on the first boot (#261). */
+export function licenseFromStartFlags(flags: Record<string, string | boolean | string[]>): LicenseOptions | undefined {
+	const level = flag(flags, "license-level");
+	const account = flag(flags, "license-account");
+	const password = flag(flags, "license-password");
+	if (level === undefined && account === undefined && password === undefined) return undefined;
+	if ((account === undefined) !== (password === undefined)) {
+		throw new QuickCHRError(
+			"INVALID_ARGUMENT",
+			"--license-account and --license-password go together — or leave both out to use MIKROTIK_WEB_ACCOUNT/MIKROTIK_WEB_PASSWORD or the stored credentials.",
+		);
+	}
+	// The level is passed as typed: `start()` normalizes it (`unlimited` → `p-unlimited`)
+	// and refuses an unknown one before any download.
+	return { account, password, level: level as LicenseLevelInput | undefined };
 }
 
 /** The device-mode request the `--device-mode*` flags describe, or `undefined` when
@@ -756,6 +779,9 @@ async function cmdAdd(argv: string[]) {
 		opts.user = { name: uname, password: password ?? "" };
 	}
 	opts.disableAdmin = flagOptionalBool(flags, "disable-admin");
+	// Level only: credentials are resolved at the first start, never stored (#261).
+	// `add()` normalizes the spelling and refuses an unknown level before any download.
+	opts.license = flag(flags, "license-level") as LicenseLevelInput | undefined;
 	// `add` always creates a machine, so its provisioning window is open by definition.
 	// A RouterOS 6 machine takes no provisioning at all, so the setting — a default, not
 	// a request — stays out of it; only an explicit --secure-login is refused.
@@ -784,6 +810,7 @@ async function cmdAdd(argv: string[]) {
 		...(state.disableAdmin ? ["disable admin"] : []),
 	];
 	if (login.length > 0) console.log(`  Login:   ${login.join(", ")}  ${dim("(applied on first start)")}`);
+	if (state.license) console.log(`  License: ${state.license}  ${dim("(applied on first start)")}`);
 	if (state.deviceMode) {
 		const { shouldApplyDeviceMode: willApplyDm, resolveDeviceModeOptions: resolveDm } = await import("../lib/device-mode.ts");
 		console.log(willApplyDm(resolveDm(state.deviceMode))
@@ -1502,21 +1529,7 @@ export async function cmdStart(argv: string[]) {
 
 	opts.deviceMode = deviceModeFromFlags(flags);
 
-	// --license-* flags (credentials from env if not supplied)
-	const licenseLevel = flag(flags, "license-level");
-	const licenseAccount = flag(flags, "license-account") ?? process.env.MIKROTIK_WEB_ACCOUNT;
-	const licensePassword = flag(flags, "license-password") ?? process.env.MIKROTIK_WEB_PASSWORD;
-	if (licenseLevel || licenseAccount) {
-		if (!licenseAccount || !licensePassword) {
-			console.error("Error: --license-level requires --license-account and --license-password (or MIKROTIK_WEB_ACCOUNT/MIKROTIK_WEB_PASSWORD env vars).");
-			process.exit(1);
-		}
-		opts.license = {
-			account: licenseAccount,
-			password: licensePassword,
-			level: licenseLevel as import("../lib/types.ts").LicenseLevel | undefined,
-		};
-	}
+	opts.license = licenseFromStartFlags(flags);
 
 	// --add-user admin:pass
 	const userStr = flag(flags, "add-user");
@@ -2143,7 +2156,7 @@ async function applyLicense(argv: string[]) {
 	const name = positional[0] ?? flag(flags, "name");
 
 	if (!name) {
-		console.error("Usage: quickchr set <name> --license [--level=p1|p10|unlimited]");
+		console.error("Usage: quickchr set <name> --license [--level=p1|p10|p-unlimited]");
 		process.exit(1);
 	}
 
@@ -2163,7 +2176,8 @@ async function applyLicense(argv: string[]) {
 
 	let account = flag(flags, "account") ?? process.env.MIKROTIK_WEB_ACCOUNT;
 	let password = flag(flags, "password") ?? process.env.MIKROTIK_WEB_PASSWORD;
-	const level = (flag(flags, "level") as import("../lib/types.ts").LicenseLevel | undefined) ?? "p1";
+	const { normalizeLicenseLevel } = await import("../lib/license.ts");
+	const level = normalizeLicenseLevel(flag(flags, "level") ?? "p1");
 
 	if (!account || !password) {
 		const { getStoredCredentials, credentialStorageLabel } = await import("../lib/credentials.ts");
@@ -2227,7 +2241,7 @@ async function cmdSet(argv: string[]) {
 	// --license` printed a usage error while `quickchr license --name lab` worked.
 	const name = positional[0] ?? flag(flags, "name");
 
-	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|unlimited]] [--package <pkg>[,<pkg>...]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>] [--qemu-arg <arg>] [--clear-qemu-args]";
+	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|p-unlimited]] [--package <pkg>[,<pkg>...]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>] [--qemu-arg <arg>] [--clear-qemu-args]";
 	if (!name) {
 		console.error(usage);
 		process.exit(1);
@@ -3747,7 +3761,7 @@ Create a new CHR machine without starting it.
 Use 'quickchr start <name>' to boot it afterwards.
 
 Post-boot provisioning flags in this command (--add-package, --install-all-packages,
---add-user, --disable-admin, managed login, and device-mode) are validated on
+--add-user, --disable-admin, managed login, device-mode, and --license-level) are validated on
 RouterOS ${MIN_PROVISION_VERSION}+ only. Older 7.x remains boot-only. Disk and network
 options still work on older versions when the required host tools are installed.
 
@@ -3787,6 +3801,11 @@ Options:
   --device-mode-enable <f>  Set one or more device-mode flags to yes (e.g. container)
   --device-mode-disable <f> Set one or more device-mode flags to no
   --no-device-mode      Skip device-mode provisioning entirely
+  --license-level <l>   Apply a trial license on first boot: p1 (1 Gbps), p10 (10 Gbps),
+                        p-unlimited ('unlimited' is accepted). Only the level is
+                        recorded; MikroTik.com credentials are resolved at the first
+                        start (its own credential flags, then MIKROTIK_WEB_ACCOUNT/
+                        MIKROTIK_WEB_PASSWORD, then the secret store).
   --add-network <spec>  Add a network NIC (repeatable). Specs: user, shared, bridged:<if>,
                         socket::<name>, tap:<if>. Default: single user NIC.
   --no-network          Start with no NICs (headless)
@@ -3904,9 +3923,13 @@ Options:
                         socket::<name>, tap:<if>. Default: single user NIC.
   --no-network          Start with no NICs (headless)
   --install-all-packages  Install all packages from all_packages.zip
-  --license-level <l>   Apply trial license: p1 (1 Gbps), p10 (10 Gbps), unlimited
-  --license-account <a> MikroTik account email (or use MIKROTIK_WEB_ACCOUNT env var)
-  --license-password <p> MikroTik password (or use MIKROTIK_WEB_PASSWORD env var)
+  --license-level <l>   Apply trial license: p1 (1 Gbps), p10 (10 Gbps), p-unlimited
+                        ('unlimited' is accepted as p-unlimited)
+  --license-account <a> MikroTik account email
+  --license-password <p> MikroTik password. Without these two, credentials come
+                        from MIKROTIK_WEB_ACCOUNT/MIKROTIK_WEB_PASSWORD, then the
+                        OS secret store; start refuses before booting if none
+                        are found.
   --device-mode <m>     Configure device-mode: rose|advanced|basic|home|auto|skip
   --device-mode-enable <f>  Set one or more device-mode flags to yes
   --device-mode-disable <f> Set one or more device-mode flags to no
@@ -4115,7 +4138,8 @@ working config rather than unlock a capability, so their route stays
 'quickchr clean <name>' followed by the original add/start command.
 
 License options (used with --license):
-  --level <level>     License level: p1 (1 Gbps), p10 (10 Gbps), unlimited (default: p1)
+  --level <level>     License level: p1 (1 Gbps), p10 (10 Gbps), p-unlimited (default: p1;
+                      'unlimited' is accepted as p-unlimited)
   --account <email>   MikroTik.com account email
   --password <pass>   MikroTik.com password
 
@@ -4137,7 +4161,8 @@ No reboot required. Takes effect immediately.
   <name>              Name of a running CHR instance (required).
 
 Options:
-  --level <level>     License level: p1 (1 Gbps), p10 (10 Gbps), unlimited (default: p1)
+  --level <level>     License level: p1 (1 Gbps), p10 (10 Gbps), p-unlimited (default: p1;
+                      'unlimited' is accepted as p-unlimited)
   --account <email>   MikroTik.com account email
   --password <pass>   MikroTik.com password
 

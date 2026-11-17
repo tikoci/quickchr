@@ -74,7 +74,7 @@ import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFile
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
 import { ensureEmptySshConfig, provision } from "./provision.ts";
-import { renewLicense, getLicenseInfo } from "./license.ts";
+import { renewLicense, getLicenseInfo, licenseLevelOf, normalizeLicenseInput, normalizeLicenseLevel } from "./license.ts";
 import { resolveAuth, resolveCreds } from "./auth.ts";
 import { type ScpOptions, scpPush, scpPull } from "./scp.ts";
 import { deleteInstanceCredentials, credentialStorageLabel, getStoredCredentials, getInstanceCredentials, STORED_IN_SECRETS_PASSWORD } from "./credentials.ts";
@@ -155,7 +155,12 @@ function hasProvisioningMutations(opts: {
  *  Returns a shallow copy so the caller's input object is not mutated. */
 function normalizeStartOptions(opts: StartOptions): StartOptions {
 	if (opts.noAuth === true && opts.secureLogin === undefined) {
-		return { ...opts, secureLogin: false };
+		opts = { ...opts, secureLogin: false };
+	}
+	// RouterOS spelling before anything else reads the level, so an unknown one is
+	// refused before a download and `unlimited` never reaches /system/license/renew (#261).
+	if (opts.license !== undefined) {
+		opts = { ...opts, license: normalizeLicenseInput(opts.license) };
 	}
 	return opts;
 }
@@ -368,24 +373,48 @@ function unregisterSocketMembers(state: MachineState): void {
 
 // --- License helpers ---
 
+const MISSING_LICENSE_CREDENTIALS =
+	"License requested but no MikroTik.com credentials were found. Pass them " +
+	"(--license-account/--license-password, or LicenseOptions account/password), set " +
+	"MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD, or save them to the secret store " +
+	"(the interactive 'quickchr set <name> --license' prompt offers to).";
+
 /** Resolve a LicenseInput to a full LicenseOptions, filling in credentials from
- *  env vars / secret store when not provided by the caller. Returns null with a
- *  warning when credentials cannot be found. */
+ *  env vars / secret store when not provided by the caller. Returns null when
+ *  credentials cannot be found. */
 async function resolveLicenseInput(input: LicenseInput): Promise<LicenseOptions | null> {
 	const opts: LicenseOptions = typeof input === "string" ? { level: input } : { ...input };
 	if (opts.account && opts.password) return opts;
-	// Try to fill in missing credentials.
 	const stored = await getStoredCredentials();
 	if (stored) {
 		if (!opts.account) opts.account = stored.account;
 		if (!opts.password) opts.password = stored.password;
 		return opts;
 	}
-	console.warn(
-		"License skipped: no MikroTik web credentials found. " +
-		"Set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or run 'quickchr login'.",
-	);
 	return null;
+}
+
+/** `add()` records only the license level. Say so when the caller passed credentials
+ *  that will not be kept, and when none can be found now — the first `start` resolves
+ *  them again and refuses before booting if they are still missing. */
+async function warnLicenseIntent(license: LicenseInput, logger: ProgressLogger): Promise<void> {
+	if (typeof license !== "string" && (license.account || license.password)) {
+		logger.warn("License credentials are not stored with the machine — only the level is. The first start resolves them from MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or the secret store.");
+		return;
+	}
+	if (!(await resolveLicenseInput(license))) {
+		logger.warn(`No MikroTik.com credentials found yet. The license (${licenseLevelOf(license)}) is recorded; set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or save credentials before the first start, which refuses without them.`);
+	}
+}
+
+/** Refuse a license step whose credentials cannot be found *before* the boot it would
+ *  otherwise fail at the end of. Only a lookup — the step resolves again when it runs,
+ *  so nothing secret is carried across the boot. */
+async function assertLicenseCredentials(license: LicenseInput | undefined): Promise<void> {
+	if (license === undefined) return;
+	if (!(await resolveLicenseInput(license))) {
+		throw new QuickCHRError("PROCESS_FAILED", MISSING_LICENSE_CREDENTIALS);
+	}
 }
 
 /** Put a machine's disks back to the factory image and drop the credential material
@@ -652,12 +681,11 @@ async function cleanUnderLock(state: MachineState): Promise<void> {
 	// test). `disableAdmin` goes with them because it is read as a live fact
 	// about the guest (buildDescriptor's `disableAdminLockout`) and a fresh
 	// image has admin enabled again. `licenseLevel` goes with them for the same
-	// reason: it is a read-back of the license the erased disk held, not an
-	// intent — quickchr never persists the license *input* — so leaving it
+	// reason: it is a read-back of the license the erased disk held, so leaving it
 	// behind would report a level the fresh image does not have. Provisioning
-	// *intent* — packages, deviceMode, secureLogin — is not guest state and
-	// survives, and is what the next `start()` re-applies now that the window
-	// reopens.
+	// *intent* — packages, deviceMode, secureLogin, and the requested `license`
+	// level (never its credentials) — is not guest state and survives, and is what
+	// the next `start()` re-applies now that the window reopens.
 	// (`resetGuestToFactory()` has already dropped the secret-store entry and the
 	// managed keypair, which describe the same erased account.)
 
@@ -1070,16 +1098,17 @@ function createInstance(state: MachineState): ChrInstance {
 
 		async license(opts: LicenseOptions): Promise<void> {
 			assertProvisioningSupportedVersion(state.version, "apply a license");
+			const level = opts.level === undefined ? undefined : normalizeLicenseLevel(opts.level);
 			const auth = resolveAuth(state);
-			await renewLicense(ports.http, opts, undefined, undefined, undefined, auth.header);
+			await renewLicense(ports.http, { ...opts, level }, undefined, undefined, undefined, auth.header);
 			// Persist the applied level in state
-			if (opts.level) {
+			if (level) {
 				const current = loadMachine(state.name);
 				if (current) {
-					current.licenseLevel = opts.level;
+					current.licenseLevel = level;
 					saveMachine(current);
 				}
-				state.licenseLevel = opts.level;
+				state.licenseLevel = level;
 			}
 		},
 
@@ -2356,6 +2385,7 @@ export class QuickCHR {
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
+		if (opts.license !== undefined) await warnLicenseIntent(opts.license, createLogger(opts.onProgress));
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -2410,6 +2440,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
@@ -2610,6 +2641,7 @@ export class QuickCHR {
 					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
 					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
+					await assertLicenseCredentials(pendingOpts.license);
 					requireHostFor(existing.arch);
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger, opts.wait ?? true, sessionLaunch(opts));
 				}
@@ -2621,7 +2653,10 @@ export class QuickCHR {
 
 		assertRouterOs6Arch(version, arch);
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
-		if (!opts.dryRun) requireHostFor(arch);
+		if (!opts.dryRun) {
+			await assertLicenseCredentials(opts.license);
+			requireHostFor(arch);
+		}
 
 		// Dry run — return instance handle without actually spawning. Nothing is
 		// claimed: a dry run persists nothing for another create to collide with.
@@ -2642,6 +2677,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
@@ -2735,6 +2771,7 @@ export class QuickCHR {
 			user: opts.user,
 			disableAdmin: opts.disableAdmin,
 			secureLogin: opts.secureLogin,
+			license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
 			extraPorts: opts.extraPorts ?? [],
@@ -3021,15 +3058,12 @@ export class QuickCHR {
 			log.status("Applying CHR license...");
 			const resolvedLicense = await resolveLicenseInput(opts.license);
 			if (!resolvedLicense) {
-				throw new QuickCHRError(
-					"PROCESS_FAILED",
-					"License requested but no MikroTik web credentials were available. Set MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD or run 'quickchr login'.",
-				);
+				throw new QuickCHRError("PROCESS_FAILED", MISSING_LICENSE_CREDENTIALS);
 			}
 			try {
 				await renewLicense(chrPorts.http, resolvedLicense, undefined, undefined, log);
 				// Read back the actual applied level — RouterOS is the source of truth.
-				let actualLevel: string = resolvedLicense.level ?? "p1";
+				let actualLevel: string = licenseLevelOf(resolvedLicense);
 				try {
 					const info = await getLicenseInfo(chrPorts.http);
 					if (info.level && info.level !== "free") actualLevel = info.level;

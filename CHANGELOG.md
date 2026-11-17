@@ -87,6 +87,21 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- Trial licenses (#261). `--license-level unlimited` (and `--level unlimited` on
+  `set --license` and `license`) failed with HTTP 400: RouterOS spells it
+  `p-unlimited`. quickchr now sends `p1`, `p10` or `p-unlimited` and still accepts
+  `unlimited` as `p-unlimited`. An unknown level is refused before any download.
+  Help and the wizard now list `p-unlimited`. `start --license-level` no longer
+  requires `--license-account`/`--license-password` or the env vars: like
+  `set --license`, it falls back to the stored credential, and it refuses before
+  booting when no credential is found anywhere. `add` now takes `--license-level`.
+  It records only the level, never the credentials, and the first `start` applies
+  it. `clean` keeps that level, like other provisioning intent. The
+  provisioning-window refusal now names the level in its
+  `quickchr set <name> --license --level <level>` route. Library: `LicenseLevel` is
+  `"p1" | "p10" | "p-unlimited"`. Inputs take `LicenseLevelInput`, which also
+  allows `"unlimited"`. `MachineState.license` records the requested level, and
+  `normalizeLicenseLevel` is exported.
 - A machine whose QEMU belongs to another user (for example one started with
   `sudo quickchr start` for native vmnet) is no longer read as dead. `list` used to
   save it as `stopped`; after that `stop` claimed success, `shutdown` said "already

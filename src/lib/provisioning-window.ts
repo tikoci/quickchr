@@ -16,6 +16,7 @@
  */
 
 import { getInstanceCredentials } from "./credentials.ts";
+import { licenseLevelOf } from "./license.ts";
 import { shellQuote } from "./names.ts";
 import {
 	formatDeviceModeFlags,
@@ -103,10 +104,6 @@ function deviceModeSatisfiedBy(
 ): boolean {
 	const entries = Object.entries(requested);
 	return entries.length > 0 && entries.every(([setting, value]) => applied[setting] === value);
-}
-
-function licenseLevelOf(license: LicenseInput): string {
-	return (typeof license === "string" ? license : license.level) ?? "p1";
 }
 
 /** Did the request's password actually reach the guest? The persisted `state.user`
@@ -242,8 +239,10 @@ export function appliedDeviceModeRecord(
  * stored and a plain `quickchr start <name>` booted without it (#185). The CLI now
  * sends `undefined` for an absent flag; this function is where the rule is enforced.
  *
- * `license` is not merged: quickchr never persists license credentials, so there is
- * no stored intent to fall back to.
+ * `license` merges by level only. `add()` records the requested level, never the
+ * MikroTik.com credentials, so a `start` that names credentials but no level keeps the
+ * level `add` recorded, and a plain `start` applies it with credentials resolved at boot
+ * (#261).
  */
 export function pendingProvisioningFor(
 	existing: MachineState,
@@ -255,9 +254,15 @@ export function pendingProvisioningFor(
 		deviceMode: request.deviceMode ?? existing.deviceMode,
 		user: request.user ?? existing.user,
 		disableAdmin: request.disableAdmin ?? existing.disableAdmin,
-		license: request.license,
+		license: pendingLicense(request.license, existing.license),
 		secureLogin: request.secureLogin ?? existing.secureLogin,
 	};
+}
+
+function pendingLicense(requested: LicenseInput | undefined, recorded: MachineState["license"]): LicenseInput | undefined {
+	if (requested === undefined) return recorded;
+	if (typeof requested === "string" || requested.level !== undefined || recorded === undefined) return requested;
+	return { ...requested, level: recorded };
 }
 
 /** True when any step in this request would change something. */
@@ -301,7 +306,7 @@ function postBootRoute(ask: ProvisioningAsk, request: ProvisioningRequest, name:
 	const replay = `quickchr clean ${quoted}   # resets the disk, then repeat the original start command`;
 	switch (ask.step) {
 		case "license":
-			return `quickchr set ${quoted} --license`;
+			return `quickchr set ${quoted} --license --level ${licenseLevelOf(request.license ?? "p1")}`;
 		case "deviceMode":
 			// Spelled out with the requested flags, because the route only helps if it
 			// can be run as printed — and `set` takes the same flag names `start` does.

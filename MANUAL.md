@@ -233,9 +233,9 @@ directory, downloads the RouterOS image (cached), and writes
 | `--add-user <user:pass>` | — | Provisioning, ≥ 7.20.8 |
 | `--disable-admin` | false | Provisioning, ≥ 7.20.8 |
 | `--secure-login` / `--no-secure-login` | unset | Provisioning, ≥ 7.20.8. The only way to get the managed SSH key that centrs and other descriptor consumers need for SSH/SFTP: it creates the `quickchr` account with a batch-verified key. Without it, or when combined with `--add-user`, no key is created. First boot only; an already-booted machine cannot add the key later, so pass it at `add`/`start` (#253) |
-| `--license-level <l>` | — | `p1`, `p10`, `unlimited`, ≥ 7.20.8 |
-| `--license-account <a>` | env `MIKROTIK_WEB_ACCOUNT` | MikroTik.com email |
-| `--license-password <p>` | env `MIKROTIK_WEB_PASSWORD` | |
+| `--license-level <l>` | — | `p1`, `p10`, `p-unlimited` (`unlimited` is accepted as `p-unlimited`), ≥ 7.20.8. On `add` only the level is recorded; credentials are resolved at the first `start` |
+| `--license-account <a>` | — | `start` only. MikroTik.com email. Without it: env `MIKROTIK_WEB_ACCOUNT`, then the secret store |
+| `--license-password <p>` | — | `start` only. Pairs with `--license-account`. Without both, `start` refuses before booting when no credential is found |
 | `--device-mode <m>` | — | `rose`, `advanced`, `basic`, `home`, `auto`, `skip`, ≥ 7.20.8 |
 | `--device-mode-enable <f,...>` | — | Repeatable, comma-separated |
 | `--device-mode-disable <f,...>` | — | Repeatable, comma-separated |
@@ -443,7 +443,7 @@ guest state; wiping them costs an arm64 device rescan).
 `clean` itself never provisions — it only resets the disk. What it does do is
 **reopen the provisioning window** (#176), so the *next* `start` re-applies the
 provisioning intent `machine.json` still holds: `packages`, `deviceMode`,
-`secureLogin`. Budget for that start accordingly; it costs what a first boot costs,
+`secureLogin`, and the requested `license` level (never its credentials). Budget for that start accordingly; it costs what a first boot costs,
 not what a restart costs.
 
 What does **not** come back on its own is anything `clean` had to clear because it
@@ -605,11 +605,13 @@ macOS HVF and any TCG fallback don't initialize the virtio channel
 
 ### Configuration
 
-#### `license <name> [--level p1|p10|unlimited]`
+#### `license <name> [--level p1|p10|p-unlimited]`
 
 Apply or renew a CHR trial license on a running instance. Resolves
 MikroTik.com credentials from `--license-account`/`--license-password`,
 the env vars, or the secret store. Requires RouterOS ≥ 7.20.8.
+`--level` takes RouterOS's spelling — `p1`, `p10`, `p-unlimited` — and
+`unlimited` is accepted as `p-unlimited`; RouterOS itself rejects `unlimited` (#261).
 
 #### `set <name> [--license | --package <p>] [--device-mode <m>] [--device-mode-enable <f>] [--device-mode-disable <f>]`
 
@@ -722,7 +724,7 @@ older versions show an upgrade prompt.
 | Packages | No extra / All packages / Choose (multiselect per arch) |
 | Device-mode | no / yes → profile (rose/advanced/basic/home) + extra feature flags |
 | Login | quickchr managed (recommended) / custom user+pass / keep admin no-password |
-| License | no / yes → level (p1/p10/unlimited) + credentials (stored or entered) |
+| License | no / yes → level (p1/p10/p-unlimited) + credentials (stored or entered) |
 
 **Post-start**: after a successful background boot, the wizard shows port
 details (REST URL, SSH, WinBox), login credentials, and optionally installs
@@ -1117,7 +1119,7 @@ redact before logging or attaching to bug reports.
 | `user` | `{ name, password }` | — | Provisioning |
 | `disableAdmin` | boolean | `false` | Provisioning |
 | `secureLogin` | boolean | `false` | **`true` is the explicit trigger** for managed-account creation, including the batch-verified SSH key that `descriptor()` advertises (first boot only, #253) |
-| `license` | `LicenseInput` | — | `"p1"` / `"p10"` / `"unlimited"` or `LicenseOptions` |
+| `license` | `LicenseInput` | — | `"p1"` / `"p10"` / `"p-unlimited"` (`"unlimited"` is normalized to `"p-unlimited"`) or `LicenseOptions`. Only the level is recorded in `machine.json` (`license`); credentials are resolved from env vars / the secret store, and `start()` refuses before booting when none are found |
 | `deviceMode` | `DeviceModeOptions` | — | `{mode?, enable?[], disable?[]}` |
 | `installDeps` | boolean | — | **Deprecated, ignored.** Never installed anything; run `quickchr doctor` for install hints |
 | `dryRun` | boolean | `false` | Print QEMU command and exit |
@@ -1289,12 +1291,12 @@ Routes that still work after the window has closed:
 
 | change | route |
 |---|---|
-| license | `quickchr set <name> --license` |
+| license | `quickchr set <name> --license --level <level>` |
 | device-mode | `quickchr set <name> --device-mode…` / `instance.setDeviceMode()` (power-cycles the VM) |
 | packages | `quickchr set <name> --package …` / `instance.installPackage()` (reboots the guest) |
 | anything else | `quickchr clean <name>` resets the disk to the factory image and reopens the window, at first-boot cost |
 
-`clean()` retains provisioning *intent* — packages, device-mode, managed login — so the
+`clean()` retains provisioning *intent* — packages, device-mode, managed login, license level — so the
 next `start` re-applies those on its own. It clears `user`, `disableAdmin` and
 `licenseLevel`, which are facts about the erased guest rather than intent, and a refused
 request is never persisted. **Repeat the original command after the reset** rather than
