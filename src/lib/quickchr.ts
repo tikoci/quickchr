@@ -1109,14 +1109,21 @@ function createInstance(state: MachineState): ChrInstance {
 			const level = opts.level === undefined ? undefined : normalizeLicenseLevel(opts.level);
 			const auth = resolveAuth(state);
 			await renewLicense(ports.http, { ...opts, level }, undefined, undefined, undefined, auth.header);
-			// Persist the applied level in state
+			// Same contract as the first-boot step and as setDeviceMode(): the level is
+			// recorded as intent (so `clean()` replays it) and as fact, and the step joins
+			// the record the window reads (so a later `start --license-level` with the same
+			// level is "already applied", not refused). Credentials are never recorded.
+			// Without a level, renew does not verify one, so there is nothing to record.
 			if (level) {
 				const current = loadMachine(state.name);
 				if (current) {
+					current.license = level;
 					current.licenseLevel = level;
 					saveMachine(current);
 				}
+				state.license = level;
 				state.licenseLevel = level;
+				recordProvisioningStep(state, "license");
 			}
 		},
 

@@ -98,7 +98,10 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   It records only the level, never the credentials, and the first `start` applies
   it. A level given on that first `start` replaces the recorded one, and a
   `start` that names credentials but no level uses the recorded level. `clean`
-  keeps that level, like other provisioning intent. The
+  keeps that level, like other provisioning intent. `set --license --level` (and
+  `instance.license()`) now follows the same rule, as `set --device-mode` does.
+  `clean` replays the level, and a later `start` with the same level counts as
+  already applied instead of being refused. The
   provisioning-window refusal now names the level in its
   `quickchr set <name> --license --level <level>` route. Library: `LicenseLevel` is
   `"p1" | "p10" | "p-unlimited"`. Inputs take `LicenseLevelInput`, which also

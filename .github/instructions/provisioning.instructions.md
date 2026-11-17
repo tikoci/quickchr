@@ -221,7 +221,9 @@ reads the level back in that spelling, and the renew poll, `state.licenseLevel` 
 the provisioning-window "already applied" check all compare against it.
 
 `add --license-level` records only the level (`MachineState.license`, intent that
-survives `clean()`). A first-boot apply rewrites it to the level actually requested.
+survives `clean()`). A first-boot apply rewrites it to the level actually requested. So does a post-boot
+`instance.license()` (`set --license`), which also records the `license` step, as
+`setDeviceMode()` does.
 A request with credentials but no level means the recorded level, both at first boot
 and in the window check (`withRecordedLicenseLevel()`). Otherwise repeating that
 `start` is refused as a request for p1. MikroTik.com credentials are never persisted with a machine. They

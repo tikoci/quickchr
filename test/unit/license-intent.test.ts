@@ -4,6 +4,7 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { licenseFromStartFlags, parseFlags } from "../../src/cli/index.ts";
 import { licenseLevelOf, normalizeLicenseInput, normalizeLicenseLevel, renewLicense } from "../../src/lib/license.ts";
+import { assertProvisioningWindow } from "../../src/lib/provisioning-window.ts";
 import { QuickCHR } from "../../src/lib/quickchr.ts";
 import { loadMachine, saveMachine } from "../../src/lib/state.ts";
 import type { MachineState } from "../../src/lib/types.ts";
@@ -231,4 +232,45 @@ describe("start() with a license request", () => {
 		expect(instance.state.license).toBe("p1");
 		expect(JSON.stringify(instance.state)).not.toContain("secret");
 	});
+
+	test("a post-boot license() records intent, fact and step, like setDeviceMode()", async () => {
+		// `set --license --level p10` on a booted machine: clean() must replay p10, and a
+		// later `start --license-level p10` is already applied, not refused.
+		let level = "free";
+		const server = createServer((req, res) => {
+			res.writeHead(200, { "Content-Type": "application/json" });
+			if (req.url?.includes("/renew")) {
+				level = "p10";
+				res.end(JSON.stringify([{ ".section": "0", status: "connecting" }, { ".section": "1", status: "done" }]));
+				return;
+			}
+			res.end(JSON.stringify({ level, "system-id": "TEST" }));
+		});
+		const port = await new Promise<number>((resolve) => {
+			server.listen(0, "127.0.0.1", () => {
+				const address = server.address();
+				resolve(typeof address === "object" && address ? address.port : 0);
+			});
+		});
+		try {
+			saveMachine(added("lic-post-boot", {
+				status: "running",
+				lastStartedAt: "2026-01-01T00:00:00.000Z",
+				ports: { http: { name: "http", host: port, guest: 80, proto: "tcp" } },
+			}));
+			const instance = QuickCHR.get("lic-post-boot");
+			if (!instance) throw new Error("seeded machine did not load");
+			await instance.license({ account: "a@example.com", password: "secret", level: "p10" });
+
+			const after = loadMachine("lic-post-boot");
+			expect(after?.license).toBe("p10");
+			expect(after?.licenseLevel).toBe("p10");
+			expect(after?.provisioning?.steps).toContain("license");
+			expect(JSON.stringify(after)).not.toContain("secret");
+			if (!after) throw new Error("machine vanished");
+			expect(assertProvisioningWindow(after, { license: "p10" }).map((ask) => ask.step)).toEqual(["license"]);
+		} finally {
+			server.close();
+		}
+	}, 30_000);
 });
