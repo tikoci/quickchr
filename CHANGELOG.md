@@ -96,7 +96,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   `set --license`, it falls back to the stored credential, and it refuses before
   booting when no credential is found anywhere. `add` now takes `--license-level`.
   It records only the level, never the credentials, and the first `start` applies
-  it. `clean` keeps that level, like other provisioning intent. The
+  it. A level given on that first `start` replaces the recorded one, and a
+  `start` that names credentials but no level uses the recorded level. `clean`
+  keeps that level, like other provisioning intent. The
   provisioning-window refusal now names the level in its
   `quickchr set <name> --license --level <level>` route. Library: `LicenseLevel` is
   `"p1" | "p10" | "p-unlimited"`. Inputs take `LicenseLevelInput`, which also

@@ -260,8 +260,21 @@ export function pendingProvisioningFor(
 }
 
 function pendingLicense(requested: LicenseInput | undefined, recorded: MachineState["license"]): LicenseInput | undefined {
-	if (requested === undefined) return recorded;
-	if (typeof requested === "string" || requested.level !== undefined || recorded === undefined) return requested;
+	return withRecordedLicenseLevel(requested, recorded) ?? recorded;
+}
+
+/** A license request that names credentials but no level means the recorded level,
+ *  not p1. Applied before the window check as well as at first boot: otherwise the
+ *  first `start --license-account … --license-password …` applies the level `add`
+ *  recorded, and repeating that same command is refused as a request for p1 (#261).
+ *  An absent request stays absent, so a plain restart asks for nothing. */
+export function withRecordedLicenseLevel(
+	requested: LicenseInput | undefined,
+	recorded: MachineState["license"],
+): LicenseInput | undefined {
+	if (requested === undefined || typeof requested === "string" || requested.level !== undefined || recorded === undefined) {
+		return requested;
+	}
 	return { ...requested, level: recorded };
 }
 

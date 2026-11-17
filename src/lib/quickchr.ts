@@ -103,6 +103,7 @@ import {
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 	pendingProvisioningFor,
+	withRecordedLicenseLevel,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
@@ -2592,7 +2593,7 @@ export class QuickCHR {
 				deviceMode: opts.deviceMode,
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
-				license: opts.license,
+				license: withRecordedLicenseLevel(opts.license, existing.license),
 				secureLogin: opts.secureLogin,
 			};
 			// Version before window: on a version that can never be provisioned, the
@@ -3071,11 +3072,17 @@ export class QuickCHR {
 				} catch (e) {
 					log.warn(`License read-back failed (using requested level): ${e instanceof Error ? e.message : String(e)}`);
 				}
+				// The requested level becomes the recorded intent too, so a level given on
+				// the first start (over or instead of `add`'s) is what `clean()` replays.
+				// A later step failing rolls this back with the rest of the record.
+				const requestedLevel = licenseLevelOf(resolvedLicense);
 				const current = loadMachine(machineState.name);
 				if (current) {
+					current.license = requestedLevel;
 					current.licenseLevel = actualLevel as LicenseLevel;
 					saveMachine(current);
 				}
+				machineState.license = requestedLevel;
 				machineState.licenseLevel = actualLevel as LicenseLevel;
 				applied.push("license");
 				log.status(`  License applied: free → ${actualLevel}`);

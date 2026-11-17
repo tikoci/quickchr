@@ -6,6 +6,7 @@ import {
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 	pendingProvisioningFor,
+	withRecordedLicenseLevel,
 } from "../../src/lib/provisioning-window.ts";
 import { resolveDeviceModeOptions } from "../../src/lib/device-mode.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
@@ -319,6 +320,25 @@ describe("assertProvisioningWindow", () => {
 			provisioning: { at: new Date().toISOString(), steps: ["license"] },
 		});
 		expect(assertProvisioningWindow(state, { license: "unlimited" }).map((ask) => ask.step)).toEqual(["license"]);
+	});
+
+	test("repeating a credentials-only start is satisfied by the recorded level, not refused as p1 (#261)", () => {
+		// add --license-level p10, then start --license-account A --license-password P
+		// applied p10. Running that same start again asks for nothing new.
+		const state = machine({
+			license: "p10",
+			lastStartedAt: new Date().toISOString(),
+			licenseLevel: "p10",
+			provisioning: { at: new Date().toISOString(), steps: ["license"] },
+		});
+		const request = { license: withRecordedLicenseLevel({ account: "a@example.com", password: "pw" }, state.license) };
+		expect(assertProvisioningWindow(state, request).map((ask) => ask.description)).toEqual(["license (p10)"]);
+	});
+
+	test("withRecordedLicenseLevel leaves an absent request absent — a plain restart asks for nothing", () => {
+		expect(withRecordedLicenseLevel(undefined, "p10")).toBeUndefined();
+		expect(withRecordedLicenseLevel("p1", "p10")).toBe("p1");
+		expect(withRecordedLicenseLevel({ account: "a", password: "b" }, undefined)).toEqual({ account: "a", password: "b" });
 	});
 
 	test("no provisioning options — a plain restart — passes untouched", () => {

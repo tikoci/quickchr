@@ -221,7 +221,10 @@ reads the level back in that spelling, and the renew poll, `state.licenseLevel` 
 the provisioning-window "already applied" check all compare against it.
 
 `add --license-level` records only the level (`MachineState.license`, intent that
-survives `clean()`). MikroTik.com credentials are never persisted with a machine. They
+survives `clean()`). A first-boot apply rewrites it to the level actually requested.
+A request with credentials but no level means the recorded level, both at first boot
+and in the window check (`withRecordedLicenseLevel()`). Otherwise repeating that
+`start` is refused as a request for p1. MikroTik.com credentials are never persisted with a machine. They
 are resolved at boot in this order: explicit options, then `MIKROTIK_WEB_ACCOUNT` /
 `MIKROTIK_WEB_PASSWORD`, then the secret store. `start()` checks for them before it
 launches QEMU, so a missing credential is refused before the boot, not after it.
