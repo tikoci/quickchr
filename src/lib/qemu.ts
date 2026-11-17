@@ -11,7 +11,9 @@ import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, Po
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware, requireQemuImg } from "./platform.ts";
 import { buildHostfwdString, deviceArgs } from "./network.ts";
-import { ensureDir } from "./state.ts";
+import { ensureDir, getDataDir } from "./state.ts";
+import { pidLiveness } from "./pid.ts";
+import { shellQuote } from "./names.ts";
 import { restGet } from "./rest.ts";
 import { apiLogin } from "./api-login.ts";
 import { isRouterOs6 } from "./versions.ts";
@@ -426,9 +428,7 @@ export async function spawnQemu(
 		// arguments were bad (e.g. port already in use). Detect this early so
 		// the caller gets a clear error instead of a 120-second waitForBoot.
 		await Bun.sleep(1500);
-		try {
-			process.kill(spawnedPid, 0);
-		} catch {
+		if (pidLiveness(spawnedPid) === "dead") {
 			let logTail = "(no log)";
 			try {
 				if (existsSync(logPath)) {
@@ -467,11 +467,9 @@ export async function spawnQemu(
 
 /** Stop a QEMU process by PID. Tries SIGTERM first, then SIGKILL. */
 export async function stopQemu(pid: number): Promise<boolean> {
-	try {
-		process.kill(pid, 0); // Check if alive
-	} catch {
-		return false; // Already dead
-	}
+	const liveness = pidLiveness(pid);
+	if (liveness === "dead") return false;
+	if (liveness === "foreign") throw foreignQemuError(pid);
 
 	// Terminate the host process (a guest power cut, not /system/shutdown)
 	process.kill(pid, "SIGTERM");
@@ -479,11 +477,7 @@ export async function stopQemu(pid: number): Promise<boolean> {
 	// Wait up to 5s for QEMU to exit before escalating
 	for (let i = 0; i < 50; i++) {
 		await Bun.sleep(100);
-		try {
-			process.kill(pid, 0);
-		} catch {
-			return true; // Exited
-		}
+		if (pidLiveness(pid) === "dead") return true;
 	}
 
 	// Force kill
@@ -492,6 +486,27 @@ export async function stopQemu(pid: number): Promise<boolean> {
 	} catch { /* already dead */ }
 
 	return true;
+}
+
+/** The command that runs `action` on `name` as the user owning its QEMU (#259). It pins
+ *  `QUICKCHR_DATA_DIR`: `sudo` may reset `HOME`, and the same name under root's data
+ *  dir is a different machine, or none. */
+export function ownerCommand(action: string, name: string, actionArgs?: string): string {
+	const command = `quickchr ${action} ${shellQuote(name)}${actionArgs ? ` ${actionArgs}` : ""}`;
+	if (process.platform === "win32") return command;
+	return `sudo env QUICKCHR_DATA_DIR=${shellQuote(getDataDir())} ${command}`;
+}
+
+/** The refusal for a QEMU this user cannot signal (#259). `name`/`action` make the hint
+ *  a runnable command when the caller knows them; `actionArgs` (already shell-quoted)
+ *  carries the rest of a request that needs more than a name, like `set --device-mode`. */
+export function foreignQemuError(pid: number, name?: string, action = "stop", actionArgs?: string): QuickCHRError {
+	const who = name ? `Machine "${name}" is running` : "QEMU is running";
+	return new QuickCHRError(
+		"PERMISSION_DENIED",
+		`${who} as another user (PID ${pid}, likely started with sudo); this user cannot signal it, so nothing was changed.`,
+		name ? `Run it as the user that owns that QEMU: ${ownerCommand(action, name, actionArgs)}` : undefined,
+	);
 }
 
 /** Remove the listening unix-socket files QEMU binds (monitor/serial/qga/gdb).

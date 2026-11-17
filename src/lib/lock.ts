@@ -51,6 +51,7 @@ import { linkSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, w
 import { dirname, join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { getDataDir, getMachinesDir } from "./state.ts";
+import { pidLiveness } from "./pid.ts";
 
 /** What a lock holder is doing. `foreground` is a start whose QEMU runs attached to
  *  the caller's terminal: it holds the lock until the VM exits, so waiting for it is
@@ -163,13 +164,7 @@ type Inspection =
 	| { state: "unknown" };
 
 function isAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (e) {
-		// EPERM: the process exists but belongs to someone else.
-		return (e as NodeJS.ErrnoException).code === "EPERM";
-	}
+	return pidLiveness(pid) !== "dead";
 }
 
 function readRaw(path: string): string | undefined {

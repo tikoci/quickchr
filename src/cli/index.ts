@@ -1690,13 +1690,22 @@ async function cmdStop(argv: string[]) {
 			console.log("No running instances.");
 			return;
 		}
+		// One machine owned by another user (#259) must not stop the sweep: report it,
+		// stop the rest, and exit nonzero so nothing reads as all-stopped.
+		let denied = 0;
 		for (const m of machines) {
 			const instance = QuickCHR.get(m.name);
-			if (instance) {
+			if (!instance) continue;
+			try {
 				await instance.stop();
 				console.log(`${statusIcon("stopped")} ${bold(m.name)} stopped`);
+			} catch (e) {
+				if (!(e instanceof QuickCHRError) || e.code !== "PERMISSION_DENIED") throw e;
+				denied++;
+				console.error(`${statusIcon("error")} ${bold(m.name)}: ${e.message}${e.installHint ? `\n  Hint: ${e.installHint}` : ""}`);
 			}
 		}
+		if (denied > 0) process.exit(1);
 		return;
 	}
 
@@ -1723,6 +1732,8 @@ async function cmdList(argv: string[] = []) {
 	const name = positional[0];
 
 	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { isMachineForeign } = await import("../lib/state.ts");
+	const { ownerCommand } = await import("../lib/qemu.ts");
 
 	if (name) {
 		const { statusIcon, bold, dim, link, formatPorts, formatNetworks, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
@@ -1734,6 +1745,7 @@ async function cmdList(argv: string[] = []) {
 		}
 
 		const s = instance.state;
+		const foreign = isMachineForeign(s);
 
 		if (asJson) {
 			const creds = s.status === "running" ? await resolveDisplayCredentials(s) : null;
@@ -1747,6 +1759,7 @@ async function cmdList(argv: string[] = []) {
 				networks: s.networks,
 				ports: s.ports,
 				pid: s.pid ?? null,
+				foreign,
 				frozen: s.frozen ?? false,
 				qemuArgs: s.qemuArgs ?? [],
 				packages: s.packages,
@@ -1763,7 +1776,7 @@ async function cmdList(argv: string[] = []) {
 		console.log(`  CPU/Mem:    ${s.cpu} vCPU${s.cpu > 1 ? "s" : ""}, ${s.mem} MB`);
 		console.log(`  Network:    ${formatNetworks(s.networks)}`);
 		console.log(`  Ports:      ${formatPorts(s.ports)}`);
-		console.log(`  Status:     ${s.status}${s.pid ? ` (PID ${s.pid})` : ""}`);
+		console.log(`  Status:     ${s.status}${s.pid ? ` (PID ${s.pid}${foreign ? ", owned by another user" : ""})` : ""}`);
 		if (s.frozen) {
 			console.log(`  Frozen:     yes — awaiting quickchr continue`);
 			console.log(`  GDB:        ${dim(join(s.machineDir, "gdb.sock"))}`);
@@ -1786,7 +1799,7 @@ async function cmdList(argv: string[] = []) {
 			}
 			console.log(`  Serial:     ${dim(`${s.machineDir}/serial.sock`)}`);
 			console.log();
-			console.log(`  ${dim("Tip:")} quickchr stop ${s.name}`);
+			console.log(`  ${dim("Tip:")} ${foreign ? ownerCommand("stop", s.name) : `quickchr stop ${s.name}`}`);
 		} else {
 			console.log();
 			console.log(`  ${dim("Tip:")} quickchr start ${s.name}  |  quickchr remove ${s.name}`);
@@ -1814,7 +1827,7 @@ async function cmdList(argv: string[] = []) {
 
 	if (asJson) {
 		console.log(JSON.stringify([
-			...machines,
+			...machines.map((m) => ({ ...m, foreign: isMachineForeign(m) })),
 			...unreadable.map((u) => ({ name: u.name, status: "unreadable", error: u.error })),
 		], null, 2));
 		return;
@@ -1823,7 +1836,7 @@ async function cmdList(argv: string[] = []) {
 	const headers = ["", "Name", "Version", "Arch", "Network", "Ports", "PID"];
 	const rows = machines.map((m) => [
 		statusIcon(m.status),
-		m.frozen ? `${m.name} (frozen)` : m.name,
+		`${m.name}${m.frozen ? " (frozen)" : ""}${isMachineForeign(m) ? " (other user)" : ""}`,
 		m.version,
 		m.arch,
 		formatNetworks(m.networks ?? []),

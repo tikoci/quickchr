@@ -8,6 +8,7 @@ import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { networkModeToConfigs } from "./network.ts";
 import { assertPathSafeName, isPathSafeName } from "./names.ts";
+import { pidLiveness } from "./pid.ts";
 
 /** Get the quickchr data directory root. Override with QUICKCHR_DATA_DIR env var. */
 export function getDataDir(): string {
@@ -333,14 +334,8 @@ function sweepAbandonedRemovals(trashDir: string): void {
 	for (const entry of entries) {
 		const pid = Number(entry.split(".").at(-2));
 		if (!Number.isInteger(pid) || pid <= 0) continue;
-		if (pid !== process.pid) {
-			try {
-				process.kill(pid, 0);
-				continue; // still being deleted by that process
-			} catch (e) {
-				if ((e as NodeJS.ErrnoException).code === "EPERM") continue;
-			}
-		}
+		// Still being deleted by that process (possibly another user's).
+		if (pid !== process.pid && pidLiveness(pid) !== "dead") continue;
 		try { rmSync(join(trashDir, entry), { recursive: true, force: true }); } catch { /* next time */ }
 	}
 }
@@ -368,15 +363,18 @@ export function updateMachineStatus(
 	saveMachine(state);
 }
 
-/** Check if a machine is actually still running (verify PID). */
+/** Check if a machine is actually still running (verify PID). A QEMU owned by another
+ *  user counts as running: see `isMachineForeign()`. */
 export function isMachineRunning(state: MachineState): boolean {
 	if (state.status !== "running" || !state.pid) return false;
-	try {
-		process.kill(state.pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
+	return pidLiveness(state.pid) !== "dead";
+}
+
+/** True when the machine's QEMU is alive but owned by another user (typically root,
+ *  after `sudo quickchr start` for native vmnet), so this process cannot signal it. */
+export function isMachineForeign(state: MachineState): boolean {
+	if (state.status !== "running" || !state.pid) return false;
+	return pidLiveness(state.pid) === "foreign";
 }
 
 /** Refresh status for all machines (check PIDs). */
