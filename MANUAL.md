@@ -1538,11 +1538,23 @@ is unset.
 - **Per-instance CHR credentials**: file in the user config dir
   (`~/.config/quickchr/com.quickchr.instance.json`; not the OS keychain — a
   Keychain dialog hangs in non-TTY contexts like tests and CI).
-- **MikroTik.com web account** (for license operations): tries
-  `Bun.secrets` (OS keychain) when interactive, falls back to the same
-  config-file store otherwise (`~/.config/quickchr/com.quickchr.mikrotik-web.json`).
+- **MikroTik.com web account** (for license operations): explicit flags /
+  `LicenseOptions` first, then both `MIKROTIK_WEB_ACCOUNT` and
+  `MIKROTIK_WEB_PASSWORD`, then `Bun.secrets` (OS keychain) whenever the runtime
+  provides it — interactive or not — and the config-file store
+  (`~/.config/quickchr/com.quickchr.mikrotik-web.json`) only when `Bun.secrets` is
+  absent or throws.
 
 Both honor explicit CLI flags / env vars first.
+
+**Unattended use (agents, CI): supply MikroTik.com credentials explicitly.** A keychain
+read can raise an authorization or unlock dialog and block. quickchr reads the keychain
+only for a license request that has neither explicit credentials nor *both* env vars.
+That covers `start --license-level` with no credential flags, a first `start` of a
+machine `add`ed with `--license-level`, and `set --license`. `add` never reads it. Set
+both `MIKROTIK_WEB_*` env vars, or pass `--license-account`/`--license-password`, and
+the keychain is never consulted. One of the two env vars alone is not enough. A `start`
+that does fall back reads the keychain once, before the boot.
 
 ---
 

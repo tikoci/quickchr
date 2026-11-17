@@ -408,14 +408,21 @@ function warnLicenseIntent(license: LicenseInput, logger: ProgressLogger): void 
 	}
 }
 
-/** Refuse a license step whose credentials cannot be found *before* the boot it would
- *  otherwise fail at the end of. Only a lookup — the step resolves again when it runs,
- *  so nothing secret is carried across the boot. */
-async function assertLicenseCredentials(license: LicenseInput | undefined): Promise<void> {
-	if (license === undefined) return;
-	if (!(await resolveLicenseInput(license))) {
-		throw new QuickCHRError("PROCESS_FAILED", MISSING_LICENSE_CREDENTIALS);
-	}
+/** Resolve a license step's credentials *before* the boot it would otherwise fail at
+ *  the end of, and hand the result to provisioning.
+ *
+ *  Resolved once, on purpose. The fallback after explicit options and the env-var pair
+ *  is the OS keychain (`Bun.secrets`), which can raise an authorization or unlock
+ *  dialog — a hang for an agent or CI caller. Looking it up here *and* again at the
+ *  license step doubled that exposure, so the caller swaps the request for this
+ *  explicit pair; the step then never reaches the store. The pair lives only in memory:
+ *  state records `licenseLevelOf()` of it, never the credentials. Explicit credentials
+ *  or both MIKROTIK_WEB_* env vars never reach the keychain at all. */
+async function resolveLicenseForBoot(license: LicenseInput | undefined): Promise<LicenseOptions | undefined> {
+	if (license === undefined) return undefined;
+	const resolved = await resolveLicenseInput(license);
+	if (!resolved) throw new QuickCHRError("PROCESS_FAILED", MISSING_LICENSE_CREDENTIALS);
+	return resolved;
 }
 
 /** Put a machine's disks back to the factory image and drop the credential material
@@ -2642,7 +2649,7 @@ export class QuickCHR {
 					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
 					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
-					await assertLicenseCredentials(pendingOpts.license);
+					pendingOpts.license = await resolveLicenseForBoot(pendingOpts.license);
 					requireHostFor(existing.arch);
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger, opts.wait ?? true, sessionLaunch(opts));
 				}
@@ -2655,7 +2662,7 @@ export class QuickCHR {
 		assertRouterOs6Arch(version, arch);
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 		if (!opts.dryRun) {
-			await assertLicenseCredentials(opts.license);
+			opts = { ...opts, license: await resolveLicenseForBoot(opts.license) };
 			requireHostFor(arch);
 		}
 
