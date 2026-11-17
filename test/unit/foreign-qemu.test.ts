@@ -8,7 +8,7 @@
  * exist, and behaves normally for every other pid (the lock's own liveness checks).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { shellQuote } from "../../src/lib/names.ts";
 import { pidLiveness } from "../../src/lib/pid.ts";
@@ -152,6 +152,29 @@ describe("a QEMU owned by another user (#259)", () => {
 		expect((error as { installHint?: string }).installHint).toEndWith("quickchr set foreign-device-mode --device-mode rose");
 		expectStillRunning("foreign-device-mode");
 	});
+
+	// A `sudo quickchr start` can leave a root-owned lock in the machine dir; taking it
+	// then fails with a raw EACCES. Modelled by denying writes on the machine dir,
+	// which root ignores and Windows does not model, hence the skip.
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"a lock it cannot write still yields PERMISSION_DENIED, not a raw EACCES",
+		async () => {
+			const state = machine("foreign-locked");
+			seed(state);
+			chmodSync(state.machineDir, 0o500);
+			try {
+				const instance = QuickCHR.get("foreign-locked");
+				await expect(instance?.stop()).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+				await expect(instance?.shutdown({ timeoutMs: 1000 })).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+				await expect(instance?.remove()).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+				await expect(instance?.clean()).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+				await expect(instance?.setDeviceMode({ mode: "rose" })).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+			} finally {
+				chmodSync(state.machineDir, 0o700);
+			}
+			expectStillRunning("foreign-locked");
+		},
+	);
 
 	test("the hint quotes a legacy name so it pastes as one argument", async () => {
 		seed(machine("lab old"));

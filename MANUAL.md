@@ -1937,7 +1937,7 @@ present, then exits `1`.
 | `MACHINE_EXISTS` | name already in `machines/` | choose another name or `QuickCHR.get(name)` |
 | `MACHINE_NOT_FOUND` | name not in `machines/`, or a booted machine's disk file is missing | `quickchr list`; for a missing disk, restore it or `quickchr clean <name>` |
 | `MACHINE_RUNNING` / `MACHINE_STOPPED` | wrong lifecycle state | `start` or `stop` first |
-| `PERMISSION_DENIED` | `stop`/`shutdown`/`remove`/`clean`/`set --device-mode` (library: also `destroy()`) on a machine whose QEMU another user owns (e.g. started with `sudo quickchr start`); `list` shows it as `(other user)` | run the command as that user, pinned to the same data dir (`sudo` may reset `HOME`): `sudo env QUICKCHR_DATA_DIR=<data dir> quickchr stop <name>`. The error's hint prints the exact command |
+| `PERMISSION_DENIED` | `stop`/`shutdown`/`remove`/`clean`/`set --device-mode` (library: also `destroy()`) on a machine whose QEMU another user owns (e.g. started with `sudo quickchr start`); `list` shows it as `(other user)` | run the command as that user, pinned to the same data dir (`sudo` may reset `HOME`): `sudo env QUICKCHR_DATA_DIR=<data dir> quickchr stop <name>`. The error's hint prints that command for the refused operation; if your original command asked for more (say `set --device-mode … --package …`), rerun all of it that way |
 | `MACHINE_LOCKED` | another operation holds the machine (the message names it, its pid and age) | wait for it; a `foreground` holder must be quit from its console |
 | `EXEC_FAILED` | RouterOS rejected the command (auth, syntax) | check creds, command syntax |
 | `PROCESS_FAILED` | QEMU spawn / reboot / verify failed | check `qemu.log`, host resources |
