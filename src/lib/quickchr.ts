@@ -88,6 +88,7 @@ import { createLogger, type ProgressLogger } from "./log.ts";
 import {
 	describeDeviceModeChange,
 	FACTORY_AUTH_HEADER,
+	formatDeviceModeFlags,
 	formatDeviceModeSelection,
 	readDeviceMode,
 	resolveDeviceModeOptions,
@@ -492,8 +493,8 @@ async function withMachineLock<T>(state: MachineState, op: LockOperation, fn: ()
 /** Refuse a lifecycle operation on a QEMU another user owns (#259): it is running and
  *  this process cannot signal it, so carrying on would record `stopped` (or delete
  *  state) under a live VM and report a success that did not happen. */
-function assertOwnQemu(state: MachineState, action: string): void {
-	if (state.pid && isMachineForeign(state)) throw foreignQemuError(state.pid, state.name, action);
+function assertOwnQemu(state: MachineState, action: string, actionArgs?: string): void {
+	if (state.pid && isMachineForeign(state)) throw foreignQemuError(state.pid, state.name, action, actionArgs);
 }
 
 async function stopUnderLock(state: MachineState): Promise<void> {
@@ -1104,7 +1105,7 @@ function createInstance(state: MachineState): ChrInstance {
 				refreshMachineState(state);
 				// Activation terminates and replaces QEMU, which a foreign one cannot be
 				// (#259): refuse before touching the guest, not after the power-cut fails.
-				assertOwnQemu(state, "set");
+				assertOwnQemu(state, "set", formatDeviceModeFlags(resolved));
 				// Inside the lock: the applicability check has to hold for the operation,
 				// not merely at the moment it was made.
 				assertDeviceModeApplicable(state);

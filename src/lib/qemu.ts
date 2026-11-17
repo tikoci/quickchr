@@ -428,9 +428,7 @@ export async function spawnQemu(
 		// arguments were bad (e.g. port already in use). Detect this early so
 		// the caller gets a clear error instead of a 120-second waitForBoot.
 		await Bun.sleep(1500);
-		try {
-			process.kill(spawnedPid, 0);
-		} catch {
+		if (pidLiveness(spawnedPid) === "dead") {
 			let logTail = "(no log)";
 			try {
 				if (existsSync(logPath)) {
@@ -493,20 +491,21 @@ export async function stopQemu(pid: number): Promise<boolean> {
 /** The command that runs `action` on `name` as the user owning its QEMU (#259). It pins
  *  `QUICKCHR_DATA_DIR`: `sudo` may reset `HOME`, and the same name under root's data
  *  dir is a different machine, or none. */
-export function ownerCommand(action: string, name: string): string {
-	const command = `quickchr ${action} ${shellQuote(name)}`;
+export function ownerCommand(action: string, name: string, actionArgs?: string): string {
+	const command = `quickchr ${action} ${shellQuote(name)}${actionArgs ? ` ${actionArgs}` : ""}`;
 	if (process.platform === "win32") return command;
 	return `sudo env QUICKCHR_DATA_DIR=${shellQuote(getDataDir())} ${command}`;
 }
 
 /** The refusal for a QEMU this user cannot signal (#259). `name`/`action` make the hint
- *  a runnable command when the caller knows them. */
-export function foreignQemuError(pid: number, name?: string, action = "stop"): QuickCHRError {
+ *  a runnable command when the caller knows them; `actionArgs` (already shell-quoted)
+ *  carries the rest of a request that needs more than a name, like `set --device-mode`. */
+export function foreignQemuError(pid: number, name?: string, action = "stop", actionArgs?: string): QuickCHRError {
 	const who = name ? `Machine "${name}" is running` : "QEMU is running";
 	return new QuickCHRError(
 		"PERMISSION_DENIED",
 		`${who} as another user (PID ${pid}, likely started with sudo); this user cannot signal it, so nothing was changed.`,
-		name ? `Run it as the user that owns that QEMU: ${ownerCommand(action, name)}` : undefined,
+		name ? `Run it as the user that owns that QEMU: ${ownerCommand(action, name, actionArgs)}` : undefined,
 	);
 }
 

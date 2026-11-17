@@ -146,7 +146,10 @@ describe("a QEMU owned by another user (#259)", () => {
 		// spawned a replacement next to the live original.
 		seed(machine("foreign-device-mode"));
 		const instance = QuickCHR.get("foreign-device-mode");
-		await expect(instance?.setDeviceMode({ mode: "rose" })).rejects.toMatchObject({ code: "PERMISSION_DENIED" });
+		const error = await instance?.setDeviceMode({ mode: "rose" }).catch((e: unknown) => e);
+		expect(error).toMatchObject({ code: "PERMISSION_DENIED" });
+		// The hint carries the requested change: a bare `set <name>` is "Nothing to set".
+		expect((error as { installHint?: string }).installHint).toEndWith("quickchr set foreign-device-mode --device-mode rose");
 		expectStillRunning("foreign-device-mode");
 	});
 
@@ -167,4 +170,46 @@ describe("a QEMU owned by another user (#259)", () => {
 		expect((error as { installHint?: string }).installHint).toBe(`Run it as the user that owns that QEMU: ${expected}`);
 		expect((error as Error).message).toContain(`PID ${FOREIGN_PID}`);
 	});
+});
+
+describe("CLI stop --all with a foreign machine (#259)", () => {
+	test("stops the owned machine, reports the foreign one, keeps its state, exits 1", async () => {
+		// A real idle process stands in for an owned QEMU, so `stop` really signals it.
+		const owned = Bun.spawn([process.execPath, "-e", "await Bun.sleep(60_000)"], { stdout: "ignore", stderr: "ignore" });
+		try {
+			seed(machine("owned-a", { pid: owned.pid }));
+			seed(machine("foreign-b", { portBase: 9110 }));
+			const proc = Bun.spawn([
+				process.execPath,
+				"--preload", join(import.meta.dir, "helpers/foreign-pid-preload.ts"),
+				join(import.meta.dir, "../../src/cli/index.ts"),
+				"stop", "--all",
+			], {
+				env: {
+					...process.env,
+					QUICKCHR_DATA_DIR: TEST_DIR,
+					QUICKCHR_TEST_FOREIGN_PID: String(FOREIGN_PID),
+					QUICKCHR_NO_TIPS: "1",
+					NO_COLOR: "1",
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+				proc.exited,
+			]);
+			expect(exitCode).toBe(1);
+			expect(stdout).toContain("owned-a");
+			expect(stderr).toContain("foreign-b");
+			expect(stderr).toContain("as another user");
+			expect(await owned.exited).not.toBeNull();
+			expect(loadMachine("owned-a")?.status).toBe("stopped");
+			expectStillRunning("foreign-b");
+		} finally {
+			owned.kill();
+			await owned.exited;
+		}
+	}, 30_000);
 });

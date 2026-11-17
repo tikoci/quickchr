@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync
 import { join } from "node:path";
 import { QuickCHRError } from "./types.ts";
 import { getDataDir } from "./state.ts";
+import { pidLiveness } from "./pid.ts";
 import { assertValidResourceName, assertPathSafeName } from "./names.ts";
 
 /** Transport a named socket uses to carry guest frames.
@@ -201,9 +202,7 @@ function withEntryLock<T>(name: string, fn: () => T): T {
 		}
 		unreadableSince = undefined;
 
-		let ownerAlive = true;
-		try { process.kill(ownerPid, 0); } catch { ownerAlive = false; }
-		if (!ownerAlive) {
+		if (pidLiveness(ownerPid) === "dead") {
 			try { rmSync(lockPath, { force: true }); } catch { /* another waiter got there first */ }
 			continue;
 		}
