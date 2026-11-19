@@ -35,7 +35,8 @@ Expected time: ~30–60 s (license-server round-trip).
 ## If you copied only this directory
 
 - Replace `../../src/index.ts` → `@tikoci/quickchr`; copy `../lib.ts` or inline.
-- `license()` also accepts `level: "p10" | "unlimited"`. Credentials resolve from
+- `license()` also accepts `level: "p10" | "p-unlimited"` (`"unlimited"` is
+  normalized to `"p-unlimited"`). Credentials resolve from
   env (`MIKROTIK_WEB_*`) or quickchr's secret store.
 
 ## Friction found

@@ -11,6 +11,29 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-19
+
+### Breaking (0.6.0)
+
+0.6.0 goes to npm `next` first. Each item is described in full in its entry below;
+this list is what to check when upgrading from 0.5.x.
+
+- **macOS `shared` / `bridged:<iface>` no longer fall back to native vmnet** when no
+  socket_vmnet daemon is serving. They fail with `NETWORK_UNAVAILABLE` naming
+  `quickchr networks create <net>`, a one-time sudo step. Running quickchr as root keeps
+  the native path. QEMU older than 7.2 is refused for these networks. (#256)
+- **A waiting `start` with no `user` NIC is refused** with `INVALID_NETWORK`. Any
+  `--add-network` replaces the default NIC, so add `--add-network user` or pass
+  `--no-wait`. (#268)
+- **A relative `QUICKCHR_DATA_DIR` is refused** with `STATE_ERROR`. (#276)
+- **Library types**: `LicenseLevel` is `"p1" | "p10" | "p-unlimited"` (inputs take
+  `LicenseLevelInput`, which still accepts `"unlimited"`); `ResolvedNetwork.wrapper` is
+  removed; `PlatformInfo.socketVmnet.client` is optional. Under
+  `exactOptionalPropertyTypes`, widened output properties such as `MachineState.pid`
+  can be present and `undefined`. (#261, #262, #256, #285)
+- **New error code** `PERMISSION_DENIED`: `stop`, `shutdown`, `remove`, `clean` and
+  `set --device-mode` refuse a machine whose QEMU another user owns. (#259)
+
 ### Added
 
 - Library: `defaultBootTimeout(arch, withPackages?, accel?)`, `accelTimeoutFactor` and
@@ -52,11 +75,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   matched the client's fourth pairing message in every trial, and both
   discovery methods committed 3 of 16. The TZSP/MNDP decoder (`tool/tzsp.ts`) has no quickchr imports, so
   it can move to a shared package.
-
 - A `networks create` or `restart` whose service does not come up now prints the
   end of the helper's log, which is world-readable, instead of a `sudo tail` hint,
   and names both `restart` and `remove` as the way out. (#270)
-
 - On macOS, `shared` or `bridged:<iface>` with no socket_vmnet daemon now fails with
   `NETWORK_UNAVAILABLE` naming `quickchr networks create <net>`, instead of falling
   back to native vmnet, which only works with QEMU as root. Running quickchr as root

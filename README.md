@@ -55,22 +55,21 @@ Library:
 bun add @tikoci/quickchr
 ```
 
-### Prerelease QA (0.5.1)
+### Prerelease QA
 
-0.5.1 is published to npm `next` first; the unqualified install above uses `latest`,
-and 0.5.1 is promoted there once QA passes. Pin this published candidate for
-reproducible CLI or library QA:
+Each release is published to npm `next` first; the unqualified install above uses
+`latest`, and a release is promoted there once QA passes. `next` is never older than
+`latest`. Install the current candidate, or pin one exact version for reproducible QA:
 
 ```bash
-bun install -g @tikoci/quickchr@0.5.1
-bun add @tikoci/quickchr@0.5.1
+bun install -g @tikoci/quickchr@next
+bun add @tikoci/quickchr@next
+bun add @tikoci/quickchr@0.6.0      # pin an exact candidate
 quickchr --version
 ```
 
-Use `@next` instead of `@0.5.1` to follow later candidates. See the
-[0.5.1 changelog](./CHANGELOG.md#051--2026-10-22) for the changes since 0.5.0,
-including storage admission, cache accounting, and disk preservation fixes.
-The [0.5.0 notes](./CHANGELOG.md#050--2026-10-22) cover migration from 0.4.x.
+See the [changelog](./CHANGELOG.md) for each release, and its **Breaking** section
+before upgrading across a minor version (for example 0.5.x to 0.6.0).
 
 ### CLI Usage
 
@@ -206,7 +205,7 @@ reports a forced power cut if the guest does not stop within the grace budget.
 | `--no-network` | Start with no NICs (headless) | |
 | `--no-winbox` | Exclude WinBox port mapping | |
 | `--no-api-ssl` | Exclude API-SSL port mapping | |
-| `--license-level <l>` | Apply trial license: p1, p10, unlimited | |
+| `--license-level <l>` | Apply trial license: p1, p10, p-unlimited (`unlimited` is accepted) | |
 | `--license-account <a>` | MikroTik account email | env `MIKROTIK_WEB_ACCOUNT` |
 | `--license-password <p>` | MikroTik account password | env `MIKROTIK_WEB_PASSWORD` |
 | `--device-mode <m>` | Configure device-mode: rose\|advanced\|basic\|home\|auto\|skip | |
@@ -272,6 +271,9 @@ In **foreground** mode, your terminal becomes the CHR serial console. Use these 
 By default each CHR gets a single user-mode NIC (SLIRP). Use `--add-network` to add more NICs or replace the default:
 
 ```bash
+# macOS only, once per host network: install its socket_vmnet service (one sudo step)
+quickchr networks create shared
+
 # Two CHRs on a shared L2 segment via socket_vmnet (macOS) or bridge (Linux)
 quickchr start --name router1 --add-network user --add-network shared
 quickchr start --name router2 --add-network user --add-network shared
