@@ -56,6 +56,7 @@ brname
 btest
 bubbletea
 buildx
+bunfig
 bunx
 bypassable
 cacheowner
@@ -380,6 +381,7 @@ repointed
 rescan
 resolv
 respawn
+respawned
 respawning
 respawns
 restraml

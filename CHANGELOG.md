@@ -11,6 +11,20 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Fixed
+
+- **`timeoutExtra` now applies when `start()` boots a machine that already exists**:
+  one `add()` made, or one that has booted before. Only a new machine's start used to
+  add it. On the CLI, `quickchr start <name> --timeout-extra` and the `timeout-extra`
+  setting now apply to every start, as MANUAL §10 says. (#291)
+
+### Documentation
+
+- MANUAL §4 has a new section, "Using quickchr in another project's tests": download
+  the image first with `cacheAdd()`, then create and boot with one `start()`, keep
+  stdout clean with `onProgress`, size the test hook's timeout from
+  `defaultBootTimeout`, and remove the machine in teardown. (#296)
+
 ## [0.6.0] — 2026-11-19
 
 ### Breaking (0.6.0)

@@ -334,6 +334,21 @@ describe("boot-timeout launch routing (#189)", () => {
 	}
 });
 
+describe("start() of an existing machine honors timeoutExtra (#291)", () => {
+	for (const kind of ["added", "pending", "booted"]) {
+		test(kind, async () => {
+			// Explicit env: Bun.spawn without it does not see runtime process.env
+			// mutations (verified 1.4.4), so the worker would use the real data dir.
+			const proc = Bun.spawn([process.execPath, join(import.meta.dir, "helpers/existing-timeout-extra-worker.ts"), kind], {
+				env: { ...process.env },
+				stdout: "pipe", stderr: "pipe",
+			});
+			const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+			expect({ exit, output: stdout + stderr }).toEqual({ exit: 0, output: "" });
+		});
+	}
+});
+
 describe("continue BOOT_TIMEOUT keeps the machine stopped and preserved (#214)", () => {
 	test("a resumed guest that never reaches REST is stopped, not removed", async () => {
 		// Explicit env: Bun.spawn without it does not see runtime process.env
