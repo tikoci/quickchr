@@ -123,8 +123,12 @@ function defaultMem(arch: Arch, override?: number): number {
 
 /**
  * The boot budget, in milliseconds, that `start()` waits for a machine of `arch`
- * to answer REST on this host. Accelerator and cross-arch emulation scale it
- * (see {@link accelTimeoutFactor}); a package install doubles it.
+ * to answer REST on this host, **per boot attempt**. Accelerator and cross-arch
+ * emulation scale it (see {@link accelTimeoutFactor}); a package install doubles it.
+ * Under `kvm`/`hvf`, a fresh background `start()` that times out respawns QEMU
+ * once and waits the budget again (DESIGN.md #8), and provisioning after boot
+ * has waits of its own, so a deadline for a whole `start()` needs more than one
+ * budget.
  *
  * Exported so callers can derive their own timeouts (a test's, a job's) from
  * quickchr's number instead of copying it (#285). `accel` defaults to `"tcg"`,
