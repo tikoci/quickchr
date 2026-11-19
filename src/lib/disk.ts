@@ -317,7 +317,7 @@ export function parseSnapshotList(monitorOutput: string): SnapshotInfo[] {
 		// QEMU lists snapshots missing from some disks under a second heading,
 		// "List of partial (non-loadable) snapshots on '<drive>':". `loadvm` refuses
 		// them, so they are not snapshots of this machine — stop before them (#266).
-		if (/non-loadable/i.test(line)) break;
+		if (/^\s*List of partial \(non-loadable\) snapshots/i.test(line)) break;
 		// Match snapshot data lines: ID, TAG, VM SIZE, DATE (YYYY-MM-DD HH:MM:SS), VM CLOCK, ICOUNT
 		// Example: "--      test              113 MiB 2026-04-14 00:47:19  0000:01:17.163         --"
 		// Example: "1       snap1             113 MiB 2026-04-14 00:47:19  0000:01:17.163         --"
@@ -337,8 +337,9 @@ export function parseSnapshotList(monitorOutput: string): SnapshotInfo[] {
 			name: name,
 			vmStateSize: parseVmSize(vmSizeStr),
 			// The monitor prints the QEMU host's local time. Parse it as local (no
-			// zone suffix) so it names the same instant as the stopped path's
-			// `qemu-img` date-sec, in the same toISOString() form (#266).
+			// zone suffix), in the stopped path's toISOString() form. Local time is
+			// ambiguous across a DST change, so `snapshot.list()` prefers the qcow2
+			// date-sec when it can read it (#266).
 			date: new Date(dateStr.replace(" ", "T")).toISOString(),
 			vmClock: vmClock,
 			icount: icountStr && icountStr !== "--" ? Number(icountStr) : undefined,

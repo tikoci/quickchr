@@ -3,8 +3,8 @@
  */
 
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
-import { absoluteEnvPath, userHomeDir } from "./paths.ts";
+import { join, resolve } from "node:path";
+import { absoluteEnvPath, isFullyQualifiedPath, userHomeDir } from "./paths.ts";
 import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { networkModeToConfigs } from "./network.ts";
@@ -17,7 +17,7 @@ import { pidLiveness } from "./pid.ts";
 export function getDataDir(): string {
 	const override = process.env.QUICKCHR_DATA_DIR;
 	if (override) {
-		if (!isAbsolute(override)) {
+		if (!isFullyQualifiedPath(override)) {
 			throw new QuickCHRError(
 				"STATE_ERROR",
 				`QUICKCHR_DATA_DIR must be an absolute path, got "${override}". ` +

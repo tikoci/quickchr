@@ -398,6 +398,38 @@ describe("a start that would wait for REST needs a user-mode NIC (#268)", () => 
 		expect(instance.state.name).toBe("bridged-lab");
 	});
 
+	test("provisioning on a new machine with no user NIC is refused before the download", async () => {
+		const result = await codeOf(QuickCHR.start({ ...v7, ...bridgedOnly, packages: ["container"] }));
+		expect(result.code).toBe("NETWORK_UNAVAILABLE");
+		expect(nothingCreated()).toBe(true);
+	});
+
+	test("recorded first-boot provisioning on a machine with no user NIC is refused, not booted", async () => {
+		seed(addedRecord("bridged-lab", "7.25.1", {
+			networks: [{ specifier: { type: "bridged", iface: "en0" }, id: "net0" }],
+			packages: ["container"],
+		}));
+		for (const extra of [{}, { background: false }]) {
+			const result = await codeOf(QuickCHR.start({ name: "bridged-lab", ...extra }));
+			expect(result.code).toBe("NETWORK_UNAVAILABLE");
+		}
+		expect(existsSync(join(machineDir("bridged-lab"), "qemu.pid"))).toBe(false);
+	});
+
+	test("a waiting continue() on a frozen machine with no user NIC is refused before it resumes", async () => {
+		seed(addedRecord("bridged-lab", "7.25.1", {
+			networks: [{ specifier: { type: "bridged", iface: "en0" }, id: "net0" }],
+			status: "running",
+			pid: process.pid,
+			frozen: true,
+		}));
+		const instance = await QuickCHR.start({ name: "bridged-lab" });
+		const result = await codeOf(instance.continue());
+		expect(result.code).toBe("INVALID_NETWORK");
+		expect(result.message).toContain("continue cannot wait");
+		expect(loadMachine("bridged-lab")?.frozen).toBe(true);
+	});
+
 	test("user alongside bridged passes this check", async () => {
 		const result = await codeOf(QuickCHR.start({ ...v7, networks: ["user", { type: "bridged", iface: "en0" }], dryRun: true }).then(() => {
 			throw new QuickCHRError("STATE_ERROR", "resolved");

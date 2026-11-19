@@ -99,16 +99,20 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   alone left no port forward for the REST wait to reach. The refusal is
   `INVALID_NETWORK`, raised before anything is downloaded or spawned, and its hint
   names `--add-network user --add-network <spec>` or `--no-wait`. `--no-wait`,
-  `--fg` and `frozen` starts are unaffected. (#268)
+  `--fg` and `frozen` starts are unaffected. Provisioning without a `user` NIC
+  (`NETWORK_UNAVAILABLE`) is now refused before the image download, including
+  first-boot provisioning recorded by `add` (it used to boot and time out). A
+  waiting `continue` on such a machine is refused before it resumes the guest. (#268)
 - The data dir can no longer resolve relative to the working directory. With `HOME`
   unset or empty it fell back to `.local/share/quickchr` under the current directory,
   while the config dir used the real home. The data dir, config dir and completion
   paths now share one rule (`HOME`, then `USERPROFILE`, then the OS account's home
-  directory), and a relative `QUICKCHR_DATA_DIR` is refused with `STATE_ERROR`. (#276)
+  directory), and a relative `QUICKCHR_DATA_DIR` is refused with `STATE_ERROR`. On
+  Windows a drive-relative path (`\quickchr`) counts as relative. (#276)
 - `snapshot list` on a running machine no longer lists partial snapshots (present on
-  some disks only), which `load` cannot restore, and its dates are the real UTC
-  instant: the QEMU monitor prints host local time, which was labeled UTC. The
-  running and stopped `list` now agree. Docs: `snapshot --help` and MANUAL say a
+  some disks only), which `load` cannot restore. Its dates and ids now come from the
+  qcow2 metadata, as on a stopped machine: the monitor prints host local time, which
+  was labeled UTC, and `--` for the id. The running and stopped `list` now agree. Docs: `snapshot --help` and MANUAL say a
   snapshot covers the boot disk and every `--add-disk` disk, MANUAL no longer claims
   `delete` works on a stopped machine, and extra disks are named as RouterOS shows
   them (`/disk` slots `pcie1`, `pcie2`, unformatted). (#266)

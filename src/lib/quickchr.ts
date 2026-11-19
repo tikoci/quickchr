@@ -284,22 +284,41 @@ function startWaitsForBoot(opts: { background?: boolean | undefined; wait?: bool
 	return (opts.background ?? true) && opts.wait !== false && !opts.frozen;
 }
 
-/** The boot wait polls REST through the user-mode NIC's port forwards. A machine
- *  without a user NIC has none, so the wait could only run out its whole timeout
- *  (and a boot retry) before failing (#268). Refused before anything is spawned.
- *  `existing` names a machine whose NICs were fixed by an earlier `add`/`start`. */
-function assertBootWaitReachable(networks: NetworkConfig[], willWait: boolean, name: string, existing: boolean): void {
-	if (!willWait || hasUserModeNetwork(networks)) return;
-	const nicSummary = networks.length === 0
+function describeInterfaces(networks: NetworkConfig[]): string {
+	return networks.length === 0
 		? "no network interfaces"
 		: `only ${networks.map((n) => typeof n.specifier === "string" ? n.specifier : n.specifier.type).join(", ")} network interfaces`;
+}
+
+/** The boot wait polls REST through the user-mode NIC's port forwards. A machine
+ *  without a user NIC has none, so the wait could only run out its whole timeout
+ *  (and a boot retry) before failing (#268). Refused before anything is spawned
+ *  or resumed. `hint` names the way out for the calling operation. */
+function assertBootWaitReachable(networks: NetworkConfig[], willWait: boolean, name: string, operation: string, hint: string): void {
+	if (!willWait || hasUserModeNetwork(networks)) return;
 	throw new QuickCHRError(
 		"INVALID_NETWORK",
-		`Machine "${name}" has ${nicSummary} and no user-mode NIC, so start cannot wait for it to boot: ` +
+		`Machine "${name}" has ${describeInterfaces(networks)} and no user-mode NIC, so ${operation} cannot wait for it to boot: ` +
 		"quickchr reaches the guest's REST API through the user-mode NIC's port forwards, and without one the wait can only time out.",
-		existing
-			? `Start it with --no-wait (wait: false) or --fg to boot without waiting, or recreate it with a user-mode NIC alongside its other networks (--add-network user --add-network <spec>).`
-			: `Add a user-mode NIC alongside the others (--add-network user --add-network <spec>), or pass --no-wait (wait: false) to boot without waiting.`,
+		hint,
+	);
+}
+
+const NEW_MACHINE_NO_USER_NIC_HINT =
+	"Add a user-mode NIC alongside the others (--add-network user --add-network <spec>), or pass --no-wait (wait: false) to boot without waiting.";
+const EXISTING_MACHINE_NO_USER_NIC_HINT =
+	"Start it with --no-wait (wait: false) or --fg to boot without waiting, or recreate it with a user-mode NIC alongside its other networks (--add-network user --add-network <spec>).";
+
+/** Provisioning runs over localhost REST/SSH, which needs a user-mode NIC. Checked
+ *  before the image download and before a recorded first-boot provisioning
+ *  relaunches the machine, so neither boots into a wait it cannot pass (#268). */
+function assertProvisioningReachable(networks: NetworkConfig[], name: string): void {
+	if (hasUserModeNetwork(networks)) return;
+	throw new QuickCHRError(
+		"NETWORK_UNAVAILABLE",
+		`Provisioning (packages, login setup, device-mode, license) requires a user-mode network interface for localhost access, ` +
+		`and machine "${name}" has ${describeInterfaces(networks)}. ` +
+		"Add a user-mode network (--add-network user --add-network <spec>) or remove provisioning options.",
 	);
 }
 
@@ -643,6 +662,9 @@ async function continueUnderLock(state: MachineState, wait: boolean, timeoutExtr
 			`Machine "${state.name}" is not running — nothing to continue.`,
 		);
 	}
+	// Before `cont`: a refused continue leaves the guest held and the marker in place.
+	assertBootWaitReachable(state.networks, wait, state.name, "continue",
+		`Resume it with 'quickchr continue ${shellQuote(state.name)} --no-wait' (wait: false).`);
 	// Idempotent: gdb (or an earlier continue) may have resumed the guest already.
 	const status = await monitorCommand(state.machineDir, "info status", undefined, state.portBase);
 	if (!status.includes("running")) {
@@ -1403,7 +1425,18 @@ function createInstance(state: MachineState): ChrInstance {
 				if (state.status === "running") {
 					try {
 						const out = await monitorCommand(state.machineDir, "info snapshots", undefined, state.portBase);
-						return parseSnapshotList(out);
+						const live = parseSnapshotList(out);
+						// The monitor decides which snapshots are loadable; its dates are
+						// local wall-clock time (ambiguous across a DST change) and its ids
+						// read "--". Take both from the qcow2 metadata when it is readable (#266).
+						const bootPath = bootDiskPath(state.machineDir, "qcow2");
+						const onDisk = live.length > 0 && existsSync(bootPath)
+							? await listSnapshots(bootPath).catch(() => [] as SnapshotInfo[])
+							: [];
+						return live.map((snap) => {
+							const meta = onDisk.find((d) => d.name === snap.name);
+							return meta ? { ...snap, id: meta.id, date: meta.date } : snap;
+						});
 					} catch { /* fall through to qemu-img */ }
 				}
 
@@ -2696,22 +2729,23 @@ export class QuickCHR {
 					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
 					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
+					assertProvisioningReachable(existing.networks, existing.name);
 					pendingOpts.license = await resolveLicenseForBoot(pendingOpts.license);
 					requireHostFor(existing.arch);
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger, opts.wait ?? true, sessionLaunch(opts));
 				}
 			}
 			// Exists but stopped — restart it
-			assertBootWaitReachable(existing.networks, startWaitsForBoot(opts), existing.name, true);
+			assertBootWaitReachable(existing.networks, startWaitsForBoot(opts), existing.name, "start", EXISTING_MACHINE_NO_USER_NIC_HINT);
 			requireHostFor(existing.arch);
 			return QuickCHR._launchExisting(existing, opts.background ?? true, undefined, logger, opts.wait ?? true, sessionLaunch(opts));
 		}
 
 		assertRouterOs6Arch(version, arch);
-		// Provisioning has its own user-NIC refusal below, and always waits for the boot.
-		if (!hasProvisioningMutations(mutations)) {
-			assertBootWaitReachable(resolveStartNetworks(opts.networks, opts.network), startWaitsForBoot(opts), name, false);
-		}
+		// Provisioning always waits for the boot, so it needs the user NIC either way.
+		const requestedNetworks = resolveStartNetworks(opts.networks, opts.network);
+		if (hasProvisioningMutations(mutations)) assertProvisioningReachable(requestedNetworks, name);
+		else assertBootWaitReachable(requestedNetworks, startWaitsForBoot(opts), name, "start", NEW_MACHINE_NO_USER_NIC_HINT);
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 		if (!opts.dryRun) {
 			opts = { ...opts, license: await resolveLicenseForBoot(opts.license) };
@@ -2807,14 +2841,6 @@ export class QuickCHR {
 		);
 		const bootDisk = diskArtifacts.bootDisk;
 		const extraDiskConfigs = diskArtifacts.extraDisks;
-
-		if (hasProvisioning && !hasUserModeNetwork(networkConfigs)) {
-			throw new QuickCHRError(
-				"NETWORK_UNAVAILABLE",
-				"Provisioning (packages, login setup, device-mode, license) requires a user-mode network interface for localhost access. " +
-				"Add a user-mode network or remove provisioning options.",
-			);
-		}
 
 		const spawnInBackground = background || (!background && hasProvisioning);
 		const state: MachineState = {

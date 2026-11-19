@@ -489,6 +489,7 @@ udevadm
 udp
 uefi
 uid
+unc
 uncharacterized
 unfiled
 unpairs

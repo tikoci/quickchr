@@ -334,6 +334,16 @@ describe("parseSnapshotList", () => {
 		expect(snaps.map((s) => s.name)).toEqual(["whole"]);
 	});
 
+	test("a snapshot whose tag contains 'non-loadable' is still listed (#266)", () => {
+		const output = [
+			"List of snapshots present on all disks:",
+			"ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT",
+			"--        backup-non-loadable 113 MiB 2026-11-11 06:50:00  0000:00:10.000         --",
+			"--        after             113 MiB 2026-11-11 06:51:00  0000:00:11.000         --",
+		].join("\n");
+		expect(parseSnapshotList(output).map((s) => s.name)).toEqual(["backup-non-loadable", "after"]);
+	});
+
 	// The stopped path's qemu-img date-sec goes through toISOString() too.
 	test("the monitor's local date is parsed as local time, not UTC (#266)", () => {
 		const local = new Date(2026, 10, 11, 6, 53, 7);

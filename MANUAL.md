@@ -333,7 +333,10 @@ gdbstub). Sends one monitor `cont`, then waits for RouterOS to become
 ready — the same promise `start` makes. `--no-wait` returns right after
 resuming; `--timeout-extra`/`-T` extends the resume timeout like `start`. Idempotent: when the guest is already running (e.g. gdb
 continued it), this just clears the frozen marker. A machine that never
-reaches readiness is a `BOOT_TIMEOUT`; it is stopped and preserved.
+reaches readiness is a `BOOT_TIMEOUT`; it is stopped and preserved. A
+machine with no `user` NIC has no REST forward to wait on, so a waiting
+`continue` is refused (`INVALID_NETWORK`) before it resumes anything; use
+`--no-wait`.
 
 `--frozen` exists for harnesses that must touch the guest before RouterOS
 init runs — e.g. patching guest RAM via gdb, then resuming:
@@ -1371,7 +1374,9 @@ if you list it: `--add-network user --add-network bridged:en0`. quickchr
 reaches REST and SSH through the `user` NIC's port forwards, so a `start` that
 would wait for the boot refuses a machine without one (`INVALID_NETWORK`,
 before anything is downloaded or spawned). Pass `--no-wait` or `--fg` to boot
-such a machine anyway.
+such a machine anyway. Provisioning always needs the `user` NIC
+(`NETWORK_UNAVAILABLE`, also before the download). Likewise `continue` on a
+frozen machine without one needs `--no-wait`.
 
 ### Which mechanism? (by traffic shape)
 
@@ -1951,9 +1956,12 @@ Constraints:
   through the QEMU monitor). `delete` on a stopped machine fails with
   `MACHINE_STOPPED`.
 - `list` works either way. When stopped it reads `boot.qcow2` with `qemu-img info`.
-- A snapshot QEMU reports as partial (missing from one of the disks, e.g. after a
-  hand-run `qemu-img snapshot -d`) is not listed: `loadvm` cannot load it.
-  `delete` still removes what is left of it.
+- On a running machine, `list` asks the QEMU monitor, which leaves out a snapshot
+  that is partial (missing from one of the disks, e.g. after a hand-run
+  `qemu-img snapshot -d`), since `loadvm` cannot load it. Dates and ids come from
+  the qcow2 metadata. A stopped `list` (or a running one whose monitor query
+  fails) reads `boot.qcow2` only, so it can still show a tag that is missing from
+  an extra disk. `delete` removes what is left of a partial snapshot.
 - Snapshots live inside the qcow2 files, so `remove` and `clean` delete them all.
 - QEMU's practical cap is 16 snapshots per disk.
 

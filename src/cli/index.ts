@@ -5,7 +5,7 @@
 
 import type { StartOptions, Arch, Channel, DeviceModeOptions, LicenseLevelInput, LicenseOptions, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { join } from "node:path";
-import { parseNetworkSpecifier } from "../lib/network.ts";
+import { hasUserModeNetwork, parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
 import { ADD_FLAGS, REMOVED_FLAGS, SET_FLAGS, START_FLAGS, VALUE_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
 import { QuickCHRError } from "../lib/types.ts";
@@ -1355,7 +1355,8 @@ async function cmdSetup() {
 						spinner.start(`Loading snapshot ${selectedSnap}...`);
 						try {
 							await instance.snapshot.load(selectedSnap);
-							const booted = await instance.waitForBoot(120_000);
+							// Without a user NIC there is no REST forward to check readiness through.
+							const booted = !hasUserModeNetwork(instance.state.networks) || await instance.waitForBoot(120_000);
 							spinner.stop(booted
 								? `Loaded snapshot ${bold(selectedSnap)}`
 								: `Loaded snapshot ${bold(selectedSnap)} (boot readiness check timed out)`);
