@@ -15,12 +15,12 @@
  * and type-checks a file that imports the public entry point.
  *
  * Offline: the package's runtime `dependencies`, `@types/bun` and `tsc` come
- * from this repo's node_modules (symlinked). Wired into `bun run check`. Exits
- * non-zero on any error.
+ * from this repo's node_modules (linked, as junctions on Windows, which need no
+ * symlink privilege). Wired into `bun run check`. Exits non-zero on any error.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
 
@@ -72,28 +72,30 @@ function run(cmd: string[], cwd: string): { ok: boolean; out: string } {
 const work = mkdtempSync(join(tmpdir(), "quickchr-consumer-"));
 let failed = false;
 try {
-	const pack = run(["bun", "pm", "pack", "--quiet", "--ignore-scripts", "--destination", work], ROOT);
+	const pack = run([process.execPath, "pm", "pack", "--quiet", "--ignore-scripts", "--destination", work], ROOT);
 	const tarball = pack.out.split("\n").map((l) => l.trim()).filter((l) => l.endsWith(".tgz")).pop();
 	if (!pack.ok || !tarball) throw new Error(`bun pm pack failed:\n${pack.out}`);
 
-	const pkgDir = join(work, "node_modules", "@tikoci", "quickchr");
-	mkdirSync(pkgDir, { recursive: true });
-	const tarPath = tarball.startsWith("/") ? tarball : join(work, tarball);
-	const extract = run(["tar", "-xzf", tarPath, "-C", pkgDir, "--strip-components=1"], work);
+	// Relative paths from `work`: GNU tar reads a drive-letter path (C:\...) as a
+	// remote host; Windows' built-in tar takes relative paths too.
+	const pkgDir = join("node_modules", "@tikoci", "quickchr");
+	mkdirSync(join(work, pkgDir), { recursive: true });
+	const extract = run(["tar", "-xzf", basename(tarball), "-C", pkgDir, "--strip-components=1"], work);
 	if (!extract.ok) throw new Error(`tar failed:\n${extract.out}`);
 
 	const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
 	for (const dep of [...Object.keys(manifest.dependencies ?? {}), "@types/bun", "bun-types"]) {
 		const link = join(work, "node_modules", dep);
 		mkdirSync(dirname(link), { recursive: true });
-		symlinkSync(join(ROOT, "node_modules", dep), link, "dir");
+		symlinkSync(join(ROOT, "node_modules", dep), link, process.platform === "win32" ? "junction" : "dir");
 	}
 
 	writeFileSync(join(work, "package.json"), JSON.stringify({ name: "quickchr-consumer", private: true, type: "module" }));
 	writeFileSync(join(work, "tsconfig.json"), JSON.stringify({ compilerOptions: HOUSE_COMPILER_OPTIONS, include: ["index.ts"] }, null, 2));
 	writeFileSync(join(work, "index.ts"), CONSUMER_SOURCE);
 
-	const tsc = run([join(ROOT, "node_modules", ".bin", "tsc"), "-p", "."], work);
+	// typescript's own bin script, run by this Bun: `.bin/tsc` is a `.exe` shim on Windows.
+	const tsc = run([process.execPath, join(ROOT, "node_modules", "typescript", "bin", "tsc"), "-p", "."], work);
 	if (!tsc.ok) {
 		failed = true;
 		console.error("check-consumer-types: a consumer on the house tsconfig cannot type-check quickchr (#285):\n");
