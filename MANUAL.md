@@ -981,7 +981,9 @@ lifecycle operation takes the machine lock (`machines/<name>/.lock/`):
 
 `add()` is the same minus the QEMU spawn — useful when you want to
 materialize a machine and start it later (or hand the config to another
-process).
+process). To create and boot in one go — for example in a test — call `start()`
+on the new name instead; see
+[Using quickchr in another project's tests](#using-quickchr-in-another-projects-tests).
 
 `get()` returns `null` if the machine doesn't exist; otherwise it
 loads `machine.json`, refreshes PID liveness, and returns a runtime
@@ -1229,6 +1231,78 @@ if (version !== CACHE_VERSION_UNRESOLVED) {
 `cacheKey({ version })` validates the pin without resolving a channel.
 `cacheAdd()` returns `{ dir, version, arch, path, cacheHit }`; it only downloads
 and extracts the image and never creates or boots a machine.
+
+### Using quickchr in another project's tests
+
+The pattern for a project that boots CHRs from its own integration tests:
+download the image first, create and boot with one `start()`, remove in teardown.
+centrs works this way (`test/integration/preload.ts` and `chr.ts` in tikoci/centrs).
+
+```ts
+import { cacheAdd, createLogger, defaultBootTimeout, QuickCHR, type ChrInstance } from "@tikoci/quickchr";
+import { randomBytes } from "node:crypto";
+
+const arch = "x86";
+const timeoutExtra = Number(process.env.QUICKCHR_TIMEOUT_EXTRA ?? 0) * 1000;
+const onProgress = (msg: string) => console.error(`quickchr: ${msg}`);
+
+// 1. Outside every test timeout: a bunfig.toml preload, or a CI step (`quickchr cache add`).
+const { version } = await cacheAdd({ channel: "stable", arch, logger: createLogger(onProgress) });
+
+// 2. In beforeAll: one call creates, boots and waits for REST.
+let chr: ChrInstance | undefined;
+beforeAll(async () => {
+  const name = `myapp-it-${randomBytes(4).toString("hex")}`;
+  console.error(`machine: ${name}`); // so a killed run says what it left
+  chr = await QuickCHR.start({ name, version, arch, onProgress, timeoutExtra });
+}, defaultBootTimeout(arch, false, "tcg") + 2 * timeoutExtra + 300_000);
+
+// 3. In afterAll: remove the machine this run made.
+afterAll(async () => { await chr?.remove(); });
+```
+
+- **Download first, then boot the version you downloaded.** A cold-cache download
+  inside a test's timeout looks like a hang. Pass the resolved `version` to `start()`,
+  not the channel, so a channel that moves between the two steps cannot start a second
+  download inside the test.
+- **Create with `start()`, not `add()` then `start({ name })`.** On a name that does
+  not exist, `start()` claims it as `add()` does (allocation lock, then the machine
+  lock, which fails at once with `MACHINE_LOCKED` against a concurrent create of the
+  same name), removes the machine again if its first boot times out, and returns the
+  handle. Its `state.createdAt` tells this machine apart from a later one of the same
+  name. `add()` is for a machine you configure now and boot later or from another
+  process. It prints its image line to stdout even with `onProgress` (#290).
+- **A random name is enough ownership** when the run shares the developer's data
+  directory. A test never needs to start or remove a machine it did not create. In CI,
+  point `QUICKCHR_DATA_DIR` at the runner's temp directory and cache
+  `<data dir>/cache` between runs.
+- **Keep stdout yours.** With `onProgress` on `start()` and a logger on `cacheAdd()`,
+  quickchr prints nothing to stdout.
+- **Make the hook's timeout outlive quickchr's own waits**, so a slow boot fails
+  inside quickchr with its `BOOT_TIMEOUT` report rather than being cut off by the test
+  runner. With the image already cached, `start()` can wait for: the port allocation
+  lock (up to 60 s); the boot itself, `defaultBootTimeout(arch, withPackages, accel)`
+  plus `timeoutExtra`; on KVM or HVF, a second boot of the same length, because a boot
+  that misses REST is respawned once; and, after a timeout, the failure report (up to
+  180 s, bounded inside quickchr) and the stop (up to 5 s before SIGKILL). The `"tcg"`
+  budget is at least two KVM or HVF boots, so the timeout above covers every
+  accelerator: `timeoutExtra` counted twice for the respawn, and 300 s for the lock,
+  the report and the stop.
+  `remove()` waits up to the boot budget for an operation already in progress, then
+  stops QEMU.
+- **Pass `arch`** when your timeouts depend on it. The default is the Bun process's
+  architecture, which is `x86` for an x64 Bun under Rosetta on Apple Silicon (#293).
+- **Print the name before calling `start()`** (to stderr), so a run that is killed
+  before teardown says what it left behind. Once the boot has begun, the machine has a
+  readable `machine.json` and a detached QEMU: `quickchr list <name>` shows it and
+  `quickchr remove <name>` (or `QuickCHR.get(name)?.remove()`) stops and removes it.
+  A run killed earlier, while the machine was still being created, can leave a
+  directory with no readable `machine.json` instead, which `QuickCHR.listOrphans()`
+  names. `start()` writes `machine.json` only after spawning QEMU, so that QEMU may
+  still be running. **Stop it before `QuickCHR.removeOrphan(name)`**: its command line
+  names the machine directory (`pgrep -fl "machines/<name>/"` on Linux and macOS), and
+  `removeOrphan()` does not check for a live QEMU yet (#294). On a throwaway CI runner
+  with its own `QUICKCHR_DATA_DIR`, both kinds go away with the runner.
 
 ---
 

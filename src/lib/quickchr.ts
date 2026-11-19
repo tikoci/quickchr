@@ -236,16 +236,21 @@ function describeProvisioningOperation(opts: Parameters<typeof listProvisioningM
 	return `use ${PROVISIONING_FEATURE_LABEL} (${joinHumanList(operations)})`;
 }
 
-/** Per-boot launch intent for `_launchExisting`: session `qemuArgs` and `frozen`
- *  when given, used for the spawn but never persisted.
+/** Per-boot launch intent for `_launchExisting`, used for this boot but never persisted. */
+type SessionLaunch = { qemuArgs?: string[]; frozen?: boolean; timeoutExtra?: number };
+
+/** Per-boot launch intent for `_launchExisting`: session `qemuArgs`, `frozen` and
+ *  `timeoutExtra` when given, used for the spawn but never persisted.
  *  Absent (`undefined`) means "not given", and only absent falls through to what
  *  `add` recorded — the same rule as `pendingProvisioningFor` (#185): an empty
- *  array is not an instruction to drop the stored args. */
-function sessionLaunch(opts: StartOptions): { qemuArgs?: string[]; frozen?: boolean } | undefined {
-	const launch: { qemuArgs?: string[]; frozen?: boolean } = {};
+ *  array is not an instruction to drop the stored args. `timeoutExtra` reaches the
+ *  boot wait the same way it does for a new machine (#291). */
+function sessionLaunch(opts: StartOptions): SessionLaunch | undefined {
+	const launch: SessionLaunch = {};
 	if (opts.qemuArgs?.length) launch.qemuArgs = [...opts.qemuArgs];
 	if (opts.frozen) launch.frozen = true;
-	return launch.qemuArgs || launch.frozen ? launch : undefined;
+	if (opts.timeoutExtra) launch.timeoutExtra = opts.timeoutExtra;
+	return launch.qemuArgs || launch.frozen || launch.timeoutExtra ? launch : undefined;
 }
 
 /** `wait: false` returns before the guest has booted, and provisioning needs a booted
@@ -3234,8 +3239,9 @@ export class QuickCHR {
 	/** Re-launch an existing stopped machine.
 	 *
 	 *  `launch` carries per-boot intent that is used for this spawn but never
-	 *  persisted: session `qemuArgs` replace the stored ones for that boot, and
-	 *  `frozen` holds the guest at reset for a later `continue()`. */
+	 *  persisted: session `qemuArgs` replace the stored ones for that boot,
+	 *  `frozen` holds the guest at reset for a later `continue()`, and `timeoutExtra`
+	 *  is added to this boot's wait (#291). */
 	static async _launchExisting(
 		state: MachineState,
 		background: boolean,
@@ -3250,7 +3256,7 @@ export class QuickCHR {
 		},
 		logger?: ProgressLogger,
 		wait = true,
-		launch?: { qemuArgs?: string[]; frozen?: boolean },
+		launch?: SessionLaunch,
 	): Promise<ChrInstance> {
 		const wantsProvisioning = (opts: typeof provisioningOpts) => !!(
 			opts && (
@@ -3384,7 +3390,7 @@ export class QuickCHR {
 		if (!wait) return instance;
 
 		// Always wait for boot in background mode — start() promises "REST-ready".
-		const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts?.installAllPackages, accel);
+		const bootTimeout = defaultBootTimeout(state.arch, provisioningOpts?.installAllPackages, accel) + (launch?.timeoutExtra ?? 0);
 		const probe = newBootProbeStats();
 		const booted = await instance.waitForBoot(bootTimeout, probe);
 		if (!booted) {
