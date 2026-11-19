@@ -1297,9 +1297,12 @@ afterAll(async () => { await chr?.remove(); });
   readable `machine.json` and a detached QEMU: `quickchr list <name>` shows it and
   `quickchr remove <name>` (or `QuickCHR.get(name)?.remove()`) stops and removes it.
   A run killed earlier, while the machine was still being created, can leave a
-  directory with no readable `machine.json` instead: `QuickCHR.listOrphans()` names it
-  and `QuickCHR.removeOrphan(name)` clears it. On a throwaway CI runner with its own
-  `QUICKCHR_DATA_DIR`, both go away with the runner.
+  directory with no readable `machine.json` instead, which `QuickCHR.listOrphans()`
+  names. `start()` writes `machine.json` only after spawning QEMU, so that QEMU may
+  still be running. **Stop it before `QuickCHR.removeOrphan(name)`**: its command line
+  names the machine directory (`pgrep -fl "machines/<name>/"` on Linux and macOS), and
+  `removeOrphan()` does not check for a live QEMU yet (#294). On a throwaway CI runner
+  with its own `QUICKCHR_DATA_DIR`, both kinds go away with the runner.
 
 ---
 
