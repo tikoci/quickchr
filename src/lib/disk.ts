@@ -366,6 +366,23 @@ function parseVmSize(sizeStr: string): number {
 }
 
 /**
+ * Combine a running machine's monitor listing with the boot disk's qcow2 metadata.
+ *
+ * The monitor (`live`) decides *which* snapshots exist: it leaves out partial ones
+ * that `loadvm` cannot load. Its dates are local wall-clock time, ambiguous across
+ * a DST change, and its ids read `--`. So each live row takes `id` and `date` from
+ * the same-named `qemu-img` entry (`onDisk`, from `date-sec`) when there is one,
+ * and keeps its own otherwise, e.g. when `qemu-img` could not read the disk (#266).
+ * A tag present only on disk is never added.
+ */
+export function mergeSnapshotMetadata(live: SnapshotInfo[], onDisk: SnapshotInfo[]): SnapshotInfo[] {
+	return live.map((snap) => {
+		const meta = onDisk.find((d) => d.name === snap.name);
+		return meta ? { ...snap, id: meta.id, date: meta.date } : snap;
+	});
+}
+
+/**
  * List snapshots stored in a qcow2 disk image using `qemu-img info`.
  *
  * Works on both running and stopped machines (reads the qcow2 metadata directly).

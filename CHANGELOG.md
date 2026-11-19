@@ -112,7 +112,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 - `snapshot list` on a running machine no longer lists partial snapshots (present on
   some disks only), which `load` cannot restore. Its dates and ids now come from the
   qcow2 metadata, as on a stopped machine: the monitor prints host local time, which
-  was labeled UTC, and `--` for the id. The running and stopped `list` now agree. Docs: `snapshot --help` and MANUAL say a
+  was labeled UTC, and `--` for the id. When that metadata is readable, a running and
+  a stopped `list` give the same ids and dates. A stopped `list` reads `boot.qcow2`
+  only, so it can still show a partial snapshot. Docs: `snapshot --help` and MANUAL say a
   snapshot covers the boot disk and every `--add-disk` disk, MANUAL no longer claims
   `delete` works on a stopped machine, and extra disks are named as RouterOS shows
   them (`/disk` slots `pcie1`, `pcie2`, unformatted). (#266)

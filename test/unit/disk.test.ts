@@ -9,6 +9,7 @@ import {
 	cleanDiskFiles,
 	getDiskInfo,
 	parseSnapshotList,
+	mergeSnapshotMetadata,
 	formatSnapshotTable,
 	formatDiskSize,
 } from "../../src/lib/disk.ts";
@@ -356,6 +357,33 @@ describe("parseSnapshotList", () => {
 		const snaps = parseSnapshotList(output);
 		expect(snaps).toHaveLength(1);
 		expect(snaps[0]?.icount).toBeUndefined();
+	});
+});
+
+describe("mergeSnapshotMetadata (#266)", () => {
+	const row = (name: string, id: string, date: string) => ({ id, name, vmStateSize: 1, date, vmClock: "00:00:01.000" });
+	const live = [row("a", "0", "2026-11-01T08:30:00.000Z"), row("b", "0", "2026-11-01T08:40:00.000Z")];
+
+	test("ids and dates come from the qcow2 metadata for the live rows", () => {
+		const onDisk = [row("a", "1", "2026-11-01T09:30:00.000Z"), row("b", "2", "2026-11-01T09:40:00.000Z")];
+		expect(mergeSnapshotMetadata(live, onDisk)).toEqual([
+			row("a", "1", "2026-11-01T09:30:00.000Z"),
+			row("b", "2", "2026-11-01T09:40:00.000Z"),
+		]);
+	});
+
+	test("no readable metadata (qemu-img failed) keeps the monitor rows as parsed", () => {
+		expect(mergeSnapshotMetadata(live, [])).toEqual(live);
+	});
+
+	test("a live row with no disk entry keeps its own id and date", () => {
+		const merged = mergeSnapshotMetadata(live, [row("a", "1", "2026-11-01T09:30:00.000Z")]);
+		expect(merged[1]).toEqual(live[1]);
+	});
+
+	test("a tag only on disk (partial, left out by the monitor) is not added", () => {
+		const merged = mergeSnapshotMetadata([live[0] ?? row("a", "0", "")], [row("a", "1", "x"), row("partial", "3", "y")]);
+		expect(merged.map((s) => s.name)).toEqual(["a"]);
 	});
 });
 

@@ -69,7 +69,7 @@ import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
 import { pidLiveness } from "./pid.ts";
 import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
-import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, formatDiskSize } from "./disk.ts";
+import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, mergeSnapshotMetadata, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
 import { installPackages, installAllPackages, downloadAndListPackages, downloadPackages, findPackageFile, uploadPackages } from "./packages.ts";
@@ -1431,17 +1431,11 @@ function createInstance(state: MachineState): ChrInstance {
 					try {
 						const out = await monitorCommand(state.machineDir, "info snapshots", undefined, state.portBase);
 						const live = parseSnapshotList(out);
-						// The monitor decides which snapshots are loadable; its dates are
-						// local wall-clock time (ambiguous across a DST change) and its ids
-						// read "--". Take both from the qcow2 metadata when it is readable (#266).
 						const bootPath = bootDiskPath(state.machineDir, "qcow2");
 						const onDisk = live.length > 0 && existsSync(bootPath)
 							? await listSnapshots(bootPath).catch(() => [] as SnapshotInfo[])
 							: [];
-						return live.map((snap) => {
-							const meta = onDisk.find((d) => d.name === snap.name);
-							return meta ? { ...snap, id: meta.id, date: meta.date } : snap;
-						});
+						return mergeSnapshotMetadata(live, onDisk);
 					} catch { /* fall through to qemu-img */ }
 				}
 
