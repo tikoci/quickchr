@@ -12,7 +12,8 @@ import { QuickCHRError } from "./types.ts";
  *  `isAbsolute()` also accepts a drive-relative `\x`, which lands on whichever
  *  drive the working directory is on (#276). */
 export function isFullyQualifiedPath(path: string, platform: NodeJS.Platform = process.platform): boolean {
-	if (platform === "win32") return /^[A-Za-z]:[\\/]/.test(path) || /^[\\/]{2}[^\\/]/.test(path);
+	// A UNC root needs both components: \\server\share.
+	if (platform === "win32") return /^[A-Za-z]:[\\/]/.test(path) || /^[\\/]{2}[^\\/]+[\\/]+[^\\/]+/.test(path);
 	return isAbsolute(path);
 }
 

@@ -398,6 +398,29 @@ describe("a start that would wait for REST needs a user-mode NIC (#268)", () => 
 		expect(instance.state.name).toBe("bridged-lab");
 	});
 
+	test("with no version given, the refusal comes before the channel lookup", async () => {
+		const originalFetch = globalThis.fetch;
+		let fetches = 0;
+		globalThis.fetch = Object.assign(
+			async () => {
+				fetches++;
+				throw new Error("network blocked in this test");
+			},
+			{ preconnect: originalFetch.preconnect },
+		) as typeof fetch;
+		try {
+			const result = await codeOf(QuickCHR.start({ arch: "x86", name: "bridged-lab", ...bridgedOnly }));
+			expect(result.code).toBe("INVALID_NETWORK");
+			const provisioning = await codeOf(QuickCHR.start({ arch: "x86", ...bridgedOnly, packages: ["container"] }));
+			expect(provisioning.code).toBe("NETWORK_UNAVAILABLE");
+			expect(provisioning.message).toContain("the new machine");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+		expect(fetches).toBe(0);
+		expect(nothingCreated()).toBe(true);
+	});
+
 	test("provisioning on a new machine with no user NIC is refused before the download", async () => {
 		const result = await codeOf(QuickCHR.start({ ...v7, ...bridgedOnly, packages: ["container"] }));
 		expect(result.code).toBe("NETWORK_UNAVAILABLE");

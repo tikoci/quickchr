@@ -124,6 +124,10 @@ describe("isFullyQualifiedPath on Windows (#276)", () => {
 		expect(isFullyQualifiedPath("\\quickchr-data", "win32")).toBe(false);
 		expect(isFullyQualifiedPath("/quickchr-data", "win32")).toBe(false);
 		expect(isFullyQualifiedPath("C:quickchr", "win32")).toBe(false);
+		// A UNC root needs a share as well as a server.
+		expect(isFullyQualifiedPath("//server", "win32")).toBe(false);
+		expect(isFullyQualifiedPath("\\\\server\\", "win32")).toBe(false);
+		expect(isFullyQualifiedPath("//server/share", "win32")).toBe(true);
 		expect(isFullyQualifiedPath("quickchr", "win32")).toBe(false);
 	});
 

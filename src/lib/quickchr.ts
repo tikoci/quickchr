@@ -284,6 +284,11 @@ function startWaitsForBoot(opts: { background?: boolean | undefined; wait?: bool
 	return (opts.background ?? true) && opts.wait !== false && !opts.frozen;
 }
 
+function machineLabel(name: string | undefined, midSentence = false): string {
+	if (name) return `${midSentence ? "machine" : "Machine"} "${name}"`;
+	return midSentence ? "the new machine" : "The new machine";
+}
+
 function describeInterfaces(networks: NetworkConfig[]): string {
 	return networks.length === 0
 		? "no network interfaces"
@@ -294,11 +299,11 @@ function describeInterfaces(networks: NetworkConfig[]): string {
  *  without a user NIC has none, so the wait could only run out its whole timeout
  *  (and a boot retry) before failing (#268). Refused before anything is spawned
  *  or resumed. `hint` names the way out for the calling operation. */
-function assertBootWaitReachable(networks: NetworkConfig[], willWait: boolean, name: string, operation: string, hint: string): void {
+function assertBootWaitReachable(networks: NetworkConfig[], willWait: boolean, name: string | undefined, operation: string, hint: string): void {
 	if (!willWait || hasUserModeNetwork(networks)) return;
 	throw new QuickCHRError(
 		"INVALID_NETWORK",
-		`Machine "${name}" has ${describeInterfaces(networks)} and no user-mode NIC, so ${operation} cannot wait for it to boot: ` +
+		`${machineLabel(name)} has ${describeInterfaces(networks)} and no user-mode NIC, so ${operation} cannot wait for it to boot: ` +
 		"quickchr reaches the guest's REST API through the user-mode NIC's port forwards, and without one the wait can only time out.",
 		hint,
 	);
@@ -312,12 +317,12 @@ const EXISTING_MACHINE_NO_USER_NIC_HINT =
 /** Provisioning runs over localhost REST/SSH, which needs a user-mode NIC. Checked
  *  before the image download and before a recorded first-boot provisioning
  *  relaunches the machine, so neither boots into a wait it cannot pass (#268). */
-function assertProvisioningReachable(networks: NetworkConfig[], name: string): void {
+function assertProvisioningReachable(networks: NetworkConfig[], name: string | undefined): void {
 	if (hasUserModeNetwork(networks)) return;
 	throw new QuickCHRError(
 		"NETWORK_UNAVAILABLE",
 		`Provisioning (packages, login setup, device-mode, license) requires a user-mode network interface for localhost access, ` +
-		`and machine "${name}" has ${describeInterfaces(networks)}. ` +
+		`and ${machineLabel(name, true)} has ${describeInterfaces(networks)}. ` +
 		"Add a user-mode network (--add-network user --add-network <spec>) or remove provisioning options.",
 	);
 }
@@ -2617,6 +2622,24 @@ export class QuickCHR {
 		const existingNames = listMachineNames();
 		const existingByName = opts.name && existingNames.includes(opts.name) ? loadMachine(opts.name) : undefined;
 
+		// A new machine's NICs are known before its version: refuse a start that could
+		// never reach the guest before a channel lookup or download (#268). Provisioning
+		// always waits for the boot, so it needs the user NIC either way.
+		if (!existingByName) {
+			const requestedNetworks = resolveStartNetworks(opts.networks, opts.network);
+			const wantsProvisioning = hasProvisioningMutations({
+				installAllPackages: opts.installAllPackages,
+				packages: opts.packages,
+				hasDeviceModeProvisioning,
+				user: opts.user,
+				disableAdmin: opts.disableAdmin,
+				license: opts.license,
+				secureLogin: opts.secureLogin,
+			});
+			if (wantsProvisioning) assertProvisioningReachable(requestedNetworks, opts.name);
+			else assertBootWaitReachable(requestedNetworks, startWaitsForBoot(opts), opts.name, "start", NEW_MACHINE_NO_USER_NIC_HINT);
+		}
+
 		// Resolve version
 		warnVersionWithChannel(opts, logger);
 		let version: string;
@@ -2742,10 +2765,6 @@ export class QuickCHR {
 		}
 
 		assertRouterOs6Arch(version, arch);
-		// Provisioning always waits for the boot, so it needs the user NIC either way.
-		const requestedNetworks = resolveStartNetworks(opts.networks, opts.network);
-		if (hasProvisioningMutations(mutations)) assertProvisioningReachable(requestedNetworks, name);
-		else assertBootWaitReachable(requestedNetworks, startWaitsForBoot(opts), name, "start", NEW_MACHINE_NO_USER_NIC_HINT);
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 		if (!opts.dryRun) {
 			opts = { ...opts, license: await resolveLicenseForBoot(opts.license) };
