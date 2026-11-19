@@ -60,8 +60,8 @@ export interface CheckpointRecord {
 	file: string;
 	index: number;
 	outcome: string;
-	duration_s?: number;
-	cap_s?: number;
+	duration_s?: number | undefined;
+	cap_s?: number | undefined;
 	ts: string;
 	host?: HostSnapshot;
 }
@@ -69,15 +69,15 @@ export interface CheckpointRecord {
 export interface LegIdentity {
 	platform: string;
 	target: string;
-	resolved?: string;
-	accel?: string;
+	resolved?: string | undefined;
+	accel?: string | undefined;
 	sha: string;
 	run_id: string;
 	attempt: string;
 }
 
 export interface CheckpointState {
-	checkRunId?: number;
+	checkRunId?: number | undefined;
 	leg: LegIdentity;
 	planned: string[];
 	startedAt: string;

@@ -195,7 +195,7 @@ export function suggestFlag(name: string, known: readonly string[]): string | un
 export function unknownFlags(
 	flags: Record<string, string | boolean | string[]>,
 	known: readonly string[],
-): Array<{ name: string; suggestion?: string }> {
+): Array<{ name: string; suggestion?: string | undefined }> {
 	return Object.keys(flags)
 		.filter((name) => !known.includes(name))
 		.map((name) => ({ name, suggestion: suggestFlag(name, known) }));
@@ -203,7 +203,7 @@ export function unknownFlags(
 
 /** Human-readable complaint for `unknownFlags()` output. Empty when nothing is unknown. */
 export function unknownFlagMessage(
-	unknown: Array<{ name: string; suggestion?: string }>,
+	unknown: Array<{ name: string; suggestion?: string | undefined }>,
 	command: string,
 ): string {
 	if (unknown.length === 0) return "";

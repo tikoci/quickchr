@@ -121,7 +121,22 @@ function defaultMem(arch: Arch, override?: number): number {
 	return override ?? (isCrossArchEmulation(arch) ? 1024 : 512);
 }
 
-/** Default boot timeout — accel mode and cross-arch emulation affect how slow the VM boots. */
+/**
+ * The boot budget, in milliseconds, that `start()` waits for a machine of `arch`
+ * to answer REST on this host, **per boot attempt**. Accelerator and cross-arch
+ * emulation scale it (see {@link accelTimeoutFactor}); a package install doubles it.
+ * Under `kvm`/`hvf`, a fresh background `start()` that times out respawns QEMU
+ * once and waits the budget again (DESIGN.md #8), and provisioning after boot
+ * has waits of its own, so a deadline for a whole `start()` needs more than one
+ * budget.
+ *
+ * Exported so callers can derive their own timeouts (a test's, a job's) from
+ * quickchr's number instead of copying it (#285). `accel` defaults to `"tcg"`,
+ * the slowest case; pass {@link detectAccel}'s result for this host's budget.
+ * Not included: `StartOptions.timeoutExtra`, which `start()` adds on top, and
+ * the CLI's `--timeout-extra` / `QUICKCHR_TIMEOUT_EXTRA` (seconds), which the
+ * CLI turns into `timeoutExtra`.
+ */
 export function defaultBootTimeout(arch: Arch, withPackages?: boolean, accel?: string): number {
 	const cross = isCrossArchEmulation(arch);
 	const factor = accelTimeoutFactor(accel ?? "tcg", cross);
@@ -132,13 +147,13 @@ export function defaultBootTimeout(arch: Arch, withPackages?: boolean, accel?: s
 }
 
 function hasProvisioningMutations(opts: {
-	installAllPackages?: boolean;
-	packages?: string[];
+	installAllPackages?: boolean | undefined;
+	packages?: string[] | undefined;
 	hasDeviceModeProvisioning?: boolean;
-	user?: { name: string; password: string };
-	disableAdmin?: boolean;
-	license?: LicenseInput;
-	secureLogin?: boolean;
+	user?: { name: string; password: string } | undefined;
+	disableAdmin?: boolean | undefined;
+	license?: LicenseInput | undefined;
+	secureLogin?: boolean | undefined;
 }): boolean {
 	return !!(
 		opts.installAllPackages ||
@@ -177,13 +192,13 @@ function warnVersionWithChannel(opts: StartOptions, logger: ProgressLogger): voi
 }
 
 function listProvisioningMutations(opts: {
-	installAllPackages?: boolean;
-	packages?: string[];
+	installAllPackages?: boolean | undefined;
+	packages?: string[] | undefined;
 	hasDeviceModeProvisioning?: boolean;
-	user?: { name: string; password: string };
-	disableAdmin?: boolean;
-	license?: LicenseInput;
-	secureLogin?: boolean;
+	user?: { name: string; password: string } | undefined;
+	disableAdmin?: boolean | undefined;
+	license?: LicenseInput | undefined;
+	secureLogin?: boolean | undefined;
 }): string[] {
 	const operations: string[] = [];
 	if (opts.installAllPackages) {
@@ -346,7 +361,7 @@ function reportSocketTransports(state: MachineState, logger: ProgressLogger): vo
  *  are not running. */
 export function registerAndResolveNetworks(
 	state: MachineState,
-	ctx: { platform: PlatformInfo; qemuVersion?: string },
+	ctx: { platform: PlatformInfo; qemuVersion?: string | undefined },
 	hostfwd: string,
 ): NetworkConfig[] {
 	try {
@@ -3004,13 +3019,13 @@ export class QuickCHR {
 		instance: ChrInstance,
 		machineState: MachineState,
 		opts: {
-			installAllPackages?: boolean;
-			packages?: string[];
-			deviceMode?: DeviceModeOptions;
-			user?: { name: string; password: string };
-			disableAdmin?: boolean;
-			license?: LicenseInput;
-			secureLogin?: boolean;
+			installAllPackages?: boolean | undefined;
+			packages?: string[] | undefined;
+			deviceMode?: DeviceModeOptions | undefined;
+			user?: { name: string; password: string } | undefined;
+			disableAdmin?: boolean | undefined;
+			license?: LicenseInput | undefined;
+			secureLogin?: boolean | undefined;
 		},
 		launchConfig: QemuLaunchConfig,
 		logger?: ProgressLogger,
@@ -3156,13 +3171,13 @@ export class QuickCHR {
 		state: MachineState,
 		background: boolean,
 		provisioningOpts?: {
-			installAllPackages?: boolean;
-			packages?: string[];
-			deviceMode?: DeviceModeOptions;
-			user?: { name: string; password: string };
-			disableAdmin?: boolean;
-			license?: LicenseInput;
-			secureLogin?: boolean;
+			installAllPackages?: boolean | undefined;
+			packages?: string[] | undefined;
+			deviceMode?: DeviceModeOptions | undefined;
+			user?: { name: string; password: string } | undefined;
+			disableAdmin?: boolean | undefined;
+			license?: LicenseInput | undefined;
+			secureLogin?: boolean | undefined;
 		},
 		logger?: ProgressLogger,
 		wait = true,

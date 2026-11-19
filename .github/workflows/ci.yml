@@ -180,6 +180,10 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Run unit tests (includes Windows-specific tests)
         run: bun test test/unit/
+      # bun run check runs on Linux only; this keeps the consumer check's Windows
+      # path (junction links, Windows tar, the tsc launcher) exercised (#285).
+      - name: Consumer type check
+        run: bun run lint:consumer
 
   # ── Integration freshness (PR only, required check) ─────────────────────────
   # The honesty contract for integration-on-main: PRs merge only while the

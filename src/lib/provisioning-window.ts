@@ -36,13 +36,13 @@ import {
 
 /** The provisioning options `start()` accepts, in one shape. */
 export interface ProvisioningRequest {
-	installAllPackages?: boolean;
-	packages?: string[];
-	deviceMode?: DeviceModeOptions;
-	user?: { name: string; password: string };
-	disableAdmin?: boolean;
-	license?: LicenseInput;
-	secureLogin?: boolean;
+	installAllPackages?: boolean | undefined;
+	packages?: string[] | undefined;
+	deviceMode?: DeviceModeOptions | undefined;
+	user?: { name: string; password: string } | undefined;
+	disableAdmin?: boolean | undefined;
+	license?: LicenseInput | undefined;
+	secureLogin?: boolean | undefined;
 }
 
 /**

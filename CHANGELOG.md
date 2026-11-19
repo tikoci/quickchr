@@ -13,6 +13,12 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Added
 
+- Library: `defaultBootTimeout(arch, withPackages?, accel?)`, `accelTimeoutFactor` and
+  `detectAccel` are exported, so a caller can derive its own timeouts (a test's, a
+  job's) from the boot budget `start()` uses instead of copying it. The budget is per
+  boot attempt: under `kvm`/`hvf` a fresh `start()` may respawn QEMU once and wait it
+  again, and provisioning waits on top. `accel` defaults to `tcg`, the slowest case;
+  `StartOptions.timeoutExtra` is not included. (#285)
 - `quickchr networks create | status | restart | remove <net>` manage macOS host
   networks. `<net>` is `shared` or `bridged:<iface>`, the same specifier machines
   use. `create` installs lima-vm's upstream socket_vmnet (pinned version and
@@ -87,6 +93,17 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- A project whose tsconfig sets `exactOptionalPropertyTypes`, as the tikoci house
+  tsconfig does, can import the library. quickchr ships its TypeScript source, so the
+  consumer's `tsc` checked it under the consumer's flags and reported 84 errors that
+  `skipLibCheck` does not skip. quickchr now builds under the house tsconfig itself, and
+  `bun run check` type-checks the packed package as such a consumer. Library: optional
+  properties that take a forwarded `undefined` are typed `x?: T | undefined`, so inputs
+  accept what they accepted before. For a consumer with `exactOptionalPropertyTypes`,
+  a widened output property (such as `MachineState.pid`) can be present and
+  `undefined`, so check the value rather than only `"pid" in state`. `typescript` moved from
+  `dependencies` to `devDependencies` (and to 7.0.2), so installing quickchr no longer
+  installs TypeScript. (#285, #278)
 - Trial licenses (#261). `--license-level unlimited` (and `--level unlimited` on
   `set --license` and `license`) failed with HTTP 400: RouterOS spells it
   `p-unlimited`. quickchr now sends `p1`, `p10` or `p-unlimited` and still accepts

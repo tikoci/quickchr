@@ -46,7 +46,7 @@ export interface PlannedLeg {
 	id: string;
 	label: string;
 	target: string;
-	resolved?: string;
+	resolved?: string | undefined;
 }
 
 /** A check run of ours, reduced to what classification needs. */
@@ -57,7 +57,7 @@ export interface CheckpointView {
 		records?: CheckpointRecord[];
 		current?: string | null;
 		startedAt?: string;
-	};
+	} | undefined;
 	checkRunId?: number;
 	/** The check run's `output.text`, verbatim — the block `payload` was parsed
 	 *  from. Carried so `finalizeLostCheckRuns` can PATCH it back untouched
@@ -65,7 +65,7 @@ export interface CheckpointView {
 	 *  so a close that omits `text` erases every per-file record the aggregate
 	 *  just read. Kept as raw text rather than re-rendered from `payload` so the
 	 *  round-trip cannot drift as the payload's shape changes. */
-	payloadText?: string;
+	payloadText?: string | undefined;
 }
 
 /** A workflow job, reduced. Survives runner loss — verified against run
@@ -94,18 +94,18 @@ export type LegTerminal = "complete" | "runner-lost" | "attempted-incomplete" | 
 export interface LegLedgerEntry {
 	platform: string;
 	target: string;
-	resolved?: string;
+	resolved?: string | undefined;
 	terminal: LegTerminal;
 	/** Last file the leg reported finishing. The answer #76 has never had. */
-	last_file?: string;
+	last_file?: string | undefined;
 	/** File it was inside when the record stops — `planned[reported]`. */
-	current_file?: string;
+	current_file?: string | undefined;
 	files_reported?: number;
 	files_planned?: number;
-	last_checkpoint_ts?: string;
+	last_checkpoint_ts?: string | undefined;
 	/** Step left non-terminal in the jobs API — coarse, free, and survives. */
 	stalled_step?: string;
-	job_conclusion?: string;
+	job_conclusion?: string | undefined;
 	/** Seconds from job start to when the SERVICE gave up. An upper bound on the
 	 *  wedge, not the wedge: the interval between a runner going quiet and that
 	 *  verdict is uncharacterized (#76). */
@@ -470,7 +470,7 @@ export function completedLegs(dataDir: string, runId: string): Set<string> {
 export function renderFinalizedOutput(
 	entry: LegLedgerEntry,
 	cp: CheckpointView,
-): { title: string; summary: string; text?: string } {
+): { title: string; summary: string; text?: string | undefined } {
 	return {
 		title: `${entry.terminal} — last file ${entry.last_file ?? "(none reported)"}`,
 		summary: [

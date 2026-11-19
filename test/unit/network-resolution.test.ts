@@ -61,7 +61,8 @@ function asUid<T>(uid: number, fn: () => T): T {
 	try {
 		return fn();
 	} finally {
-		process.getuid = original;
+		if (original) process.getuid = original;
+		else delete process.getuid;
 	}
 }
 

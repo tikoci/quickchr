@@ -105,11 +105,11 @@ export interface ManagedNetwork {
 	label: string;
 	plistPath: string;
 	programArguments: string[];
-	helperPath?: string;
-	socketPath?: string;
-	interfaceId?: string;
+	helperPath?: string | undefined;
+	socketPath?: string | undefined;
+	interfaceId?: string | undefined;
 	/** The plist's StandardErrorPath: where socket_vmnet says why it would not start. */
-	logPath?: string;
+	logPath?: string | undefined;
 }
 
 function argValue(args: string[], name: string): string | undefined {
@@ -184,7 +184,7 @@ const LEGACY_WRAPPER_NETDEV = /-netdev socket,id=[^,\s]+,fd=\d/;
 export function machineUsesManagedNetwork(
 	machine: Pick<MachineState, "networks" | "status">,
 	spec: ManagedNetworkSpec,
-	opts: { socketPath?: string; liveArgs?: string; resolveAlias?: (alias: string) => string } = {},
+	opts: { socketPath?: string | undefined; liveArgs?: string | undefined; resolveAlias?: (alias: string) => string } = {},
 ): boolean {
 	if (opts.liveArgs !== undefined && opts.socketPath) {
 		if (opts.liveArgs.includes(opts.socketPath)) return true;
@@ -223,7 +223,7 @@ export interface ManagedNetworkPlan {
 	interfaceId: string;
 	programArguments: string[];
 	/** The service this replaces, when one with the same label exists. */
-	replaces?: ManagedNetwork;
+	replaces?: ManagedNetwork | undefined;
 }
 
 export function planManagedNetwork(spec: ManagedNetworkSpec, existing?: ManagedNetwork, arch?: string): ManagedNetworkPlan {
@@ -453,9 +453,9 @@ export async function stageSocketVmnetHelper(plan: ManagedNetworkPlan, stageDir:
 export interface ManagedNetworkStatus {
 	loaded: boolean;
 	running: boolean;
-	pid?: number;
-	lastExit?: string;
-	socket?: SocketVmnetProbe;
+	pid?: number | undefined;
+	lastExit?: string | undefined;
+	socket?: SocketVmnetProbe | undefined;
 }
 
 /** Read `launchctl print` output. Only top-level (one-tab) keys: nested blocks repeat

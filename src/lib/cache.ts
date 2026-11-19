@@ -72,11 +72,11 @@ export interface CacheInventory {
 }
 
 export interface PruneOptions {
-	cacheDir?: string;
+	cacheDir?: string | undefined;
 	maxSizeBytes?: number;
 	maxAgeMs?: number;
 	olderThan?: string;
-	protectVersions?: string[];
+	protectVersions?: string[] | undefined;
 	/** Evict eligible entries, oldest version first, until this many bytes are gone. */
 	reclaimBytes?: number;
 	/** Keep entries written or used this recently. Pins are what protect a reader; this
@@ -412,7 +412,7 @@ export function pruneCacheUnderLock(
  * Best-effort auto-prune used by `start()` after a successful boot.
  * Never throws — failures are swallowed and logged.
  */
-export function autoPruneIfOverCap(opts: { logger?: (msg: string) => void; cacheDir?: string; maxSizeBytes?: number; protectVersions?: string[] } = {}): PruneResult {
+export function autoPruneIfOverCap(opts: { logger?: ((msg: string) => void) | undefined; cacheDir?: string; maxSizeBytes?: number | undefined; protectVersions?: string[] } = {}): PruneResult {
 	const cap = opts.maxSizeBytes ?? DEFAULT_CACHE_MAX_BYTES;
 	try {
 		const entries = listCacheEntries(opts.cacheDir);

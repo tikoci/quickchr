@@ -22,6 +22,7 @@ When changing QEMU/CHR behavior, update the relevant shared skill in
 
 - **Bun** — not Node.js. Use `Bun.spawn()`, `Bun.write()`, `Bun.sleep()`, `bun test`, `bun:test`.
 - No CommonJS. All code is ESM with `.ts` extensions in imports.
+- The package ships `.ts` source, so consumers type-check it under their own flags. `tsconfig.json` is the tikoci house template (`exactOptionalPropertyTypes` included): write `x?: T | undefined` when `undefined` is passed. `bun run lint:consumer` checks the packed package as a strict consumer (DESIGN.md #13, #285).
 - Test framework: `bun:test` (`describe`, `test`, `expect`).
 
 ## Architecture

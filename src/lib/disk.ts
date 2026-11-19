@@ -52,7 +52,7 @@ export function normalizeDiskOptions(
 	bootSize?: string,
 	extraDisks?: string[],
  	bootDiskFormat?: BootDiskFormat,
-): { bootSize?: string; extraDisks?: string[]; bootDiskFormat: BootDiskFormat } {
+): { bootSize?: string | undefined; extraDisks?: string[] | undefined; bootDiskFormat: BootDiskFormat } {
  	const format: BootDiskFormat = bootDiskFormat ?? (bootSize ? "qcow2" : "raw");
 
 	if (format === "raw" && bootSize) {
@@ -148,7 +148,7 @@ export async function getDiskInfo(path: string): Promise<DiskInfo> {
 
 /** The boot format a machine record implies. Records from before `bootDiskFormat`
  *  existed only had `bootSize`, which always meant qcow2. */
-export function bootDiskFormatOf(state: { bootDiskFormat?: BootDiskFormat; bootSize?: string }): BootDiskFormat {
+export function bootDiskFormatOf(state: { bootDiskFormat?: BootDiskFormat; bootSize?: string | undefined }): BootDiskFormat {
 	return state.bootDiskFormat ?? (state.bootSize ? "qcow2" : "raw");
 }
 
@@ -245,7 +245,7 @@ export async function ensureConfiguredDisks(
 	sources: DiskSources,
 ): Promise<{
 	bootDisk: { path: string; format: BootDiskFormat };
-	extraDisks?: { path: string; format: "qcow2" }[];
+	extraDisks?: { path: string; format: "qcow2" }[] | undefined;
 }> {
 	const bootPath = bootDiskPath(machineDir, bootDiskFormat);
 	let bootDisk = { path: bootPath, format: bootDiskFormat };

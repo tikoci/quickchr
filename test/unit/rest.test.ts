@@ -90,12 +90,12 @@ describe("restGet", () => {
 describe("JSON REST methods", () => {
 	test("restPost and restPatch serialize JSON bodies with content headers", async () => {
 		const seen: Array<{
-			method?: string;
-			url?: string;
+			method?: string | undefined;
+			url?: string | undefined;
 			body: string;
-			contentType?: string | string[];
-			contentLength?: string | string[];
-			authorization?: string;
+			contentType?: string | string[] | undefined;
+			contentLength?: string | string[] | undefined;
+			authorization?: string | undefined;
 		}> = [];
 		const { port } = await startMockServer(async (req, res) => {
 			const body = await readRequestBody(req);
@@ -140,10 +140,10 @@ describe("JSON REST methods", () => {
 
 	test("restRequest supports raw string bodies and bodyless methods", async () => {
 		const seen: Array<{
-			method?: string;
+			method?: string | undefined;
 			body: string;
-			contentType?: string | string[];
-			contentLength?: string | string[];
+			contentType?: string | string[] | undefined;
+			contentLength?: string | string[] | undefined;
 		}> = [];
 		const { port } = await startMockServer(async (req, res) => {
 			seen.push({

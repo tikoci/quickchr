@@ -221,7 +221,7 @@ function groupByFilesystem(parts: StoragePart[]): FilesystemGroup[] {
 export function admitStorage(
 	action: string,
 	need: StorageNeed = { parts: [] },
-	opts: { reclaim?: boolean; logger?: (message: string) => void } = {},
+	opts: { reclaim?: boolean; logger?: ((message: string) => void) | undefined } = {},
 ): StorageLease {
 	return withStorageLock(() => {
 		const reserveBytes = resolveStorageReserve();
@@ -286,7 +286,7 @@ function insufficientSpace(
 		required: number;
 		reserveBytes: number;
 		reservedByOthers: number;
-		reclaimed?: { evicted: CacheEntry[]; failed: PruneResult["failed"]; kept: PruneResult; wouldNotCover: boolean };
+		reclaimed?: { evicted: CacheEntry[]; failed: PruneResult["failed"]; kept: PruneResult; wouldNotCover: boolean } | undefined;
 	},
 ): QuickCHRError {
 	const detail = group.parts.map((part) => `${part.label} ${formatDiskSize(part.bytes)}`).join(" + ");

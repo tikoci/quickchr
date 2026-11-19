@@ -126,11 +126,11 @@ export interface HostInterface {
 	/** Human-readable port name (e.g. "Wi-Fi", "Thunderbolt 1"). */
 	name: string;
 	/** MAC address. */
-	mac?: string;
+	mac?: string | undefined;
 	/** Interface alias for --add-network convenience: "wifi", "ethernet", or undefined. */
-	alias?: "wifi" | "ethernet";
+	alias?: "wifi" | "ethernet" | undefined;
 	/** Link state from `ifconfig` (`status: active`); undefined when it reports none. */
-	active?: boolean;
+	active?: boolean | undefined;
 }
 
 /** socket_vmnet sockets found on macOS. Detection keys on the sockets: QEMU attaches
@@ -138,11 +138,11 @@ export interface HostInterface {
  *  socket file can outlive its daemon; whether it accepts is `probeSocketVmnet()`'s job. */
 export interface SocketVmnetInfo {
 	/** `socket_vmnet_client` binary, when one is installed. Informational only. */
-	client?: string;
+	client?: string | undefined;
 	/** `socket_vmnet` daemon binary, when one is found. Informational only. */
-	daemon?: string;
+	daemon?: string | undefined;
 	/** Shared-mode socket file, when present. */
-	sharedSocket?: string;
+	sharedSocket?: string | undefined;
 	/** Map of interface name → bridged socket file. */
 	bridgedSockets: Record<string, string>;
 }
@@ -239,7 +239,7 @@ export interface SnapshotInfo {
 	/** Guest VM clock at snapshot time, formatted as `HH:MM:SS.mmm`. */
 	vmClock: string;
 	/** Instruction count at snapshot time, or `undefined` if QEMU reported `--`. */
-	icount?: number;
+	icount?: number | undefined;
 }
 
 // --- Machine State ---
@@ -257,13 +257,13 @@ export interface MachineConfig {
 	ports: Record<string, PortMapping>;
 	packages: string[];
 	/** Install all packages from all_packages.zip on first boot. */
-	installAllPackages?: boolean;
-	deviceMode?: DeviceModeOptions;
-	user?: { name: string; password: string };
-	disableAdmin?: boolean;
+	installAllPackages?: boolean | undefined;
+	deviceMode?: DeviceModeOptions | undefined;
+	user?: { name: string; password: string } | undefined;
+	disableAdmin?: boolean | undefined;
 	/** Managed-login intent, recorded at `add()`/`start()`. Same rule as
 	 *  {@link StartOptions.secureLogin}: only an explicit `true` creates the account. */
-	secureLogin?: boolean;
+	secureLogin?: boolean | undefined;
 	portBase: number;
 	excludePorts: ServiceName[];
 	extraPorts: PortMapping[];
@@ -271,22 +271,22 @@ export interface MachineConfig {
 	 *  and re-applied after `clean()`. Only the level is recorded: MikroTik.com
 	 *  credentials are never persisted here and are resolved at boot (env vars, then
 	 *  the secret store). */
-	license?: LicenseLevel;
+	license?: LicenseLevel | undefined;
 	/** License level read back from the guest after it was applied — a fact about the
 	 *  current disk, cleared by `clean()`. */
-	licenseLevel?: LicenseLevel;
+	licenseLevel?: LicenseLevel | undefined;
 	/** Boot disk size override (e.g. "512M", "2G"). Requires `qemu-img` on the host.
 	 *  When set, the boot disk is converted from raw to qcow2. */
-	bootSize?: string;
+	bootSize?: string | undefined;
 	/** Extra blank disk sizes (e.g. ["512M", "1G"]). Requires `qemu-img` on the host.
 	 *  Extra disks are always created as qcow2 images. */
-	extraDisks?: string[];
+	extraDisks?: string[] | undefined;
 	/** Format of the boot disk — raw by default, qcow2 when resized. */
 	bootDiskFormat?: BootDiskFormat;
 	/** Extra QEMU argv elements recorded by `add --qemu-arg`, reused on every boot
 	 *  unless a `start` call passes its own `qemuArgs` for that session (session
 	 *  replaces stored for that boot). Appended verbatim after quickchr's own args. */
-	qemuArgs?: string[];
+	qemuArgs?: string[] | undefined;
 }
 
 /** One provisioning step, as recorded on {@link ProvisioningRecord.steps}. */
@@ -334,7 +334,7 @@ export interface ManagedSshKey {
 	 *  RouterOS's `/user/ssh-keys` listing. This is the signal #71 gates on. */
 	batchVerified: boolean;
 	/** ISO timestamp of the successful batch verification, when one happened. */
-	verifiedAt?: string;
+	verifiedAt?: string | undefined;
 }
 
 export interface MachineState extends MachineConfig {
@@ -342,26 +342,26 @@ export interface MachineState extends MachineConfig {
 	/** Last QEMU spawn. Stamped before the guest is known to have booted, so it says
 	 *  nothing about whether the guest was configured — see {@link provisioning}.
 	 *  Cleared by `clean()`, which replaces the disk that boot belonged to. */
-	lastStartedAt?: string;
+	lastStartedAt?: string | undefined;
 	/** Provisioning that landed on the current disk, if any (#176). */
-	provisioning?: ProvisioningRecord;
+	provisioning?: ProvisioningRecord | undefined;
 	/** Last `clean()`, which reset the disk to the factory image. */
 	cleanedAt?: string;
 	status: "stopped" | "running" | "error";
-	pid?: number;
+	pid?: number | undefined;
 	/** Live marker: QEMU was started with `frozen: true` (`start --frozen`) and is
 	 *  held at reset (`-S`), awaiting `continue()`. Per-boot intent like
 	 *  `wait: false`, not persisted config — stopping clears it, and a later
 	 *  plain `start` boots normally. `status` stays `"running"` while frozen. */
-	frozen?: boolean;
+	frozen?: boolean | undefined;
 	/** Path to the machine directory. */
 	machineDir: string;
 	/** Accelerator resolved for the most recent boot ("kvm" | "hvf" | "tcg"). */
 	lastAccel?: string;
 	/** Wall-clock ms from QEMU spawn to REST-ready for the most recent boot. */
-	lastBootMs?: number;
+	lastBootMs?: number | undefined;
 	/** Managed SSH key installed during provisioning, if any (issue #74). */
-	managedSshKey?: ManagedSshKey;
+	managedSshKey?: ManagedSshKey | undefined;
 }
 
 // --- Start Options ---
@@ -382,19 +382,19 @@ export interface StartOptions {
 	 *  As a convenience, a channel name (e.g. "long-term") is also accepted here and
 	 *  resolves the same as `channel: "long-term"` — but this emits a warning, since
 	 *  `channel` is the self-documenting field for that case. */
-	version?: string;
+	version?: string | undefined;
 	/** Release channel to resolve latest version from. Default: "stable". */
-	channel?: Channel;
+	channel?: Channel | undefined;
 	/** Guest architecture. Default: matches host (arm64 on Apple Silicon, x86 on Intel/AMD).
 	 *  Pass `"auto"` as an explicit synonym for the default — useful when an agent or
 	 *  caller wants to state the intent rather than omit the field. */
-	arch?: Arch | "auto";
+	arch?: Arch | "auto" | undefined;
 	/** Instance name. Auto-generated from version+arch if omitted. Must not start with "-". */
-	name?: string;
+	name?: string | undefined;
 	/** Number of virtual CPUs. Default: 1. */
-	cpu?: number;
+	cpu?: number | undefined;
 	/** Memory in MiB. Default: 512 (1024 for cross-arch TCG emulation). */
-	mem?: number;
+	mem?: number | undefined;
 	/** Run QEMU in background (true, default) or foreground with serial console on stdio (false).
 	 *  This only decides where the serial console goes — it never made `start()` return
 	 *  sooner. That is {@link StartOptions.wait}. */
@@ -408,7 +408,7 @@ export interface StartOptions {
 	 *  `wait: false` — including first-boot options `add()` recorded. Both are refused
 	 *  (`INVALID_ARGUMENT`) rather than silently skipped, as is `background: false`,
 	 *  which blocks on the serial console regardless. */
-	wait?: boolean;
+	wait?: boolean | undefined;
 	/** Extra packages to install after boot.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
 	packages?: string[];
@@ -417,13 +417,13 @@ export interface StartOptions {
 	 *  `add()` recorded; an explicit `false` overrides it. The same holds for
 	 *  `disableAdmin` and `secureLogin`.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
-	installAllPackages?: boolean;
+	installAllPackages?: boolean | undefined;
 	/** Create a user after boot.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
-	user?: { name: string; password: string };
+	user?: { name: string; password: string } | undefined;
 	/** Disable the default admin account after boot.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
-	disableAdmin?: boolean;
+	disableAdmin?: boolean | undefined;
 	/** Create a 'quickchr' managed account with a generated password. **Only an explicit
 	 *  `true` does this.** Unset and `false` are the same: the machine keeps the factory
 	 *  `admin` login with an empty password (exec still works). The CLI resolves the
@@ -432,14 +432,14 @@ export interface StartOptions {
 	 *  `provision()` point here.
 	 *  Enabling the managed login path is quickchr provisioning, so it is validated/tested
 	 *  on RouterOS 7.20.8+ only. */
-	secureLogin?: boolean;
+	secureLogin?: boolean | undefined;
 	/** Convenience alias: `noAuth: true` is equivalent to `secureLogin: false` —
 	 *  skip the managed `quickchr` user provisioning, leave admin password-less.
 	 *  Self-documenting alternative for callers who find `secureLogin: false` cryptic.
 	 *  When both are set, an explicit `secureLogin` value wins. */
 	noAuth?: boolean;
 	/** Starting port number for this instance's port block. Auto-allocated if omitted. */
-	portBase?: number;
+	portBase?: number | undefined;
 	/** Services to exclude from port mappings (e.g. ["winbox", "api-ssl"]). */
 	excludePorts?: ServiceName[];
 	/** Additional host→guest port forwards appended to the default service set —
@@ -474,7 +474,7 @@ export interface StartOptions {
 	 *  // management + host-visible L2 (e.g. to receive MNDP on the host):
 	 *  networks: ["user", { type: "socket-connect", port: hostTcpServerPort }]
 	 */
-	networks?: NetworkSpecifier[];
+	networks?: NetworkSpecifier[] | undefined;
 	/** @deprecated Ignored — nothing ever read it, so it never installed anything (#193).
 	 *  `quickchr doctor` lists missing host dependencies. To be removed in a later minor. */
 	installDeps?: boolean;
@@ -484,22 +484,22 @@ export interface StartOptions {
 	 *  Pass a level string (e.g. "p1") to auto-resolve MikroTik credentials,
 	 *  or a LicenseOptions object to supply credentials explicitly.
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
-	license?: LicenseInput;
+	license?: LicenseInput | undefined;
 	/** Configure /system/device-mode after boot. If omitted, CHR boots with RouterOS defaults (mode=advanced).
 	 *  This is quickchr provisioning, so it is validated/tested on RouterOS 7.20.8+ only. */
-	deviceMode?: DeviceModeOptions;
+	deviceMode?: DeviceModeOptions | undefined;
 	/** Boot disk size override (e.g. "512M", "2G"). Requires `qemu-img` on the host.
 	 *  Converts the boot disk to qcow2 before first boot. */
-	bootSize?: string;
+	bootSize?: string | undefined;
 	/** Boot disk format. `qcow2` enables snapshots and resize; `raw` keeps the original raw image.
 	 *  Raw boot disks cannot be resized. */
 	bootDiskFormat?: BootDiskFormat;
 	/** Extra blank disks to attach, specified as sizes (e.g. ["512M", "1G"]).
 	 *  Requires `qemu-img` on the host. Extra disks are always qcow2. */
-	extraDisks?: string[];
+	extraDisks?: string[] | undefined;
 	/** Extra milliseconds added to the computed boot timeout.
 	 *  Useful on slow hosts where `defaultBootTimeout` underestimates actual boot time. */
-	timeoutExtra?: number;
+	timeoutExtra?: number | undefined;
 	/** Extra QEMU argv elements, one array entry per argv element, appended verbatim
 	 *  (no splitting, no validation) after quickchr's own args.
 	 *
@@ -513,7 +513,7 @@ export interface StartOptions {
 	 *  Ordering is load-bearing: passthrough goes last, so conflicting QEMU options
 	 *  resolve last-wins (e.g. a duplicate `-M pc,...` merges over quickchr's `-M pc`).
 	 *  A bad element surfaces as `SPAWN_FAILED` with the QEMU log tail. */
-	qemuArgs?: string[];
+	qemuArgs?: string[] | undefined;
 	/** Progress callback for status messages during start.
 	 *  If not provided, messages go to console.log.
 	 *  Debug-level messages (prefixed [debug]) are only emitted when QUICKCHR_DEBUG=1. */
@@ -524,7 +524,7 @@ export interface StartOptions {
 	 *  the spawn early-exit check, like `wait: false` — resume with
 	 *  `continue()`. Refused with provisioning and with `background: false`.
 	 *  Per-boot intent: never persisted, so a later plain `start` boots normally. */
-	frozen?: boolean;
+	frozen?: boolean | undefined;
 }
 
 // --- Instance (runtime handle) ---
@@ -704,7 +704,7 @@ export interface ContinueOptions {
 	/** Extra milliseconds added to the computed boot timeout — the same knob as
 	 *  `StartOptions.timeoutExtra`, for slow hosts where the default underestimates
 	 *  the resume-to-ready time. */
-	timeoutExtra?: number;
+	timeoutExtra?: number | undefined;
 }
 
 /**
@@ -943,12 +943,12 @@ export interface PlatformInfo {
 	os: "darwin" | "linux" | "win32";
 	hostArch: "x64" | "arm64";
 	packageManager: PackageManager;
-	qemuBinX86?: string;
-	qemuBinArm64?: string;
-	qemuImg?: string;
-	efiFirmware?: EfiFirmwarePaths;
+	qemuBinX86?: string | undefined;
+	qemuBinArm64?: string | undefined;
+	qemuImg?: string | undefined;
+	efiFirmware?: EfiFirmwarePaths | undefined;
 	accelAvailable: string[];
-	socketVmnet?: SocketVmnetInfo;
+	socketVmnet?: SocketVmnetInfo | undefined;
 }
 
 // --- Doctor ---
@@ -1030,7 +1030,7 @@ export type ErrorCode =
 
 export class QuickCHRError extends Error {
 	code: ErrorCode;
-	installHint?: string;
+	installHint?: string | undefined;
 
 	constructor(code: ErrorCode, message: string, installHint?: string) {
 		super(message);
@@ -1048,13 +1048,13 @@ export type ExecTransport = "auto" | "rest" | "ssh" | "console" | "qga";
 /** Options for ChrInstance.exec(). */
 export interface ExecOptions {
 	/** Transport to use. "auto" tries REST, then console only on refused/unreachable connections; never replays resets/timeouts. */
-	via?: ExecTransport;
+	via?: ExecTransport | undefined;
 	/** Override username (default: resolved from machine config). */
-	user?: string;
+	user?: string | undefined;
 	/** Override password (default: resolved from machine config). */
-	password?: string;
+	password?: string | undefined;
 	/** Request timeout in milliseconds (default: 30 000). */
-	timeout?: number;
+	timeout?: number | undefined;
 }
 
 /** Result of a ChrInstance.exec() call.
@@ -1142,7 +1142,7 @@ export interface QgaNetworkInterface {
 	/** RouterOS interface name, e.g. "ether1" */
 	name: string;
 	/** MAC address, e.g. "0e:61:47:d8:43:2a" */
-	mac?: string;
+	mac?: string | undefined;
 	ipAddresses: QgaNetworkIpAddress[];
 }
 
@@ -1151,7 +1151,7 @@ export interface QgaTimezone {
 	/** Offset from UTC in seconds (positive = east of UTC) */
 	offset: number;
 	/** IANA timezone name if reported by the guest */
-	zone?: string;
+	zone?: string | undefined;
 }
 
 /** Filesystem freeze state returned by {@link qgaFsFreezeStatus}. */
@@ -1177,9 +1177,9 @@ export type LicenseLevelInput = LicenseLevel | "unlimited";
  *  from env vars (MIKROTIK_WEB_ACCOUNT / MIKROTIK_WEB_PASSWORD) or the secret store.
  */
 export interface LicenseOptions {
-	account?: string;
-	password?: string;
-	level?: LicenseLevelInput;
+	account?: string | undefined;
+	password?: string | undefined;
+	level?: LicenseLevelInput | undefined;
 }
 
 /** License shorthand accepted by StartOptions.license.
@@ -1193,11 +1193,11 @@ export type LicenseInput = LicenseLevelInput | LicenseOptions;
 /** Device-mode options for /system/device-mode/update. */
 export interface DeviceModeOptions {
 	/** Profile mode. Supports known modes plus unknown future values. */
-	mode?: string;
+	mode?: string | undefined;
 	/** Feature names to set to yes (e.g. container, routerboard). */
-	enable?: string[];
+	enable?: string[] | undefined;
 	/** Feature names to set to no (e.g. zerotier, iot). */
-	disable?: string[];
+	disable?: string[] | undefined;
 }
 
 // --- Known extra packages ---

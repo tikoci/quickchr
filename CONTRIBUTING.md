@@ -116,9 +116,10 @@ QUICKCHR_INTEGRATION=1 bun test test/integration/
 ### Linting and Type Checking
 
 ```bash
-bun run check           # Biome + tsc --noEmit + markdownlint
+bun run check           # Biome + tsc --noEmit + markdownlint + the other lint:* checks
 bun run lint:biome      # Biome only
 bun run lint:typecheck  # tsc --noEmit only
+bun run lint:consumer   # pack, then type-check an import of it under the house tsconfig (#285)
 ```
 
 ### Project Structure

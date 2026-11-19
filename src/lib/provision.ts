@@ -23,7 +23,7 @@ export interface ProvisionResult {
 	user: { name: string; password: string } | null;
 	/** The managed SSH key installed for that user, if provisioning installed one
 	 *  (issue #74). Absent when no key was installed. */
-	managedSshKey?: ManagedSshKey;
+	managedSshKey?: ManagedSshKey | undefined;
 }
 
 async function readUser(httpPort: number, auth: string, name: string): Promise<Record<string, unknown> | undefined> {

@@ -26,11 +26,11 @@ export type SocketMode = "mcast" | "listen-connect" | "dgram";
 export interface SocketEntry {
 	name: string;
 	mode: SocketMode;
-	mcastGroup?: string;
+	mcastGroup?: string | undefined;
 	/** Host port for `listen-connect` and `mcast`. Absent on a `dgram` link, which
 	 *  addresses its ends by filesystem path and uses no port at all — carrying a
 	 *  number there would be a field that looks meaningful and is not. */
-	port?: number;
+	port?: number | undefined;
 	createdAt: string;
 	/** Machines that currently reference this socket. */
 	members: string[];
@@ -43,7 +43,7 @@ export interface SocketEntry {
 	 *  before `resolveAllNetworks()`, so the starting machine had always added itself
 	 *  by the time the resolver asked whether it was first, and every member resolved
 	 *  to `connect=`. Nobody ever listened. */
-	endpoints?: (string | null)[];
+	endpoints?: (string | null)[] | undefined;
 	/** Auto-created by `start()` (true) vs explicit user/CLI creation (false). */
 	autoCreated: boolean;
 }
@@ -298,7 +298,7 @@ function allocatePort(): number {
 
 export function createNamedSocket(
 	name: string,
-	opts?: { mode?: SocketMode; port?: number; mcastGroup?: string; autoCreated?: boolean },
+	opts?: { mode?: SocketMode | undefined; port?: number | undefined; mcastGroup?: string | undefined; autoCreated?: boolean },
 ): SocketEntry {
 	return withEntryLock(name, () => {
 		if (reloadEntry(name)) {
@@ -312,7 +312,7 @@ export function createNamedSocket(
  *  established that the name is free. */
 function createEntry(
 	name: string,
-	opts?: { mode?: SocketMode; port?: number; mcastGroup?: string; autoCreated?: boolean },
+	opts?: { mode?: SocketMode | undefined; port?: number | undefined; mcastGroup?: string | undefined; autoCreated?: boolean },
 ): SocketEntry {
 	// The name becomes a filename under networks/ and is echoed back in every
 	// `--add-network socket::<name>`, so it is validated before anything is written —

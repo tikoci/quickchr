@@ -485,12 +485,12 @@ export interface FailureTrigger {
 	error: string;
 	/** ms from REST-ready to the failure, when derivable. Distinguishes a reset
 	 *  seconds after boot from one many operations later. */
-	sinceReadyMs?: number;
+	sinceReadyMs?: number | undefined;
 	/** The credential/database change immediately preceding the failed request —
 	 *  #69's suspected precondition. Free text, e.g.
 	 *  `createUser(testuser) then auth as testuser`. Callers state what they did;
 	 *  nothing here infers it. */
-	credentialTransition?: string;
+	credentialTransition?: string | undefined;
 }
 
 export interface BootFailureContext {
@@ -500,8 +500,8 @@ export interface BootFailureContext {
 	accel: string;
 	/** Omitted by non-boot captures, which have no boot budget to report. */
 	bootTimeoutMs?: number;
-	pid?: number;
-	httpPort?: number;
+	pid?: number | undefined;
+	httpPort?: number | undefined;
 	portBase?: number;
 	qemuArgs?: string[];
 	probe?: BootProbeStats;
@@ -527,9 +527,9 @@ export interface BootFailureContext {
 	/** Runs one RouterOS command over the serial console. Injected (console.ts)
 	 *  so this module keeps no channel dependency. Omit to skip guest-side
 	 *  capture entirely — e.g. when no serial channel exists. */
-	guestExec?: GuestExec;
+	guestExec?: GuestExec | undefined;
 	/** Account `guestExec` logs in as. Recorded in the report only. */
-	guestUser?: string;
+	guestUser?: string | undefined;
 }
 
 export interface BootFailureReport {

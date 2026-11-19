@@ -156,7 +156,7 @@ export interface HostSnapshot {
 	cpuCount: number;
 	totalMemMiB: number;
 	freeMemMiB: number;
-	freeDiskMiB?: number;
+	freeDiskMiB?: number | undefined;
 	loadAvg: number[];
 	/**
 	 * HOST uptime, from `os.uptime()`.
@@ -167,7 +167,7 @@ export interface HostSnapshot {
 	 * checkpoint's number as if it meant the watchdog's.
 	 */
 	hostUptimeS: number;
-	qemuCount?: number;
+	qemuCount?: number | undefined;
 	/**
 	 * Free disk on the volume holding quickchr's data dir, in MiB.
 	 *
@@ -177,7 +177,7 @@ export interface HostSnapshot {
 	 * disks and snapshots. On macOS and Linux runners they usually coincide, and
 	 * reporting both makes that a measurement rather than an assumption.
 	 */
-	freeDataDiskMiB?: number;
+	freeDataDiskMiB?: number | undefined;
 	/** macOS only — kernel's system-wide free percentage (`memory_pressure -Q`). */
 	memFreePct?: number;
 	/** macOS only — swap in use, MiB (`vm.swapusage`). */

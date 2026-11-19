@@ -327,7 +327,9 @@ export function accelNote(guestArch: "x86" | "arm64", accel: string): string | n
 	);
 }
 
-/** Detect available QEMU acceleration for a guest architecture. */
+/** Detect available QEMU acceleration for a guest architecture: `"kvm"`, `"hvf"`
+ *  or `"tcg"`. An `accel` setting (`--accel`, `QUICKCHR_ACCEL`, quickchr.env)
+ *  other than `auto` wins over detection. */
 export async function detectAccel(guestArch: "x86" | "arm64"): Promise<string> {
 	const forced = resolveAccelOverride();
 	if (forced !== "auto") return forced;

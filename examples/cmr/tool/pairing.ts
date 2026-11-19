@@ -40,9 +40,9 @@ export const strategyNames = Object.keys(STRATEGIES) as Strategy[];
 export type Verdict = "paired" | "half-paired" | "pending" | "absent" | "other";
 
 export interface Observation {
-	clientStatus?: string;
-	pairingStatus?: string;
-	row?: Row;
+	clientStatus?: string | undefined;
+	pairingStatus?: string | undefined;
+	row?: Row | undefined;
 	verdict: Verdict;
 }
 
