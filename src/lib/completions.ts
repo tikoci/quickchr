@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { listMachineNames, getMachinesDir } from "./state.ts";
+import { userHomeDir } from "./paths.ts";
 
 export type SupportedShell = "bash" | "zsh" | "fish";
 const SUPPORTED_SHELLS: SupportedShell[] = ["bash", "zsh", "fish"];
@@ -99,10 +100,6 @@ export interface CompletionInstallPath {
 	rcFile?: string;
 }
 
-function homeDir(): string {
-	return process.env.HOME ?? process.env.USERPROFILE ?? "";
-}
-
 function brewPrefix(): string | undefined {
 	// Check common Homebrew prefix locations; avoid spawning brew for speed.
 	for (const p of ["/opt/homebrew", "/usr/local"]) {
@@ -112,7 +109,7 @@ function brewPrefix(): string | undefined {
 }
 
 function quickchrCompletionsDir(): string {
-	const dataDir = join(homeDir(), ".local", "share", "quickchr", "completions");
+	const dataDir = join(userHomeDir(), ".local", "share", "quickchr", "completions");
 	return dataDir;
 }
 
@@ -121,7 +118,7 @@ function quickchrCompletionsDir(): string {
  * Prefers Homebrew locations when available (no rc modification needed).
  */
 export function completionInstallPath(shell: SupportedShell): CompletionInstallPath {
-	const home = homeDir();
+	const home = userHomeDir();
 	const brew = brewPrefix();
 
 	if (shell === "bash") {

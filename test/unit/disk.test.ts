@@ -9,6 +9,7 @@ import {
 	cleanDiskFiles,
 	getDiskInfo,
 	parseSnapshotList,
+	mergeSnapshotMetadata,
 	formatSnapshotTable,
 	formatDiskSize,
 } from "../../src/lib/disk.ts";
@@ -284,7 +285,8 @@ describe("parseSnapshotList", () => {
 		expect(snaps[0]?.name).toBe("test");
 		expect(snaps[0]?.id).toBe("0"); // "--" maps to "0"
 		expect(snaps[0]?.vmStateSize).toBe(113 * 1024 * 1024);
-		expect(snaps[0]?.date).toBe("2026-04-14T00:47:19Z");
+		// Monitor dates are host local time, so the UTC instant depends on the TZ.
+		expect(snaps[0]?.date).toBe(new Date(2026, 3, 14, 0, 47, 19).toISOString());
 		expect(snaps[0]?.vmClock).toBe("0000:01:17.163");
 		expect(snaps[0]?.icount).toBeUndefined();
 		expect(snaps[1]?.name).toBe("before-upgrade");
@@ -319,11 +321,69 @@ describe("parseSnapshotList", () => {
 		expect(snaps[0]?.vmClock).toBe("00:00:41.532");
 	});
 
+	test("partial (non-loadable) snapshots are not listed (#266)", () => {
+		const output = [
+			"List of snapshots present on all disks:",
+			"ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT",
+			"--        whole             113 MiB 2026-11-11 06:50:00  0000:00:10.000         --",
+			"",
+			"List of partial (non-loadable) snapshots on 'virtio0':",
+			"ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT",
+			"1         s1                113 MiB 2026-11-11 06:53:07  0000:00:13.430         --",
+		].join("\n");
+		const snaps = parseSnapshotList(output);
+		expect(snaps.map((s) => s.name)).toEqual(["whole"]);
+	});
+
+	test("a snapshot whose tag contains 'non-loadable' is still listed (#266)", () => {
+		const output = [
+			"List of snapshots present on all disks:",
+			"ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT",
+			"--        backup-non-loadable 113 MiB 2026-11-11 06:50:00  0000:00:10.000         --",
+			"--        after             113 MiB 2026-11-11 06:51:00  0000:00:11.000         --",
+		].join("\n");
+		expect(parseSnapshotList(output).map((s) => s.name)).toEqual(["backup-non-loadable", "after"]);
+	});
+
+	// The stopped path's qemu-img date-sec goes through toISOString() too.
+	test("the monitor's local date is parsed as local time, not UTC (#266)", () => {
+		const local = new Date(2026, 10, 11, 6, 53, 7);
+		const output = "--        s1                113 MiB 2026-11-11 06:53:07  0000:00:13.430         --";
+		expect(parseSnapshotList(output)[0]?.date).toBe(local.toISOString());
+	});
+
 	test("parses rows without an ICOUNT column", () => {
 		const output = "--        baseline           47 MiB 2026-07-05 04:37:01    00:00:41.532";
 		const snaps = parseSnapshotList(output);
 		expect(snaps).toHaveLength(1);
 		expect(snaps[0]?.icount).toBeUndefined();
+	});
+});
+
+describe("mergeSnapshotMetadata (#266)", () => {
+	const row = (name: string, id: string, date: string) => ({ id, name, vmStateSize: 1, date, vmClock: "00:00:01.000" });
+	const live = [row("a", "0", "2026-11-01T08:30:00.000Z"), row("b", "0", "2026-11-01T08:40:00.000Z")];
+
+	test("ids and dates come from the qcow2 metadata for the live rows", () => {
+		const onDisk = [row("a", "1", "2026-11-01T09:30:00.000Z"), row("b", "2", "2026-11-01T09:40:00.000Z")];
+		expect(mergeSnapshotMetadata(live, onDisk)).toEqual([
+			row("a", "1", "2026-11-01T09:30:00.000Z"),
+			row("b", "2", "2026-11-01T09:40:00.000Z"),
+		]);
+	});
+
+	test("no readable metadata (qemu-img failed) keeps the monitor rows as parsed", () => {
+		expect(mergeSnapshotMetadata(live, [])).toEqual(live);
+	});
+
+	test("a live row with no disk entry keeps its own id and date", () => {
+		const merged = mergeSnapshotMetadata(live, [row("a", "1", "2026-11-01T09:30:00.000Z")]);
+		expect(merged[1]).toEqual(live[1]);
+	});
+
+	test("a tag only on disk (partial, left out by the monitor) is not added", () => {
+		const merged = mergeSnapshotMetadata([live[0] ?? row("a", "0", "")], [row("a", "1", "x"), row("partial", "3", "y")]);
+		expect(merged.map((s) => s.name)).toEqual(["a"]);
 	});
 });
 

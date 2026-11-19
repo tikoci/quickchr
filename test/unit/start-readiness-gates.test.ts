@@ -359,3 +359,113 @@ describe("continue reuses the frozen launch's recorded accelerator (#214)", () =
 		expect({ exit, output: stdout + stderr }).toEqual({ exit: 0, output: "" });
 	});
 });
+
+describe("a start that would wait for REST needs a user-mode NIC (#268)", () => {
+	const v7 = { version: "7.25.1", arch: "x86" as const, name: "bridged-lab" };
+	const bridgedOnly = { networks: [{ type: "bridged" as const, iface: "en0" }] };
+
+	test("start() with only a bridged NIC is refused before any I/O", async () => {
+		const result = await codeOf(QuickCHR.start({ ...v7, ...bridgedOnly }));
+		expect(result.code).toBe("INVALID_NETWORK");
+		expect(result.message).toContain("no user-mode NIC");
+		expect(nothingCreated()).toBe(true);
+	});
+
+	test("the hint names both ways out", async () => {
+		try {
+			await QuickCHR.start({ ...v7, ...bridgedOnly });
+			throw new Error("expected a refusal");
+		} catch (e) {
+			expect((e as QuickCHRError).installHint).toContain("--add-network user");
+			expect((e as QuickCHRError).installHint).toContain("--no-wait");
+		}
+	});
+
+	test("a stopped add()-created machine with no user NIC is refused, not booted", async () => {
+		seed(addedRecord("bridged-lab", "7.25.1", { networks: [{ specifier: { type: "bridged", iface: "en0" }, id: "net0" }] }));
+		const result = await codeOf(QuickCHR.start({ name: "bridged-lab" }));
+		expect(result.code).toBe("INVALID_NETWORK");
+		expect(existsSync(join(machineDir("bridged-lab"), "qemu.pid"))).toBe(false);
+	});
+
+	test("an already-running machine with no user NIC still returns its handle", async () => {
+		seed(addedRecord("bridged-lab", "7.25.1", {
+			networks: [{ specifier: { type: "bridged", iface: "en0" }, id: "net0" }],
+			status: "running",
+			pid: process.pid,
+		}));
+		const instance = await QuickCHR.start({ name: "bridged-lab" });
+		expect(instance.state.name).toBe("bridged-lab");
+	});
+
+	test("with no version given, the refusal comes before the channel lookup", async () => {
+		const originalFetch = globalThis.fetch;
+		let fetches = 0;
+		globalThis.fetch = Object.assign(
+			async () => {
+				fetches++;
+				throw new Error("network blocked in this test");
+			},
+			{ preconnect: originalFetch.preconnect },
+		) as typeof fetch;
+		try {
+			const result = await codeOf(QuickCHR.start({ arch: "x86", name: "bridged-lab", ...bridgedOnly }));
+			expect(result.code).toBe("INVALID_NETWORK");
+			const provisioning = await codeOf(QuickCHR.start({ arch: "x86", ...bridgedOnly, packages: ["container"] }));
+			expect(provisioning.code).toBe("NETWORK_UNAVAILABLE");
+			expect(provisioning.message).toContain("the new machine");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+		expect(fetches).toBe(0);
+		expect(nothingCreated()).toBe(true);
+	});
+
+	test("provisioning on a new machine with no user NIC is refused before the download", async () => {
+		const result = await codeOf(QuickCHR.start({ ...v7, ...bridgedOnly, packages: ["container"] }));
+		expect(result.code).toBe("NETWORK_UNAVAILABLE");
+		expect(nothingCreated()).toBe(true);
+	});
+
+	test("recorded first-boot provisioning on a machine with no user NIC is refused, not booted", async () => {
+		seed(addedRecord("bridged-lab", "7.25.1", {
+			networks: [{ specifier: { type: "bridged", iface: "en0" }, id: "net0" }],
+			packages: ["container"],
+		}));
+		for (const extra of [{}, { background: false }]) {
+			const result = await codeOf(QuickCHR.start({ name: "bridged-lab", ...extra }));
+			expect(result.code).toBe("NETWORK_UNAVAILABLE");
+		}
+		expect(existsSync(join(machineDir("bridged-lab"), "qemu.pid"))).toBe(false);
+	});
+
+	test("a waiting continue() on a frozen machine with no user NIC is refused before it resumes", async () => {
+		seed(addedRecord("bridged-lab", "7.25.1", {
+			networks: [{ specifier: { type: "bridged", iface: "en0" }, id: "net0" }],
+			status: "running",
+			pid: process.pid,
+			frozen: true,
+		}));
+		const instance = await QuickCHR.start({ name: "bridged-lab" });
+		const result = await codeOf(instance.continue());
+		expect(result.code).toBe("INVALID_NETWORK");
+		expect(result.message).toContain("continue cannot wait");
+		expect(loadMachine("bridged-lab")?.frozen).toBe(true);
+	});
+
+	test("user alongside bridged passes this check", async () => {
+		const result = await codeOf(QuickCHR.start({ ...v7, networks: ["user", { type: "bridged", iface: "en0" }], dryRun: true }).then(() => {
+			throw new QuickCHRError("STATE_ERROR", "resolved");
+		}));
+		expect(result.message).toBe("resolved");
+	});
+
+	test("wait: false, frozen and a foreground start never wait, so they pass this check", async () => {
+		for (const extra of [{ wait: false }, { frozen: true }, { background: false }]) {
+			const result = await codeOf(QuickCHR.start({ ...v7, ...bridgedOnly, ...extra, dryRun: true }).then(() => {
+				throw new QuickCHRError("STATE_ERROR", "resolved");
+			}));
+			expect(result.message).toBe("resolved");
+		}
+	});
+});

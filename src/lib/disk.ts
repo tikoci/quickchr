@@ -314,6 +314,10 @@ export function parseSnapshotList(monitorOutput: string): SnapshotInfo[] {
 	const snapshots: SnapshotInfo[] = [];
 
 	for (const line of lines) {
+		// QEMU lists snapshots missing from some disks under a second heading,
+		// "List of partial (non-loadable) snapshots on '<drive>':". `loadvm` refuses
+		// them, so they are not snapshots of this machine — stop before them (#266).
+		if (/^\s*List of partial \(non-loadable\) snapshots/i.test(line)) break;
 		// Match snapshot data lines: ID, TAG, VM SIZE, DATE (YYYY-MM-DD HH:MM:SS), VM CLOCK, ICOUNT
 		// Example: "--      test              113 MiB 2026-04-14 00:47:19  0000:01:17.163         --"
 		// Example: "1       snap1             113 MiB 2026-04-14 00:47:19  0000:01:17.163         --"
@@ -332,7 +336,11 @@ export function parseSnapshotList(monitorOutput: string): SnapshotInfo[] {
 			id: id === "--" ? "0" : id,
 			name: name,
 			vmStateSize: parseVmSize(vmSizeStr),
-			date: dateStr.replace(" ", "T") + "Z",
+			// The monitor prints the QEMU host's local time. Parse it as local (no
+			// zone suffix), in the stopped path's toISOString() form. Local time is
+			// ambiguous across a DST change, so `snapshot.list()` prefers the qcow2
+			// date-sec when it can read it (#266).
+			date: new Date(dateStr.replace(" ", "T")).toISOString(),
 			vmClock: vmClock,
 			icount: icountStr && icountStr !== "--" ? Number(icountStr) : undefined,
 		});
@@ -355,6 +363,23 @@ function parseVmSize(sizeStr: string): number {
 		"tib": 1024 ** 4, "tb": 1000 ** 4,
 	};
 	return Math.round(value * (multipliers[unit] ?? 1));
+}
+
+/**
+ * Combine a running machine's monitor listing with the boot disk's qcow2 metadata.
+ *
+ * The monitor (`live`) decides *which* snapshots exist: it leaves out partial ones
+ * that `loadvm` cannot load. Its dates are local wall-clock time, ambiguous across
+ * a DST change, and its ids read `--`. So each live row takes `id` and `date` from
+ * the same-named `qemu-img` entry (`onDisk`, from `date-sec`) when there is one,
+ * and keeps its own otherwise, e.g. when `qemu-img` could not read the disk (#266).
+ * A tag present only on disk is never added.
+ */
+export function mergeSnapshotMetadata(live: SnapshotInfo[], onDisk: SnapshotInfo[]): SnapshotInfo[] {
+	return live.map((snap) => {
+		const meta = onDisk.find((d) => d.name === snap.name);
+		return meta ? { ...snap, id: meta.id, date: meta.date } : snap;
+	});
 }
 
 /**

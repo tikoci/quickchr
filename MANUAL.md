@@ -333,7 +333,10 @@ gdbstub). Sends one monitor `cont`, then waits for RouterOS to become
 ready — the same promise `start` makes. `--no-wait` returns right after
 resuming; `--timeout-extra`/`-T` extends the resume timeout like `start`. Idempotent: when the guest is already running (e.g. gdb
 continued it), this just clears the frozen marker. A machine that never
-reaches readiness is a `BOOT_TIMEOUT`; it is stopped and preserved.
+reaches readiness is a `BOOT_TIMEOUT`; it is stopped and preserved. A
+machine with no `user` NIC has no REST forward to wait on, so a waiting
+`continue` is refused (`INVALID_NETWORK`) before it resumes anything; use
+`--no-wait`.
 
 `--frozen` exists for harnesses that must touch the guest before RouterOS
 init runs — e.g. patching guest RAM via gdb, then resuming:
@@ -670,9 +673,11 @@ drift; their route stays `quickchr clean <name>` followed by the original comman
 
 #### `snapshot <name> <list | save [snapname] | load <snapname> | delete <snapname>>` (alias `snap`)
 
-Internal qcow2 snapshots. `save` requires the machine running (`savevm`
-goes through QEMU monitor). `list` and `delete` work in either state
-(uses `qemu-img info` when stopped). Requires `bootDiskFormat: qcow2`.
+Internal qcow2 snapshots of the boot disk **and every `--add-disk` disk**
+(see §13). `save`, `load` and `delete` require the machine running (they go
+through the QEMU monitor's `savevm`/`loadvm`/`delvm`). `list` works in either
+state (uses `qemu-img info` on `boot.qcow2` when stopped). Requires
+`bootDiskFormat: qcow2`.
 
 ### Meta
 
@@ -891,7 +896,7 @@ mutate any machine's `machine.json`.
 
 | Env var | Effect |
 |---|---|
-| `QUICKCHR_DATA_DIR` | Override the data root (defaults to `~/.local/share/quickchr` on POSIX or the Windows path — see §8) |
+| `QUICKCHR_DATA_DIR` | Override the data root (defaults to `~/.local/share/quickchr` on POSIX or the Windows path — see §8). Must be an absolute path |
 | `QUICKCHR_NO_PROMPT` | Force non-interactive mode (skips all wizards) |
 | `QUICKCHR_DEBUG` | Emit `[debug]` lines from the progress logger |
 | `QUICKCHR_INTEGRATION` | Required to run `test/integration/` |
@@ -1364,6 +1369,15 @@ the first interface, and SLiRP's built-in DHCP needs the
 `10.0.2.15` address to make `hostfwd` work (see DESIGN.md
 §SLiRP-must-be-ether1 and `test/lab/slirp-hostfwd/`).
 
+Any `--add-network` **replaces** the default list, so `user` is present only
+if you list it: `--add-network user --add-network bridged:en0`. quickchr
+reaches REST and SSH through the `user` NIC's port forwards, so a `start` that
+would wait for the boot refuses a machine without one (`INVALID_NETWORK`,
+before anything is downloaded or spawned). Pass `--no-wait` or `--fg` to boot
+such a machine anyway. Provisioning always needs the `user` NIC
+(`NETWORK_UNAVAILABLE`, also before the download). Likewise `continue` on a
+frozen machine without one needs `--no-wait`.
+
 ### Which mechanism? (by traffic shape)
 
 Picking among the specifiers/forwards by *goal* — full guide with recipes in
@@ -1510,7 +1524,10 @@ restrictions, half-open SLiRP under TCG), see `docs/networking.md`.
 ```
 
 The data root is `~/.local/share/quickchr/`; `XDG_DATA_HOME` does not
-change it. Override the whole tree with `QUICKCHR_DATA_DIR=/some/path`.
+change it. Override the whole tree with `QUICKCHR_DATA_DIR=/some/path`, which
+must be absolute (a relative value is refused with `STATE_ERROR`). `~` is `HOME`,
+then `USERPROFILE`, then the OS account's home directory, so the data and config
+trees agree even when `HOME` is unset (launchd, cron, a minimal-env child).
 
 **Global settings** live separately, under the XDG **config** tier, not this
 data tree: `~/.config/quickchr/quickchr.env` (dotenv-style). See §3's
@@ -1837,8 +1854,12 @@ also needs `qemu-img` for its writable UEFI firmware disk.
 ### Extra disks
 
 `--add-disk <size>` (repeatable) creates blank qcow2 images and attaches
-them as additional virtio-blk-pci devices. RouterOS sees them as
-`ether2`/`disk2`/etc. depending on whether you've also added NICs.
+them as additional virtio-blk-pci devices. RouterOS lists them in `/disk` as
+slots `pcie1`, `pcie2`, … (serial `vdb`, `vdc`, …; grounded on 7.25.1 x86).
+They arrive unformatted (`fs=-`): run `/disk format pcie1 file-system=ext4`
+first, after which the disk is mounted at `pcie1/`. The slot number follows
+PCI order, and on x86 adding a NIC to a machine that has extra disks currently
+renumbers them (`pcie1` becomes `pcie2`; tracked in #257).
 `quickchr disk <name>` shows the layout; with `qemu-img` it also reports
 virtual + actual sizes.
 
@@ -1921,13 +1942,34 @@ quickchr snapshot my-chr save before-upgrade
 quickchr snapshot my-chr list
 ```
 
+**A snapshot covers every disk.** QEMU's `savevm` writes the snapshot into each
+writable qcow2 drive: the VM state goes into `boot.qcow2`, and each `diskN.qcow2`
+gets a disk-only entry under the same tag. `loadvm` reverts all of them and
+`delvm` removes the tag from all of them, so data on an `--add-disk` disk (for
+example RouterOS `/app` storage) rolls back with the boot disk. quickchr fixes
+the disk set at `add`, so the disks never disagree about which snapshots exist.
+
 Constraints:
 
 - Boot disk must be qcow2.
-- `save` and `load` need the machine running (uses `savevm`/`loadvm`).
-- `list` and `delete` work either way (`qemu-img info` when stopped).
-- Snapshots live inside the qcow2 file, so `remove` deletes them all.
+- `save`, `load` and `delete` need the machine running (`savevm`/`loadvm`/`delvm`
+  through the QEMU monitor). `delete` on a stopped machine fails with
+  `MACHINE_STOPPED`.
+- `list` works either way. When stopped it reads `boot.qcow2` with `qemu-img info`.
+- On a running machine, `list` asks the QEMU monitor, which leaves out a snapshot
+  that is partial (missing from one of the disks, e.g. after a hand-run
+  `qemu-img snapshot -d`), since `loadvm` cannot load it. Dates and ids come from
+  the qcow2 metadata. A stopped `list` (or a running one whose monitor query
+  fails) reads `boot.qcow2` only, so it can still show a tag that is missing from
+  an extra disk. `delete` removes what is left of a partial snapshot.
+- Snapshots live inside the qcow2 files, so `remove` and `clean` delete them all.
 - QEMU's practical cap is 16 snapshots per disk.
+
+To copy a machine's disk files offline instead (a backup that survives
+`remove`/`clean`, or one kept on another volume), stop it with `quickchr shutdown`,
+not `quickchr stop`. `stop` kills QEMU without a guest flush, and files written just
+before it can come back empty. A snapshot does not have this problem, because it
+includes the guest's RAM.
 
 ---
 
@@ -1959,12 +2001,12 @@ present, then exits `1`.
 | `QGA_UNSUPPORTED` | QGA on ARM64 | use `--via=rest` or `--via=console` |
 | `QGA_TIMEOUT` | QGA daemon unreachable | KVM-only; not on macOS HVF or TCG |
 | `NETWORK_UNAVAILABLE` | provisioning needs `user` NIC, none present | add `--add-network user` |
-| `INVALID_NETWORK` | unknown alias / unresolvable iface / dead socket daemon | `quickchr networks` |
+| `INVALID_NETWORK` | unknown alias / unresolvable iface / dead socket daemon; or a waiting `start` on a machine with no `user` NIC | `quickchr networks`; for no `user` NIC: add `--add-network user`, or `--no-wait` |
 | `PROVISIONING_VERSION_UNSUPPORTED` | provisioning option on RouterOS < 7.20.8 (including any 6.x) | use `--channel long-term` or pin a `7.20.8+` version |
 | `REST_UNAVAILABLE` | REST operation (`exec`, `get`, `rest()`) on a RouterOS 6 machine | use the native API — `centrs … --via native-api --no-validate` |
 | `INVALID_ARGUMENT` | a flag combination quickchr will not honour — e.g. `--no-wait` with provisioning | drop one of the two |
 | `INSUFFICIENT_DISK_SPACE` | data dir's filesystem has less than the operation's estimate plus `storage-reserve`, even after evicting what the cache could spare | free space, remove machines, lower `storage-reserve`, or move via `QUICKCHR_DATA_DIR` |
-| `STATE_ERROR` | snapshot on raw boot disk | recreate with `--boot-disk-format=qcow2` |
+| `STATE_ERROR` | snapshot on raw boot disk; relative `QUICKCHR_DATA_DIR`; no home directory found | recreate with `--boot-disk-format=qcow2`; use an absolute `QUICKCHR_DATA_DIR` or set `HOME` |
 | `INVALID_SIZE_STRING` | invalid cache/settings size string | use size syntax like `512M`, `2G`, or `1.5G` |
 | `INVALID_SETTING_KEY` | `settings get`/`set`/`reset` received an unrecognized key | `quickchr settings print` to see the managed keys |
 | `INVALID_SETTING_VALUE` | `settings set` (or a `QUICKCHR_*` env var / `quickchr.env` line) failed validation for a recognized key | `quickchr help settings` for the expected type/enum per key |

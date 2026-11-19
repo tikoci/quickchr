@@ -5,7 +5,7 @@
 
 import type { StartOptions, Arch, Channel, DeviceModeOptions, LicenseLevelInput, LicenseOptions, ServiceName, NetworkSpecifier } from "../lib/types.ts";
 import { join } from "node:path";
-import { parseNetworkSpecifier } from "../lib/network.ts";
+import { hasUserModeNetwork, parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
 import { ADD_FLAGS, REMOVED_FLAGS, SET_FLAGS, START_FLAGS, VALUE_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
 import { QuickCHRError } from "../lib/types.ts";
@@ -1355,7 +1355,8 @@ async function cmdSetup() {
 						spinner.start(`Loading snapshot ${selectedSnap}...`);
 						try {
 							await instance.snapshot.load(selectedSnap);
-							const booted = await instance.waitForBoot(120_000);
+							// Without a user NIC there is no REST forward to check readiness through.
+							const booted = !hasUserModeNetwork(instance.state.networks) || await instance.waitForBoot(120_000);
 							spinner.stop(booted
 								? `Loaded snapshot ${bold(selectedSnap)}`
 								: `Loaded snapshot ${bold(selectedSnap)} (boot readiness check timed out)`);
@@ -4082,13 +4083,17 @@ Install qemu-img to include virtual/actual size details in the output.`);
 		case "snap":
 			console.log(`quickchr snapshot <name> [list|save|load|delete] [snapshot-name] [--json]
 
-Manage VM snapshots on a CHR instance's qcow2 boot disk.
+Manage VM snapshots on a CHR instance. A snapshot covers the boot disk and
+every --add-disk disk: QEMU's savevm/loadvm/delvm act on all of the machine's
+qcow2 drives, and the VM state (RAM) is stored in boot.qcow2.
 
   <name>              Instance name (required).
 
 Subcommands:
   list                List all snapshots (default if no subcommand given).
+                      Works stopped too (reads boot.qcow2 with qemu-img).
   save [snap-name]    Save a snapshot. Name auto-generated (ISO date) if omitted.
+                      Machine must be running.
   load <snap-name>    Restore a snapshot. Machine must be running.
   delete <snap-name>  Delete a snapshot. Machine must be running.
 
