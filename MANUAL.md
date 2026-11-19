@@ -1252,11 +1252,10 @@ const { version } = await cacheAdd({ channel: "stable", arch, logger: createLogg
 // 2. In beforeAll: one call creates, boots and waits for REST.
 let chr: ChrInstance | undefined;
 beforeAll(async () => {
-  chr = await QuickCHR.start({
-    name: `myapp-it-${randomBytes(4).toString("hex")}`,
-    version, arch, onProgress, timeoutExtra,
-  });
-}, defaultBootTimeout(arch, false, "tcg") + 2 * timeoutExtra + 120_000);
+  const name = `myapp-it-${randomBytes(4).toString("hex")}`;
+  console.error(`machine: ${name}`); // so a killed run says what it left
+  chr = await QuickCHR.start({ name, version, arch, onProgress, timeoutExtra });
+}, defaultBootTimeout(arch, false, "tcg") + 2 * timeoutExtra + 300_000);
 
 // 3. In afterAll: remove the machine this run made.
 afterAll(async () => { await chr?.remove(); });
@@ -1284,16 +1283,23 @@ afterAll(async () => { await chr?.remove(); });
   runner. With the image already cached, `start()` can wait for: the port allocation
   lock (up to 60 s); the boot itself, `defaultBootTimeout(arch, withPackages, accel)`
   plus `timeoutExtra`; on KVM or HVF, a second boot of the same length, because a boot
-  that misses REST is respawned once; and the failure report and stop after a timeout
-  (seconds). The `"tcg"` budget is at least two KVM or HVF boots, so the timeout
-  above covers every accelerator, with `timeoutExtra` counted twice for the respawn.
+  that misses REST is respawned once; and, after a timeout, the failure report (up to
+  180 s, bounded inside quickchr) and the stop (up to 5 s before SIGKILL). The `"tcg"`
+  budget is at least two KVM or HVF boots, so the timeout above covers every
+  accelerator: `timeoutExtra` counted twice for the respawn, and 300 s for the lock,
+  the report and the stop.
   `remove()` waits up to the boot budget for an operation already in progress, then
   stops QEMU.
 - **Pass `arch`** when your timeouts depend on it. The default is the Bun process's
   architecture, which is `x86` for an x64 Bun under Rosetta on Apple Silicon (#293).
-- **A run killed during `start()`** can leave a directory with no readable
-  `machine.json`. `QuickCHR.listOrphans()` names it and `QuickCHR.removeOrphan(name)`
-  clears it.
+- **Print the name before calling `start()`** (to stderr), so a run that is killed
+  before teardown says what it left behind. Once the boot has begun, the machine has a
+  readable `machine.json` and a detached QEMU: `quickchr list <name>` shows it and
+  `quickchr remove <name>` (or `QuickCHR.get(name)?.remove()`) stops and removes it.
+  A run killed earlier, while the machine was still being created, can leave a
+  directory with no readable `machine.json` instead: `QuickCHR.listOrphans()` names it
+  and `QuickCHR.removeOrphan(name)` clears it. On a throwaway CI runner with its own
+  `QUICKCHR_DATA_DIR`, both go away with the runner.
 
 ---
 
