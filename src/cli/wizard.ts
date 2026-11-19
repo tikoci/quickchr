@@ -8,7 +8,7 @@ import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
 export type WizardUserChoice = "custom" | "managed" | "admin";
 
 export interface WizardUserChoiceResult {
-	user?: { name: string; password: string };
+	user?: { name: string; password: string } | undefined;
 	disableAdmin: boolean;
 	secureLogin?: boolean;
 }
@@ -71,7 +71,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 			options: CHANNELS.map((c) => ({
 				value: c,
 				label: c,
-				hint: c === "long-term" ? "recommended for provisioning" : undefined,
+				...(c === "long-term" && { hint: "recommended for provisioning" }),
 			})),
 			initialValue: defaultChannel,
 		});
@@ -89,6 +89,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 				if (/^6\./.test(v)) {
 					return "RouterOS 6 is boot-only and not offered here — use: quickchr add --version <6.x> --arch x86";
 				}
+				return undefined;
 			},
 		});
 		if (clack.isCancel(ver)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -180,6 +181,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 				message: "Boot disk size (e.g., 512M, 1G, 2G):",
 				validate: (v) => {
 					if (!isValidDiskSize(v)) return "Size like 512M, 1G, or 2048";
+					return undefined;
 				},
 			});
 			if (clack.isCancel(size)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -202,6 +204,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 				message: `Extra disk ${extraDisks.length + 1} size (e.g., 64M, 512M, 1G):`,
 				validate: (v) => {
 					if (!isValidDiskSize(v)) return "Size like 64M, 512M, or 1G";
+					return undefined;
 				},
 			});
 			if (clack.isCancel(diskSize)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -301,7 +304,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 						clack.log.warn("No physical interfaces detected. Enter device name manually.");
 						const manualIface = await clack.text({
 							message: "Interface device name (e.g. en0):",
-							validate: (v) => { if (!v.trim()) return "Required"; },
+							validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
 						});
 						if (clack.isCancel(manualIface)) { clack.cancel("Cancelled."); process.exit(0); }
 						iface = manualIface.trim();
@@ -311,7 +314,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 							options: ifaces.map((i) => ({
 								value: i.device,
 								label: `${i.device} — ${i.name}`,
-								hint: i.alias ?? undefined,
+								...(i.alias && { hint: i.alias }),
 							})),
 						});
 						if (clack.isCancel(ifaceChoice)) { clack.cancel("Cancelled."); process.exit(0); }
@@ -323,7 +326,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 				} else if (netType === "socket") {
 					const socketName = await clack.text({
 						message: "Socket link name (VMs sharing a name get L2 connectivity):",
-						validate: (v) => { if (!v.trim()) return "Required"; },
+						validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
 					});
 					if (clack.isCancel(socketName)) { clack.cancel("Cancelled."); process.exit(0); }
 					networks.push(parseNetworkSpecifier(`socket::${socketName}`));
@@ -491,7 +494,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 		if (userChoice === "custom") {
 			const userName = await clack.text({
 				message: "Username:",
-				validate: (v) => { if (!v.trim()) return "Required"; },
+				validate: (v) => { if (!v.trim()) return "Required"; return undefined; },
 			});
 			if (clack.isCancel(userName)) { clack.cancel("Cancelled."); process.exit(0); }
 

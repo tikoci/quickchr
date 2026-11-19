@@ -13,9 +13,9 @@ const CACHE_VERSION_MAX_LENGTH = 32;
 
 export interface CacheTargetOptions {
 	/** Resolve this RouterOS channel. Mutually exclusive with `version`. */
-	channel?: Channel;
+	channel?: Channel | undefined;
 	/** Use this concrete RouterOS version without a network resolution request. */
-	version?: string;
+	version?: string | undefined;
 	/** Override the cache directory. Defaults to quickchr's platform-correct cache. */
 	cacheDir?: string;
 	/** CHR architecture. `auto` and omission select the Bun process architecture. */
@@ -30,7 +30,7 @@ export interface CacheKeyResult {
 }
 
 export interface CacheAddOptions extends CacheTargetOptions {
-	logger?: ProgressLogger;
+	logger?: ProgressLogger | undefined;
 }
 
 export interface CacheAddResult extends CacheKeyResult {
@@ -40,7 +40,7 @@ export interface CacheAddResult extends CacheKeyResult {
 
 export type CacheVersionResolver = (channel: Channel) => Promise<string>;
 
-function validateTarget(options: CacheTargetOptions): { channel?: Channel; version?: string } {
+function validateTarget(options: CacheTargetOptions): { channel?: Channel | undefined; version?: string | undefined } {
 	if (options.channel !== undefined && options.version !== undefined) {
 		throw new QuickCHRError("INVALID_VERSION", "Choose either a RouterOS channel or a concrete version, not both");
 	}

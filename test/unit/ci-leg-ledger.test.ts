@@ -284,7 +284,7 @@ describe("closing a lost leg's check run is a round-trip (#128)", () => {
 	}
 
 	/** What the NEXT build reads back from the check run the previous one closed. */
-	function reread(output: { text?: string }): CheckpointView {
+	function reread(output: { text?: string | undefined }): CheckpointView {
 		return { status: "completed", checkRunId: 42, payload: parsePayload(output.text), payloadText: output.text };
 	}
 

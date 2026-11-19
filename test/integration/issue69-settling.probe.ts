@@ -39,9 +39,9 @@ const OUTPUT_PATH = process.env.QUICKCHR_ISSUE69_OUT ??
 interface ErrorInfo {
 	name: string;
 	message: string;
-	code?: string;
-	errno?: number;
-	syscall?: string;
+	code?: string | undefined;
+	errno?: number | undefined;
+	syscall?: string | undefined;
 }
 
 interface RestProbeResult {

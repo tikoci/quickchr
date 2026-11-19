@@ -203,8 +203,8 @@ export interface InstallResult {
 	shell: SupportedShell;
 	file: string;
 	/** Line appended to rc file, if any. */
-	rcLine?: string;
-	rcFile?: string;
+	rcLine?: string | undefined;
+	rcFile?: string | undefined;
 	/** True if the file was already present (skipped rewrite). */
 	alreadyInstalled: boolean;
 	/** True when --dry-run: nothing was written. */
@@ -233,7 +233,7 @@ export function installCompletions(
 }
 
 /** Remove completions for the given shell. Returns true if the file existed. */
-export function uninstallCompletions(shell: SupportedShell): { removed: boolean; file: string; rcLine?: string; rcFile?: string } {
+export function uninstallCompletions(shell: SupportedShell): { removed: boolean; file: string; rcLine?: string | undefined; rcFile?: string | undefined } {
 	const { file, rcLine, rcFile } = completionInstallPath(shell);
 	const removed = existsSync(file);
 	if (removed) {

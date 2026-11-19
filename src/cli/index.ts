@@ -1315,6 +1315,7 @@ async function cmdSetup() {
 							validate: (v) => {
 								if (v && !v.trim()) return "Snapshot name is required";
 								if (v && /\s/.test(v)) return "Use a name without spaces";
+								return undefined;
 							},
 						});
 						if (clack.isCancel(snapName)) continue;

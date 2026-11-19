@@ -23,7 +23,7 @@ export interface QemuLaunchConfig {
 	arch: Arch;
 	machineDir: string;
 	bootDisk: { path: string; format: BootDiskFormat };
-	extraDisks?: { path: string; format: "qcow2" }[];
+	extraDisks?: { path: string; format: "qcow2" }[] | undefined;
 	mem: number;
 	cpu: number;
 	ports: Record<string, PortMapping>;
@@ -42,11 +42,11 @@ export interface QemuLaunchConfig {
 	accel?: string;
 	/** Extra argv elements (`StartOptions.qemuArgs`), appended verbatim after
 	 *  quickchr's own args. Ordering is load-bearing: last-wins on conflicts. */
-	qemuArgs?: string[];
+	qemuArgs?: string[] | undefined;
 	/** Hold the guest at reset (`-S`) with a gdbstub on `<machineDir>/gdb.sock`
 	 *  (`start --frozen`). Unix socket, `server=on,wait=off` so the spawn never
 	 *  blocks waiting for a client. */
-	frozen?: boolean;
+	frozen?: boolean | undefined;
 }
 
 /** Build the full QEMU command-line arguments array. */

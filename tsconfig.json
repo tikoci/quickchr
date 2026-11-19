@@ -1,31 +1,45 @@
+// tikoci house tsconfig (tikoci-linting's tsconfig.example.json). Bun runs the
+// code and tsc only checks it (`tsc --noEmit`).
+//
+// quickchr publishes its .ts source, not .d.ts files, so a consumer's tsc
+// checks quickchr's code under the consumer's flags (skipLibCheck does not
+// apply to .ts files). Keep these flags at least as strict as the house
+// template: `bun run lint:consumer` checks the packed package under it (#285).
 {
   "compilerOptions": {
-    // Environment setup & latest features
+    // Bun runs TypeScript directly: modern output, bundler resolution.
     "lib": ["ESNext"],
     "target": "ESNext",
     "module": "Preserve",
-    "moduleDetection": "force",
-    "jsx": "react-jsx",
-    "allowJs": true,
-    // Bun runtime — provides Bun globals, web APIs (fetch/ReadableStream/etc.), and node: built-ins
-    "types": ["bun"],
-
-    // Bundler mode
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "types": ["bun"], // needs @types/bun in devDependencies
+    "allowImportingTsExtensions": true, // relative imports end in .ts
+    "verbatimModuleSyntax": true, // type-only imports say `import type`
     "noEmit": true,
-
-    // Best practices
-    "strict": true,
     "skipLibCheck": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true,
-    "noImplicitOverride": true,
 
-    // Some stricter flags (disabled by default)
+    // Tight types: the type tells the story, so a diff shows what changed.
+    "strict": true,
+    "noUncheckedIndexedAccess": true, // arr[i] and record[key] may be undefined
+    "exactOptionalPropertyTypes": true, // `x?: T` means absent; write `x?: T | undefined` when undefined is a value
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    // Only syntax TypeScript can erase: no enum, namespace or parameter
+    // properties. The code is JavaScript plus types; use a union of literals
+    // or an `as const` object instead.
+    "erasableSyntaxOnly": true,
+
+    // Off on purpose:
+    // - Biome reports unused imports, variables and parameters, with a fix.
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+    // - noUncheckedIndexedAccess already types index access as possibly
+    //   undefined; requiring bracket syntax as well conflicts with Biome's
+    //   useLiteralKeys and adds churn, not safety.
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "include": ["src", "test", "scripts", "examples"]
 }

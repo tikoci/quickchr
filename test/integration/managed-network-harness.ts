@@ -85,7 +85,7 @@ export interface StatusRow {
 	text: string;
 }
 
-export async function status(specifier: string): Promise<{ result: CliResult; row?: StatusRow }> {
+export async function status(specifier: string): Promise<{ result: CliResult; row?: StatusRow | undefined }> {
 	const result = await quickchr("networks", "status", specifier, "--json");
 	const rows = JSON.parse(result.stdout) as StatusRow[];
 	return { result, row: rows[0] };
@@ -448,9 +448,9 @@ export async function phase<T>(
 export interface BridgedProbeResult {
 	iface: string;
 	created: CliResult;
-	status?: StatusRow;
+	status?: StatusRow | undefined;
 	qemuArgv?: string;
-	lease?: GuestLease;
+	lease?: GuestLease | undefined;
 	lan?: LanProbe;
 	record: Record<string, unknown>;
 }

@@ -147,7 +147,7 @@ export function link(url: string, label?: string): string {
 
 /** Resolve display credentials for a machine (from secret store or state). */
 export async function resolveDisplayCredentials(
-	state: { name: string; user?: { name: string; password: string } },
+	state: { name: string; user?: { name: string; password: string } | undefined },
 ): Promise<{ user: string; password: string }> {
 	const { getInstanceCredentials } = await import("../lib/credentials.ts");
 	const stored = getInstanceCredentials(state.name);

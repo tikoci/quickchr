@@ -155,12 +155,12 @@ export interface TransferOutcome {
 	/** Bytes actually received. */
 	bytes: number;
 	/** `content-length`, when the server sent one. */
-	expected?: number;
+	expected?: number | undefined;
 	elapsedMs: number;
 	/** Observed bytes per second over the whole transfer. */
 	throughputBytesPerS: number;
 	/** Set when a deadline ended the transfer; absent for other failures. */
-	deadline?: DownloadDeadline;
+	deadline?: DownloadDeadline | undefined;
 	/** The budget the transfer was held to, in ms. */
 	budgetMs: number;
 }

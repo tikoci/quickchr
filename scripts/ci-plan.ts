@@ -22,7 +22,7 @@ export interface MatrixLeg {
 	id: string;
 	label: string;
 	target: string;
-	resolved?: string;
+	resolved?: string | undefined;
 }
 
 /** One platform+version dispatched more than once. */

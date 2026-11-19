@@ -483,7 +483,7 @@ export function hasUserModeNetwork(networks: NetworkConfig[]): boolean {
 
 export interface ResolutionContext {
 	platform: PlatformInfo;
-	socketVmnet?: SocketVmnetInfo;
+	socketVmnet?: SocketVmnetInfo | undefined;
 	/** Machine being resolved. A named socket's endpoint role is per-machine, so the
 	 *  resolver needs to know who is asking; absent for callers that only want the
 	 *  shape of a specifier (dry runs, unit tests over the non-socket modes). */
@@ -491,7 +491,7 @@ export interface ResolutionContext {
 	/** QEMU version string, when the caller knows it. `-netdev dgram` landed in 7.2;
 	 *  an unknown version does not block, because refusing to run on a QEMU we merely
 	 *  failed to parse is worse than the error the spawn would give. */
-	qemuVersion?: string;
+	qemuVersion?: string | undefined;
 }
 
 /** `-device` for one NIC — the **only** place a NIC device is emitted.

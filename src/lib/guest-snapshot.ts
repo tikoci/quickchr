@@ -92,7 +92,7 @@ export interface GuestSnapshotEntry {
 	 *  mode is then the reader, not RouterOS. **Undefined means "not reported"**,
 	 *  which covers both an exec that never ran and one that returned a bare
 	 *  string (see {@link GuestExec}); do not read it as "no exec". */
-	framed?: boolean;
+	framed?: boolean | undefined;
 }
 
 export interface GuestSnapshot {

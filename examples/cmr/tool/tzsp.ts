@@ -41,8 +41,15 @@ export interface TzspFrame {
  */
 export class TzspReceiver {
 	readonly frames: TzspFrame[] = [];
-	private socket?: Socket;
-	constructor(readonly source: string, private readonly origin: number = Date.now(), private readonly onFrame?: (frame: TzspFrame) => void) {}
+	private socket?: Socket | undefined;
+	readonly source: string;
+	private readonly origin: number;
+	private readonly onFrame: ((frame: TzspFrame) => void) | undefined;
+	constructor(source: string, origin: number = Date.now(), onFrame?: (frame: TzspFrame) => void) {
+		this.source = source;
+		this.origin = origin;
+		this.onFrame = onFrame;
+	}
 
 	/** Bind 127.0.0.1 on an ephemeral port and return the port. */
 	open(host = "127.0.0.1"): Promise<number> {

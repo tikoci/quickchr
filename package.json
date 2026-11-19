@@ -25,7 +25,7 @@
     "bun": ">=1.4.3"
   },
   "scripts": {
-    "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown && bun run lint:cspell && bun run lint:examples && bun run lint:specifiers && bun run lint:shell && bun run lint:bun-pin",
+    "check": "bun run lint:biome && bun run lint:typecheck && bun run lint:markdown && bun run lint:cspell && bun run lint:examples && bun run lint:specifiers && bun run lint:shell && bun run lint:bun-pin && bun run lint:consumer",
     "lint": "biome check . && tsc --noEmit",
     "lint:biome": "biome check .",
     "lint:typecheck": "tsc --noEmit",
@@ -35,6 +35,7 @@
     "lint:specifiers": "bun run scripts/validate-network-specifiers.ts",
     "lint:shell": "sh scripts/lint-shell.sh",
     "lint:bun-pin": "bun run scripts/check-bun-pin.ts",
+    "lint:consumer": "bun run scripts/check-consumer-types.ts",
     "test": "bun test test/unit/",
     "test:examples": "bun test examples/",
     "smoke:examples": "QUICKCHR_INTEGRATION=1 EXAMPLES_SMOKE=1 bun test test/integration/examples-smoke.test.ts",
@@ -47,12 +48,12 @@
     "@biomejs/biome": "^2.4.10",
     "@types/bun": "^1.3.11",
     "cspell": "^10.0.0",
-    "markdownlint-cli2": "^0.21.0"
+    "markdownlint-cli2": "^0.21.0",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",
-    "fflate": "^0.8.2",
-    "typescript": "^5"
+    "fflate": "^0.8.2"
   },
   "private": false,
   "type": "module",

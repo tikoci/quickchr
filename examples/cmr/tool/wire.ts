@@ -174,7 +174,7 @@ export interface WireReport {
 	/** `attached`: each time the sniffer was armed, and how many frames arrived before the next arming. */
 	routers: Record<string, { port: number; interfaces: string[]; attached: { t: number; framesAfter: number }[]; frames: number }>;
 	marks: Mark[];
-	mndp: { t: number; sender: string; header: string; tlvs?: Record<string, string>; payloadHex?: string }[];
+	mndp: { t: number; sender: string; header: string; tlvs?: Record<string, string>; payloadHex?: string | undefined }[];
 	/** Announcements, lifetimes (one per machine and boot), and the gaps within a lifetime. */
 	mndpIntervals: Record<string, { count: number; lifetimes: number; minMs: number; medianMs: number; maxMs: number }>;
 	/** Segments are [t, direction (> to the controller, < from it), TCP flags, payload bytes]. */

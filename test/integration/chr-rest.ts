@@ -46,7 +46,7 @@ export interface ChrGetOptions {
 	 * second one. Omit it when nothing changed — an absent field reads as "not
 	 * recorded", which is honest, where a guessed one would not be.
 	 */
-	after?: string;
+	after?: string | undefined;
 }
 
 /**
