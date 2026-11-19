@@ -278,6 +278,31 @@ function assertFrozenAllowsProvisioning(opts: StartOptions, operation: string, m
 	);
 }
 
+/** Whether a start returns only once the guest's REST API answers: the default
+ *  background start does; `wait: false`, `frozen` and a foreground start do not. */
+function startWaitsForBoot(opts: { background?: boolean | undefined; wait?: boolean | undefined; frozen?: boolean | undefined }): boolean {
+	return (opts.background ?? true) && opts.wait !== false && !opts.frozen;
+}
+
+/** The boot wait polls REST through the user-mode NIC's port forwards. A machine
+ *  without a user NIC has none, so the wait could only run out its whole timeout
+ *  (and a boot retry) before failing (#268). Refused before anything is spawned.
+ *  `existing` names a machine whose NICs were fixed by an earlier `add`/`start`. */
+function assertBootWaitReachable(networks: NetworkConfig[], willWait: boolean, name: string, existing: boolean): void {
+	if (!willWait || hasUserModeNetwork(networks)) return;
+	const nicSummary = networks.length === 0
+		? "no network interfaces"
+		: `only ${networks.map((n) => typeof n.specifier === "string" ? n.specifier : n.specifier.type).join(", ")} network interfaces`;
+	throw new QuickCHRError(
+		"INVALID_NETWORK",
+		`Machine "${name}" has ${nicSummary} and no user-mode NIC, so start cannot wait for it to boot: ` +
+		"quickchr reaches the guest's REST API through the user-mode NIC's port forwards, and without one the wait can only time out.",
+		existing
+			? `Start it with --no-wait (wait: false) or --fg to boot without waiting, or recreate it with a user-mode NIC alongside its other networks (--add-network user --add-network <spec>).`
+			: `Add a user-mode NIC alongside the others (--add-network user --add-network <spec>), or pass --no-wait (wait: false) to boot without waiting.`,
+	);
+}
+
 // --- Socket registry lifecycle helpers ---
 
 function getSocketNamedNetworks(state: MachineState): string[] {
@@ -2677,11 +2702,16 @@ export class QuickCHR {
 				}
 			}
 			// Exists but stopped — restart it
+			assertBootWaitReachable(existing.networks, startWaitsForBoot(opts), existing.name, true);
 			requireHostFor(existing.arch);
 			return QuickCHR._launchExisting(existing, opts.background ?? true, undefined, logger, opts.wait ?? true, sessionLaunch(opts));
 		}
 
 		assertRouterOs6Arch(version, arch);
+		// Provisioning has its own user-NIC refusal below, and always waits for the boot.
+		if (!hasProvisioningMutations(mutations)) {
+			assertBootWaitReachable(resolveStartNetworks(opts.networks, opts.network), startWaitsForBoot(opts), name, false);
+		}
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
 		if (!opts.dryRun) {
 			opts = { ...opts, license: await resolveLicenseForBoot(opts.license) };

@@ -93,6 +93,25 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- `start` refuses a machine with no `user` NIC when it would wait for the boot,
+  instead of sitting silent until the boot timeout (and a boot retry). Any
+  `--add-network` replaces the default NIC list, so `--add-network bridged:en0`
+  alone left no port forward for the REST wait to reach. The refusal is
+  `INVALID_NETWORK`, raised before anything is downloaded or spawned, and its hint
+  names `--add-network user --add-network <spec>` or `--no-wait`. `--no-wait`,
+  `--fg` and `frozen` starts are unaffected. (#268)
+- The data dir can no longer resolve relative to the working directory. With `HOME`
+  unset or empty it fell back to `.local/share/quickchr` under the current directory,
+  while the config dir used the real home. The data dir, config dir and completion
+  paths now share one rule (`HOME`, then `USERPROFILE`, then the OS account's home
+  directory), and a relative `QUICKCHR_DATA_DIR` is refused with `STATE_ERROR`. (#276)
+- `snapshot list` on a running machine no longer lists partial snapshots (present on
+  some disks only), which `load` cannot restore, and its dates are the real UTC
+  instant: the QEMU monitor prints host local time, which was labeled UTC. The
+  running and stopped `list` now agree. Docs: `snapshot --help` and MANUAL say a
+  snapshot covers the boot disk and every `--add-disk` disk, MANUAL no longer claims
+  `delete` works on a stopped machine, and extra disks are named as RouterOS shows
+  them (`/disk` slots `pcie1`, `pcie2`, unformatted). (#266)
 - A project whose tsconfig sets `exactOptionalPropertyTypes`, as the tikoci house
   tsconfig does, can import the library. quickchr ships its TypeScript source, so the
   consumer's `tsc` checked it under the consumer's flags and reported 84 errors that

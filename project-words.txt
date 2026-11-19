@@ -513,6 +513,8 @@ validname
 vcpu
 vcs
 vda
+vdb
+vdc
 venv
 ver
 veth

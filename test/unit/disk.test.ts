@@ -284,7 +284,8 @@ describe("parseSnapshotList", () => {
 		expect(snaps[0]?.name).toBe("test");
 		expect(snaps[0]?.id).toBe("0"); // "--" maps to "0"
 		expect(snaps[0]?.vmStateSize).toBe(113 * 1024 * 1024);
-		expect(snaps[0]?.date).toBe("2026-04-14T00:47:19Z");
+		// Monitor dates are host local time, so the UTC instant depends on the TZ.
+		expect(snaps[0]?.date).toBe(new Date(2026, 3, 14, 0, 47, 19).toISOString());
 		expect(snaps[0]?.vmClock).toBe("0000:01:17.163");
 		expect(snaps[0]?.icount).toBeUndefined();
 		expect(snaps[1]?.name).toBe("before-upgrade");
@@ -317,6 +318,27 @@ describe("parseSnapshotList", () => {
 		expect(snaps).toHaveLength(1);
 		expect(snaps[0]?.name).toBe("baseline");
 		expect(snaps[0]?.vmClock).toBe("00:00:41.532");
+	});
+
+	test("partial (non-loadable) snapshots are not listed (#266)", () => {
+		const output = [
+			"List of snapshots present on all disks:",
+			"ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT",
+			"--        whole             113 MiB 2026-11-11 06:50:00  0000:00:10.000         --",
+			"",
+			"List of partial (non-loadable) snapshots on 'virtio0':",
+			"ID        TAG               VM SIZE                DATE        VM CLOCK     ICOUNT",
+			"1         s1                113 MiB 2026-11-11 06:53:07  0000:00:13.430         --",
+		].join("\n");
+		const snaps = parseSnapshotList(output);
+		expect(snaps.map((s) => s.name)).toEqual(["whole"]);
+	});
+
+	// The stopped path's qemu-img date-sec goes through toISOString() too.
+	test("the monitor's local date is parsed as local time, not UTC (#266)", () => {
+		const local = new Date(2026, 10, 11, 6, 53, 7);
+		const output = "--        s1                113 MiB 2026-11-11 06:53:07  0000:00:13.430         --";
+		expect(parseSnapshotList(output)[0]?.date).toBe(local.toISOString());
 	});
 
 	test("parses rows without an ICOUNT column", () => {

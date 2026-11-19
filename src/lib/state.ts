@@ -3,22 +3,36 @@
  */
 
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
-import { join, } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
+import { absoluteEnvPath, userHomeDir } from "./paths.ts";
 import type { MachineState, } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { networkModeToConfigs } from "./network.ts";
 import { assertPathSafeName, isPathSafeName } from "./names.ts";
 import { pidLiveness } from "./pid.ts";
 
-/** Get the quickchr data directory root. Override with QUICKCHR_DATA_DIR env var. */
+/** Get the quickchr data directory root. Override with QUICKCHR_DATA_DIR env var.
+ *  Always absolute: a relative QUICKCHR_DATA_DIR is refused, and the default comes
+ *  from the same home-directory rule as the config dir (#276). */
 export function getDataDir(): string {
-	if (process.env.QUICKCHR_DATA_DIR) return process.env.QUICKCHR_DATA_DIR;
+	const override = process.env.QUICKCHR_DATA_DIR;
+	if (override) {
+		if (!isAbsolute(override)) {
+			throw new QuickCHRError(
+				"STATE_ERROR",
+				`QUICKCHR_DATA_DIR must be an absolute path, got "${override}". ` +
+				"A relative data dir would move with the working directory.",
+				`Set QUICKCHR_DATA_DIR to an absolute path, e.g. "${resolve(override)}".`,
+			);
+		}
+		return override;
+	}
 	if (process.platform === "win32") {
-		const appData = process.env.LOCALAPPDATA || join(process.env.USERPROFILE || "", "AppData", "Local");
+		const appData = absoluteEnvPath("LOCALAPPDATA")
+			?? join(absoluteEnvPath("USERPROFILE") ?? userHomeDir(), "AppData", "Local");
 		return join(appData, "quickchr");
 	}
-	const home = process.env.HOME || process.env.USERPROFILE || "";
-	return join(home, ".local", "share", "quickchr");
+	return join(userHomeDir(), ".local", "share", "quickchr");
 }
 
 /** Get the machines directory. */

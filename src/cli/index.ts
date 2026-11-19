@@ -4082,13 +4082,17 @@ Install qemu-img to include virtual/actual size details in the output.`);
 		case "snap":
 			console.log(`quickchr snapshot <name> [list|save|load|delete] [snapshot-name] [--json]
 
-Manage VM snapshots on a CHR instance's qcow2 boot disk.
+Manage VM snapshots on a CHR instance. A snapshot covers the boot disk and
+every --add-disk disk: QEMU's savevm/loadvm/delvm act on all of the machine's
+qcow2 drives, and the VM state (RAM) is stored in boot.qcow2.
 
   <name>              Instance name (required).
 
 Subcommands:
   list                List all snapshots (default if no subcommand given).
+                      Works stopped too (reads boot.qcow2 with qemu-img).
   save [snap-name]    Save a snapshot. Name auto-generated (ISO date) if omitted.
+                      Machine must be running.
   load <snap-name>    Restore a snapshot. Machine must be running.
   delete <snap-name>  Delete a snapshot. Machine must be running.
 
