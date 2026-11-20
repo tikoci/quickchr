@@ -7,6 +7,7 @@
  *   bun run cmr.ts --study policy
  *   bun run cmr.ts --study recheck
  *   bun run cmr.ts --study wire [--boots 1] [--trials 8] [--delays 0,5,30,75]
+ *   bun run cmr.ts --study repair [--boots 2] [--trials 8]
  *
  * Add a study: write `async function <name>(context)` below, register it in STUDIES, and add
  * its question and result rows to FINDINGS.md.
@@ -14,7 +15,7 @@
 import type { ChrInstance } from "../../../src/index.ts";
 import { check } from "../../lib.ts";
 import { attempt, command, createPairLab, identityOf, operand, quote, read, removeByPrefix, until, type PairLab, type Row } from "./lab.ts";
-import { observe, pairClient, pairWith, resetPairing, restartController, selectable, strategyNames, waitPending, type Strategy } from "./pairing.ts";
+import { type Observation, observe, pairClient, pairWith, rebootRouter, resetPairing, restartController, selectable, strategyNames, waitPending, waitStable, type Strategy } from "./pairing.ts";
 import { CMR_PORT, wire as wireCapture } from "./wire.ts";
 
 export interface StudyContext {
@@ -391,4 +392,91 @@ async function wire(context: StudyContext): Promise<void> {
 	}
 }
 
-export const STUDIES: Record<string, (context: StudyContext) => Promise<void>> = { pairing, policy, recheck, wire };
+/**
+ * Q: what fixes a half-paired client, and does the fix hold? Each trial pairs a fresh client with
+ * the credentialed `pair` until it half-pairs (up to 6 tries), then applies one action: nothing
+ * (`bare-pair`), a controller CMR restart, a client reboot or a controller reboot. It records what
+ * the action left, finishes with one bare `pair` if the client is still not paired, and then runs
+ * the commit test (a controller CMR restart) on the result.
+ */
+const REPAIR_ACTIONS = ["bare-pair", "cmr-restart", "client-reboot", "controller-reboot"] as const;
+async function repair(context: StudyContext): Promise<void> {
+	const boots = count(context, "boots", 2);
+	const trials = count(context, "trials", 8);
+	const results: Row[] = [];
+	const detail: unknown[] = [];
+	context.evidence.question = "Does a reboot or a CMR restart fix a half-paired client, and does a bare-pair repair survive a controller CMR restart?";
+	context.evidence.parameters = { boots, trials, actions: REPAIR_ACTIONS, halfPairBy: "credentialed", maxTries: 6 };
+	context.evidence.trials = results;
+	context.evidence.detail = detail;
+	for (let boot = 1; boot <= boots; boot++) {
+		await withPairLab(context, async ({ controller, client }) => {
+			const identity = await identityOf(client);
+			await waitPending(controller, client, identity);
+			for (let trial = 1; trial <= trials; trial++) {
+				const action = REPAIR_ACTIONS[(trial - 1) % REPAIR_ACTIONS.length] as (typeof REPAIR_ACTIONS)[number];
+				let tries = 0;
+				let result: Awaited<ReturnType<typeof pairWith>> | undefined;
+				while (tries < 6 && result?.settled.verdict !== "half-paired") {
+					if (trial > 1 || tries > 0) {
+						await resetPairing(controller, client, identity);
+						await waitPending(controller, client, identity);
+					}
+					result = await pairWith(controller, client, identity, "credentialed");
+					tries++;
+				}
+				const row: Row = { boot: String(boot), trial: String(trial), action, tries: String(tries) };
+				if (result?.settled.verdict !== "half-paired") {
+					row.reached = "no";
+					results.push(row);
+					console.log(`  boot ${boot} trial ${trial} ${action}: no half-pair in ${tries} tries`);
+					continue;
+				}
+				const settle = async (description: string, wait: () => Promise<Observation>) => {
+					try { return await wait(); } catch (error) {
+						console.log(`  ${description}: ${error instanceof Error ? error.message : String(error)}`);
+						return { ...(await observe(controller, client, identity)), timedOut: true };
+					}
+				};
+				let afterAction: (Observation & { timedOut?: boolean }) | undefined;
+				const started = Date.now();
+				if (action === "cmr-restart") afterAction = await settle("after CMR restart", () => restartController(controller, client, identity));
+				if (action === "client-reboot" || action === "controller-reboot") {
+					row.rebootSeconds = String(await rebootRouter(action === "client-reboot" ? client : controller));
+					afterAction = await settle("after reboot", () => waitStable(controller, client, identity));
+				}
+				if (afterAction) {
+					row.actionSeconds = String(Math.round((Date.now() - started) / 1000));
+					row.afterAction = `${afterAction.verdict}${afterAction.timedOut ? " (not stable)" : ""}`;
+					row.afterActionState = afterAction.row?.state ?? "";
+					row.afterActionClient = afterAction.clientStatus ?? "";
+					row.afterActionSelectable = String((await selectable(controller, identity)).selected);
+				}
+				if (afterAction?.verdict !== "paired") {
+					const output = await attempt(controller, `/cmr/device/pair [find identity=${quote(identity)}]`);
+					row.repairStatus = output.replaceAll("\r", "").trim().split("\n").at(-1)?.trim() ?? "";
+					await until("repair settles", async () => (await observe(controller, client, identity)).verdict === "paired", 20_000).catch(() => undefined);
+				}
+				const afterRepair = await observe(controller, client, identity);
+				row.afterRepair = afterRepair.verdict;
+				row.afterRepairSelectable = String((await selectable(controller, identity)).selected);
+				const commit = await settle("commit test", () => restartController(controller, client, identity));
+				row.afterCommitTest = commit.verdict;
+				row.afterCommitTestState = commit.row?.state ?? "";
+				results.push(row);
+				detail.push({ boot, trial, action, result, afterAction, afterRepair, commit });
+				console.log(`  boot ${boot} trial ${trial} ${action.padEnd(17)} tries=${tries} after action=${row.afterAction ?? "-"} ${row.afterActionState ?? ""} | bare pair=${row.repairStatus ?? "-"} → ${row.afterRepair} | after commit test=${row.afterCommitTest} ${row.afterCommitTestState}`);
+			}
+		});
+	}
+	const summary: Record<string, Record<string, number>> = {};
+	for (const r of results.filter(r => r.reached !== "no")) {
+		summary[r.action as string] ??= {};
+		const bucket = summary[r.action as string] as Record<string, number>;
+		for (const key of [`after action: ${r.afterAction ?? "(none)"}`, `after commit test: ${r.afterCommitTest}`]) bucket[key] = (bucket[key] ?? 0) + 1;
+	}
+	context.evidence.summary = summary;
+	console.log(JSON.stringify(summary, null, 2));
+}
+
+export const STUDIES: Record<string, (context: StudyContext) => Promise<void>> = { pairing, policy, recheck, wire, repair };

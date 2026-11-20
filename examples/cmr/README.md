@@ -110,6 +110,7 @@ bun run cmr.ts --study pairing --boots 3 --trials 12 --report /tmp/pairing.json
 bun run cmr.ts --study policy --report /tmp/policy.json
 bun run cmr.ts --study recheck --report /tmp/recheck.json
 bun run cmr.ts --study wire --report /tmp/wire.json
+bun run cmr.ts --study repair --report /tmp/repair.json
 ```
 
 | Study | Question |
@@ -118,6 +119,7 @@ bun run cmr.ts --study wire --report /tmp/wire.json
 | `policy` | What may a `run-script` line do on a client, compared with the manual's permission table, and which controller login groups may send one? |
 | `recheck` | Do the 7.26beta1 findings (export, client `confirm`, first-interface alert, identity sync, default upgrade rule, disable/enable) still hold? |
 | `wire` | What crosses the link while a client connects and pairs? Does MNDP carry CMR state? Do the discovery method (`controller-addresses` or MNDP) or the delay between enabling controller and client change the first connect or the half-pair? `--delays 0,5,30,75` (seconds) and `--trials` pick the grid; it always captures. |
+| `repair` | What fixes a half-paired client, and does the fix hold? Each trial half-pairs a fresh client with the credentialed `pair`, applies one action (`bare-pair`, `cmr-restart`, `client-reboot` or `controller-reboot`, rotating), records the state it left, finishes with one bare `pair` if needed, then runs the commit test (a controller CMR restart). |
 
 In recheck reports, `firstBridgeFired` is `null` (inconclusive) when the rule
 did not cover the client immediately before the first bridge was added

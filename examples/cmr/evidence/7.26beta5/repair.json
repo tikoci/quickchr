@@ -1,0 +1,1872 @@
+{
+  "study": "repair",
+  "version": "7.26beta5",
+  "timestamp": "2026-11-20T23:18:11.272Z",
+  "arch": "x86",
+  "host": "darwin/x64",
+  "question": "Does a reboot or a CMR restart fix a half-paired client, and does a bare-pair repair survive a controller CMR restart?",
+  "parameters": {
+    "boots": 2,
+    "trials": 12,
+    "actions": [
+      "bare-pair",
+      "cmr-restart",
+      "client-reboot",
+      "controller-reboot"
+    ],
+    "halfPairBy": "credentialed",
+    "maxTries": 6
+  },
+  "trials": [
+    {
+      "boot": "1",
+      "trial": "1",
+      "action": "bare-pair",
+      "tries": "1",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "2",
+      "action": "cmr-restart",
+      "tries": "2",
+      "actionSeconds": "15",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "3",
+      "action": "client-reboot",
+      "tries": "1",
+      "rebootSeconds": "19",
+      "actionSeconds": "28",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "4",
+      "action": "controller-reboot",
+      "tries": "1",
+      "rebootSeconds": "8",
+      "actionSeconds": "14",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "5",
+      "action": "bare-pair",
+      "tries": "1",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "6",
+      "action": "cmr-restart",
+      "tries": "1",
+      "actionSeconds": "15",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "7",
+      "action": "client-reboot",
+      "tries": "1",
+      "rebootSeconds": "19",
+      "actionSeconds": "28",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "8",
+      "action": "controller-reboot",
+      "tries": "1",
+      "rebootSeconds": "8",
+      "actionSeconds": "14",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "9",
+      "action": "bare-pair",
+      "tries": "1",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "10",
+      "action": "cmr-restart",
+      "tries": "1",
+      "actionSeconds": "15",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "11",
+      "action": "client-reboot",
+      "tries": "2",
+      "rebootSeconds": "8",
+      "actionSeconds": "17",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "12",
+      "action": "controller-reboot",
+      "tries": "1",
+      "rebootSeconds": "8",
+      "actionSeconds": "14",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "1",
+      "action": "bare-pair",
+      "tries": "1",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "2",
+      "action": "cmr-restart",
+      "tries": "1",
+      "actionSeconds": "15",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "3",
+      "action": "client-reboot",
+      "tries": "1",
+      "rebootSeconds": "19",
+      "actionSeconds": "28",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "4",
+      "action": "controller-reboot",
+      "tries": "1",
+      "rebootSeconds": "8",
+      "actionSeconds": "14",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "5",
+      "action": "bare-pair",
+      "tries": "1",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "6",
+      "action": "cmr-restart",
+      "tries": "1",
+      "actionSeconds": "15",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "7",
+      "action": "client-reboot",
+      "tries": "1",
+      "rebootSeconds": "8",
+      "actionSeconds": "17",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "8",
+      "action": "controller-reboot",
+      "tries": "1",
+      "rebootSeconds": "8",
+      "actionSeconds": "14",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "9",
+      "action": "bare-pair",
+      "tries": "1",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "10",
+      "action": "cmr-restart",
+      "tries": "1",
+      "actionSeconds": "15",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "11",
+      "action": "client-reboot",
+      "tries": "1",
+      "rebootSeconds": "8",
+      "actionSeconds": "17",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "12",
+      "action": "controller-reboot",
+      "tries": "1",
+      "rebootSeconds": "8",
+      "actionSeconds": "14",
+      "afterAction": "pending",
+      "afterActionState": "pair: device:ok, cmr:waiting confirmation",
+      "afterActionClient": "waiting-for-pairing,connected",
+      "afterActionSelectable": "false",
+      "repairStatus": "cmr-client@192.0.2.2  paired",
+      "afterRepair": "paired",
+      "afterRepairSelectable": "true",
+      "afterCommitTest": "paired",
+      "afterCommitTestState": ""
+    }
+  ],
+  "detail": [
+    {
+      "boot": 1,
+      "trial": 1,
+      "action": "bare-pair",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*2",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10051
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 2,
+      "action": "cmr-restart",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*4",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10059
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 3,
+      "action": "client-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*6",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10061
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 4,
+      "action": "controller-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*8",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10071
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 5,
+      "action": "bare-pair",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*3",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10069
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 6,
+      "action": "cmr-restart",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*4",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10064
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 7,
+      "action": "client-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*6",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10053
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 8,
+      "action": "controller-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*8",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10068
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 9,
+      "action": "bare-pair",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*3",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10078
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 10,
+      "action": "cmr-restart",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*4",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10056
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 11,
+      "action": "client-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*7",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10055
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*8",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*8",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*8",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 12,
+      "action": "controller-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*9",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10060
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 1,
+      "action": "bare-pair",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*2",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10057
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 2,
+      "action": "cmr-restart",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*3",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10052
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*4",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*4",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*4",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 3,
+      "action": "client-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*5",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10047
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*6",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*6",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*6",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 4,
+      "action": "controller-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*7",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10060
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 5,
+      "action": "bare-pair",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*3",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10066
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 6,
+      "action": "cmr-restart",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*4",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10048
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 7,
+      "action": "client-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*6",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10048
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 8,
+      "action": "controller-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*8",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10061
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 9,
+      "action": "bare-pair",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*3",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10071
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 10,
+      "action": "cmr-restart",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*4",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10051
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 11,
+      "action": "client-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*6",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10044
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 12,
+      "action": "controller-reboot",
+      "result": {
+        "strategy": "credentialed",
+        "outputs": [
+          {
+            "on": "controller",
+            "command": "/cmr/device/pair [find identity=\"cmr-client\"] username=\"quickchr\" password=\"…\"",
+            "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n\nColumns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok"
+          }
+        ],
+        "pairStatus": "device:ok, cmr:ok",
+        "settled": {
+          "clientStatus": "paired,connected",
+          "row": {
+            ".id": "*8",
+            "identity": "cmr-client",
+            "connected": "true",
+            "state": "pair: device:ok, cmr:ok",
+            "pairing-requirement": "none"
+          },
+          "verdict": "half-paired"
+        },
+        "settleMs": 10055
+      },
+      "afterAction": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      },
+      "afterRepair": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "commit": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    }
+  ],
+  "summary": {
+    "bare-pair": {
+      "after action: (none)": 6,
+      "after commit test: paired": 6
+    },
+    "cmr-restart": {
+      "after action: pending": 6,
+      "after commit test: paired": 6
+    },
+    "client-reboot": {
+      "after action: pending": 6,
+      "after commit test: paired": 6
+    },
+    "controller-reboot": {
+      "after action: pending": 6,
+      "after commit test: paired": 6
+    }
+  }
+}

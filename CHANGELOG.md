@@ -11,6 +11,17 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Changed
+
+- `examples/cmr/` has a new `--study repair`. It half-pairs a fresh client,
+  then tries a controller CMR restart, a client reboot or a controller reboot.
+  On 7.26beta5 none of them fixed it: each left the client pending (24 of 24).
+  One bare `/cmr/device/pair` did, and every repaired pairing survived a
+  controller CMR restart. `FINDINGS.md` also gains the `--probe` demo from an
+  Intel Mac (HVF), corrects why the 85 s first connect times out (every lab
+  router's user-mode NIC is 10.0.2.15), and takes the MNDP TTL (TLV 19) and
+  header counter from m2ir's grounding.
+
 ### Fixed
 
 - **`timeoutExtra` now applies when `start()` boots a machine that already exists**:

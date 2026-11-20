@@ -181,8 +181,14 @@ export async function restartController(controller: ChrInstance, client: ChrInst
 	await command(controller, "/cmr/set enabled=yes");
 	await until(`${identity} disconnected`, async () => !(await read(client, "/cmr/client"))[0]?.status?.endsWith(",connected"), 30_000)
 		.catch(() => undefined); // A fast reconnect can hide the disconnect from a 1 s poll.
-	// The client logs `paired,connected` and can flip to `waiting-for-pairing` a moment later:
-	// require two equal reads 3 s apart.
+	return waitStable(controller, client, identity);
+}
+
+/**
+ * Wait until both sides show the client connected and two reads 3 s apart agree. The client logs
+ * `paired,connected` and can flip to `waiting-for-pairing` a moment later, so one read is not enough.
+ */
+export async function waitStable(controller: ChrInstance, client: ChrInstance, identity: string, timeout = 180_000): Promise<Observation> {
 	let previous = "";
 	let last: Observation | undefined;
 	await until(`${identity} reconnected and stable`, async () => {
@@ -192,8 +198,38 @@ export async function restartController(controller: ChrInstance, client: ChrInst
 		previous = key;
 		if (!stable) await Bun.sleep(2000);
 		return stable;
-	}, 180_000);
+	}, timeout);
 	return last as Observation;
+}
+
+/** Seconds in a RouterOS duration such as `1h2m3s`. */
+function seconds(duration: string | undefined): number {
+	let total = 0;
+	const unit: Record<string, number> = { w: 604_800, d: 86_400, h: 3600, m: 60, s: 1 };
+	for (const [, n, u] of (duration ?? "").matchAll(/(\d+)([a-z])/g)) total += Number(n) * (unit[u as string] ?? 0);
+	return total;
+}
+
+/**
+ * Reboot RouterOS in place (`/system/reboot`; the QEMU process and its ports stay) and wait until
+ * REST answers with an uptime younger than the reboot. Returns the seconds that took.
+ */
+export async function rebootRouter(chr: ChrInstance): Promise<number> {
+	const started = Date.now();
+	wire.capture?.mark(`${chr.name} reboot`);
+	try {
+		await chr.rest("/system/reboot", { method: "POST", body: "{}" });
+	} catch (error) {
+		// The reply can be lost to the reboot; an HTTP status (auth, bad path) stays fatal.
+		if (error instanceof Error && error.message.startsWith("REST ")) throw error;
+	}
+	await until(`${chr.name} back after reboot`, async () => {
+		try {
+			const uptime = seconds((await read(chr, "/system/resource"))[0]?.uptime);
+			return uptime > 0 && uptime < (Date.now() - started) / 1000;
+		} catch { return false; } // Down while it reboots.
+	}, 180_000);
+	return Math.round((Date.now() - started) / 1000);
 }
 
 /**
