@@ -20,6 +20,7 @@ Each subdirectory is a self-contained lab covering one subsystem:
 | `scripting-patterns/` | RouterOS scripting via REST `/execute` | — | — |
 | `full-suite-resource-trend/` | Does full-suite cost inflate with position, or stay flat? (#76) | — | `ci.instructions.md` |
 | `managed-bridged/` | Managed `bridged:<iface>` network on hosted runners vs a real LAN (#270) | 1 | `testing.instructions.md` |
+| `download-origin/` | `download.mikrotik.com` vs `cdn.mikrotik.com`: bytes, headers, timing, freshness (#146) | — | `DESIGN.md` |
 
 Each directory contains:
 
@@ -29,6 +30,8 @@ Each directory contains:
 `full-suite-resource-trend/` is the exception to the `*.test.ts` shape: it measures
 the *harness* rather than RouterOS, so it is a sampler plus a runner that
 reproduces the CI per-file loop. See its own README for how to run it.
+`download-origin/` is another: a standalone `probe.ts` that needs no CHR and measures
+MikroTik's download hosts. Its REPORT.md says how to run it.
 
 ## Running
 

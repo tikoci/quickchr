@@ -32,6 +32,15 @@ on:
         options:
           - all
           - ssh-os-baseline
+          - download-origin
+      download-origin-budget-mb:
+        description: "download-origin only: MB of full artifacts to hash per runner (both hosts count)"
+        type: string
+        default: "400"
+      download-origin-rounds:
+        description: "download-origin only: paired 8 MiB range rounds per runner"
+        type: string
+        default: "12"
   push:
     paths:
       - ".github/workflows/lab.yml"
@@ -142,4 +151,43 @@ jobs:
           path: |
             probe.txt
             summary.json
+          if-no-files-found: warn
+
+  # test/lab/download-origin — is cdn.mikrotik.com the same artifact origin as
+  # download.mikrotik.com, and how do the two behave from hosted runners? (#146)
+  # Downloads real RouterOS artifacts from MikroTik, so it is dispatch-only and
+  # must be picked by name: not on push, and not part of `all`. Bandwidth is
+  # bounded by the budget/rounds inputs. Findings: test/lab/download-origin/REPORT.md.
+  download-origin:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.lab == 'download-origin' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Probe download.mikrotik.com vs cdn.mikrotik.com
+        shell: bash
+        env:
+          PROBE_LABEL: ${{ matrix.os }}
+          BUDGET_MB: ${{ inputs.download-origin-budget-mb }}
+          ROUNDS: ${{ inputs.download-origin-rounds }}
+        run: |
+          set -uo pipefail
+          bun test/lab/download-origin/probe.ts run \
+            "--full-budget-mb=$BUDGET_MB" "--rounds=$ROUNDS" --range-mib=8 \
+            --out=download-origin-results 2>&1 | tee probe.log
+      - name: Upload probe results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: download-origin-${{ matrix.os }}
+          path: |
+            download-origin-results/
+            probe.log
           if-no-files-found: warn
