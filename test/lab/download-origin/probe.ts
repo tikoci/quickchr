@@ -78,18 +78,18 @@ function hostUrl(officialUrl: string, host: Host): string {
 
 type ErrorClass = "dns" | "connect" | "tls" | "timeout" | "idle-abort" | "reset" | "http" | "other";
 
-function classify(err: unknown): { cls: ErrorClass; message: string } {
+function classify(err: unknown): { class: ErrorClass; message: string } {
 	const e = err as { code?: string; name?: string; message?: string };
 	const message = `${e?.name ?? "Error"}${e?.code ? `(${e.code})` : ""}: ${e?.message ?? String(err)}`;
 	const s = `${e?.code ?? ""} ${e?.name ?? ""} ${e?.message ?? ""}`;
-	if (/IDLE_ABORT/.test(s)) return { cls: "idle-abort", message };
-	if (/Timeout|TimeoutError|ETIMEDOUT/i.test(s)) return { cls: "timeout", message };
-	if (/ENOTFOUND|EAI_AGAIN|DNS|getaddrinfo/i.test(s)) return { cls: "dns", message };
-	if (/CERT|TLS|SSL|certificate/i.test(s)) return { cls: "tls", message };
+	if (/IDLE_ABORT/.test(s)) return { class: "idle-abort", message };
+	if (/Timeout|TimeoutError|ETIMEDOUT/i.test(s)) return { class: "timeout", message };
+	if (/ENOTFOUND|EAI_AGAIN|DNS|getaddrinfo/i.test(s)) return { class: "dns", message };
+	if (/CERT|TLS|SSL|certificate/i.test(s)) return { class: "tls", message };
 	if (/ECONNREFUSED|ConnectionRefused|EHOSTUNREACH|ENETUNREACH|FailedToOpenSocket/i.test(s))
-		return { cls: "connect", message };
-	if (/ECONNRESET|ConnectionClosed|socket|closed|EPIPE/i.test(s)) return { cls: "reset", message };
-	return { cls: "other", message };
+		return { class: "connect", message };
+	if (/ECONNRESET|ConnectionClosed|socket|closed|EPIPE/i.test(s)) return { class: "reset", message };
+	return { class: "other", message };
 }
 
 const KEEP_HEADERS = [
@@ -150,7 +150,7 @@ interface Transfer {
 	maxGapMs: number;
 	stalls: number; // gaps > STALL_MS between body chunks
 	sha256?: string | undefined;
-	error?: { cls: ErrorClass; message: string } | undefined;
+	error?: { class: ErrorClass; message: string } | undefined;
 }
 
 /** Stream a body, hashing as it goes, recording TTFB, gaps and stalls. */
@@ -189,7 +189,7 @@ async function transfer(
 		t.ttfbMs = performance.now() - t0;
 		t.status = res.status;
 		if (!(res.status === 200 || res.status === 206) || !res.body) {
-			t.error = { cls: "http", message: `HTTP ${res.status}` };
+			t.error = { class: "http", message: `HTTP ${res.status}` };
 			await res.body?.cancel();
 			return t;
 		}
@@ -215,7 +215,7 @@ async function transfer(
 		t.mbps = bodyMs > 0 ? t.bytes / 1e6 / (bodyMs / 1000) : undefined;
 		t.sha256 = hasher.digest("hex");
 		if (opts.expectedBytes !== undefined && t.bytes !== opts.expectedBytes) {
-			t.error = { cls: "reset", message: `short body: ${t.bytes}/${opts.expectedBytes}` };
+			t.error = { class: "reset", message: `short body: ${t.bytes}/${opts.expectedBytes}` };
 		}
 	} catch (err) {
 		const reason = controller.signal.aborted ? controller.signal.reason : err;
@@ -314,7 +314,7 @@ interface HostMeta {
 	head?: { status: number; headers: Record<string, string> } | undefined;
 	range?: { status: number; contentRange?: string | undefined; bytes: number } | undefined;
 	sha256File?: { status: number; text?: string | undefined; hash?: string | undefined } | undefined;
-	error?: { cls: ErrorClass; message: string } | undefined;
+	error?: { class: ErrorClass; message: string } | undefined;
 }
 
 async function hostMeta(a: Artifact, host: Host): Promise<HostMeta> {
@@ -401,7 +401,7 @@ async function run() {
 		for (const h of order) hosts.push(await hostMeta(a, h));
 		hosts.sort((x, y) => HOSTS.indexOf(x.host) - HOSTS.indexOf(y.host));
 		meta.push({ artifact: a, hosts });
-		console.error(`[probe] meta ${a.file}: ${hosts.map((m) => `${m.host}=${m.head?.status ?? m.error?.cls}`).join(" ")}`);
+		console.error(`[probe] meta ${a.file}: ${hosts.map((m) => `${m.host}=${m.head?.status ?? m.error?.class}`).join(" ")}`);
 	}
 
 	// 5. Integrity: full downloads from both hosts inside the budget, else windows.
@@ -437,7 +437,7 @@ async function run() {
 				spent += t.bytes;
 				transfers.push(t);
 				fullTransfers.push(t);
-				console.error(`[probe]   -> ${t.status} ${f(t.mbps)} MB/s ttfb=${f(t.ttfbMs, 0)}ms ${t.error?.cls ?? "ok"}`);
+				console.error(`[probe]   -> ${t.status} ${f(t.mbps)} MB/s ttfb=${f(t.ttfbMs, 0)}ms ${t.error?.class ?? "ok"}`);
 			}
 		} else {
 			mode = "windows";
@@ -505,7 +505,7 @@ async function run() {
 		}
 		const same = transfers.every((t) => !t.error && t.sha256 === transfers[0]?.sha256);
 		console.error(
-			`[probe] round ${r} ${m.artifact.file} ${range}: ${transfers.map((t) => `${t.host}=${f(t.mbps)}MB/s/${f(t.ttfbMs, 0)}ms${t.error ? `/${t.error.cls}` : ""}`).join(" ")}${same ? "" : " HASH-MISMATCH"}`,
+			`[probe] round ${r} ${m.artifact.file} ${range}: ${transfers.map((t) => `${t.host}=${f(t.mbps)}MB/s/${f(t.ttfbMs, 0)}ms${t.error ? `/${t.error.class}` : ""}`).join(" ")}${same ? "" : " HASH-MISMATCH"}`,
 		);
 		rangeTrials.push({ round: r, file: m.artifact.file, range, transfers });
 	}
@@ -519,7 +519,7 @@ async function run() {
 			host: h,
 			full: {
 				trials: mine("full").length,
-				errors: mine("full").filter((t) => t.error).map((t) => t.error?.cls),
+				errors: mine("full").filter((t) => t.error).map((t) => t.error?.class),
 				stalls: mine("full").reduce((s, t) => s + t.stalls, 0),
 				maxGapMs: Math.max(0, ...mine("full").map((t) => t.maxGapMs)),
 				mbps: stats(ok(mine("full")).map((t) => t.mbps ?? 0)),
@@ -527,7 +527,7 @@ async function run() {
 			},
 			range: {
 				trials: mine("range").length,
-				errors: mine("range").filter((t) => t.error).map((t) => t.error?.cls),
+				errors: mine("range").filter((t) => t.error).map((t) => t.error?.class),
 				stalls: mine("range").reduce((s, t) => s + t.stalls, 0),
 				maxGapMs: Math.max(0, ...mine("range").map((t) => t.maxGapMs)),
 				mbps: stats(ok(mine("range")).map((t) => t.mbps ?? 0)),
@@ -626,7 +626,6 @@ function summaryMarkdown(r: any): string {
 		"",
 		`Paired (same bytes, both hosts, order alternated): ${p.pairs} pairs; cdn faster in ${p.cdnFaster}; cdn/download throughput ratio min ${f(p.ratioCdnOverDownload.min)} / p50 ${f(p.ratioCdnOverDownload.p50)} / max ${f(p.ratioCdnOverDownload.max)}.`,
 		`Position effect: first-in-pair p50 ${f(p.positionEffect.firstMbps.p50)} MB/s vs second-in-pair p50 ${f(p.positionEffect.secondMbps.p50)} MB/s.`,
-		"",
 	);
 	return `${L.join("\n")}\n`;
 }
