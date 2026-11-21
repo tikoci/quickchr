@@ -280,8 +280,10 @@ with a layered design:
   blocks everything instead of rotting in the Actions list. Superseded push runs cancel;
   cancelled runs carry no signal (the gate skips them).
 - **`sweep.yml`** — weekly all-platform sweep (+ examples smoke). A separate file from
-  main.yml *by design*: its TCG legs (macos-x86, windows-x86 — bounded to the anchor
-  smoke subset via `tcg-smoke: true` to cap weekly cost) may red without blocking PRs,
+  main.yml *by design*: its TCG legs (macos-x86, windows-x86 — bounded to the smoke
+  subset via `tcg-smoke: true` to cap weekly cost: `anchor.test.ts`, plus
+  `receive-ports.test.ts` and `forward-cli.test.ts` for the host networking that differs
+  on Windows) may red without blocking PRs,
   but are never green-washed — red is red. On manual `integration.yml` dispatches TCG
   legs run the FULL suite by default (`tcg-smoke` defaults off): `platforms=all` means
   all platforms, full set — smoke is opt-in, never an implicit narrowing.

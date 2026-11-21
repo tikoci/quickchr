@@ -379,12 +379,16 @@ describe("pruneCache", () => {
  *  so these stand in for the platform and the rename (#303 follow-up). */
 describe("saveMachine — Windows rename refusal", () => {
 	function refusing(times: number, code = "EPERM") {
-		let calls = 0;
+		// Refusals are counted on their own: the real rename after them may itself be
+		// retried on a Windows runner (a scanner on the fixture), which is not ours to count.
+		let refusals = 0;
 		return {
-			get calls() { return calls; },
+			get refusals() { return refusals; },
 			rename(from: string, to: string) {
-				calls++;
-				if (calls <= times) throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+				if (refusals < times) {
+					refusals++;
+					throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+				}
 				renameSync(from, to);
 			},
 		};
@@ -403,7 +407,7 @@ describe("saveMachine — Windows rename refusal", () => {
 		}
 		expect(err).toMatchObject({ code: "STATE_ERROR" });
 		expect(String((err as Error).message)).toContain("previous state is unchanged");
-		expect(fake.calls).toBeGreaterThan(1); // retried, not failed on the first refusal
+		expect(fake.refusals).toBeGreaterThan(1); // retried, not failed on the first refusal
 		expect(loadMachine("win-refused")?.cpu).toBe(1);
 		expect(readdirSync(m.machineDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
 	});
@@ -413,7 +417,7 @@ describe("saveMachine — Windows rename refusal", () => {
 		saveMachine(m);
 		const fake = refusing(2, "EBUSY");
 		saveMachine({ ...m, cpu: 2 }, { platform: "win32", rename: fake.rename, sleep: noSleep });
-		expect(fake.calls).toBe(3);
+		expect(fake.refusals).toBe(2);
 		expect(loadMachine("win-brief")?.cpu).toBe(2);
 		expect(readdirSync(m.machineDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
 	});
@@ -424,7 +428,7 @@ describe("saveMachine — Windows rename refusal", () => {
 		const fake = refusing(Number.POSITIVE_INFINITY);
 		expect(() => saveMachine({ ...m, cpu: 4 }, { platform: "linux", rename: fake.rename, sleep: noSleep }))
 			.toThrow(expect.objectContaining({ code: "EPERM" }));
-		expect(fake.calls).toBe(1);
+		expect(fake.refusals).toBe(1);
 		expect(loadMachine("posix-eperm")?.cpu).toBe(1);
 	});
 });

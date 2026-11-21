@@ -107,7 +107,8 @@ turns the gate green again. Never "fix" the gate by weakening the verdict logic.
 
 Monday 05:37 UTC (or `gh workflow run sweep.yml`): all five platforms + the examples smoke
 harness, via `integration.yml` with `platforms=all` and `tcg-smoke: true` (the weekly
-cadence bounds TCG legs to the anchor subset to cap cost — the full-suite-on-TCG "find
+cadence bounds TCG legs to the smoke subset — `anchor.test.ts`, `receive-ports.test.ts`,
+`forward-cli.test.ts` — to cap cost; the full-suite-on-TCG "find
 out" path is a manual `integration.yml` dispatch, where `tcg-smoke` defaults OFF).
 Deliberately a separate workflow from `main.yml` so a red TCG leg **never** trips the PR
 freshness gate — but a red sweep is still a real failure to investigate, never green-washed.
@@ -632,7 +633,10 @@ The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Win
 **Windows integration tests** run via `platforms=windows-x86` on `integration.yml` —
 TCG-only, full suite by default (300-min timeout); a red job is a real failure
 (no `continue-on-error`). Narrow with `test-filter`, or pass `tcg-smoke=true` for
-just the anchor boot+REST pulse.
+the smoke subset: the anchor boot+REST pulse plus receive slots and the #57 forward
+probe. On Windows that probe asserts the *known* collision (QEMU's monitor greets on the
+first automatic forward at +6), so it goes red when #57 is fixed — delete its Windows
+branch then.
 QEMU is installed with `choco install qemu` and runs under TCG (no HVF/WHPX on GitHub
 Windows runners).
 
