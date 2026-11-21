@@ -426,6 +426,24 @@ describe("parseUsernetTable", () => {
 		expect(parseUsernetTable(sample)[2]).toMatchObject({ proto: "UDP", state: "223 sec", srcAddr: "10.0.2.15" });
 	});
 
+	test("Windows prints the FD as a hex socket handle; those rows are kept", () => {
+		// windows-latest, QEMU 11.1.0 (integration.yml run 44917965339), trimmed.
+		const windows = [
+			"Hub -1 (net0):",
+			"  Protocol[State]    FD  Source Address  Port   Dest. Address  Port RecvQ SendQ",
+			"  TCP[SYN_SENT]     121c       127.0.0.1  9100       10.0.2.15    80     0     0",
+			"  TCP[HOST_FORWARD] 434               *  9100       10.0.2.15    80     0     0",
+			"  TCP[HOST_FORWARD] 41c               *  9106       10.0.2.15    80     0     0",
+			"  TCP[HOST_FORWARD] 418               *  9107       10.0.2.15    80     0     0",
+			"  TCP[HOST_FORWARD] 414               *  9108       10.0.2.15    80     0     0",
+			"  UDP[235 sec]      1234               *  5678         0.0.0.0  5678     0     0",
+		].join("\r\n");
+		const rows = parseUsernetTable(windows);
+		expect(rows.length).toBe(6);
+		expect(rows.filter((r) => r.state === "HOST_FORWARD").map((r) => r.srcPort)).toEqual([9100, 9106, 9107, 9108]);
+		expect(rows[2]).toMatchObject({ fd: "41c", srcAddr: "*", dstPort: 80 });
+	});
+
 	test("returns nothing for unparsable text", () => {
 		expect(parseUsernetTable("<failed: monitor socket not found>")).toEqual([]);
 	});
