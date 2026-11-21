@@ -441,3 +441,52 @@ describe("receive slots — Copilot review fixes (#303)", () => {
 		).rejects.toMatchObject({ code: "INVALID_RECEIVE_SPEC" });
 	});
 });
+
+describe("receive slots — Codex re-review fixes (#303)", () => {
+	test("an explicit portBase whose unmapped offset is another machine's receive port is refused", async () => {
+		writeMachine(baseState("rx", { status: "stopped", pid: undefined, portBase: 19410, receivePorts: [{ name: "app", port: 19406, proto: "tcp" }] }));
+		await expect(
+			QuickCHR.start({ name: "fresh", version: "7.22.1", arch: "x86", dryRun: true, portBase: 19400 }),
+		).rejects.toThrow(/19406 \(port block offset \+6\)/);
+	});
+
+	test("a replacement save keeps machine.json's mode", async () => {
+		if (process.platform === "win32") return;
+		const { chmodSync, statSync } = await import("node:fs");
+		const state = baseState("alpha", { status: "stopped", pid: undefined });
+		writeMachine(state);
+		const file = join(state.machineDir, "machine.json");
+		chmodSync(file, 0o600);
+		await QuickCHR.get("alpha")?.addReceivePort("tzsp");
+		expect(statSync(file).mode & 0o777).toBe(0o600);
+	});
+
+	test("a stale handle cannot remove a recreated machine's slot", async () => {
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined }));
+		const stale = QuickCHR.get("alpha");
+		// Removed and created again under the same name.
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined, createdAt: "2026-02-02T00:00:00.000Z", receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		await expect(stale?.removeReceivePort("tzsp")).rejects.toMatchObject({ code: "MACHINE_NOT_FOUND" });
+		expect(QuickCHR.get("alpha")?.state.receivePorts).toEqual([{ name: "tzsp", port: 37008, proto: "udp" }]);
+	});
+
+	test("a failed save leaves the handle and disk unchanged and no temp file behind", async () => {
+		if (process.platform === "win32" || process.getuid?.() === 0) return;
+		const { chmodSync, readdirSync } = await import("node:fs");
+		const state = baseState("alpha", { status: "stopped", pid: undefined, receivePorts: [{ name: "syslog", port: 5514, proto: "udp" }] });
+		writeMachine(state);
+		const handle = QuickCHR.get("alpha");
+		// Create the lock directory first, then make the machine directory read-only so
+		// only the temp-file write fails.
+		await handle?.addReceivePort("syslog");
+		chmodSync(state.machineDir, 0o500);
+		try {
+			await expect(handle?.changeReceivePorts({ remove: ["syslog"], add: ["syslog:5515"] })).rejects.toBeDefined();
+		} finally {
+			chmodSync(state.machineDir, 0o755);
+		}
+		expect(handle?.receive.syslog?.hostPort).toBe(5514);
+		expect(QuickCHR.get("alpha")?.state.receivePorts).toEqual([{ name: "syslog", port: 5514, proto: "udp" }]);
+		expect(readdirSync(state.machineDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+	});
+});

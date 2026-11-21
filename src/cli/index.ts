@@ -4210,7 +4210,9 @@ Receive notes:
   A receive slot is a reservation: quickchr never binds it and adds no forward.
   The guest sends to 10.0.2.2:<port>; your listener binds 127.0.0.1:<port>
   unconnected. The port is unique across quickchr machines — a clash names the
-  next free port. Read it back: quickchr inspect <name> | jq .receive
+  next free port. Read it back: quickchr list <name> --json (any status) or
+  quickchr inspect <name> (running). A foreground session (start --fg) holds the
+  machine lock until QEMU exits; pass --receive to that start instead.
 
 Packages notes:
   Installing a package reboots the machine to activate it. The machine must be

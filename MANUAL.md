@@ -1533,7 +1533,8 @@ quickchr add lab --receive tzsp                  # 37008/udp
 quickchr add lab2 --receive tzsp:37009           # second machine
 quickchr set lab --receive myapp:9400/udp        # running or stopped, no restart
 quickchr set lab --no-receive myapp
-quickchr inspect lab | jq .receive               # { "tzsp": { hostPort, guestHost, guestPort, … } }
+quickchr list lab --json | jq .receivePorts      # any status: [{ name, port, proto }]
+quickchr start lab && quickchr inspect lab | jq .receive   # running only: { "tzsp": { hostPort, guestHost, guestPort, … } }
 ```
 
 - Spec `name[:port][/proto]`. Registry defaults (`WELL_KNOWN_RECEIVE_PORTS`): `tzsp`
@@ -1552,6 +1553,10 @@ quickchr inspect lab | jq .receive               # { "tzsp": { hostPort, guestHo
   `--receive` slots it does not have yet instead of ignoring them. A library
   `dryRun` previews them without saving.
 - Needs a `user` NIC; refused otherwise.
+- A foreground session (`start --fg`) holds the machine lock until QEMU exits, so
+  `set --receive` from another shell is refused with `MACHINE_LOCKED` while it runs.
+  Add slots before a foreground boot (`start <name> --fg --receive …` records them),
+  or run in the background.
 - `--forward tzsp` is refused with a pointer to `--receive`: a forward is host→guest.
 
 ### Named L2 sockets

@@ -1010,10 +1010,8 @@ function createInstance(state: MachineState): ChrInstance {
 
 		async removeReceivePort(name: string): Promise<boolean> {
 			const key = name.trim().toLowerCase();
-			refreshMachineState(state);
-			if (!(state.receivePorts ?? []).some((r) => r.name === key)) return false;
-			const after = await changeReceivePorts(state, { remove: [key] });
-			return !after.some((r) => r.name === key);
+			const { before, after } = await changeReceivePortsDetailed(state, { remove: [key] });
+			return before.some((r) => r.name === key) && !after.some((r) => r.name === key);
 		},
 
 		changeReceivePorts(change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined }): Promise<ReceivePort[]> {
@@ -2397,12 +2395,17 @@ async function pickNewMachineResources(
 	const portBase = opts.portBase || await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts, undefined, reservedHosts);
 	validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, others, name);
 	const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
-	for (const p of Object.values(ports)) {
-		const owner = held.get(p.host);
+	// Every offset of the block, mapped or not (an unmapped one is an auto extra's slot,
+	// or QEMU's IPC socket on Windows), plus any explicit forward outside it.
+	const ownHosts = new Map<number, string>();
+	for (let i = 0; i < PORTS_PER_BLOCK; i++) ownHosts.set(portBase + i, `port block offset +${i}`);
+	for (const p of Object.values(ports)) ownHosts.set(p.host, `"${p.name}"`);
+	for (const [host, label] of ownHosts) {
+		const owner = held.get(host);
 		if (owner) {
 			throw new QuickCHRError(
 				"PORT_CONFLICT",
-				`Port ${p.host} ("${p.name}") is already used by ${owner}.${opts.portBase ? " Pick another portBase, or omit it to have one allocated." : ""}`,
+				`Port ${host} (${label}) is already used by ${owner}.${opts.portBase ? " Pick another portBase, or omit it to have one allocated." : ""}`,
 			);
 		}
 	}
@@ -2465,9 +2468,20 @@ async function changeReceivePorts(
 	state: MachineState,
 	change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined },
 ): Promise<ReceivePort[]> {
+	return (await changeReceivePortsDetailed(state, change)).after;
+}
+
+/** {@link changeReceivePorts}, also returning the slots the locked record held before
+ *  the change — the only trustworthy "before", since the handle's may be stale. */
+async function changeReceivePortsDetailed(
+	state: MachineState,
+	change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined },
+): Promise<{ before: ReceivePort[]; after: ReceivePort[] }> {
 	const add = (change.add ?? []).map(normalizeReceivePort);
 	const remove = change.remove ?? [];
-	if (add.length === 0 && remove.length === 0) return state.receivePorts ?? [];
+	if (add.length === 0 && remove.length === 0) return { before: state.receivePorts ?? [], after: state.receivePorts ?? [] };
+	// withMachineLock checks this handle still names the same machine (createdAt) before
+	// it refreshes the handle — so nothing here may refresh it first.
 	return withMachineLock(state, "receive", async () => {
 		if (add.length > 0) assertReceiveReachable(state.networks, state.name);
 		ensureDir(getDataDir());
@@ -2479,10 +2493,13 @@ async function changeReceivePorts(
 			const before = state.receivePorts ?? [];
 			const next = planReceiveChange(state, add, remove, receiveCheckMachines(state.name));
 			if (JSON.stringify(next) !== JSON.stringify(before)) {
-				state.receivePorts = next.length > 0 ? next : undefined;
-				saveMachine(state);
+				const receivePorts = next.length > 0 ? next : undefined;
+				// Save first: a failed save must not leave the handle reporting a change
+				// that is not on disk.
+				saveMachine({ ...state, receivePorts });
+				state.receivePorts = receivePorts;
 			}
-			return next;
+			return { before, after: next };
 		} finally {
 			allocation.release();
 		}

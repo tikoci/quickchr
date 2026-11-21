@@ -346,7 +346,7 @@ listener binds `127.0.0.1:<port>` unconnected. quickchr only reserves the port â
 ```bash
 quickchr add lab --receive tzsp            # 37008/udp (also: netflow 2055, ipfix 4739, syslog 5514)
 quickchr add lab2 --receive tzsp:37009     # ports are unique across machines
-quickchr inspect lab | jq -r .receive.tzsp.hostPort
+quickchr list lab --json | jq '.receivePorts'   # any status; `inspect` once it runs
 ```
 
 SLIRP hides which machine sent a datagram, so the port is the label. See the

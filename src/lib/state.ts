@@ -2,7 +2,8 @@
  * Machine state persistence — JSON files in ~/.local/share/quickchr/machines/.
  */
 
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, chownSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { absoluteEnvPath, isFullyQualifiedPath, userHomeDir } from "./paths.ts";
 import type { MachineState, } from "./types.ts";
@@ -122,24 +123,41 @@ export function saveMachine(state: MachineState): void {
 	ensureDir(state.machineDir);
 	const target = machineJsonPath(state.name);
 	const body = JSON.stringify(state, null, "\t") + "\n";
-	const tmp = join(state.machineDir, `.machine.json.${process.pid}.tmp`);
-	writeFileSync(tmp, body);
-	for (let attempt = 1; ; attempt++) {
-		try {
-			renameSync(tmp, target);
-			return;
-		} catch (err) {
-			const code = (err as { code?: string }).code;
-			const transient = code === "EPERM" || code === "EACCES" || code === "EBUSY";
-			if (transient && attempt < SAVE_RENAME_ATTEMPTS) {
-				sleepSync(SAVE_RENAME_RETRY_MS);
-				continue;
-			}
-			try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
-			if (!transient) throw err;
-			writeFileSync(target, body);
-			return;
+	// A replacement keeps the file's mode (machine.json can hold a password) and, when
+	// root saves a user's machine, its owner — what writing in place used to preserve.
+	let existing: { mode: number; uid: number; gid: number } | undefined;
+	try {
+		const st = statSync(target);
+		existing = { mode: st.mode & 0o777, uid: st.uid, gid: st.gid };
+	} catch { /* new file */ }
+	// Unique per save, created exclusively: two saves in one process (workers share a
+	// pid) must not write or rename each other's temp file.
+	const tmp = join(state.machineDir, `.machine.json.${process.pid}.${randomUUID()}.tmp`);
+	try {
+		writeFileSync(tmp, body, { flag: "wx", ...(existing ? { mode: existing.mode } : {}) });
+		if (existing && process.getuid?.() === 0 && existing.uid !== 0) {
+			try { chownSync(tmp, existing.uid, existing.gid); } catch { /* best effort */ }
 		}
+		for (let attempt = 1; ; attempt++) {
+			try {
+				renameSync(tmp, target);
+				return;
+			} catch (err) {
+				const code = (err as { code?: string }).code;
+				const transient = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+				if (transient && attempt < SAVE_RENAME_ATTEMPTS) {
+					sleepSync(SAVE_RENAME_RETRY_MS);
+					continue;
+				}
+				if (!transient) throw err;
+				writeFileSync(target, body);
+				return;
+			}
+		}
+	} finally {
+		// Gone after a successful rename; anything else (a failed write, a refused rename)
+		// must not leave a temp file behind.
+		try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
 	}
 }
 
@@ -173,7 +191,20 @@ export function markMachineStopped(state: MachineState): void {
 		current.frozen = undefined;
 		saveMachine(current);
 	} finally {
-		lock.release();
+		releaseStatusLock(lock);
+	}
+}
+
+/** Release a status-refresh lock without letting a failure escape `list()`/`get()`.
+ *  The release appends a marker, which can fail (a full disk); it is retried once, and
+ *  if it still fails the holder record names this pid until the process exits — the
+ *  lock module treats a dead pid's lock as free. */
+function releaseStatusLock(lock: HeldLock): void {
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			lock.release();
+			return;
+		} catch { /* retry once */ }
 	}
 }
 

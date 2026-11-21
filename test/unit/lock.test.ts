@@ -120,6 +120,36 @@ describe("acquireLockNow", () => {
 		}
 	});
 
+	test("waits out a brief `status` holder (a list/get refresh) instead of refusing (#303 review)", async () => {
+		const lockModule = join(import.meta.dir, "../../src/lib/lock.ts");
+		const child = Bun.spawn([
+			process.execPath, "-e",
+			`const { acquireLockNow } = await import(${JSON.stringify(lockModule)}); const l = acquireLockNow(${JSON.stringify(LOCK)}, "status"); await Bun.sleep(300); l.release();`,
+		], { stdout: "ignore", stderr: "inherit", env: { ...process.env } });
+		try {
+			const deadline = Date.now() + 10_000;
+			while (currentHolder(LOCK)?.op !== "status" && Date.now() < deadline) await Bun.sleep(10);
+			expect(currentHolder(LOCK)?.op).toBe("status");
+			const lock = acquireLockNow(LOCK, "start");
+			expect(currentHolder(LOCK)?.op).toBe("start");
+			lock.release();
+		} finally {
+			child.kill();
+			await child.exited;
+		}
+	});
+
+	test("a `status` refresh never waits for another holder", () => {
+		const held = acquireLockNow(LOCK, "status");
+		try {
+			const t0 = Date.now();
+			expect(() => acquireLockNow(LOCK, "status")).toThrow();
+			expect(Date.now() - t0).toBeLessThan(500);
+		} finally {
+			held.release();
+		}
+	});
+
 	test("the same process is not let back in: two async operations conflict too", () => {
 		const held = acquireLockNow(LOCK, "stop");
 		expect(() => acquireLockNow(LOCK, "start")).toThrow();

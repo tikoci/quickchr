@@ -223,7 +223,9 @@ export async function findAvailablePortBlock(
 	let base = startBase ?? allocatePortBlock(usedBases);
 	const maxAttempts = 20;
 
-	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+	// `maxAttempts` bounds the live probes; a block ruled out by a known reservation costs
+	// no probe, so it is not charged against the budget (#303 review).
+	for (let attempt = 0; attempt < maxAttempts && base + PORTS_PER_BLOCK - 1 <= 65535;) {
 		// `reservedHosts` are ports nothing may be listening on yet — receive slots and
 		// stopped machines' forwards (#299) — so the live probe cannot see them. Any of
 		// them inside the candidate block rules it out, mapped or not (an unmapped offset
@@ -233,6 +235,7 @@ export async function findAvailablePortBlock(
 		let reserved = false;
 		for (let i = 0; i < PORTS_PER_BLOCK && !reserved; i++) reserved = reservedHosts.has(base + i);
 		if (!reserved) {
+			attempt++;
 			const conflicts = await checkPortConflicts(buildPortMappings(base, excludePorts, extraPorts));
 			if (conflicts.length === 0) return base;
 		}

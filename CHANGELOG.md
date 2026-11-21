@@ -52,7 +52,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   a port another machine holds. `machine.json` is written atomically (temp file +
   rename), explicit forwards are checked against other machines' whole port blocks,
   and `list`/`get` refreshing a dead machine's status take the machine lock and patch
-  only the status fields instead of rewriting a possibly stale record. (#303 review)
+  only the status fields instead of rewriting a possibly stale record; a `start` that
+  meets such a refresh waits for it instead of failing. Replacing `machine.json` keeps
+  its file mode. (#303 review)
 - **`timeoutExtra` now applies when `start()` boots a machine that already exists**:
   one `add()` made, or one that has booted before. Only a new machine's start used to
   add it. On the CLI, `quickchr start <name> --timeout-extra` and the `timeout-extra`

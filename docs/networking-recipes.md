@@ -127,7 +127,8 @@ quickchr add lab1 --receive tzsp            # 37008/udp — the registry default
 quickchr add lab2 --receive tzsp:37009      # a second machine: pick the next port
 quickchr set lab1 --receive syslog          # running or stopped; no restart
 quickchr set lab1 --no-receive syslog
-quickchr inspect lab1 | jq -r .receive.tzsp.hostPort    # → 37008
+quickchr list lab1 --json | jq '.receivePorts'           # any status
+quickchr start lab1 && quickchr inspect lab1 | jq -r .receive.tzsp.hostPort   # → 37008 (running only)
 ```
 
 ```ts
@@ -139,7 +140,9 @@ await chr.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${tzsp.
 ```
 
 - **A reservation only.** quickchr never binds the port and emits no `hostfwd`, which is
-  why a slot can be added to a running machine (a forward cannot, #141). Your listener
+  why a slot can be added to a running machine (a forward cannot, #141) — except during
+  a foreground session (`start --fg`), which holds the machine lock until QEMU exits;
+  pass `--receive` to that `start` instead. Your listener
   binds `127.0.0.1:<port>`, **unconnected**.
 - **One number.** SLIRP does not translate the port: the guest sends to
   `10.0.2.2:<port>` and the host receives on `<port>`.
