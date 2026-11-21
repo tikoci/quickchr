@@ -310,9 +310,12 @@ work:
 
 ## run-script and policy
 
-`/cmr/device/run-script` runs one line on each selected client. The manual
-says it runs "with the `read`, `write`, `test`, and `reboot` policies, without
-a user session".
+`/cmr/device/run-script` runs a script on each selected client. The manual
+calls it a single line, but on 7.26beta1 multi-line scripts (LF and CRLF) ran
+every line ([centrs](https://github.com/tikoci/centrs/blob/main/commands/execute/README.md));
+not tested on beta5, whose studies send one line each. The manual says it runs
+"with the `read`, `write`, `test`, and `reboot` policies, without a user
+session".
 
 ### Which controller logins may send a script
 
