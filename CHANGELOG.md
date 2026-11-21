@@ -45,6 +45,28 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- **`--no-network` / `networks: []` now gives a machine no NICs, as documented.**
+  An empty list used to fall through to the default user NIC, and even with no
+  network options QEMU adds its own default NIC; quickchr now passes `-nic none`.
+  Such a start is refused unless it doesn't wait for boot (`--no-wait`, `--fg`),
+  since quickchr reaches the guest through the user NIC, and `add()` refuses
+  provisioning options on a machine with no user NIC (it could never apply them).
+  `--no-network` together with `--add-network` is now an error; to use only the
+  networks you list, pass `--add-network` alone. If you relied on the old behaviour,
+  drop `--no-network`. (#287)
+- **`QuickCHR.add({ onProgress })` no longer prints image lines to stdout.** `add()`
+  dropped its logger on the way to the image cache, so `Using cached image…` and the
+  download lines went to `console.log` even with a progress callback. (#290)
+- **`quickchr remove` / `removeOrphan()` no longer deletes a directory whose QEMU is
+  still running.** A start killed after spawning QEMU but before saving `machine.json`
+  leaves a live VM behind an unreadable directory; removing it used to strand that VM
+  untracked. quickchr now writes `qemu.pid` immediately after spawning (it used to wait
+  out a 1.5 s startup check) and removes it once a stopped QEMU has exited. A removal
+  refuses with `MACHINE_RUNNING` and deletes nothing when that pid is alive and its
+  command line names a file in the directory (compared by canonical path, so a
+  symlinked data dir matches), with a `kill` hint. When the identity cannot be checked
+  (Windows, another user's process on macOS), it still refuses, without a kill hint,
+  and says to delete `qemu.pid` if the process is not this machine's QEMU. (#294)
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a

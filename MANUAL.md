@@ -1015,7 +1015,12 @@ and `listOrphans()` covers it.
 `listOrphans()` and `removeOrphan()` treat both the same — unreadable is unreadable —
 so `quickchr remove <name>` clears either. `removeOrphan()` returns `false` for a real
 machine (use `get(name)?.remove()` for those) and for a name that does not exist, and
-throws `INVALID_NAME` for a name that is not a usable path segment.
+throws `INVALID_NAME` for a name that is not a usable path segment. It throws
+`MACHINE_RUNNING` and deletes nothing when the directory's QEMU may still be running:
+its `qemu.pid` names a live process whose command line names a file in that directory
+(by canonical path). Where the command line cannot be read (Windows, another user's
+process on macOS), any live pid there counts, and the error says so instead of
+suggesting a kill (#294).
 
 ### `ChrInstance`
 
@@ -1280,13 +1285,13 @@ afterAll(async () => { await chr?.remove(); });
   same name), removes the machine again if its first boot times out, and returns the
   handle. Its `state.createdAt` tells this machine apart from a later one of the same
   name. `add()` is for a machine you configure now and boot later or from another
-  process. It prints its image line to stdout even with `onProgress` (#290).
+  process.
 - **A random name is enough ownership** when the run shares the developer's data
   directory. A test never needs to start or remove a machine it did not create. In CI,
   point `QUICKCHR_DATA_DIR` at the runner's temp directory and cache
   `<data dir>/cache` between runs.
-- **Keep stdout yours.** With `onProgress` on `start()` and a logger on `cacheAdd()`,
-  quickchr prints nothing to stdout.
+- **Keep stdout yours.** With `onProgress` on `add()` and `start()` and a logger on
+  `cacheAdd()`, quickchr prints nothing to stdout (#290).
 - **Make the hook's timeout outlive quickchr's own waits**, so a slow boot fails
   inside quickchr with its `BOOT_TIMEOUT` report rather than being cut off by the test
   runner. With the image already cached, `start()` can wait for: the port allocation
@@ -1308,10 +1313,10 @@ afterAll(async () => { await chr?.remove(); });
   A run killed earlier, while the machine was still being created, can leave a
   directory with no readable `machine.json` instead, which `QuickCHR.listOrphans()`
   names. `start()` writes `machine.json` only after spawning QEMU, so that QEMU may
-  still be running. **Stop it before `QuickCHR.removeOrphan(name)`**: its command line
-  names the machine directory (`pgrep -fl "machines/<name>/"` on Linux and macOS), and
-  `removeOrphan()` does not check for a live QEMU yet (#294). On a throwaway CI runner
-  with its own `QUICKCHR_DATA_DIR`, both kinds go away with the runner.
+  still be running. `QuickCHR.removeOrphan(name)` then refuses with `MACHINE_RUNNING`,
+  naming the pid, and deletes nothing; stop that process and call it again (#294). On a
+  throwaway CI runner with its own `QUICKCHR_DATA_DIR`, both kinds go away with the
+  runner.
 
 ---
 

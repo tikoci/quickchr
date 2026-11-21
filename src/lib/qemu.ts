@@ -5,8 +5,8 @@
  * manages process spawn/stop, and handles PID tracking.
  */
 
-import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync, truncateSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync, truncateSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
 import { detectAccel, requireQemu, requireFirmware, requireQemuImg } from "./platform.ts";
@@ -170,6 +170,13 @@ export function buildNetworkArgs(
 	ports: Record<string, PortMapping>,
 	networks: NetworkConfig[],
 ): void {
+	// With no network option at all, QEMU adds its own default NIC on a user-mode
+	// backend (e1000e on q35, virtio-net-pci on virt), so "no NICs" has to say so
+	// (#287).
+	if (networks.length === 0) {
+		args.push("-nic", "none");
+		return;
+	}
 	for (const net of networks) {
 		// If resolution produced QEMU args, use those directly
 		if (net.resolved?.qemuNetdevArgs) {
@@ -424,11 +431,17 @@ export async function spawnQemu(
 			spawnedPid = proc.pid;
 		}
 
+		// Record the pid before the first await. The child is already detached, so a
+		// launcher killed during the check below would otherwise leave a running VM
+		// with no record at all, and `remove` would delete its directory (#294).
+		writeFileSync(pidPath, String(spawnedPid));
+
 		// Give QEMU 1.5 s to fully initialise — if it exits immediately the
 		// arguments were bad (e.g. port already in use). Detect this early so
 		// the caller gets a clear error instead of a 120-second waitForBoot.
 		await Bun.sleep(1500);
 		if (pidLiveness(spawnedPid) === "dead") {
+			try { unlinkSync(pidPath); } catch { /* ignore */ }
 			let logTail = "(no log)";
 			try {
 				if (existsSync(logPath)) {
@@ -438,7 +451,6 @@ export async function spawnQemu(
 			throw new QuickCHRError("SPAWN_FAILED", buildQemuErrorMessage(logTail));
 		}
 
-		writeFileSync(pidPath, String(spawnedPid));
 		return { pid: spawnedPid };
 	}
 
@@ -507,6 +519,114 @@ export function foreignQemuError(pid: number, name?: string, action = "stop", ac
 		`${who} as another user (PID ${pid}, likely started with sudo); this user cannot signal it, so nothing was changed.`,
 		name ? `Run it as the user that owns that QEMU: ${ownerCommand(action, name, actionArgs)}` : undefined,
 	);
+}
+
+/** A QEMU that may still be running for a machine directory (#294). `verified` is
+ *  true when its command line names a file in that directory, compared by canonical
+ *  path; false when the pid is live but its identity could not be checked. */
+export interface LiveQemu {
+	pid: number;
+	verified: boolean;
+}
+
+/** Read `machineDir/qemu.pid` strictly: digits only, or nothing. */
+function readPidfile(machineDir: string): number | undefined {
+	let text: string;
+	try {
+		text = readFileSync(join(machineDir, "qemu.pid"), "utf8").trim();
+	} catch {
+		return undefined;
+	}
+	if (!/^\d+$/.test(text)) return undefined;
+	const pid = Number(text);
+	return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+/** The QEMU still running for `machineDir`, from the `qemu.pid` that
+ *  {@link spawnQemu} writes right after spawning, or `undefined` when there is none.
+ *
+ *  For a directory whose `machine.json` is missing or unreadable, this is the only
+ *  record of the VM: `start()` saves state only after spawning, so a run killed in
+ *  that window leaves a live QEMU behind an orphan directory (#294).
+ *
+ *  A live pid alone is not proof: a pidfile left by a crash can name a reused pid.
+ *  Where the command line can be read (Linux `/proc`, macOS `ps`), the process counts
+ *  when one of its file arguments (disk, channel socket) lives in this directory,
+ *  compared by canonical path so a symlinked data dir on either side still matches.
+ *  It is returned unverified when the command line cannot be read (Windows, another
+ *  user's process on macOS) or only names a `machines/<name>/` path that does not
+ *  resolve here: refusing a removal is recoverable, deleting under a running VM is
+ *  not. A command line that clearly belongs to something else is not this QEMU. */
+export function liveQemuFor(machineDir: string): LiveQemu | undefined {
+	const pid = readPidfile(machineDir);
+	if (pid === undefined || pidLiveness(pid) === "dead") return undefined;
+	const argv = processArgv(pid);
+	if (argv === undefined) {
+		// ps also fails for a process that exited between the checks.
+		return pidLiveness(pid) === "dead" ? undefined : { pid, verified: false };
+	}
+	const target = canonicalPath(machineDir);
+	if (argvPaths(argv).some((path) => canonicalPath(dirname(path)) === target)) return { pid, verified: true };
+	const segment = `${sep}machines${sep}${basename(machineDir)}${sep}`;
+	if (argv.some((arg) => arg.includes(segment))) return { pid, verified: false };
+	return undefined;
+}
+
+/** Delete `machineDir/qemu.pid` when the process it names has exited. Background
+ *  QEMU leaves it behind on stop, and a stale one is what a reused pid hides behind. */
+export function clearStalePidfile(machineDir: string): void {
+	const pid = readPidfile(machineDir);
+	if (pid !== undefined && pidLiveness(pid) !== "dead") return;
+	try { unlinkSync(join(machineDir, "qemu.pid")); } catch { /* absent */ }
+}
+
+function canonicalPath(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		return resolve(path);
+	}
+}
+
+/** Absolute paths inside QEMU option values: `file=/d/boot.qcow2,format=…`,
+ *  `socket,id=m,path=/d/monitor.sock,…`, `unix:/d/gdb.sock,…`, or a bare path. */
+function argvPaths(argv: string[]): string[] {
+	const paths: string[] = [];
+	for (const arg of argv) {
+		for (const piece of arg.split(",")) {
+			const value = piece.replace(/^[A-Za-z_-]+=/, "").replace(/^unix:/, "");
+			if (isAbsolute(value)) paths.push(value);
+		}
+	}
+	return paths;
+}
+
+/** A process's argv, or `undefined` when this platform or the OS does not let us
+ *  read it. macOS `ps` prints `(name)` when it cannot read another user's argv
+ *  (XNU restricts that query), and that is not an argv. */
+function processArgv(pid: number): string[] | undefined {
+	if (process.platform === "linux") {
+		try {
+			const raw = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+			const argv = raw.split("\0").filter((a) => a.length > 0);
+			return argv.length > 0 ? argv : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+	if (process.platform === "darwin") {
+		try {
+			const r = Bun.spawnSync(["/bin/ps", "-ww", "-o", "command=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore", timeout: 2000 });
+			const out = r.exitCode === 0 ? r.stdout.toString().trim() : "";
+			if (!out || (out.startsWith("(") && out.endsWith(")"))) return undefined;
+			// ps joins argv with spaces, so a path with a space splits here. That only
+			// costs verification: the `machines/<name>/` check still sees the joined text.
+			return [out, ...out.split(/\s+/)];
+		} catch {
+			return undefined;
+		}
+	}
+	return undefined;
 }
 
 /** Remove the listening unix-socket files QEMU binds (monitor/serial/qga/gdb).
