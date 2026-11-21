@@ -159,8 +159,9 @@ await chr.exec("/tool/sniffer/start");
   refused, the old slot stays. Ports are explicit or registry
   defaults for now; auto-allocation from the port block waits for
   [#57](https://github.com/tikoci/quickchr/issues/57).
-- **Needs the `user` NIC.** `inspect`'s `hostGateway` is `null` without one, and
-  `--receive` is refused.
+- **Needs the `user` NIC, first.** `inspect`'s `hostGateway` is `null` without one,
+  and `--receive` is refused. It is also refused when `user` is not ether1: RouterOS
+  adds a DHCP client only on ether1, so the guest would have no `10.0.2.x` address.
 - **Not `--forward`.** `--forward tzsp` is refused with a pointer here: a forward is
   host→guest.
 

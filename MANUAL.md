@@ -1526,7 +1526,8 @@ sniffer streaming, mangle `sniff-tzsp`, remote syslog, NetFlow/IPFIX). The guest
 sends to the user-mode gateway `10.0.2.2:<port>`; SLIRP delivers it to host loopback
 `<port>` (the port is not translated). SLIRP rewrites the source to
 `127.0.0.1:<ephemeral>`, so the port is the only way to tell machines apart — each
-slot's port is unique across quickchr machines.
+slot's port is unique across quickchr machines. The `user` NIC has to be ether1 (listed
+first): RouterOS adds a DHCP client only there.
 
 ```sh
 quickchr add lab --receive tzsp                  # 37008/udp

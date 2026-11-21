@@ -362,6 +362,18 @@ describe("ChrInstance receive slots (#299)", () => {
 		await expect(QuickCHR.get("router")?.addReceivePort("tzsp")).rejects.toMatchObject({ code: "INVALID_RECEIVE_SPEC" });
 	});
 
+	test("a user-mode NIC that is not ether1 is refused (no DHCP client there)", async () => {
+		writeMachine(baseState("router", {
+			status: "stopped",
+			pid: undefined,
+			networks: [{ specifier: "shared", id: "net0" }, { specifier: "user", id: "net1" }],
+		}));
+		await expect(QuickCHR.get("router")?.addReceivePort("tzsp")).rejects.toMatchObject({
+			code: "INVALID_RECEIVE_SPEC",
+			message: expect.stringContaining("ether1"),
+		});
+	});
+
 	test("removeReceivePort drops by name and reports a miss", async () => {
 		writeMachine(baseState("router", { status: "stopped", pid: undefined, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
 		const instance = QuickCHR.get("router");

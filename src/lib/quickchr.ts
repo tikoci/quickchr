@@ -2448,12 +2448,20 @@ function reservationsAsMachines(reserved: ReturnType<typeof listReservations>): 
 	}));
 }
 
-/** Receive slots ride the user-mode gateway; on any other NIC there is no `10.0.2.2`. */
+/** Receive slots ride the user-mode gateway; on any other NIC there is no `10.0.2.2`.
+ *  The user NIC has to be ether1 (`networks[0]`): RouterOS adds a DHCP client only
+ *  there, so on ether2 the guest has no `10.0.2.x` address to send from (#303 review). */
 function assertReceiveReachable(networks: NetworkConfig[], name: string): void {
 	if (!hasUserModeNetwork(networks)) {
 		throw new QuickCHRError(
 			"INVALID_RECEIVE_SPEC",
 			`Machine "${name}" has no user-mode NIC, so it has no 10.0.2.2 gateway to receive through. Add one (--add-network user, first) or send to the host over the machine's other network.`,
+		);
+	}
+	if (networks[0]?.specifier !== "user") {
+		throw new QuickCHRError(
+			"INVALID_RECEIVE_SPEC",
+			`Machine "${name}" has its user-mode NIC after "${networks[0]?.specifier}", not as ether1. RouterOS adds a DHCP client only on ether1, so the guest has no 10.0.2.x address and cannot reach the 10.0.2.2 gateway. List "user" first.`,
 		);
 	}
 }
