@@ -45,6 +45,12 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
+  Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
+  parser accepted digits only, so it dropped those rows — the forward outcomes in a
+  Windows boot-failure report could miss forwards that were in fact bound. Found by the
+  new #57 CI probe (#304).
+
 - A library `start({ dryRun: true })` naming an existing, stopped machine launched
   it. It now returns a preview handle without spawning QEMU. (#303 review)
 - Port allocation now sees stopped machines' explicit forwards and in-flight creations'

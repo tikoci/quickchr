@@ -44,7 +44,8 @@ name: Integration
 # Every platform runs the FULL suite by default — including the slow ones, which
 # is the honest "find out where windows/mac break" path (they just get a much
 # larger timeout). Pass tcg-smoke=true to bound the extended-budget legs to the
-# curated anchor.test.ts subset instead (the weekly sweep does, to cap its cost).
+# curated smoke subset instead — anchor.test.ts plus the host-networking files
+# receive-ports.test.ts and forward-cli.test.ts (the weekly sweep does, to cap its cost).
 # There is NO continue-on-error anywhere in this file: green means the selected
 # tests passed, red means they didn't (see ci.instructions.md "green should be
 # green").
@@ -108,7 +109,7 @@ on:
         default: ""
       tcg-smoke:
         type: boolean
-        description: "Bound the extended-budget platforms (macos-x86, windows-x86) to the anchor smoke subset when test-filter is empty. Off = full suite everywhere (those legs are slow — extended timeout)."
+        description: "Bound the extended-budget platforms (macos-x86, windows-x86) to the smoke subset (anchor, receive-ports, forward-cli) when test-filter is empty. Off = full suite everywhere (those legs are slow — extended timeout)."
         default: false
       example-filter:
         type: string
@@ -857,8 +858,12 @@ jobs:
           FILTER="${TEST_FILTER// /}"
           if [ -z "$FILTER" ] && [ "$SMOKE" = "true" ]; then
             # tcg-smoke was requested: run the curated subset that exercises
-            # boot + REST end-to-end in minutes instead of hours.
-            FILTER="anchor.test.ts"
+            # boot + REST end-to-end in minutes instead of hours, plus the two
+            # host-networking files whose behaviour differs on Windows: guest→host
+            # receive slots through SLIRP, and automatic forwards on the +6..+8
+            # offsets QEMU's IPC sockets share there (#57). Together they added
+            # ~1.5 min to windows-x86 (run 44915340501).
+            FILTER="anchor.test.ts,receive-ports.test.ts,forward-cli.test.ts"
             echo "::notice::TCG smoke subset: $FILTER (tcg-smoke input; omit it for the full suite)"
           fi
           if [ -z "$FILTER" ]; then

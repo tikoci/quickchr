@@ -196,11 +196,16 @@ export async function probeTcpPort(port: number, timeoutMs = 2000): Promise<stri
  *  ```
  *
  *  The bracketed state can contain a space (UDP rows carry a TTL, `[223 sec]`),
- *  so it is matched as "anything but `]`" rather than a word. */
+ *  so it is matched as "anything but `]`" rather than a word.
+ *
+ *  `FD` is a socket descriptor: decimal on Unix, but on Windows QEMU prints the socket
+ *  handle in hex (`41c`). Matching only digits dropped every Windows row whose handle
+ *  has a letter in it — grounded on windows-latest, QEMU 11.1.0 (integration.yml run
+ *  44917965339). It is kept as printed, since nothing reads it as a number. */
 export interface UsernetRow {
 	proto: string;
 	state: string;
-	fd: number;
+	fd: string;
 	srcAddr: string;
 	srcPort: number;
 	dstAddr: string;
@@ -210,7 +215,7 @@ export interface UsernetRow {
 }
 
 const USERNET_ROW_RE =
-	/^\s*(TCP|UDP)\[([^\]]*)\]\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/;
+	/^\s*(TCP|UDP)\[([^\]]*)\]\s+([0-9a-fA-F]+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/;
 
 export function parseUsernetTable(text: string): UsernetRow[] {
 	const rows: UsernetRow[] = [];
@@ -220,7 +225,7 @@ export function parseUsernetTable(text: string): UsernetRow[] {
 		rows.push({
 			proto: String(m[1]),
 			state: String(m[2]),
-			fd: Number(m[3]),
+			fd: String(m[3]),
 			srcAddr: String(m[4]),
 			srcPort: Number(m[5]),
 			dstAddr: String(m[6]),

@@ -107,7 +107,8 @@ turns the gate green again. Never "fix" the gate by weakening the verdict logic.
 
 Monday 05:37 UTC (or `gh workflow run sweep.yml`): all five platforms + the examples smoke
 harness, via `integration.yml` with `platforms=all` and `tcg-smoke: true` (the weekly
-cadence bounds TCG legs to the anchor subset to cap cost — the full-suite-on-TCG "find
+cadence bounds TCG legs to the smoke subset — `anchor.test.ts`, `receive-ports.test.ts`,
+`forward-cli.test.ts` — to cap cost; the full-suite-on-TCG "find
 out" path is a manual `integration.yml` dispatch, where `tcg-smoke` defaults OFF).
 Deliberately a separate workflow from `main.yml` so a red TCG leg **never** trips the PR
 freshness gate — but a red sweep is still a real failure to investigate, never green-washed.
@@ -150,7 +151,7 @@ gh run list --workflow integration.yml --limit 1   # grab the run id
 gh run watch <run-id> --exit-status                # wait for the verdict
 ```
 
-A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix job (unknown platform ids, malformed targets, or two targets resolving to one version on one platform **fail the plan** — a typo never produces an empty green run, and a dispatch that cannot produce attributable results never runs). **There is no `continue-on-error` anywhere**, and **no implicit narrowing either**: every platform — including the TCG ones (macos-x86, windows-x86) — runs the full suite by default; a `platforms=all` dispatch means all platforms, full set. TCG legs are slow (they get a 300-minute timeout when running the full suite) — pass `tcg-smoke=true` to bound them to the curated `anchor.test.ts` subset when you only need a boot+REST pulse (the weekly sweep does). **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
+A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix job (unknown platform ids, malformed targets, or two targets resolving to one version on one platform **fail the plan** — a typo never produces an empty green run, and a dispatch that cannot produce attributable results never runs). **There is no `continue-on-error` anywhere**, and **no implicit narrowing either**: every platform — including the TCG ones (macos-x86, windows-x86) — runs the full suite by default; a `platforms=all` dispatch means all platforms, full set. TCG legs are slow (they get a 300-minute timeout when running the full suite) — pass `tcg-smoke=true` to bound them to the curated smoke subset when you only need a boot+REST pulse (the weekly sweep does): `anchor.test.ts`, plus `receive-ports.test.ts` and `forward-cli.test.ts` — host networking that behaves differently on Windows, where QEMU's IPC sockets share the port block's +6..+8 offsets with automatic forwards (#57). Those two added ~1.5 min to windows-x86. **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
 
 Every integration job records per-file wall-clock timing to `integration-timing.txt` and assembles `metrics.ndjson` (both in the artifact) — see "CI metrics (ci-data)" below ([#30](https://github.com/tikoci/quickchr/issues/30)).
 
@@ -175,7 +176,12 @@ its own next deadline (#110 rule 4). `OBSERVED_MAX_S` in that script holds the w
 duration per file over a **named** window: runs
 [30657533896](https://github.com/tikoci/quickchr/actions/runs/30657533896) and
 [30665449265](https://github.com/tikoci/quickchr/actions/runs/30665449265), both at `2899be4` — 14
-legs, 168 `test-file` records. The cap is `clamp(observed × 2, 600 s, 1200 s)`. Re-derive with:
+legs, 168 `test-file` records. The cap is `clamp(observed × 2, 840 s, 1200 s)`. The 840 s floor is
+not observed: it is one single-boot test's own timeout on a same-arch TCG leg
+(`bootTestTimeoutFor(native, "tcg")` = 480 s boot + 180 s forensics + 180 s body), so a boot that
+times out on windows-x86 or macos-arm64 still gets its `captureBootFailure()` report written before
+the watchdog can fire. A unit test pins the floor to that function. It was 600 s until #304, which
+killed such a file mid-forensics. Re-derive the observed column with:
 
 ```sh
 git fetch origin ci-data
@@ -632,7 +638,10 @@ The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Win
 **Windows integration tests** run via `platforms=windows-x86` on `integration.yml` —
 TCG-only, full suite by default (300-min timeout); a red job is a real failure
 (no `continue-on-error`). Narrow with `test-filter`, or pass `tcg-smoke=true` for
-just the anchor boot+REST pulse.
+the smoke subset: the anchor boot+REST pulse plus receive slots and the #57 forward
+probe. On Windows that probe asserts the *known* collision (QEMU's monitor greets on the
+first automatic forward at +6), so it goes red when #57 is fixed — delete its Windows
+branch then.
 QEMU is installed with `choco install qemu` and runs under TCG (no HVF/WHPX on GitHub
 Windows runners).
 
@@ -671,7 +680,7 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 | `run-integration` | boolean | **true** | Run `test/integration/` on each selected platform. |
 | `run-examples` | boolean | **true** | Run the examples smoke harness on each matrix leg + `lint-powershell`. Default ON — pass `false` for narrow/lab dispatches. |
 | `test-filter` | string | "" | Integration: comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all files |
-| `tcg-smoke` | boolean | false | Bound TCG platforms (macos-x86, windows-x86) to the `anchor.test.ts` smoke subset when `test-filter` is empty. Off = full suite everywhere. |
+| `tcg-smoke` | boolean | false | Bound TCG platforms (macos-x86, windows-x86) to the smoke subset (`anchor.test.ts`, `receive-ports.test.ts`, `forward-cli.test.ts`) when `test-filter` is empty. Off = full suite everywhere. |
 | `example-filter` | string | "" | Examples: comma-separated example names — e.g. `"quickstart,rollback"`; empty = curated subset. A typo fails fast (the harness validates against known names). |
 | `routeros-targets` | string | "" | Comma-separated RouterOS targets — channels (`stable`/`long-term`/`testing`/`development`) and/or pinned versions (`7.22.1`, `7.24beta2`). **Each target crosses with each platform** (matrix legs). Empty = stable. Feeds both integration and examples. |
 | `collect-metrics` | boolean | **true** (dispatch) | Push this run's boot/test timing to the `ci-data` branch. Default ON for dispatches — a run without recorded results is a wasted run. (`workflow_call` default is false; wrappers opt in explicitly.) |

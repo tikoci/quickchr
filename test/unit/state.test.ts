@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync, utimesSync, readdirSync } from "node:fs";
+import { mkdirSync, readdirSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	saveMachine,
@@ -371,5 +371,64 @@ describe("pruneCache", () => {
 	test("returns 0 when cache dir does not exist", () => {
 		// HOME set to a fresh empty temp dir — cache dir won't exist
 		expect(pruneCache(1)).toBe(0);
+	});
+});
+
+/** Windows refuses to rename over a file another process holds open without delete
+ *  sharing (Defender, the Search indexer). CI cannot make a scanner do that on demand,
+ *  so these stand in for the platform and the rename (#303 follow-up). */
+describe("saveMachine — Windows rename refusal", () => {
+	function refusing(times: number, code = "EPERM") {
+		// Refusals are counted on their own: the real rename after them may itself be
+		// retried on a Windows runner (a scanner on the fixture), which is not ours to count.
+		let refusals = 0;
+		return {
+			get refusals() { return refusals; },
+			rename(from: string, to: string) {
+				if (refusals < times) {
+					refusals++;
+					throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+				}
+				renameSync(from, to);
+			},
+		};
+	}
+	const noSleep = () => {};
+
+	test("a refusal that outlasts the retries is STATE_ERROR and leaves the old file and no temp file", () => {
+		const m = makeMachine("win-refused");
+		saveMachine(m);
+		const fake = refusing(Number.POSITIVE_INFINITY);
+		let err: unknown;
+		try {
+			saveMachine({ ...m, cpu: 4 }, { platform: "win32", rename: fake.rename, sleep: noSleep });
+		} catch (e) {
+			err = e;
+		}
+		expect(err).toMatchObject({ code: "STATE_ERROR" });
+		expect(String((err as Error).message)).toContain("previous state is unchanged");
+		expect(fake.refusals).toBeGreaterThan(1); // retried, not failed on the first refusal
+		expect(loadMachine("win-refused")?.cpu).toBe(1);
+		expect(readdirSync(m.machineDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+	});
+
+	test("a refusal that clears within the retries saves normally", () => {
+		const m = makeMachine("win-brief");
+		saveMachine(m);
+		const fake = refusing(2, "EBUSY");
+		saveMachine({ ...m, cpu: 2 }, { platform: "win32", rename: fake.rename, sleep: noSleep });
+		expect(fake.refusals).toBe(2);
+		expect(loadMachine("win-brief")?.cpu).toBe(2);
+		expect(readdirSync(m.machineDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+	});
+
+	test("elsewhere the same error is not retried and surfaces unchanged", () => {
+		const m = makeMachine("posix-eperm");
+		saveMachine(m);
+		const fake = refusing(Number.POSITIVE_INFINITY);
+		expect(() => saveMachine({ ...m, cpu: 4 }, { platform: "linux", rename: fake.rename, sleep: noSleep }))
+			.toThrow(expect.objectContaining({ code: "EPERM" }));
+		expect(fake.refusals).toBe(1);
+		expect(loadMachine("posix-eperm")?.cpu).toBe(1);
 	});
 });

@@ -104,6 +104,15 @@ export function ensureDir(dir: string): void {
 	mkdirSync(dir, { recursive: true });
 }
 
+/** Test seams for {@link saveMachine}: the Windows rename refusal cannot be produced on
+ *  demand (it takes a scanner holding the file), so tests stand in for the platform and
+ *  the rename. Callers never pass this. */
+export interface SaveMachineIo {
+	platform?: NodeJS.Platform;
+	rename?: (from: string, to: string) => void;
+	sleep?: (ms: number) => void;
+}
+
 /** Save machine state to disk.
  *
  *  Written to a temporary file and renamed over `machine.json`, so a reader never sees
@@ -114,7 +123,8 @@ export function ensureDir(dir: string): void {
  *  that the save fails with `STATE_ERROR` and the previous `machine.json` stays: writing in place
  *  could publish a partial file, and a machine the allocator cannot read is one whose
  *  ports it hands out again (#303 review). */
-export function saveMachine(state: MachineState): void {
+export function saveMachine(state: MachineState, io: SaveMachineIo = {}): void {
+	const platform = io.platform ?? process.platform;
 	ensureDir(state.machineDir);
 	const target = machineJsonPath(state.name);
 	const body = JSON.stringify(state, null, "\t") + "\n";
@@ -139,10 +149,10 @@ export function saveMachine(state: MachineState): void {
 			try { chownSync(tmp, existing.uid, existing.gid); } catch { /* best effort */ }
 		}
 		try {
-			renameWithRetry(tmp, target);
+			renameWithRetry(tmp, target, { platform, ...(io.rename ? { rename: io.rename } : {}), ...(io.sleep ? { sleep: io.sleep } : {}) });
 		} catch (err) {
 			const code = (err as { code?: string }).code;
-			if (process.platform !== "win32" || (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY")) throw err;
+			if (platform !== "win32" || (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY")) throw err;
 			throw new QuickCHRError(
 				"STATE_ERROR",
 				`Could not replace ${target} (${code}): another program has it open — an antivirus or indexer scan, typically. The previous state is unchanged; retry the command.`,

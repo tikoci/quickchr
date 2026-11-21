@@ -92,12 +92,22 @@ export const OBSERVED_MAX_S: Record<string, number> = {
 export const CAP_MULTIPLIER = 2;
 
 /**
- * Floor. Nothing gets a cap under 10 minutes, however cheap it looks in the
- * historical window. #144 moved the declared cold downloads before the test
- * loop, but these checked-in caps deliberately retain margin until a named
- * download-free observation window justifies re-deriving them (#106).
+ * Floor: the bun timeout of one single-boot test on a same-arch TCG leg —
+ * `bootTestTimeoutFor(native arch, "tcg")` in test/integration/timeouts.ts, i.e.
+ * 480 s boot budget + 180 s boot forensics + 180 s test-body headroom. Below
+ * that, a boot that times out on windows-x86 or macos-arm64 is killed here while
+ * `captureBootFailure()` is still writing its report, and the evidence is lost
+ * (CodeRabbit on #304). It is the floor for every file, so the first boot
+ * failure in any file keeps its forensics; a second failure later in the same
+ * file may still meet the cap. `test/unit/ci-file-watchdog.test.ts` pins it to
+ * that function so the two cannot drift.
+ *
+ * It also keeps cheap files from a tight 2× cap: #144 moved the declared cold
+ * downloads before the test loop, but these checked-in caps deliberately retain
+ * margin until a named download-free observation window justifies re-deriving
+ * them (#106). Was 600 s before #304.
  */
-export const CAP_FLOOR_S = 600;
+export const CAP_FLOOR_S = 840;
 
 /** Ceiling — #77's "a 15-20 minute floor bounds the suite with real margin",
  *  taken at the top of that range. Only `provisioning.test.ts` reaches it. */

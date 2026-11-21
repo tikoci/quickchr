@@ -2,7 +2,8 @@ name: Weekly Sweep
 
 # Weekly all-platform verification: everything main.yml's per-push run does NOT
 # cover — macos/arm64 (full suite, HVF), macos/x86 + windows/x86 (TCG, bounded
-# to the anchor smoke subset here to cap weekly cost) — plus the examples smoke
+# to the smoke subset here to cap weekly cost: anchor, plus receive-ports and
+# forward-cli for the host networking that differs on Windows) — plus the examples smoke
 # harness on every platform. The full-suite-on-TCG "find out" path is a manual
 # integration.yml dispatch (where tcg-smoke defaults OFF).
 #

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createConnection } from "node:net";
+import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
 
 /**
@@ -75,7 +76,11 @@ describe.skipIf(SKIP)("CLI --forward flag end-to-end", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
 		// 1. Create the machine via CLI with a single short-form forward.
-		const addRes = await runCli(["add", MACHINE, "--forward", "smb"]);
+		const target = imageTarget();
+		const addRes = await runCli([
+			"add", MACHINE, "--forward", "smb",
+			...("channel" in target ? ["--channel", target.channel] : ["--version", target.version]),
+		]);
 		if (addRes.exitCode !== 0) {
 			throw new Error(`add failed (exit ${addRes.exitCode}):\nSTDOUT:\n${addRes.stdout}\nSTDERR:\n${addRes.stderr}`);
 		}
@@ -108,6 +113,125 @@ describe.skipIf(SKIP)("CLI --forward flag end-to-end", () => {
 			//    the guest, so a successful connect proves the forward is wired.
 			const ok = await tcpConnect("127.0.0.1", smbHostPort, 5_000);
 			expect(ok).toBe(true);
+		} finally {
+			try { await instance.stop(); } catch { /* ignore */ }
+		}
+	}, bootTestTimeout());
+});
+
+/** `connected` is tracked apart from `reason`, so an accepted-but-silent port
+ *  (`connected: true, reason: "timeout"`) is not mistaken for one that never accepted. */
+type Answer = { text: string; reason: "line" | "close" | "refused" | "error" | "timeout"; connected: boolean };
+
+/** Who answers on a port: read an unsolicited greeting if one comes (QEMU's monitor
+ *  sends a "QEMU …" banner on connect), otherwise send one HTTP request, and settle once
+ *  on the first complete line, a close, an error or the timeout. `reason` and
+ *  `connected` together tell a refused port, one that never accepted, and an
+ *  accepted-but-silent one apart.
+ *
+ *  Deliberately not `chrGet()`: the question is *who* answers — RouterOS's web server
+ *  or one of QEMU's own sockets — which an HTTP client would only report as a parse
+ *  error. Nothing is written to a port that greets first, so the monitor gets no input. */
+function whoAnswers(port: number, timeoutMs: number): Promise<Answer> {
+	return new Promise((resolve) => {
+		let text = "";
+		let settled = false;
+		let connected = false;
+		const socket = createConnection({ host: "127.0.0.1", port });
+		const settle = (reason: Answer["reason"]) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			clearTimeout(greetWait);
+			socket.destroy();
+			resolve({ text: text.slice(0, 200), reason, connected });
+		};
+		const timer = setTimeout(() => settle("timeout"), timeoutMs);
+		let greetWait: ReturnType<typeof setTimeout> | undefined;
+		socket.once("connect", () => {
+			connected = true;
+			greetWait = setTimeout(() => {
+				if (!text) socket.write("GET / HTTP/1.0\r\nHost: chr\r\n\r\n");
+			}, 1_000);
+		});
+		socket.on("data", (d: Buffer) => {
+			text += d.toString("utf8");
+			if (text.includes("\n")) settle("line");
+		});
+		socket.once("close", () => settle("close"));
+		socket.once("error", (e: NodeJS.ErrnoException) => settle(e.code === "ECONNREFUSED" ? "refused" : "error"));
+	});
+}
+/**
+ * Automatic forwards take offsets +6, +7, +8 of the port block. On Windows those are
+ * also QEMU's monitor, serial and QGA TCP sockets (#57), and Windows lets both bind
+ * the same port, so nothing fails at startup. This checks who actually answers on each
+ * forward, and that quickchr still reaches its own monitor.
+ *
+ * Grounded on windows-latest, QEMU 11.1.0 (integration.yml runs 44915869197 and
+ * 44918428359): QEMU's sockets win. +6 answers with the monitor banner, +7 is the
+ * guest's serial console (the request is typed in as a login), +8 accepts and is silent. Linux and macOS (Unix sockets for
+ * IPC) reach RouterOS on all three.
+ */
+describe.skipIf(SKIP)("automatic forwards on the Windows IPC offsets (#57)", () => {
+	const NAME = "integration-forward-ipc";
+
+	beforeAll(async () => { await cleanupMachine(NAME); });
+	afterAll(async () => { await cleanupMachine(NAME); });
+
+	test("who answers on +6..+8: RouterOS, or on Windows QEMU's own sockets (#57); the monitor still answers", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { monitorCommand } = await import("../../src/lib/channels.ts");
+		const { parseUsernetTable } = await import("../../src/lib/diagnostics.ts");
+		const names = ["ipc6", "ipc7", "ipc8"];
+		const extraPorts = names.map((name) => ({ name, host: 0, guest: 80, proto: "tcp" as const }));
+		const instance = await QuickCHR.start({ ...imageTarget(), name: NAME, background: true, extraPorts });
+		try {
+			const base = instance.state.portBase;
+			const hosts = names.map((name) => instance.state.ports[name]?.host);
+			// The premise: automatic extras take +6, +7, +8 of the block.
+			expect(hosts).toEqual([base + 6, base + 7, base + 8]);
+
+			// QEMU itself has all three forwards, whatever answers on the ports.
+			// On Windows the FD column is a hex socket handle — the probe found the parser
+			// dropping those rows (diagnostics.ts).
+			const usernet = parseUsernetTable(await monitorCommand(instance.state.machineDir, "info usernet", 5_000, base));
+			for (const host of hosts) {
+				expect(usernet.some((r) => r.proto === "TCP" && r.state === "HOST_FORWARD" && r.srcPort === host && r.dstPort === 80)).toBe(true);
+			}
+
+			const answers: Answer[] = [];
+			for (const host of hosts) answers.push(await whoAnswers(host as number, 5_000));
+			const monitor = await monitorCommand(instance.state.machineDir, "info status", 5_000, base);
+			console.log(`[#57 probe] platform=${process.platform} portBase=${base}`);
+			for (const [i, a] of answers.entries()) console.log(`[#57 probe] ${names[i]} (+${6 + i}): ${a.reason}${a.connected ? "" : " (never connected)"} ${JSON.stringify(a.text)}`);
+			console.log(`[#57 probe] monitor "info status": ${JSON.stringify(monitor.slice(0, 200))}`);
+			expect(monitor).toContain("VM status: running");
+
+			if (process.platform === "win32") {
+				// Known #57 behaviour, asserted exactly so a different failure is not
+				// mistaken for it (runs 44915869197, 44918428359). When #57 moves extras
+				// off +6..+8 this goes red: delete this branch so Windows takes the
+				// assertions below like everyone else.
+				const [mon, serial, qga] = answers;
+				// +6: QEMU's monitor greets before any request.
+				expect(mon?.reason).toBe("line");
+				expect(mon?.text).toStartWith("QEMU ");
+				expect(mon?.text).toContain("monitor");
+				// +7: the guest's serial console, at its login prompt, echoes the request
+				// back as a typed login name.
+				expect(serial?.reason).toBe("line");
+				expect(serial?.text).toStartWith("GET / HTTP/1.0");
+				// +8: QGA accepts the connection and says nothing to an HTTP request.
+				expect(qga?.connected).toBe(true);
+				expect(qga?.reason).toBe("timeout");
+				expect(qga?.text).toBe("");
+				return;
+			}
+			for (const a of answers) {
+				expect(a.reason).toBe("line");
+				expect(a.text).toStartWith("HTTP/1.");
+			}
 		} finally {
 			try { await instance.stop(); } catch { /* ignore */ }
 		}
