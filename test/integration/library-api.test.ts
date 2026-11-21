@@ -1,4 +1,5 @@
-import { describe, test, expect, spyOn } from "bun:test";
+import { describe, test, expect } from "bun:test";
+import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
 
 /**
@@ -75,33 +76,35 @@ describe.skipIf(SKIP)("library API", () => {
 	});
 
 	// #290: a caller that passes onProgress gets its lines there, and nothing on
-	// stdout. add() used to drop its logger on the way to the image cache. A cache
-	// miss takes the same logger (ensureCachedImage hands it to the download), so the
-	// test warms the cache first to keep it fast and deterministic.
+	// stdout. add() used to drop its logger on the way to the image cache. Run in a
+	// child with stdout piped, so every writer counts (console.info and Bun.stdout
+	// bypass an in-process spy). A cache miss takes the same logger (ensureCachedImage
+	// hands it to the download), and the warm-up stays inside the child so a cold
+	// cache is covered by this test's own timeout, not Bun's 5 s default.
 	test("add({ onProgress }) writes nothing to stdout", async () => {
 		const { QuickCHR } = await import("../../src/index.ts");
-		const { ensureCachedImage } = await import("../../src/lib/images.ts");
-		const { createLogger } = await import("../../src/lib/log.ts");
 		const target = imageTarget();
 		const version = "version" in target ? target.version : await QuickCHR.resolveVersion(target.channel);
-		await ensureCachedImage(version, "x86", undefined, createLogger(() => {}));
-
-		const name = `onprogress-${process.pid}`;
-		const lines: string[] = [];
-		const stdout: string[] = [];
-		const logSpy = spyOn(console, "log").mockImplementation((...a: unknown[]) => { stdout.push(a.join(" ")); });
-		const writeSpy = spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
-			stdout.push(String(chunk));
-			return true;
-		});
-		try {
-			await QuickCHR.add({ version, arch: "x86", name, onProgress: (m) => lines.push(m) });
-		} finally {
-			logSpy.mockRestore();
-			writeSpy.mockRestore();
-			try { await QuickCHR.get(name)?.remove(); } catch { /* best effort */ }
-		}
-		expect(stdout).toEqual([]);
-		expect(lines.some((l) => l.includes("Using cached image"))).toBe(true);
-	});
+		const src = join(import.meta.dir, "../../src");
+		const script = `
+			import { QuickCHR } from ${JSON.stringify(join(src, "index.ts"))};
+			import { ensureCachedImage } from ${JSON.stringify(join(src, "lib/images.ts"))};
+			import { createLogger } from ${JSON.stringify(join(src, "lib/log.ts"))};
+			const version = ${JSON.stringify(version)};
+			await ensureCachedImage(version, "x86", undefined, createLogger(() => {}));
+			const name = "onprogress-" + crypto.randomUUID().slice(0, 8);
+			const progress = (m) => process.stderr.write("PROGRESS " + m + "\\n");
+			await QuickCHR.add({ version, arch: "x86", name, onProgress: progress });
+			// Only the machine this child created is removed.
+			await QuickCHR.get(name).remove();
+		`;
+		const child = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe", env: process.env });
+		const [stdout, stderr, code] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		expect({ code, stdout }).toEqual({ code: 0, stdout: "" });
+		expect(stderr).toContain("PROGRESS   Using cached image");
+	}, 600_000);
 });

@@ -69,7 +69,7 @@ import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
 import { pidLiveness } from "./pid.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, liveQemuPidFor, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, liveQemuFor, clearStalePidfile, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, mergeSnapshotMetadata, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
@@ -625,6 +625,9 @@ async function stopUnderLock(state: MachineState): Promise<void> {
 /** Persist stopped state and release endpoints. Caller holds the lifecycle lock. */
 function finalizeStoppedState(state: MachineState): void {
 	unregisterSocketMembers(state);
+	// A background QEMU leaves qemu.pid behind; once it has exited, a stale pid there
+	// could later be reused by an unrelated process (#294).
+	clearStalePidfile(state.machineDir);
 	// A frozen marker belongs to a live QEMU held at reset — a stopped machine
 	// holds nothing, so the flag goes with the pid (#214).
 	const current = loadMachine(state.name);
@@ -2661,6 +2664,10 @@ export class QuickCHR {
 		// say why, not first ask for QEMU to be installed.
 		if (hasProvisioningMutations(mutations)) {
 			assertProvisioningSupportedVersion(version, describeProvisioningOperation(mutations));
+			// Provisioning runs at first boot over the user NIC's forwards. A machine saved
+			// without one could never apply it, and a later start cannot add the NIC: it
+			// boots the stored topology. Refuse now, as a fresh start() does.
+			assertProvisioningReachable(resolveStartNetworks(opts.networks, opts.network), opts.name);
 		}
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
@@ -3729,12 +3736,23 @@ export class QuickCHR {
 			// A start killed after spawning QEMU but before saving machine.json leaves a
 			// running VM here, and nothing else records it. Deleting the directory would
 			// strand that VM untracked, so refuse and name it (#294).
-			const pid = liveQemuPidFor(getMachineDir(name));
-			if (pid !== undefined) {
+			const live = liveQemuFor(getMachineDir(name));
+			if (live?.verified) {
 				throw new QuickCHRError(
 					"MACHINE_RUNNING",
-					`Machine directory "${name}" has no readable machine.json, but a QEMU for it is still running (PID ${pid}). Nothing was deleted.`,
-					`Stop that process (${process.platform === "win32" ? `taskkill /PID ${pid} /F` : `kill ${pid}`}), then run 'quickchr remove ${name}' again.`,
+					`Machine directory "${name}" has no readable machine.json, but its QEMU is still running (PID ${live.pid}). Nothing was deleted.`,
+					`Stop that process (${process.platform === "win32" ? `taskkill /PID ${live.pid} /F` : `kill ${live.pid}`}), then run 'quickchr remove ${name}' again.`,
+				);
+			}
+			if (live) {
+				// Identity unknown (Windows, another user's process, or an unresolvable
+				// path): refuse, but don't hand out a kill command for a pid that may
+				// belong to something else.
+				const pidfile = join(getMachineDir(name), "qemu.pid");
+				throw new QuickCHRError(
+					"MACHINE_RUNNING",
+					`Machine directory "${name}" has no readable machine.json, and process ${live.pid} from its qemu.pid is still running; quickchr could not confirm whether it is this machine's QEMU. Nothing was deleted.`,
+					`If PID ${live.pid} is this machine's QEMU, stop it; if it is not, delete ${pidfile}. Then run 'quickchr remove ${name}' again.`,
 				);
 			}
 			removeState(name);

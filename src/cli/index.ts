@@ -229,8 +229,15 @@ function buildNetworks(flags: Record<string, string | boolean | string[]>): Netw
 		specs.push(parseNetworkSpecifier(raw));
 	}
 
-	// --no-network → explicitly empty
+	// --no-network → explicitly empty. With --add-network too it would silently drop
+	// the NIC that was asked for (#287), so the contradiction is an error.
 	if (flags.network === false) {
+		if (specs.length > 0) {
+			throw new QuickCHRError(
+				"INVALID_NETWORK",
+				"--no-network means no NICs, so it cannot be combined with --add-network. To use only the networks you list, pass --add-network without --no-network.",
+			);
+		}
 		return [];
 	}
 

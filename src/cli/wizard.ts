@@ -221,8 +221,9 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 
 	// ── 5. Networking ────────────────────────────────────────────────────
 	// User/SLiRP is always included (localhost port forwarding for REST, SSH, etc.).
-	// The wizard only asks about *additional* networks. To remove the user-mode
-	// interface, use `quickchr start --no-network --add-network <spec>`.
+	// The wizard only asks about *additional* networks. To leave the user-mode
+	// interface out, use `quickchr start --add-network <spec>`: an explicit
+	// --add-network list replaces the default, and --no-network means no NICs at all.
 	const networks: NetworkSpecifier[] = ["user"];
 	const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
 	const { parseNetworkSpecifier, probeSocketVmnet, describeSocketVmnetProbe } = await import("../lib/network.ts");
