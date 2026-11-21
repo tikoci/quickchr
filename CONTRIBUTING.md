@@ -42,10 +42,16 @@ Open a Pull Request against a filed issue for review (PRs are wired to automated
 - **Squash-only** — the repo offers no other merge method. The **PR title becomes the
   `main` commit subject**, so write it as a conventional commit (`feat: …`, `fix: …`,
   `ci: …`); the PR body becomes the commit body. Branches auto-delete on merge.
+- **Open PRs as drafts; label docs and nits `skip-review`** (house rule, `tikoci-pr-flow`).
+  CodeRabbit reviews once, when a PR is marked ready, and skips a PR labeled `skip-review`.
+  An agent sets the label when creating the PR (`gh pr create --draft --label skip-review`)
+  or at least before marking it ready, because ready triggers the review and the org's
+  CodeRabbit allowance is shared. Use it for docs, typo/nit fixes and version bumps, not for
+  code or behavior changes.
 - **Reviews are part of the gate, not decoration.** PRs are wired to automated review
   (Copilot, CodeRabbit). Before merging: (1) **wait for the automated reviews to actually
   post** — a PR with zero review activity has not been reviewed, do not merge it on CI
-  green alone; (2) **answer every finding** — either fix it or reply with a *grounded*
+  green alone (a `skip-review` PR has no CodeRabbit review to wait for); (2) **answer every finding** — either fix it or reply with a *grounded*
   dismissal (evidence, not opinion); (3) **resolve every conversation thread** — this is a
   **separate action from replying**: fixing the code or posting a reply does *not* resolve
   the thread, you must explicitly mark it resolved ("Resolve conversation" in the UI, or the

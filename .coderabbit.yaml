@@ -34,6 +34,11 @@ reviews:
     enabled: true
     drafts: false
     auto_incremental_review: false
+    # tikoci-pr-flow: a PR labeled `skip-review` gets no automatic review (the
+    # `!` makes it an exclusion). Docs, nits, version bumps. `@coderabbitai
+    # review` still requests one.
+    labels:
+      - "!skip-review"
     ignore_usernames:
       - dependabot[bot]
   tools:
