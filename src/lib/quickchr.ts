@@ -2850,7 +2850,9 @@ export class QuickCHR {
 			}
 			// A dry run never launches: preview the receive change without saving it.
 			if (opts.dryRun) {
-				const receivePorts = (opts.receivePorts?.length ?? 0) > 0
+				const wantsReceive = (opts.receivePorts?.length ?? 0) > 0;
+				if (wantsReceive) assertReceiveReachable(existing.networks, existing.name);
+				const receivePorts = wantsReceive
 					? planReceiveChange(existing, (opts.receivePorts ?? []).map(normalizeReceivePort), [], receiveCheckMachines(existing.name))
 					: existing.receivePorts;
 				return createInstance({ ...existing, receivePorts });

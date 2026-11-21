@@ -68,6 +68,7 @@ export type LockOperation =
 	| "device-mode"
 	| "install-package"
 	| "receive"
+	| "status"
 	| "remove-orphan"
 	| "allocate"
 	| "storage";

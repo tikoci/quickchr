@@ -415,3 +415,29 @@ describe("receive slots — review fixes (#303)", () => {
 		expect(stale.status).toBe("stopped");
 	});
 });
+
+describe("receive slots — Copilot review fixes (#303)", () => {
+	test("a status refresh skips the write while another operation holds the machine lock", async () => {
+		const { acquireLockNow, machineLockPath } = await import("../../src/lib/lock.ts");
+		const { markMachineStopped } = await import("../../src/lib/state.ts");
+		const state = baseState("alpha", { pid: 2 ** 22 + 12345 });
+		writeMachine(state);
+		const held = acquireLockNow(machineLockPath(state.machineDir), "receive");
+		try {
+			const copy = JSON.parse(JSON.stringify(state));
+			markMachineStopped(copy);
+			expect(copy.status).toBe("stopped");
+			const onDisk = JSON.parse(await Bun.file(join(state.machineDir, "machine.json")).text());
+			expect(onDisk.status).toBe("running");
+		} finally {
+			held.release();
+		}
+	});
+
+	test("a dry-run receive preview on a machine without a user NIC is refused", async () => {
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined, networks: [{ specifier: "shared", id: "net0" }] }));
+		await expect(
+			QuickCHR.start({ name: "alpha", dryRun: true, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }),
+		).rejects.toMatchObject({ code: "INVALID_RECEIVE_SPEC" });
+	});
+});

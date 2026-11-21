@@ -50,8 +50,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 - Port allocation now sees stopped machines' explicit forwards and in-flight creations'
   resolved forward ports, so an explicit `portBase` or `--forward` can no longer land on
   a port another machine holds. `machine.json` is written atomically (temp file +
-  rename), and `list`/`get` refreshing a dead machine's status patch only the status
-  fields instead of rewriting a possibly stale record. (#303 review)
+  rename), explicit forwards are checked against other machines' whole port blocks,
+  and `list`/`get` refreshing a dead machine's status take the machine lock and patch
+  only the status fields instead of rewriting a possibly stale record. (#303 review)
 - **`timeoutExtra` now applies when `start()` boots a machine that already exists**:
   one `add()` made, or one that has booted before. Only a new machine's start used to
   add it. On the CLI, `quickchr start <name> --timeout-extra` and the `timeout-extra`

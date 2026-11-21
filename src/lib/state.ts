@@ -10,6 +10,7 @@ import { QuickCHRError } from "./types.ts";
 import { networkModeToConfigs } from "./network.ts";
 import { assertPathSafeName, isPathSafeName } from "./names.ts";
 import { pidLiveness } from "./pid.ts";
+import { acquireLockNow, type HeldLock, legacyMachineLockPath, machineLockPath } from "./lock.ts";
 
 /** Get the quickchr data directory root. Override with QUICKCHR_DATA_DIR env var.
  *  Always absolute: a relative QUICKCHR_DATA_DIR is refused, and the default comes
@@ -101,45 +102,79 @@ export function ensureDir(dir: string): void {
 	mkdirSync(dir, { recursive: true });
 }
 
+/** Rename attempts before {@link saveMachine} gives up on an atomic replace. */
+const SAVE_RENAME_ATTEMPTS = 20;
+const SAVE_RENAME_RETRY_MS = 25;
+
+function sleepSync(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /** Save machine state to disk.
  *
  *  Written to a temporary file and renamed over `machine.json`, so a reader never sees
  *  a truncated or empty file mid-write — the port allocator would otherwise skip the
- *  machine and hand out ports it holds (#299). Windows can refuse the rename while
- *  another process has the file open; that falls back to the plain write. */
+ *  machine and hand out ports it holds (#299). Windows refuses the rename while another
+ *  process holds the file open without delete sharing (an antivirus or indexer scan,
+ *  typically), so a refusal is retried for about half a second. Only after that does it write in place, which can expose a partial file to
+ *  a concurrent reader, rather than fail the operation that is saving. */
 export function saveMachine(state: MachineState): void {
 	ensureDir(state.machineDir);
 	const target = machineJsonPath(state.name);
 	const body = JSON.stringify(state, null, "\t") + "\n";
 	const tmp = join(state.machineDir, `.machine.json.${process.pid}.tmp`);
-	try {
-		writeFileSync(tmp, body);
-		renameSync(tmp, target);
-	} catch (err) {
-		try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
-		const code = (err as { code?: string }).code;
-		if (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") throw err;
-		writeFileSync(target, body);
+	writeFileSync(tmp, body);
+	for (let attempt = 1; ; attempt++) {
+		try {
+			renameSync(tmp, target);
+			return;
+		} catch (err) {
+			const code = (err as { code?: string }).code;
+			const transient = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+			if (transient && attempt < SAVE_RENAME_ATTEMPTS) {
+				sleepSync(SAVE_RENAME_RETRY_MS);
+				continue;
+			}
+			try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+			if (!transient) throw err;
+			writeFileSync(target, body);
+			return;
+		}
 	}
 }
 
 /** Record that a machine's QEMU is gone: status `stopped`, no pid, not frozen.
  *
- *  Re-reads `machine.json` and changes only those fields, so a status refresh that read
- *  the record earlier cannot write back stale config over a change made since — a
- *  receive slot added by `set --receive` while `list` was running, for one (#299). The
- *  caller's object gets the same three fields. */
+ *  Takes the machine lock without waiting, then re-reads `machine.json` and changes only
+ *  those fields, so a status refresh cannot write back stale config over a change made
+ *  meanwhile — a receive slot added by `set --receive` while `list` was running, for one
+ *  (#299). Every writer of a live record (`set --receive`, `start`, `stop`, …) holds that
+ *  lock, so while it is held the refresh skips the write: the holder saves its own state,
+ *  and the next refresh retries. The caller's object gets the three fields either way. */
 export function markMachineStopped(state: MachineState): void {
 	state.status = "stopped";
 	state.pid = undefined;
 	state.frozen = undefined;
-	const current = loadMachine(state.name);
-	if (!current) return;
-	if (current.status === "running" && current.pid && pidLiveness(current.pid) !== "dead") return;
-	current.status = "stopped";
-	current.pid = undefined;
-	current.frozen = undefined;
-	saveMachine(current);
+	let lock: HeldLock;
+	try {
+		lock = acquireLockNow(machineLockPath(state.machineDir), "status", {
+			legacyPath: legacyMachineLockPath(state.machineDir),
+			subject: `Machine "${state.name}"`,
+		});
+	} catch {
+		return;
+	}
+	try {
+		const current = loadMachine(state.name);
+		if (!current) return;
+		if (current.status === "running" && current.pid && pidLiveness(current.pid) !== "dead") return;
+		current.status = "stopped";
+		current.pid = undefined;
+		current.frozen = undefined;
+		saveMachine(current);
+	} finally {
+		lock.release();
+	}
 }
 
 /** The fields every caller dereferences without guarding, with the `typeof` each must

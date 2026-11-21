@@ -77,6 +77,18 @@ describe("receive slots in the port checks (#299)", () => {
 		expect(await findAvailablePortBlock([], [], fixed, base, new Set([47999]))).toBe(base);
 	});
 
+	test("a reserved port on an unmapped offset of the candidate block rules the block out", async () => {
+		const base = 47340;
+		expect(await findAvailablePortBlock([], [], [], base, new Set([base + 6]))).toBe(base + PORTS_PER_BLOCK);
+	});
+
+	test("an explicit forward inside another machine's block (unmapped offset) is a PORT_CONFLICT", () => {
+		const other = fakeMachine("chr-blk", { http: { name: "http", host: 9400, guest: 80, proto: "tcp" } });
+		expect(() =>
+			validateExplicitExtraPorts([{ name: "app", host: 9406, guest: 80, proto: "tcp" }], 9200, [], [other]),
+		).toThrow(/port block 9400/);
+	});
+
 	test("an explicit forward on another machine's receive port is a PORT_CONFLICT", () => {
 		const other = { ...fakeMachine("chr-rx", {}), receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" as const }] };
 		expect(() =>
