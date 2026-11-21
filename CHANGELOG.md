@@ -15,7 +15,7 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 - `examples/cmr/` has a new `--study repair`. It half-pairs a fresh client,
   then tries a controller CMR restart, a client reboot or a controller reboot.
-  On 7.26beta5 none of them fixed it: each left the client pending (24 of 24).
+  On 7.26beta5 none of them fixed it: each left the client pending (18 of 18).
   One bare `/cmr/device/pair` did, and every repaired pairing survived a
   controller CMR restart. `FINDINGS.md` also gains the `--probe` demo from an
   Intel Mac (HVF), corrects why the 85 s first connect times out (every lab

@@ -432,9 +432,11 @@ async function repair(context: StudyContext): Promise<void> {
 					console.log(`  boot ${boot} trial ${trial} ${action}: no half-pair in ${tries} tries`);
 					continue;
 				}
-				const settle = async (description: string, wait: () => Promise<Observation>) => {
+				const settle = async (description: string, wait: () => Promise<Observation>): Promise<Observation & { timedOut?: boolean }> => {
 					try { return await wait(); } catch (error) {
-						console.log(`  ${description}: ${error instanceof Error ? error.message : String(error)}`);
+						// Only a stability deadline (`until`) is an observation; a failed command or REST call fails the study.
+						if (!(error instanceof Error && error.message.startsWith("Timed out:"))) throw error;
+						console.log(`  ${description}: ${error.message}`);
 						return { ...(await observe(controller, client, identity)), timedOut: true };
 					}
 				};
@@ -461,7 +463,7 @@ async function repair(context: StudyContext): Promise<void> {
 				row.afterRepair = afterRepair.verdict;
 				row.afterRepairSelectable = String((await selectable(controller, identity)).selected);
 				const commit = await settle("commit test", () => restartController(controller, client, identity));
-				row.afterCommitTest = commit.verdict;
+				row.afterCommitTest = `${commit.verdict}${commit.timedOut ? " (not stable)" : ""}`;
 				row.afterCommitTestState = commit.row?.state ?? "";
 				results.push(row);
 				detail.push({ boot, trial, action, result, afterAction, afterRepair, commit });
