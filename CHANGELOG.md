@@ -45,6 +45,12 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- **`--no-network` / `networks: []` now gives a machine no NICs, as documented.**
+  An empty list used to fall through to the default user NIC, and even with no
+  network options QEMU adds its own default NIC; quickchr now passes `-nic none`.
+  Such a start is refused unless it doesn't wait for boot (`--no-wait`, `--fg`),
+  since quickchr reaches the guest through the user NIC. If you relied on the old
+  behaviour, drop `--no-network`. (#287)
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a
