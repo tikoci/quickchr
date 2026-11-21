@@ -603,7 +603,7 @@ function argvPaths(argv: string[]): string[] {
 
 /** A process's argv, or `undefined` when this platform or the OS does not let us
  *  read it. macOS `ps` prints `(name)` when it cannot read another user's argv
- *  (XNU restricts that query), and that is not an argv. */
+ * (the kernel restricts that query), and that is not an argv. */
 function processArgv(pid: number): string[] | undefined {
 	if (process.platform === "linux") {
 		try {
