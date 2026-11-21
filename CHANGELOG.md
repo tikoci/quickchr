@@ -54,6 +54,11 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 - **`QuickCHR.add({ onProgress })` no longer prints image lines to stdout.** `add()`
   dropped its logger on the way to the image cache, so `Using cached image…` and the
   download lines went to `console.log` even with a progress callback. (#290)
+- **`quickchr remove` / `removeOrphan()` no longer deletes a directory whose QEMU is
+  still running.** A start killed after spawning QEMU but before saving `machine.json`
+  leaves a live VM behind an unreadable directory; removing it used to strand that VM
+  untracked. It now refuses with `MACHINE_RUNNING`, naming the pid, and deletes nothing.
+  (#294)
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a

@@ -516,6 +516,49 @@ export function foreignQemuError(pid: number, name?: string, action = "stop", ac
 	);
 }
 
+/** The pid of a QEMU still running for `machineDir`, from the `qemu.pid` that
+ *  {@link spawnQemu} writes, or `undefined` when there is none.
+ *
+ *  For a directory whose `machine.json` is missing or unreadable, this is the only
+ *  record of the VM: `start()` saves state only after spawning, so a run killed in
+ *  that window leaves a live QEMU behind an orphan directory (#294). `qemu.pid` is
+ *  not removed on a background stop, so a live pid alone could be a reused one; where
+ *  the command line can be read (Linux, macOS) it must name the machine directory,
+ *  which every quickchr QEMU's does (disk and channel paths). Where it cannot be read
+ *  (Windows, or hidden by the OS), a live pid counts: refusing a removal is
+ *  recoverable, deleting under a running VM is not. */
+export function liveQemuPidFor(machineDir: string): number | undefined {
+	let pid: number;
+	try {
+		pid = Number.parseInt(readFileSync(join(machineDir, "qemu.pid"), "utf8").trim(), 10);
+	} catch {
+		return undefined;
+	}
+	if (!Number.isInteger(pid) || pid <= 0 || pidLiveness(pid) === "dead") return undefined;
+	const command = processCommandLine(pid);
+	if (command !== undefined && !command.includes(machineDir)) return undefined;
+	return pid;
+}
+
+/** A process's full command line, or `undefined` when this platform or the OS does
+ *  not let us read it. */
+function processCommandLine(pid: number): string | undefined {
+	if (process.platform === "linux") {
+		try {
+			const raw = readFileSync(`/proc/${pid}/cmdline`, "utf8");
+			return raw ? raw.replaceAll("\0", " ") : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+	if (process.platform === "darwin") {
+		const r = Bun.spawnSync(["ps", "-ww", "-o", "command=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore" });
+		const out = r.exitCode === 0 ? r.stdout.toString().trim() : "";
+		return out || undefined;
+	}
+	return undefined;
+}
+
 /** Remove the listening unix-socket files QEMU binds (monitor/serial/qga/gdb).
  *  A SIGKILLed QEMU leaves these behind; a respawn with `server=on` then fails
  *  to bind ("Address already in use"). Call before re-spawning into the same dir.

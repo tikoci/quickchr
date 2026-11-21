@@ -69,7 +69,7 @@ import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
 import { pidLiveness } from "./pid.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, liveQemuPidFor, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, mergeSnapshotMetadata, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
@@ -3702,7 +3702,9 @@ export class QuickCHR {
 	}
 
 	/** Delete a half-created machine directory. Returns false when `name` is a real
-	 *  machine (use `get(name)?.remove()`) or does not exist at all.
+	 *  machine (use `get(name)?.remove()`) or does not exist at all. Throws
+	 *  `MACHINE_RUNNING`, deleting nothing, when a QEMU for that directory is still
+	 *  running (#294).
 	 *
 	 *  A crash or SIGKILL can strand a directory even with add()'s cleanup in place, and
 	 *  a stranded directory blocks re-add while being invisible to `list` — so clearing
@@ -3724,6 +3726,17 @@ export class QuickCHR {
 		try {
 			// The creator may have finished between the check above and the lock.
 			if (!isOrphanMachineDir(name)) return false;
+			// A start killed after spawning QEMU but before saving machine.json leaves a
+			// running VM here, and nothing else records it. Deleting the directory would
+			// strand that VM untracked, so refuse and name it (#294).
+			const pid = liveQemuPidFor(getMachineDir(name));
+			if (pid !== undefined) {
+				throw new QuickCHRError(
+					"MACHINE_RUNNING",
+					`Machine directory "${name}" has no readable machine.json, but a QEMU for it is still running (PID ${pid}). Nothing was deleted.`,
+					`Stop that process (${process.platform === "win32" ? `taskkill /PID ${pid} /F` : `kill ${pid}`}), then run 'quickchr remove ${name}' again.`,
+				);
+			}
 			removeState(name);
 			return true;
 		} finally {

@@ -1015,7 +1015,10 @@ and `listOrphans()` covers it.
 `listOrphans()` and `removeOrphan()` treat both the same — unreadable is unreadable —
 so `quickchr remove <name>` clears either. `removeOrphan()` returns `false` for a real
 machine (use `get(name)?.remove()` for those) and for a name that does not exist, and
-throws `INVALID_NAME` for a name that is not a usable path segment.
+throws `INVALID_NAME` for a name that is not a usable path segment. It throws
+`MACHINE_RUNNING` and deletes nothing when the directory's QEMU is still running — its
+`qemu.pid` names a live process whose command line names that directory (on Windows,
+where the command line is not checked, any live pid there counts) (#294).
 
 ### `ChrInstance`
 
@@ -1308,10 +1311,10 @@ afterAll(async () => { await chr?.remove(); });
   A run killed earlier, while the machine was still being created, can leave a
   directory with no readable `machine.json` instead, which `QuickCHR.listOrphans()`
   names. `start()` writes `machine.json` only after spawning QEMU, so that QEMU may
-  still be running. **Stop it before `QuickCHR.removeOrphan(name)`**: its command line
-  names the machine directory (`pgrep -fl "machines/<name>/"` on Linux and macOS), and
-  `removeOrphan()` does not check for a live QEMU yet (#294). On a throwaway CI runner
-  with its own `QUICKCHR_DATA_DIR`, both kinds go away with the runner.
+  still be running. `QuickCHR.removeOrphan(name)` then refuses with `MACHINE_RUNNING`,
+  naming the pid, and deletes nothing; stop that process and call it again (#294). On a
+  throwaway CI runner with its own `QUICKCHR_DATA_DIR`, both kinds go away with the
+  runner.
 
 ---
 
