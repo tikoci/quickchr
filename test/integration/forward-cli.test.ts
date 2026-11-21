@@ -188,7 +188,9 @@ describe.skipIf(SKIP)("automatic forwards on the Windows IPC offsets (#57)", () 
 			expect(hosts).toEqual([base + 6, base + 7, base + 8]);
 
 			// QEMU itself has all three forwards, whatever answers on the ports.
-			const usernet = parseUsernetTable(await monitorCommand(instance.state.machineDir, "info usernet", 5_000, base));
+			const usernetText = await monitorCommand(instance.state.machineDir, "info usernet", 5_000, base);
+			console.log(`[#57 probe] info usernet:\n${usernetText}`);
+			const usernet = parseUsernetTable(usernetText);
 			for (const host of hosts) {
 				expect(usernet.some((r) => r.proto === "TCP" && r.state === "HOST_FORWARD" && r.srcPort === host && r.dstPort === 80)).toBe(true);
 			}
