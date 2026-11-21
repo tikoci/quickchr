@@ -295,6 +295,8 @@ interface Trial {
 	connectErr?: string;
 	ok: boolean;
 	totalMs: number;
+	/** connect → reply received, excluding the client's close. */
+	cmdMs?: number;
 	why?: string;
 	out?: string;
 }
@@ -426,7 +428,8 @@ async function trial(m: Machine, ch: Channel, i: number): Promise<Trial> {
 		return { i, connectMs: r.ms, ...(r.err ? { connectErr: r.err } : {}), ok: false, totalMs: Date.now() - started, why: "connect" };
 	}
 	const c = r.conn;
-	let res: { ok: boolean; out: string; why?: string };
+	let res: { ok: boolean; out: string; why?: string } = { ok: false, out: "" };
+	let cmdMs = 0;
 	try {
 		if (ch === "monitor") {
 			res = await monitorCmd(c, "info status", 5000);
@@ -441,6 +444,7 @@ async function trial(m: Machine, ch: Channel, i: number): Promise<Trial> {
 		} else {
 			res = await qgaPing(c, 3000);
 		}
+		cmdMs = Date.now() - started;
 	} finally {
 		await closeConn(c);
 	}
@@ -449,6 +453,7 @@ async function trial(m: Machine, ch: Channel, i: number): Promise<Trial> {
 		connectMs: r.ms,
 		ok: res.ok,
 		totalMs: Date.now() - started,
+		cmdMs,
 		...(res.why ? { why: res.why } : {}),
 		...(res.ok ? {} : { out: res.out }),
 	};
@@ -457,14 +462,35 @@ async function trial(m: Machine, ch: Channel, i: number): Promise<Trial> {
 function summarize(trials: Trial[]): string {
 	const ok = trials.filter((t) => t.ok).length;
 	const connFail = trials.filter((t) => t.why === "connect").length;
-	const okMs = trials.filter((t) => t.ok).map((t) => t.totalMs).sort((a, b) => a - b);
+	const okMs = trials.filter((t) => t.ok).map((t) => t.cmdMs ?? t.totalMs).sort((a, b) => a - b);
 	const p = (q: number) => (okMs.length ? okMs[Math.min(okMs.length - 1, Math.floor(q * okMs.length))] : NaN);
 	const reasons = new Map<string, number>();
 	for (const t of trials.filter((t) => !t.ok)) {
 		const k = t.why === "connect" ? `connect: ${t.connectErr}` : (t.why ?? "?");
 		reasons.set(k, (reasons.get(k) ?? 0) + 1);
 	}
-	return `${ok}/${trials.length} ok, ${connFail} connect failures, ok-latency p50=${p(0.5)}ms p95=${p(0.95)}ms max=${okMs.at(-1) ?? NaN}ms; failures: ${[...reasons].map(([k, v]) => `${v}× ${k}`).join("; ") || "none"}`;
+	return `${ok}/${trials.length} ok, ${connFail} connect failures, cmd-latency p50=${p(0.5)}ms p95=${p(0.95)}ms max=${okMs.at(-1) ?? NaN}ms; failures: ${[...reasons].map(([k, v]) => `${v}× ${k}`).join("; ") || "none"}`;
+}
+
+/** A second client on each channel while `held` (one client per channel) is
+ *  still connected, then whether the held client still works. */
+async function concurrentPhase(m0: Machine, held: Map<string, Conn>): Promise<void> {
+	for (const ch of CHANNELS) {
+		const r = await openConn(endpoint(m0, ch), CONNECT_TIMEOUT_MS);
+		let bytes = "";
+		if (r.conn) {
+			r.conn.sock.write(ch === "qga" ? '{"execute":"guest-ping"}\n' : ch === "serial" ? "\r" : "\n");
+			await Bun.sleep(2000);
+			bytes = r.conn.buf.slice(0, 120);
+			await closeConn(r.conn);
+		}
+		const h = held.get(`${m0.name}/${ch}`);
+		let heldStillWorks: unknown = null;
+		if (h && ch === "monitor") heldStillWorks = await monitorCmd(h, "info status", 10_000);
+		if (h && ch === "serial") heldStillWorks = await serialExec(h, ":put [/system identity get name]", 30_000);
+		results.concurrent[ch] = { heldConnected: !!h, connected: !!r.conn, connectMs: r.ms, err: r.err ?? null, secondClientGot: bytes, heldStillWorks };
+		log(`concurrent ${ch}: held=${!!h} second client connected=${!!r.conn} err=${r.err ?? "-"} got=${JSON.stringify(bytes)}`);
+	}
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
@@ -569,23 +595,11 @@ async function main(): Promise<void> {
 		);
 
 		// ── phase 2: a second client while the held one is still connected ──
+		// pipe: here, on the boot-time clients (the only ones a pipe ever gets).
+		// tcp/unix: after the trials, so this step cannot disturb them (run 1
+		// had it here and QGA refused every later connect on both arms).
 		const m0 = machines[0] as Machine;
-		for (const ch of CHANNELS) {
-			const r = await openConn(endpoint(m0, ch), CONNECT_TIMEOUT_MS);
-			let bytes = "";
-			if (r.conn) {
-				r.conn.sock.write(ch === "qga" ? '{"execute":"guest-ping"}\n' : ch === "serial" ? "\r" : "\n");
-				await Bun.sleep(2000);
-				bytes = r.conn.buf.slice(0, 120);
-				await closeConn(r.conn);
-			}
-			const h = held.get(`${m0.name}/${ch}`);
-			let heldStillWorks: unknown = null;
-			if (h && ch === "monitor") heldStillWorks = await monitorCmd(h, "info status", 10_000);
-			if (h && ch === "serial") heldStillWorks = await serialExec(h, ":put [/system identity get name]", 30_000);
-			results.concurrent[ch] = { connected: !!r.conn, connectMs: r.ms, err: r.err ?? null, secondClientGot: bytes, heldStillWorks };
-			log(`concurrent ${ch}: second client connected=${!!r.conn} err=${r.err ?? "-"} got=${JSON.stringify(bytes)}`);
-		}
+		if (ARM === "pipe") await concurrentPhase(m0, held);
 
 		// ── phase 3: close the held clients, then N fresh trials per channel ──
 		for (const c of held.values()) await closeConn(c);
@@ -623,6 +637,32 @@ async function main(): Promise<void> {
 			for (let i = 1; i <= 10; i++) trials.push(await trial(m, "monitor", i));
 			results.channels.push({ channel: "monitor", machine: m.name, trials });
 			log(`SUMMARY ${m.name}/monitor: ${summarize(trials)}`);
+		}
+
+		if (ARM === "pipe") {
+			// Longer than libuv's 30 s WaitNamedPipe on ERROR_PIPE_BUSY, so a
+			// slow-to-rearm pipe is not mistaken for a dead one.
+			const long: unknown[] = [];
+			for (let k = 0; k < 2; k++) {
+				const r = await openConn(endpoint(m0, "monitor"), 40_000);
+				long.push({ connected: !!r.conn, ms: r.ms, err: r.err ?? null });
+				await closeConn(r.conn);
+			}
+			results.liveness.pipeLongTimeoutReconnects = long;
+			log(`long-timeout monitor reconnects ${JSON.stringify(long)}`);
+		} else {
+			const fresh = new Map<string, Conn>();
+			for (const ch of CHANNELS) {
+				const r = await openConn(endpoint(m0, ch));
+				if (r.conn) fresh.set(`${m0.name}/${ch}`, r.conn);
+			}
+			await concurrentPhase(m0, fresh);
+			for (const c of fresh.values()) await closeConn(c);
+			// And does each channel still take a fresh client after that?
+			const after: Record<string, unknown> = {};
+			for (const ch of CHANNELS) after[ch] = await trial(m0, ch, 0);
+			results.liveness.trialAfterConcurrent = after;
+			log(`trial after concurrent ${JSON.stringify(after)}`);
 		}
 
 		// ── duplicate pipe name (pipe only) ──
