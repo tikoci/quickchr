@@ -82,6 +82,13 @@ describe("receive slots in the port checks (#299)", () => {
 		expect(await findAvailablePortBlock([], [], [], base, new Set([base + 6]))).toBe(base + PORTS_PER_BLOCK);
 	});
 
+	test("a reserved port where a fifth auto extra lands (+10, past the block) rules the block out", async () => {
+		const base = 47360;
+		const extras = Array.from({ length: 5 }, (_, i) => ({ name: `x${i}`, host: 0, guest: 1000 + i, proto: "tcp" as const }));
+		// Without the extras check this returned `base`. The next block holds +10 itself.
+		expect(await findAvailablePortBlock([], [], extras, base, new Set([base + 10]))).toBe(base + 2 * PORTS_PER_BLOCK);
+	});
+
 	test("reserved blocks do not use up the live-probe budget", async () => {
 		const base = 48000;
 		const reserved = new Set<number>();

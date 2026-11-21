@@ -823,7 +823,9 @@ export interface ChrInstance {
 	 *  @example
 	 *  const tzsp = instance.receive.tzsp; // { hostPort: 37008, guestHost: "10.0.2.2", ... }
 	 *  if (!tzsp) throw new Error("no tzsp receive slot");
-	 *  await instance.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${tzsp.guestHost}:${tzsp.guestPort}`);
+	 *  // filter-stream=yes keeps the sniffer from capturing its own TZSP stream.
+	 *  await instance.exec(`/tool/sniffer/set streaming-enabled=yes filter-stream=yes streaming-server=${tzsp.guestHost}:${tzsp.guestPort}`);
+	 *  await instance.exec("/tool/sniffer/start");
 	 */
 	readonly receive: Record<string, ReceiveEndpoint>;
 	/** Reserve a guest→host receive slot on this machine (#299), running or stopped —

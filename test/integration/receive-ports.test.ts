@@ -51,6 +51,9 @@ async function runCli(args: string[]): Promise<{ stdout: string; stderr: string;
 describe.skipIf(SKIP)("receive slots — per-machine guest→host UDP", () => {
 	let la: Listener | undefined;
 	let lb: Listener | undefined;
+	// Both starts, so teardown can wait for the one still running when the other fails —
+	// otherwise it could save its machine after cleanup looked and outlive the suite.
+	const starts: Promise<unknown>[] = [];
 
 	beforeAll(async () => {
 		await cleanupMachine(A);
@@ -60,6 +63,7 @@ describe.skipIf(SKIP)("receive slots — per-machine guest→host UDP", () => {
 	afterAll(async () => {
 		try { la?.socket.close(); } catch { /* ignore */ }
 		try { lb?.socket.close(); } catch { /* ignore */ }
+		await Promise.allSettled(starts);
 		await cleanupMachine(A);
 		await cleanupMachine(B);
 	});
@@ -81,16 +85,16 @@ describe.skipIf(SKIP)("receive slots — per-machine guest→host UDP", () => {
 		}
 		expect(QuickCHR.get(A)?.state.receivePorts).toEqual([{ name: "syslog", port: la.port, proto: "udp" }]);
 
-		const [a, b] = await Promise.all([
-			QuickCHR.start({ name: A, background: true }),
-			QuickCHR.start({
-				...target,
-				name: B,
-				background: true,
-				secureLogin: false,
-				receivePorts: [{ name: "syslog", port: lb.port, proto: "udp" }],
-			}),
-		]);
+		const startA = QuickCHR.start({ name: A, background: true });
+		const startB = QuickCHR.start({
+			...target,
+			name: B,
+			background: true,
+			secureLogin: false,
+			receivePorts: [{ name: "syslog", port: lb.port, proto: "udp" }],
+		});
+		starts.push(startA, startB);
+		const [a, b] = await Promise.all([startA, startB]);
 
 		// The descriptor is what consumers (tzsp-sniff) read.
 		const da = await a.descriptor();

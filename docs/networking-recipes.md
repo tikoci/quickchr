@@ -136,7 +136,9 @@ const chr = await QuickCHR.start({ name: "lab1", receivePorts: [parseReceiveSpec
 const tzsp = chr.receive.tzsp;   // ReceiveEndpoint | undefined under noUncheckedIndexedAccess
 if (!tzsp) throw new Error("lab1 has no tzsp receive slot");
 // listener: dgram bind(tzsp.hostPort, "127.0.0.1") — unconnected
-await chr.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${tzsp.guestHost}:${tzsp.guestPort}`);
+// filter-stream=yes keeps the sniffer from capturing its own TZSP stream
+await chr.exec(`/tool/sniffer/set streaming-enabled=yes filter-stream=yes streaming-server=${tzsp.guestHost}:${tzsp.guestPort}`);
+await chr.exec("/tool/sniffer/start");
 ```
 
 - **A reservation only.** quickchr never binds the port and emits no `hostfwd`, which is

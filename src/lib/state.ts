@@ -11,6 +11,7 @@ import { QuickCHRError } from "./types.ts";
 import { networkModeToConfigs } from "./network.ts";
 import { assertPathSafeName, isPathSafeName } from "./names.ts";
 import { pidLiveness } from "./pid.ts";
+import { renameWithRetry } from "./rename.ts";
 import { acquireLockNow, type HeldLock, legacyMachineLockPath, machineLockPath } from "./lock.ts";
 
 /** Get the quickchr data directory root. Override with QUICKCHR_DATA_DIR env var.
@@ -103,22 +104,16 @@ export function ensureDir(dir: string): void {
 	mkdirSync(dir, { recursive: true });
 }
 
-/** Rename attempts before {@link saveMachine} gives up on an atomic replace. */
-const SAVE_RENAME_ATTEMPTS = 20;
-const SAVE_RENAME_RETRY_MS = 25;
-
-function sleepSync(ms: number): void {
-	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
 /** Save machine state to disk.
  *
  *  Written to a temporary file and renamed over `machine.json`, so a reader never sees
  *  a truncated or empty file mid-write — the port allocator would otherwise skip the
  *  machine and hand out ports it holds (#299). Windows refuses the rename while another
  *  process holds the file open without delete sharing (an antivirus or indexer scan,
- *  typically), so a refusal is retried for about half a second. Only after that does it write in place, which can expose a partial file to
- *  a concurrent reader, rather than fail the operation that is saving. */
+ *  typically), so a refusal is retried by {@link renameWithRetry} (about 1.6 s). After
+ *  that the save fails with `STATE_ERROR` and the previous `machine.json` stays: writing in place
+ *  could publish a partial file, and a machine the allocator cannot read is one whose
+ *  ports it hands out again (#303 review). */
 export function saveMachine(state: MachineState): void {
 	ensureDir(state.machineDir);
 	const target = machineJsonPath(state.name);
@@ -138,21 +133,15 @@ export function saveMachine(state: MachineState): void {
 		if (existing && process.getuid?.() === 0 && existing.uid !== 0) {
 			try { chownSync(tmp, existing.uid, existing.gid); } catch { /* best effort */ }
 		}
-		for (let attempt = 1; ; attempt++) {
-			try {
-				renameSync(tmp, target);
-				return;
-			} catch (err) {
-				const code = (err as { code?: string }).code;
-				const transient = code === "EPERM" || code === "EACCES" || code === "EBUSY";
-				if (transient && attempt < SAVE_RENAME_ATTEMPTS) {
-					sleepSync(SAVE_RENAME_RETRY_MS);
-					continue;
-				}
-				if (!transient) throw err;
-				writeFileSync(target, body);
-				return;
-			}
+		try {
+			renameWithRetry(tmp, target);
+		} catch (err) {
+			const code = (err as { code?: string }).code;
+			if (process.platform !== "win32" || (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY")) throw err;
+			throw new QuickCHRError(
+				"STATE_ERROR",
+				`Could not replace ${target} (${code}): another program has it open — an antivirus or indexer scan, typically. The previous state is unchanged; retry the command.`,
+			);
 		}
 	} finally {
 		// Gone after a successful rename; anything else (a failed write, a refused rename)

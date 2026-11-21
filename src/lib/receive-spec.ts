@@ -191,7 +191,7 @@ export function planReceiveChange(
 		} else if (have.port !== slot.port || have.proto !== slot.proto) {
 			throw new QuickCHRError(
 				"INVALID_RECEIVE_SPEC",
-				`Machine "${machine.name}" already receives "${slot.name}" on ${have.port}/${have.proto}. Move it in one call: quickchr set ${shellQuote(machine.name)} --no-receive ${slot.name} --receive ${slot.name}:${slot.port}`,
+				`Machine "${machine.name}" already receives "${slot.name}" on ${have.port}/${have.proto}. Move it in one call: quickchr set ${shellQuote(machine.name)} --no-receive ${slot.name} --receive ${slot.name}:${slot.port}/${slot.proto}`,
 			);
 		}
 	}

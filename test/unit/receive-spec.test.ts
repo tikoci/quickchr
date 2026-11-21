@@ -203,7 +203,12 @@ describe("planReceiveChange", () => {
 	});
 
 	test("same name, different port, without a removal points at the one-call move", () => {
-		expect(() => planReceiveChange(machine, [{ name: "syslog", port: 5516, proto: "udp" }], [], [])).toThrow("--no-receive syslog --receive syslog:5516");
+		expect(() => planReceiveChange(machine, [{ name: "syslog", port: 5516, proto: "udp" }], [], [])).toThrow("--no-receive syslog --receive syslog:5516/udp");
+	});
+
+	test("the move hint keeps a tcp slot tcp", () => {
+		const tcp = { ...machine, receivePorts: [{ name: "app", port: 9400, proto: "tcp" as const }] };
+		expect(() => planReceiveChange(tcp, [{ name: "app", port: 9401, proto: "tcp" }], [], [])).toThrow("--receive app:9401/tcp");
 	});
 
 	test("re-adding the same slot is a no-op; removing an absent name is ignored", () => {

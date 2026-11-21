@@ -54,7 +54,11 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   and `list`/`get` refreshing a dead machine's status take the machine lock and patch
   only the status fields instead of rewriting a possibly stale record; a `start` that
   meets such a refresh waits for it instead of failing. Replacing `machine.json` keeps
-  its file mode. (#303 review)
+  its file mode, and a replace Windows keeps refusing fails with `STATE_ERROR` instead of
+  writing the file in place. (#303 review)
+- `license()` recorded its level without the machine lock, so a concurrent
+  `set --receive` could save an older copy of `machine.json` over it. Both now keep the
+  other's change. (#303 review)
 - **`timeoutExtra` now applies when `start()` boots a machine that already exists**:
   one `add()` made, or one that has booted before. Only a new machine's start used to
   add it. On the CLI, `quickchr start <name> --timeout-extra` and the `timeout-extra`

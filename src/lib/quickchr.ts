@@ -1217,16 +1217,22 @@ function createInstance(state: MachineState): ChrInstance {
 			// the record the window reads (so a later `start --license-level` with the same
 			// level is "already applied", not refused). Credentials are never recorded.
 			// Without a level, renew does not verify one, so there is nothing to record.
+			// Recorded under the machine lock, like every other writer of the record: a
+			// concurrent `set --receive` re-reads after this save instead of writing its
+			// older snapshot over it (#303 review). The renew itself runs unlocked — it
+			// talks only to the guest.
 			if (level) {
-				const current = loadMachine(state.name);
-				if (current) {
-					current.license = level;
-					current.licenseLevel = level;
-					saveMachine(current);
-				}
-				state.license = level;
-				state.licenseLevel = level;
-				recordProvisioningStep(state, "license");
+				await withMachineLock(state, "license", async () => {
+					const current = loadMachine(state.name);
+					if (current) {
+						current.license = level;
+						current.licenseLevel = level;
+						saveMachine(current);
+					}
+					state.license = level;
+					state.licenseLevel = level;
+					recordProvisioningStep(state, "license");
+				});
 			}
 		},
 
@@ -2490,13 +2496,17 @@ async function changeReceivePortsDetailed(
 			subject: "The port allocator",
 		});
 		try {
-			const before = state.receivePorts ?? [];
-			const next = planReceiveChange(state, add, remove, receiveCheckMachines(state.name));
+			// Re-read after the allocation-lock wait and change only `receivePorts`, so a
+			// field another writer saved meanwhile is kept, not overwritten from this
+			// handle's snapshot (#303 review).
+			const current = loadMachine(state.name) ?? state;
+			const before = current.receivePorts ?? [];
+			const next = planReceiveChange(current, add, remove, receiveCheckMachines(state.name));
 			if (JSON.stringify(next) !== JSON.stringify(before)) {
 				const receivePorts = next.length > 0 ? next : undefined;
 				// Save first: a failed save must not leave the handle reporting a change
 				// that is not on disk.
-				saveMachine({ ...state, receivePorts });
+				saveMachine({ ...current, receivePorts });
 				state.receivePorts = receivePorts;
 			}
 			return { before, after: next };

@@ -67,6 +67,7 @@ export type LockOperation =
 	| "remove"
 	| "device-mode"
 	| "install-package"
+	| "license"
 	| "receive"
 	| "status"
 	| "remove-orphan"

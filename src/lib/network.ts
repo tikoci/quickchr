@@ -234,6 +234,12 @@ export async function findAvailablePortBlock(
 		// validateExplicitExtraPorts() says so.
 		let reserved = false;
 		for (let i = 0; i < PORTS_PER_BLOCK && !reserved; i++) reserved = reservedHosts.has(base + i);
+		// Auto extras sit at +6+i (buildPortMappings), so a fifth one is already past the
+		// block — check every host they would take, not just the block (#303 review).
+		for (let i = 0; i < extraPorts.length && !reserved; i++) {
+			const extra = extraPorts[i];
+			if (extra && !extra.host) reserved = reservedHosts.has(base + 6 + i);
+		}
 		if (!reserved) {
 			attempt++;
 			const conflicts = await checkPortConflicts(buildPortMappings(base, excludePorts, extraPorts));
