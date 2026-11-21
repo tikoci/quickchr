@@ -42,6 +42,7 @@ export type {
 	DoctorCheck,
 	DoctorResult,
 	EfiFirmwarePaths,
+	HostGateway,
 	ExecOptions,
 	ExecResult,
 	ExecTransport,
@@ -66,6 +67,8 @@ export type {
 	QgaNetworkIpAddress,
 	QgaOsInfo,
 	QgaTimezone,
+	ReceiveEndpoint,
+	ReceivePort,
 	ServiceEndpoint,
 	ServiceName,
 	SnapshotInfo,
@@ -143,11 +146,14 @@ export type { MikrotikCredentials, InstanceCredentials } from "./lib/credentials
 export { downloadPackages, listAvailablePackages, downloadAndListPackages, installPackages, installAllPackages } from "./lib/packages.ts";
 
 // Guest port registry
-export { WELL_KNOWN_GUEST_PORTS, lookupGuestPort } from "./lib/guest-ports.ts";
-export type { GuestPortDef } from "./lib/guest-ports.ts";
+export { WELL_KNOWN_GUEST_PORTS, lookupGuestPort, WELL_KNOWN_RECEIVE_PORTS, lookupReceivePort } from "./lib/guest-ports.ts";
+export type { GuestPortDef, ReceivePortDef } from "./lib/guest-ports.ts";
 
 // Forward spec parsing
 export { parseForwardSpec, expandForwardSpec, FORWARD_RANGE_MAX } from "./lib/forward-spec.ts";
+
+// Receive spec parsing (guest→host, #299)
+export { parseReceiveSpec } from "./lib/receive-spec.ts";
 
 // Logging
 export { createLogger } from "./lib/log.ts";

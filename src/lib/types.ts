@@ -187,6 +187,47 @@ export interface PortMapping {
 	proto: "tcp" | "udp";
 }
 
+/** A named **guest→host** receive slot (#299) — the reverse of a {@link PortMapping}.
+ *
+ *  The guest sends to the user-mode gateway `10.0.2.2:<port>` and SLIRP delivers it to
+ *  host loopback `127.0.0.1:<port>` (SLIRP does not translate the port, so one number
+ *  serves both sides). SLIRP rewrites the source to `127.0.0.1:<ephemeral>`, so the
+ *  destination port is the only thing that tells two machines apart — hence one slot
+ *  per machine, unique across quickchr.
+ *
+ *  quickchr only **reserves** the port: it never binds it and never emits a `hostfwd`
+ *  for it. The listener binds it, **unconnected** (`recvfrom`, not `connect`). Turn
+ *  CLI-style `--receive` specs into this with {@link parseReceiveSpec}. */
+export interface ReceivePort {
+	/** Lowercase label, unique per machine (e.g. `"tzsp"`). The descriptor's key. */
+	name: string;
+	/** Host port the listener binds on loopback; also the port the guest sends to. */
+	port: number;
+	proto: "tcp" | "udp";
+}
+
+/** Descriptor/`ChrInstance.receive` form of a {@link ReceivePort} — where the guest
+ *  sends and where the host listens. `null`-free: a machine without a user-mode NIC
+ *  cannot hold receive slots. */
+export interface ReceiveEndpoint {
+	transport: "tcp" | "udp";
+	/** Host address to bind — always loopback. Bind it unconnected. */
+	host: string;
+	hostPort: number;
+	/** Address the guest sends to — the user-mode gateway. */
+	guestHost: string;
+	guestPort: number;
+}
+
+/** The host as seen from inside a guest, for the descriptor (#299). */
+export interface HostGateway {
+	/** `"10.0.2.2"` — QEMU user-mode gateway. */
+	address: string;
+	/** Host interface where gateway-relayed traffic can be captured (`"lo0"` on macOS,
+	 *  `"any"` elsewhere) — same value as {@link ChrInstance.captureInterface}. */
+	captureInterface: string;
+}
+
 /** Default RouterOS service ports and their offset within a port block. */
 export const SERVICE_PORTS = {
 	http: { guest: 80, offset: 0, proto: "tcp" as const },
@@ -267,6 +308,10 @@ export interface MachineConfig {
 	portBase: number;
 	excludePorts: ServiceName[];
 	extraPorts: PortMapping[];
+	/** Guest→host receive slots (#299): reserved, never bound by quickchr and never a
+	 *  `hostfwd`. Absent in machine.json written before receive slots existed. Can change on a running
+	 *  machine (`ChrInstance.addReceivePort()`), unlike `ports`. */
+	receivePorts?: ReceivePort[] | undefined;
 	/** License level requested at `add()`/`start()` — intent, applied on first boot
 	 *  and re-applied after `clean()`. Only the level is recorded: MikroTik.com
 	 *  credentials are never persisted here and are resolved at boot (env vars, then
@@ -460,6 +505,16 @@ export interface StartOptions {
 	 *  extraPorts: expandForwardSpec("btest:9200-9210:2000-2010/udp")
 	 */
 	extraPorts?: PortMapping[];
+	/** Guest→host receive slots — the library equivalent of the CLI `--receive` flag
+	 *  (#299). Reserved only (no `hostfwd`); needs a `"user"` NIC. Ports are explicit or
+	 *  come from {@link WELL_KNOWN_RECEIVE_PORTS} via {@link parseReceiveSpec}, and must
+	 *  not collide with any machine's forward or receive port (`PORT_CONFLICT`). On an
+	 *  existing machine, slots not already recorded are added (same as
+	 *  `ChrInstance.addReceivePort()`); a recorded name with a different port is refused.
+	 *  @example
+	 *  receivePorts: [parseReceiveSpec("tzsp")] // 37008/udp
+	 */
+	receivePorts?: ReceivePort[] | undefined;
 	/** @deprecated Use `networks` instead. Kept for backward compatibility. */
 	network?: NetworkMode;
 	/** Network interfaces — the library equivalent of repeated `--add-network` flags.
@@ -671,6 +726,13 @@ export interface Descriptor {
 	customForwards?: CustomForward[];
 	/** Topology-only; SLiRP-forwarded connection facts stay in `services`. */
 	networks?: NetworkTopologyEntry[];
+	/** The host as seen from the guest (#299); `null` when the machine has no
+	 *  user-mode NIC. Additive within descriptorVersion 1. */
+	hostGateway?: HostGateway | null;
+	/** Guest→host receive slots keyed by name (#299). Only present when the machine has
+	 *  any. Bind `host:hostPort` **unconnected**; configure the guest to send to
+	 *  `guestHost:guestPort`. */
+	receive?: Record<string, ReceiveEndpoint>;
 }
 
 /** Return value of ChrInstance.queryLoad(). */
@@ -755,6 +817,23 @@ export interface ChrInstance {
 	 *  await instance.exec(`/tool/sniffer/set streaming-server=${instance.hostGatewayIp}:37008`);
 	 */
 	hostGatewayIp: string;
+	/** Guest→host receive slots keyed by name (#299), the same shape as the
+	 *  descriptor's `receive`. Read from {@link state}, so it reflects
+	 *  {@link addReceivePort}/{@link removeReceivePort} on this handle.
+	 *  @example
+	 *  const tzsp = instance.receive.tzsp; // { hostPort: 37008, guestHost: "10.0.2.2", ... }
+	 *  await instance.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${tzsp.guestHost}:${tzsp.guestPort}`);
+	 */
+	readonly receive: Record<string, ReceiveEndpoint>;
+	/** Reserve a guest→host receive slot on this machine (#299), running or stopped —
+	 *  no QEMU change and no restart. Accepts a {@link ReceivePort} or a `--receive`
+	 *  spec string (`"tzsp"`, `"tzsp:37009"`). Recording the same name and port again is
+	 *  a no-op; the same name with a different port is `INVALID_RECEIVE_SPEC`; a port
+	 *  any machine already uses is `PORT_CONFLICT` naming the next free port. Needs a
+	 *  user-mode NIC. Returns the recorded slot. */
+	addReceivePort(spec: ReceivePort | string): Promise<ReceivePort>;
+	/** Drop a receive slot by name. Returns `false` when the machine had none by that name. */
+	removeReceivePort(name: string): Promise<boolean>;
 
 	/** Check or wait for readiness — REST, or a native-API login on RouterOS 6 (#182).
 	 *  After `QuickCHR.start()` the returned instance is already ready, so this returns
@@ -1010,6 +1089,8 @@ export type ErrorCode =
 	| "NETWORK_UNAVAILABLE"
 	| "INVALID_NETWORK"
 	| "INVALID_FORWARD_SPEC"
+	// A `--receive` spec / `ReceivePort` quickchr cannot record (#299).
+	| "INVALID_RECEIVE_SPEC"
 	| "PROVISIONING_VERSION_UNSUPPORTED"
 	// A provisioning option handed to a machine whose provisioning window has closed:
 	// the guest has booted, so quickchr cannot assume it still holds the default

@@ -106,6 +106,8 @@ import {
 	withRecordedLicenseLevel,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
+import type { ReceivePort } from "./types.ts";
+import { normalizeReceivePort, otherMachinesReceivePorts, receiveEndpoints, validateReceivePorts, type ReceiveCheckMachine } from "./receive-spec.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
 import { admitStorage, estimateMachineCreation, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
@@ -802,6 +804,11 @@ async function cleanUnderLock(state: MachineState): Promise<void> {
 	state.cleanedAt = cleanedAt;
 }
 
+/** Where gateway-relayed (loopback) traffic can be captured on this host. */
+function captureInterfaceForHost(): string {
+	return process.platform === "darwin" ? "lo0" : "any";
+}
+
 /** Create a ChrInstance handle from persisted MachineState. */
 function createInstance(state: MachineState): ChrInstance {
 	const ports = toChrPorts(state.ports);
@@ -974,6 +981,10 @@ function createInstance(state: MachineState): ChrInstance {
 			},
 			...(customForwards.length > 0 ? { customForwards } : {}),
 			networks,
+			hostGateway: hasUserModeNetwork(state.networks)
+				? { address: HOST_GATEWAY_IP, captureInterface: captureInterfaceForHost() }
+				: null,
+			...((state.receivePorts?.length ?? 0) > 0 ? { receive: receiveEndpoints(state.receivePorts) } : {}),
 		};
 	};
 
@@ -984,8 +995,28 @@ function createInstance(state: MachineState): ChrInstance {
 		restUrl,
 		sshPort: ports.ssh,
 		portBase: state.portBase,
-		captureInterface: process.platform === "darwin" ? "lo0" : "any",
+		captureInterface: captureInterfaceForHost(),
 		hostGatewayIp: HOST_GATEWAY_IP,
+		get receive() {
+			return receiveEndpoints(state.receivePorts);
+		},
+
+		async addReceivePort(spec: ReceivePort | string): Promise<ReceivePort> {
+			const [slot] = await recordReceivePorts(state, [spec]);
+			return slot as ReceivePort;
+		},
+
+		async removeReceivePort(name: string): Promise<boolean> {
+			const key = name.trim().toLowerCase();
+			return withMachineLock(state, "receive", async () => {
+				const current = state.receivePorts ?? [];
+				if (!current.some((r) => r.name === key)) return false;
+				const rest = current.filter((r) => r.name !== key);
+				state.receivePorts = rest.length > 0 ? rest : undefined;
+				saveMachine(state);
+				return true;
+			});
+		},
 
 		async waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean> {
 			if (readinessProbeFor(state.version) === "api") {
@@ -2346,19 +2377,91 @@ function assertPortBaseFree(
 async function pickNewMachineResources(
 	name: string,
 	opts: StartOptions,
-): Promise<{ portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[] }> {
+): Promise<{ portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[]; receivePorts: ReceivePort[] }> {
 	const machines = loadAllMachines();
 	const reserved = listReservations(name);
 	if (opts.portBase) assertPortBaseFree(opts.portBase, name, machines, reserved);
+	const receivePorts = (opts.receivePorts ?? []).map(normalizeReceivePort);
+	const receiveCheck = [...machines, ...reservationsAsMachines(reserved)];
+	// Receive slots are reservations nothing listens on yet, so the block probe cannot
+	// see them: neither another machine's nor this machine's own may land in the block.
+	const reservedHosts = otherMachinesReceivePorts(receiveCheck, name);
+	for (const r of receivePorts) reservedHosts.add(r.port);
 	const usedBases = [...getUsedPortBases(), ...reserved.map((r) => r.portBase)];
-	const portBase = opts.portBase || await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts);
+	const portBase = opts.portBase || await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts, undefined, reservedHosts);
 	validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, machines, name);
 	const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
 
 	const usedMacs = getUsedMacs();
 	for (const r of reserved) for (const mac of r.macs) usedMacs.add(mac);
 	const networks = assignMacs(name, resolveStartNetworks(opts.networks, opts.network), usedMacs);
-	return { portBase, ports, networks };
+	if (receivePorts.length > 0) {
+		assertReceiveReachable(networks, name);
+		validateReceivePorts(receivePorts, name, ports, [], receiveCheck);
+	}
+	return { portBase, ports, networks, receivePorts };
+}
+
+/** In-flight creations as far as the receive-slot check is concerned (#299). */
+function reservationsAsMachines(reserved: ReturnType<typeof listReservations>): ReceiveCheckMachine[] {
+	return reserved.map((r) => ({
+		name: r.name,
+		ports: {},
+		receivePorts: (r.receivePorts ?? []).map((port) => ({ name: "pending", port, proto: "udp" as const })),
+	}));
+}
+
+/** Receive slots ride the user-mode gateway; on any other NIC there is no `10.0.2.2`. */
+function assertReceiveReachable(networks: NetworkConfig[], name: string): void {
+	if (!hasUserModeNetwork(networks)) {
+		throw new QuickCHRError(
+			"INVALID_RECEIVE_SPEC",
+			`Machine "${name}" has no user-mode NIC, so it has no 10.0.2.2 gateway to receive through. Add one (--add-network user, first) or send to the host over the machine's other network.`,
+		);
+	}
+}
+
+/** Record receive slots on an existing machine (#299). No QEMU change: valid on a
+ *  running or stopped machine. Holds the machine lock, then the allocation lock so the
+ *  cross-machine check cannot race a creation or another machine's add. */
+async function recordReceivePorts(state: MachineState, requested: Array<ReceivePort | string>): Promise<ReceivePort[]> {
+	const slots = requested.map(normalizeReceivePort);
+	if (slots.length === 0) return [];
+	return withMachineLock(state, "receive", async () => {
+		assertReceiveReachable(state.networks, state.name);
+		ensureDir(getDataDir());
+		const allocation = await acquireLock(allocationLockPath(), "allocate", {
+			waitMs: ALLOCATION_LOCK_WAIT_MS,
+			subject: "The port allocator",
+		});
+		try {
+			const current = state.receivePorts ?? [];
+			const fresh: ReceivePort[] = [];
+			for (const slot of slots) {
+				const have = current.find((r) => r.name === slot.name);
+				if (!have) {
+					fresh.push(slot);
+				} else if (have.port !== slot.port || have.proto !== slot.proto) {
+					throw new QuickCHRError(
+						"INVALID_RECEIVE_SPEC",
+						`Machine "${state.name}" already receives "${slot.name}" on ${have.port}/${have.proto}. Remove it first: quickchr set ${shellQuote(state.name)} --no-receive ${slot.name}`,
+					);
+				}
+			}
+			if (fresh.length > 0) {
+				validateReceivePorts(fresh, state.name, state.ports, current, [
+					...loadAllMachines(),
+					...reservationsAsMachines(listReservations(state.name)),
+				]);
+				state.receivePorts = [...current, ...fresh];
+				saveMachine(state);
+			}
+			const recorded = state.receivePorts ?? [];
+			return slots.map((s) => recorded.find((r) => r.name === s.name) ?? s);
+		} finally {
+			allocation.release();
+		}
+	});
 }
 
 /** Choose a new machine's resources and take its machine lock with them recorded in
@@ -2378,7 +2481,7 @@ export async function claimNewMachine(
 	name: string,
 	op: Extract<LockOperation, "add" | "start" | "foreground">,
 	opts: StartOptions,
-): Promise<{ lock: HeldLock; portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[] }> {
+): Promise<{ lock: HeldLock; portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[]; receivePorts: ReceivePort[] }> {
 	ensureDir(getDataDir());
 	const allocation = await acquireLock(allocationLockPath(), "allocate", {
 		waitMs: ALLOCATION_LOCK_WAIT_MS,
@@ -2392,6 +2495,7 @@ export async function claimNewMachine(
 			reserve: {
 				portBase: picked.portBase,
 				macs: picked.networks.flatMap((n) => (n.mac ? [n.mac] : [])),
+				...(picked.receivePorts.length > 0 ? { receivePorts: picked.receivePorts.map((r) => r.port) } : {}),
 			},
 		};
 		// The lock lives in the directory, so the directory comes first. A refusal here
@@ -2507,7 +2611,7 @@ export class QuickCHR {
 			storageLease.release();
 			throw err;
 		}
-		const { lock, portBase, ports, networks } = claimed;
+		const { lock, portBase, ports, networks, receivePorts } = claimed;
 		try {
 			const cachedImg = await ensureCachedImage(version, arch);
 			const diskArtifacts = await ensureConfiguredDisks(
@@ -2536,6 +2640,7 @@ export class QuickCHR {
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
+				receivePorts: receivePorts.length > 0 ? receivePorts : undefined,
 				bootSize: diskOpts.bootSize,
 				extraDisks: diskOpts.extraDisks,
 				bootDiskFormat: diskArtifacts.bootDisk.format,
@@ -2717,6 +2822,11 @@ export class QuickCHR {
 			for (const ask of satisfied) {
 				(logger ?? createLogger()).status(`${ask.description} is already applied — nothing to do.`);
 			}
+			// Receive slots are not provisioning — no guest I/O, no QEMU change — so an
+			// existing machine takes them now instead of refusing them (#299).
+			if ((opts.receivePorts?.length ?? 0) > 0 && !opts.dryRun) {
+				await recordReceivePorts(existing, opts.receivePorts ?? []);
+			}
 			if (isMachineRunning(existing)) {
 				return createInstance(existing);
 			}
@@ -2774,7 +2884,7 @@ export class QuickCHR {
 		// claimed: a dry run persists nothing for another create to collide with.
 		if (opts.dryRun) {
 			const machineDir = getMachineDir(name);
-			const { portBase, ports, networks } = await pickNewMachineResources(name, opts);
+			const { portBase, ports, networks, receivePorts } = await pickNewMachineResources(name, opts);
 			const state: MachineState = {
 				name,
 				version,
@@ -2793,6 +2903,7 @@ export class QuickCHR {
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
+				receivePorts: receivePorts.length > 0 ? receivePorts : undefined,
 				bootSize: diskOpts.bootSize,
 				extraDisks: diskOpts.extraDisks,
 				bootDiskFormat: diskOpts.bootDiskFormat,
@@ -2837,7 +2948,7 @@ export class QuickCHR {
 			storageLease.release();
 			throw err;
 		}
-		const { lock, portBase, ports, networks: networkConfigs } = claimed;
+		const { lock, portBase, ports, networks: networkConfigs, receivePorts } = claimed;
 		// Endpoints are claimed before QEMU is spawned, because resolution needs to know
 		// which end this machine holds. A launch that fails before its state is persisted
 		// has no instance lifecycle to release them later, so a failed start would leave a
@@ -2879,6 +2990,7 @@ export class QuickCHR {
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
 			extraPorts: opts.extraPorts ?? [],
+			receivePorts: receivePorts.length > 0 ? receivePorts : undefined,
 			bootSize: diskOpts.bootSize,
 			extraDisks: diskOpts.extraDisks,
 			bootDiskFormat: bootDisk.format,

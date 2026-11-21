@@ -136,6 +136,15 @@ Ports are assigned in fixed 10-port blocks from `DEFAULT_PORT_BASE` (9100), scan
 1. **Base 9100 is a poor default** — collides with JetDirect/PDL (printers) and trains agents to memorize "quickchr = 9100 for REST", which only holds for the *first* instance (the second gets 9110). Open: random base in a clean high range (persisted per machine) vs caller-requested range vs both; and whether that's a breaking change or a setting with 9100 as the default. → [#56](https://github.com/tikoci/quickchr/issues/56)
 2. **Fixed blocks are overfit** — extras bolt on at `+6..+9` and collide with the Windows IPC offsets above (one slot before spilling); manual `extraPorts` bypass collision checking. Open: dynamic variable-size blocks vs a fixed core pool + a separate extras pool. → [#57](https://github.com/tikoci/quickchr/issues/57)
 
+### Receive slots (guest→host, #299)
+
+A **receive slot** is a per-machine named port for traffic the guest sends to the host (TZSP, syslog, NetFlow): the guest sends to `10.0.2.2:N`, SLIRP delivers it to host `127.0.0.1:N`. Decisions:
+
+- **The port is the label.** SLIRP rewrites the source to `127.0.0.1:<ephemeral>`, RouterOS TZSP has no sensor ID, and QEMU `guestfwd` is TCP-only, so one port per machine, unique across quickchr, is the only general way to tell machines apart.
+- **Separate from forwards.** Stored as `MachineState.receivePorts`, never in `ports`/`extraPorts`: `buildHostfwdString` would otherwise emit a `hostfwd` for it, and `PortMapping.guest` has no meaning. Because there is no QEMU side, a slot can be added or removed on a running machine (contrast #141).
+- **Not in the block, for now.** Ports are explicit or registry defaults (`WELL_KNOWN_RECEIVE_PORTS`, kept apart from `WELL_KNOWN_GUEST_PORTS` so `--forward tzsp` cannot mean the wrong direction). The block has no spare offset (auto extras take `+6+i`; Windows IPC takes +6..+8), so auto-allocation waits for #57, where receive slots are the second user of an extras pool. Registry defaults below 1024 are replaced by an unprivileged stand-in (syslog → 5514) so a listener needs no root; `snmp-trap` is absent because RouterOS has no trap-port setting.
+- **Collisions** are checked across every machine's forward and receive ports and in-flight creations (the lock reservation carries receive ports); a clash names the next free port. Live changes hold the machine lock, then the allocation lock — creation takes them in the other order but never waits on an existing machine's lock, so this cannot deadlock.
+
 Current consumers are all first-party tikoci projects (centrs, donny, restraml), so a port-scheme migration can be coordinated across them — but `@tikoci/quickchr` is published and public, so a change to the persisted port contract still needs an issue, a CHANGELOG/docs note, and (for the `ChrInstance`/`StartOptions` surface) a deprecation/migration path, not a silent break.
 
 ## Storage Layout

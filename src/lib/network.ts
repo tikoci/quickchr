@@ -120,6 +120,9 @@ export function validateExplicitExtraPorts(
 		for (const mapping of Object.values(m.ports ?? {})) {
 			otherHosts.set(mapping.host, { machine: m.name, service: mapping.name });
 		}
+		for (const slot of m.receivePorts ?? []) {
+			otherHosts.set(slot.port, { machine: m.name, service: `receive ${slot.name}` });
+		}
 	}
 
 	const seenInExtras = new Map<number, string>();
@@ -210,14 +213,18 @@ export async function findAvailablePortBlock(
 	excludePorts: ServiceName[] = [],
 	extraPorts: PortMapping[] = [],
 	startBase?: number,
+	reservedHosts: ReadonlySet<number> = new Set(),
 ): Promise<number> {
 	let base = startBase ?? allocatePortBlock(usedBases);
 	const maxAttempts = 20;
 
 	for (let attempt = 0; attempt < maxAttempts; attempt++) {
 		const mappings = buildPortMappings(base, excludePorts, extraPorts);
-		const conflicts = await checkPortConflicts(mappings);
-		if (conflicts.length === 0) {
+		// `reservedHosts` are ports nothing may be listening on yet — another machine's
+		// receive slots (#299) — so the live probe below cannot see them.
+		const reserved = Object.values(mappings).some((m) => reservedHosts.has(m.host));
+		const conflicts = reserved ? [] : await checkPortConflicts(mappings);
+		if (!reserved && conflicts.length === 0) {
 			return base;
 		}
 		// Step past the probed conflict without stepping onto a used block: a block

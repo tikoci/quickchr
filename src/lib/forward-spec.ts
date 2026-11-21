@@ -29,7 +29,7 @@
  * embedded in the message on any parse error.
  */
 
-import { lookupGuestPort } from "./guest-ports.ts";
+import { lookupGuestPort, lookupReceivePort } from "./guest-ports.ts";
 import { type PortMapping, QuickCHRError } from "./types.ts";
 
 function fail(spec: string, reason: string): never {
@@ -93,6 +93,9 @@ export function parseForwardSpec(spec: string): PortMapping {
 		guest = parsePort(spec, parts[2], "guest", false);
 	} else if (known) {
 		guest = known.guest;
+	} else if (lookupReceivePort(name)) {
+		// tzsp/netflow/… flow guest→host; a hostfwd is the wrong direction (#299).
+		fail(spec, `"${name}" is sent by the guest to the host — use --receive ${name}, not --forward (a forward is host→guest)`);
 	} else {
 		fail(spec, `guest port required for unknown service "${name}"`);
 	}

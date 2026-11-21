@@ -15,7 +15,7 @@
 const CREATE_FLAGS = [
 	"version", "channel", "arch", "name", "cpu", "mem", "accel",
 	"add-package", "install-all-packages",
-	"port-base", "forward", "winbox", "api-ssl",
+	"port-base", "forward", "receive", "winbox", "api-ssl",
 	"add-network", "network",
 	"boot-disk-format", "boot-size", "add-disk",
 	"device-mode", "device-mode-enable", "device-mode-disable",
@@ -44,6 +44,7 @@ const SET_ONLY_FLAGS = [
 	"package",
 	"device-mode", "device-mode-enable", "device-mode-disable",
 	"qemu-arg", "clear-qemu-args",
+	"receive", "no-receive",
 ] as const;
 
 export const ADD_FLAGS: readonly string[] = CREATE_FLAGS;
@@ -76,7 +77,7 @@ export const SET_FLAGS: readonly string[] = SET_ONLY_FLAGS;
 export const VALUE_FLAGS: ReadonlySet<string> = new Set([
 	// add / start
 	"version", "channel", "arch", "name", "cpu", "mem", "accel",
-	"add-package", "port-base", "forward",
+	"add-package", "port-base", "forward", "receive",
 	"add-network",
 	"boot-disk-format", "boot-size", "add-disk",
 	"device-mode", "device-mode-enable", "device-mode-disable",
@@ -85,8 +86,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
 	"qemu-arg",
 	// exec / qga / console
 	"via", "user", "password", "timeout", "path", "data", "script",
-	// set --license / --package
-	"account", "level", "package",
+	// set --license / --package / --receive
+	"account", "level", "package", "no-receive",
 	// networks sockets create
 	"mode", "port", "group",
 	// completions / logs

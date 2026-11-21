@@ -296,3 +296,77 @@ describe("descriptor() — v1 shape", () => {
 		await expect(instance?.descriptor()).rejects.toMatchObject({ code: "MACHINE_STOPPED" });
 	});
 });
+
+describe("descriptor() — hostGateway and receive (#299)", () => {
+	test("hostGateway is the user-mode gateway; receive omitted when the machine has none", async () => {
+		writeMachine(baseState("router"));
+		const descriptor = await QuickCHR.get("router")?.descriptor();
+		expect(descriptor?.hostGateway).toEqual({
+			address: "10.0.2.2",
+			captureInterface: process.platform === "darwin" ? "lo0" : "any",
+		});
+		expect(descriptor).not.toHaveProperty("receive");
+	});
+
+	test("hostGateway is null without a user-mode NIC", async () => {
+		writeMachine(baseState("router", { networks: [{ specifier: "shared", id: "net0" }] }));
+		const descriptor = await QuickCHR.get("router")?.descriptor();
+		expect(descriptor?.hostGateway).toBeNull();
+	});
+
+	test("receive is keyed by name with guest target and host bind", async () => {
+		writeMachine(baseState("router", { receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		const descriptor = await QuickCHR.get("router")?.descriptor();
+		expect(descriptor?.receive).toEqual({
+			tzsp: { transport: "udp", host: "127.0.0.1", hostPort: 37008, guestHost: "10.0.2.2", guestPort: 37008 },
+		});
+		// A receive slot is never a forward.
+		expect(descriptor?.customForwards?.some((f) => f.name === "tzsp") ?? false).toBe(false);
+	});
+});
+
+describe("ChrInstance receive slots (#299)", () => {
+	test("addReceivePort records and persists; same slot again is a no-op", async () => {
+		writeMachine(baseState("router", { status: "stopped", pid: undefined }));
+		const instance = QuickCHR.get("router");
+		expect(await instance?.addReceivePort("tzsp")).toEqual({ name: "tzsp", port: 37008, proto: "udp" });
+		expect(await instance?.addReceivePort("tzsp")).toEqual({ name: "tzsp", port: 37008, proto: "udp" });
+		expect(instance?.receive.tzsp?.hostPort).toBe(37008);
+		expect(QuickCHR.get("router")?.state.receivePorts).toEqual([{ name: "tzsp", port: 37008, proto: "udp" }]);
+	});
+
+	test("works on a running machine (no QEMU change)", async () => {
+		writeMachine(baseState("router"));
+		const instance = QuickCHR.get("router");
+		await instance?.addReceivePort({ name: "syslog", port: 5514, proto: "udp" });
+		const descriptor = await instance?.descriptor();
+		expect(descriptor?.receive?.syslog?.guestPort).toBe(5514);
+	});
+
+	test("the same name with a different port is refused", async () => {
+		writeMachine(baseState("router", { status: "stopped", pid: undefined, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		await expect(QuickCHR.get("router")?.addReceivePort("tzsp:37009")).rejects.toMatchObject({ code: "INVALID_RECEIVE_SPEC" });
+	});
+
+	test("a port another machine receives on is a PORT_CONFLICT naming the next one", async () => {
+		writeMachine(baseState("lab1", { status: "stopped", pid: undefined, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		writeMachine(baseState("lab2", { status: "stopped", pid: undefined, portBase: 19110, ports: {} }));
+		const err = await QuickCHR.get("lab2")?.addReceivePort("tzsp").catch((e: unknown) => e);
+		expect(err).toMatchObject({ code: "PORT_CONFLICT" });
+		expect(String((err as Error).message)).toContain("tzsp:37009");
+		expect(await QuickCHR.get("lab2")?.addReceivePort("tzsp:37009")).toEqual({ name: "tzsp", port: 37009, proto: "udp" });
+	});
+
+	test("no user-mode NIC is refused", async () => {
+		writeMachine(baseState("router", { status: "stopped", pid: undefined, networks: [{ specifier: "shared", id: "net0" }] }));
+		await expect(QuickCHR.get("router")?.addReceivePort("tzsp")).rejects.toMatchObject({ code: "INVALID_RECEIVE_SPEC" });
+	});
+
+	test("removeReceivePort drops by name and reports a miss", async () => {
+		writeMachine(baseState("router", { status: "stopped", pid: undefined, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		const instance = QuickCHR.get("router");
+		expect(await instance?.removeReceivePort("TZSP")).toBe(true);
+		expect(await instance?.removeReceivePort("tzsp")).toBe(false);
+		expect(QuickCHR.get("router")?.state.receivePorts).toBeUndefined();
+	});
+});

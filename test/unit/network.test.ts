@@ -65,6 +65,24 @@ describe("findAvailablePortBlock", () => {
 	});
 });
 
+describe("receive slots in the port checks (#299)", () => {
+	test("findAvailablePortBlock skips a block holding a reserved receive port", async () => {
+		const base = 47300;
+		expect(await findAvailablePortBlock([], [], [], base, new Set([base + 2]))).toBe(base + PORTS_PER_BLOCK);
+	});
+
+	test("an explicit forward on another machine's receive port is a PORT_CONFLICT", () => {
+		const other = { ...fakeMachine("chr-rx", {}), receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" as const }] };
+		expect(() =>
+			validateExplicitExtraPorts([{ name: "x", host: 37008, guest: 37008, proto: "udp" }], 9200, [], [other]),
+		).toThrow(/receive tzsp/);
+	});
+
+	test("receive slots never become hostfwd directives", () => {
+		expect(buildHostfwdString(buildPortMappings(9100))).not.toContain("37008");
+	});
+});
+
 describe("buildPortMappings", () => {
 	test("builds default mappings from base", () => {
 		const ports = buildPortMappings(9100);

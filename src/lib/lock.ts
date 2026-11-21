@@ -67,6 +67,7 @@ export type LockOperation =
 	| "remove"
 	| "device-mode"
 	| "install-package"
+	| "receive"
 	| "remove-orphan"
 	| "allocate"
 	| "storage";
@@ -77,6 +78,8 @@ export type LockOperation =
 export interface ResourceReservation {
 	portBase: number;
 	macs: string[];
+	/** Receive-slot ports the creation will record (#299). */
+	receivePorts?: number[];
 }
 
 export interface LockRecord {

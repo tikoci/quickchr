@@ -16,7 +16,7 @@ only for the specific traffic shapes below.
 |---|---|---|---|---|
 | Reach a guest **TCP/UDP service** (REST, SSH, WinBox, SNMP, a container port) | host → guest | `user` NIC + `hostfwd` (`--forward` / `extraPorts`) | yes | no |
 | Reach a guest service on **many/dynamic ports** (e.g. btest data ports) | host → guest | `hostfwd` **range** (`--forward name:9200-9210:2000-2010/udp`) | yes (one per port) | no |
-| Receive UDP the **guest sends** (syslog, NetFlow, TZSP, a server replying) | guest → host | guest sends to gateway `10.0.2.2:<port>`; host binds an **unconnected** socket | **no** | no |
+| Receive UDP the **guest sends** (syslog, NetFlow, TZSP, a server replying) | guest → host | guest sends to gateway `10.0.2.2:<port>`; host binds an **unconnected** socket. Name the port per machine with `--receive` / `receivePorts` | **no** | no |
 | Receive guest **L2 frames / broadcasts** (MNDP, MAC-Telnet, raw Ethernet) | guest ↔ host | `socket-connect` L2 NIC (host TCP server) | no | yes |
 | **L2 link between two VMs** | VM ↔ VM | `socket::<name>` (named pair) or `socket-listen`/`connect`/`mcast` | no | yes |
 | Real **LAN presence / DHCP from the host** | full L3 | `shared` or `bridged:<iface>` | no | yes |
@@ -34,6 +34,7 @@ The CLI flags and the `StartOptions` fields are the same two knobs:
 |---|---|---|
 | `--add-network <spec>` (repeatable) | `networks` | `NetworkSpecifier[]` |
 | `--forward <spec>` (repeatable) | `extraPorts` | `PortMapping[]` |
+| `--receive <spec>` (repeatable; also `set --receive` / `--no-receive`) | `receivePorts` (also `addReceivePort()` / `removeReceivePort()`) | `ReceivePort[]` |
 
 Turn `--forward` spec strings into `extraPorts` with `parseForwardSpec` (single
 port) or `expandForwardSpec` (ranges), both exported from `@tikoci/quickchr`.
@@ -112,6 +113,47 @@ evidence: [`../test/lab/gateway-udp/REPORT.md`](../test/lab/gateway-udp/REPORT.m
 
 > RouterOS gotcha: logging-action names must be **alphanumeric** (`qchrgw`, not
 > `qchr-gw`).
+
+### Named receive slots (`--receive`) — one port per machine
+
+SLIRP rewrites every relayed datagram's source to `127.0.0.1:<ephemeral>`, so the
+host cannot tell two machines apart by address. The **destination port is the only
+label** (TZSP from RouterOS carries no sensor ID either). A receive slot gives a
+machine a named port that is unique across quickchr machines, recorded in
+`machine.json` and reported by `inspect`:
+
+```sh
+quickchr add lab1 --receive tzsp            # 37008/udp — the registry default
+quickchr add lab2 --receive tzsp:37009      # a second machine: pick the next port
+quickchr set lab1 --receive syslog          # running or stopped; no restart
+quickchr set lab1 --no-receive syslog
+quickchr inspect lab1 | jq -r .receive.tzsp.hostPort    # → 37008
+```
+
+```ts
+const chr = await QuickCHR.start({ name: "lab1", receivePorts: [parseReceiveSpec("tzsp")] });
+const { guestHost, guestPort, hostPort } = chr.receive.tzsp;
+// listener: dgram bind(hostPort, "127.0.0.1") — unconnected
+await chr.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${guestHost}:${guestPort}`);
+```
+
+- **A reservation only.** quickchr never binds the port and emits no `hostfwd`, which is
+  why a slot can be added to a running machine (a forward cannot, #141). Your listener
+  binds `127.0.0.1:<port>`, **unconnected**.
+- **One number.** SLIRP does not translate the port: the guest sends to
+  `10.0.2.2:<port>` and the host receives on `<port>`.
+- **Spec** `name[:port][/proto]`. Known names fill the port: `tzsp` 37008, `netflow`
+  (alias `traffic-flow`) 2055, `ipfix` 4739, `syslog` **5514** — not 514, so the
+  listener needs no root; RouterOS sets the remote port. Anything else needs a port;
+  proto defaults to `udp`.
+- **Unique across machines.** A port any machine forwards or receives on is a
+  `PORT_CONFLICT` that names the next free port. Ports are explicit or registry
+  defaults for now; auto-allocation from the port block waits for
+  [#57](https://github.com/tikoci/quickchr/issues/57).
+- **Needs the `user` NIC.** `inspect`'s `hostGateway` is `null` without one, and
+  `--receive` is refused.
+- **Not `--forward`.** `--forward tzsp` is refused with a pointer here: a forward is
+  host→guest.
 
 ---
 

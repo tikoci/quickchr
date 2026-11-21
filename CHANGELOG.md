@@ -11,6 +11,24 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Added
+
+- **Receive ports for traffic the guest sends** (TZSP, syslog, NetFlow).
+  `quickchr add lab --receive tzsp` reserves a named port: the guest sends to
+  `10.0.2.2:37008` and a host listener binds `127.0.0.1:37008`, unconnected. SLIRP
+  hides which machine sent a datagram, so the port is the label, and it is unique
+  across machines; a clash names the next free port (`--receive tzsp:37009`).
+  Known names fill the port: `tzsp` 37008, `netflow` 2055, `ipfix` 4739, `syslog`
+  5514. `quickchr set <name> --receive …` / `--no-receive <name>` work on a running
+  machine with no restart, since quickchr only reserves the port and adds no forward.
+  Library: `StartOptions.receivePorts`, `parseReceiveSpec`, `WELL_KNOWN_RECEIVE_PORTS`,
+  `ChrInstance.receive`, `addReceivePort()`, `removeReceivePort()`. `--forward tzsp`
+  now says to use `--receive`. (#299)
+- `quickchr inspect` / `descriptor()` add `hostGateway` (`{ address: "10.0.2.2",
+  captureInterface }`, or `null` when the machine has no user-mode NIC) and
+  `receive` (receive ports keyed by name). Additive: `descriptorVersion` stays 1.
+  `quickchr list <name> --json` adds `receivePorts`. (#299)
+
 ### Changed
 
 - `examples/cmr/` has a new `--study repair`. It half-pairs a fresh client,

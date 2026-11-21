@@ -65,3 +65,42 @@ export function lookupGuestPort(nameOrAlias: string): GuestPortDef | undefined {
 	}
 	return undefined;
 }
+
+/**
+ * A well-known **guest→host** receive service (#299) — the counterpart of
+ * {@link GuestPortDef} for `--receive`. Kept apart from {@link WELL_KNOWN_GUEST_PORTS}
+ * on purpose: `--forward tzsp` would build a host→guest `hostfwd`, which is the wrong
+ * direction for a stream the guest sends.
+ */
+export interface ReceivePortDef {
+	/** Canonical lowercase name, e.g. "tzsp". */
+	name: string;
+	/** Host port `--receive <name>` reserves when no port is given. Equal to
+	 *  {@link wellKnown} unless that is below 1024, where an unprivileged listener could
+	 *  not bind it on Linux. */
+	defaultPort: number;
+	/** The protocol's registered port, for reference. */
+	wellKnown: number;
+	proto: "tcp" | "udp";
+	aliases?: string[];
+	/** Brief, factual notes — the RouterOS feature that sends it. */
+	notes?: string;
+}
+
+export const WELL_KNOWN_RECEIVE_PORTS: readonly ReceivePortDef[] = [
+	{ name: "tzsp", defaultPort: 37008, wellKnown: 37008, proto: "udp", notes: "RouterOS /tool/sniffer streaming-server, mangle action=sniff-tzsp" },
+	{ name: "netflow", defaultPort: 2055, wellKnown: 2055, proto: "udp", aliases: ["traffic-flow"], notes: "RouterOS /ip/traffic-flow target (NetFlow v1/v5/v9)" },
+	{ name: "ipfix", defaultPort: 4739, wellKnown: 4739, proto: "udp", notes: "RouterOS /ip/traffic-flow target version=IPFIX" },
+	{ name: "syslog", defaultPort: 5514, wellKnown: 514, proto: "udp", notes: "RouterOS /system/logging/action target=remote (set remote-port)" },
+];
+
+/** Look up a receive service by canonical name or alias. Case-insensitive. */
+export function lookupReceivePort(nameOrAlias: string): ReceivePortDef | undefined {
+	if (!nameOrAlias) return undefined;
+	const key = nameOrAlias.toLowerCase();
+	for (const entry of WELL_KNOWN_RECEIVE_PORTS) {
+		if (entry.name === key) return entry;
+		if (entry.aliases?.some((a) => a.toLowerCase() === key)) return entry;
+	}
+	return undefined;
+}
