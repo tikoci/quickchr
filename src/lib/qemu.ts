@@ -170,6 +170,13 @@ export function buildNetworkArgs(
 	ports: Record<string, PortMapping>,
 	networks: NetworkConfig[],
 ): void {
+	// With no network option at all, QEMU adds its own default NIC on a user-mode
+	// backend (e1000e on q35, virtio-net-pci on virt), so "no NICs" has to say so
+	// (#287).
+	if (networks.length === 0) {
+		args.push("-nic", "none");
+		return;
+	}
 	for (const net of networks) {
 		// If resolution produced QEMU args, use those directly
 		if (net.resolved?.qemuNetdevArgs) {
