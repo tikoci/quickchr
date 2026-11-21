@@ -164,7 +164,7 @@ describe("review fixes (#303)", () => {
 		const other: ReceiveCheckMachine = { name: "win", portBase: 9400, ports: {}, receivePorts: [] };
 		expect(() => validateReceivePorts([{ name: "app", port: 9406, proto: "tcp" }], "lab", {}, [], [other])).toThrow("port block 9400–9409");
 		// The hint skips the whole block.
-		expect(() => validateReceivePorts([{ name: "app", port: 9406, proto: "tcp" }], "lab", {}, [], [other])).toThrow("--receive app:9410");
+		expect(() => validateReceivePorts([{ name: "app", port: 9406, proto: "tcp" }], "lab", {}, [], [other])).toThrow("--receive app:9410/tcp");
 	});
 
 	test("a port inside this machine's own block is taken", () => {

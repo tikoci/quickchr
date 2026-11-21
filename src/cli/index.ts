@@ -1586,6 +1586,10 @@ export async function cmdStart(argv: string[]) {
 	opts.background = !wantFg;
 
 	if (opts.dryRun) {
+		// Receive slots are checked against the machine's NICs and every other machine's
+		// ports; the library's dry run does that without launching or saving, so a slot
+		// the real start would refuse is refused here too (#303 review).
+		if ((opts.receivePorts?.length ?? 0) > 0) await QuickCHR.start({ ...opts, dryRun: true });
 		console.log("Dry run — would start with options:", JSON.stringify(opts, null, 2));
 		return;
 	}
@@ -2371,7 +2375,7 @@ async function applyQemuArgsChange(name: string, qemuArgs: string[], clear: bool
  *  machine alike, immediately. Removals first, so `--no-receive tzsp --receive
  *  tzsp:37009` moves a slot in one call. */
 async function applyReceiveChange(name: string, add: ReceivePort[], remove: string[]) {
-	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { QuickCHR, changeReceivePortsDetailed } = await import("../lib/quickchr.ts");
 	const { bold, formatReceive, machineNotFoundMessage } = await import("./format.ts");
 
 	const instance = QuickCHR.get(name);
@@ -2380,9 +2384,9 @@ async function applyReceiveChange(name: string, add: ReceivePort[], remove: stri
 		process.exit(1);
 	}
 	// One change, validated and saved once: a refused --receive leaves the removals
-	// undone too, so moving a slot cannot lose it.
-	const before = instance.state.receivePorts ?? [];
-	const after = await instance.changeReceivePorts({ add, remove });
+	// undone too, so moving a slot cannot lose it. `before` is what the locked record
+	// held, not this handle's snapshot, so the removal report is true.
+	const { before, after } = await changeReceivePortsDetailed(instance.state, { add, remove });
 	for (const slot of remove) {
 		const key = slot.trim().toLowerCase();
 		const had = before.some((r) => r.name === key);

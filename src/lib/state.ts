@@ -2,7 +2,7 @@
  * Machine state persistence — JSON files in ~/.local/share/quickchr/machines/.
  */
 
-import { appendFileSync, chownSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { absoluteEnvPath, isFullyQualifiedPath, userHomeDir } from "./paths.ts";
@@ -130,6 +130,11 @@ export function saveMachine(state: MachineState): void {
 	const tmp = join(state.machineDir, `.machine.json.${process.pid}.${randomUUID()}.tmp`);
 	try {
 		writeFileSync(tmp, body, { flag: "wx", ...(existing ? { mode: existing.mode } : {}) });
+		// `mode` on create is masked by the umask, so set it outright: a 0660 file saved
+		// under umask 077 must stay 0660.
+		if (existing) {
+			try { chmodSync(tmp, existing.mode); } catch { /* best effort */ }
+		}
 		if (existing && process.getuid?.() === 0 && existing.uid !== 0) {
 			try { chownSync(tmp, existing.uid, existing.gid); } catch { /* best effort */ }
 		}
@@ -178,7 +183,10 @@ export function markMachineStopped(state: MachineState): void {
 		current.status = "stopped";
 		current.pid = undefined;
 		current.frozen = undefined;
-		saveMachine(current);
+		// Best effort: the caller already has the computed status, and a save refused
+		// (a scanner holding the file on Windows, a read-only directory) must not fail
+		// `list()`/`get()`. The next refresh tries again.
+		try { saveMachine(current); } catch { /* best effort */ }
 	} finally {
 		releaseStatusLock(lock);
 	}

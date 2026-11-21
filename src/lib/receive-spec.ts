@@ -158,7 +158,7 @@ export function validateReceivePorts(
 			const next = nextFreePort(r.port, taken);
 			throw new QuickCHRError(
 				"PORT_CONFLICT",
-				`Receive port ${r.port} for "${r.name}" is already used by ${where}. Next free port: ${next} — e.g. --receive ${r.name}:${next}`,
+				`Receive port ${r.port} for "${r.name}" is already used by ${where}. Next free port: ${next} — e.g. --receive ${r.name}:${next}/${r.proto}`,
 			);
 		}
 		taken.set(r.port, { machine: ownName, label: `receive "${r.name}"` });

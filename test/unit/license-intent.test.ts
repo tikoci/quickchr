@@ -6,7 +6,7 @@ import { licenseFromStartFlags, parseFlags } from "../../src/cli/index.ts";
 import { licenseLevelOf, normalizeLicenseInput, normalizeLicenseLevel, renewLicense } from "../../src/lib/license.ts";
 import { assertProvisioningWindow } from "../../src/lib/provisioning-window.ts";
 import { QuickCHR } from "../../src/lib/quickchr.ts";
-import { acquireLock, allocationLockPath } from "../../src/lib/lock.ts";
+import { acquireLock, acquireLockNow, allocationLockPath, machineLockPath } from "../../src/lib/lock.ts";
 import { loadMachine, saveMachine } from "../../src/lib/state.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 
@@ -317,6 +317,50 @@ describe("start() with a license request", () => {
 			expect(after?.receivePorts).toEqual([{ name: "tzsp", port: 37008, proto: "udp" }]);
 		} finally {
 			if (!released) allocator.release();
+			server.close();
+		}
+	}, 30_000);
+
+	// #303 review: the renew ran before the lock, so a `clean` holding it could reset the
+	// disk after the guest verified the level and the record would still claim it.
+	test("license() does not reach the guest while another operation holds the machine lock", async () => {
+		let renews = 0;
+		const server = createServer((req, res) => {
+			res.writeHead(200, { "Content-Type": "application/json" });
+			if (req.url?.includes("/renew")) {
+				renews++;
+				res.end(JSON.stringify([{ ".section": "0", status: "done" }]));
+				return;
+			}
+			res.end(JSON.stringify({ level: "p10", "system-id": "TEST" }));
+		});
+		const port = await new Promise<number>((resolve) => {
+			server.listen(0, "127.0.0.1", () => {
+				const address = server.address();
+				resolve(typeof address === "object" && address ? address.port : 0);
+			});
+		});
+		const state = added("lic-locked", {
+			status: "running",
+			lastStartedAt: "2026-01-01T00:00:00.000Z",
+			ports: { http: { name: "http", host: port, guest: 80, proto: "tcp" } },
+		});
+		saveMachine(state);
+		const held = acquireLockNow(machineLockPath(state.machineDir), "clean");
+		let released = false;
+		try {
+			const instance = QuickCHR.get("lic-locked");
+			if (!instance) throw new Error("seeded machine did not load");
+			const license = instance.license({ account: "a@example.com", password: "secret", level: "p10" });
+			await Bun.sleep(400);
+			expect(renews).toBe(0);
+			held.release();
+			released = true;
+			await license;
+			expect(renews).toBe(1);
+			expect(loadMachine("lic-locked")?.licenseLevel).toBe("p10");
+		} finally {
+			if (!released) held.release();
 			server.close();
 		}
 	}, 30_000);

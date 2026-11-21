@@ -57,9 +57,15 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   its file mode. If Windows still refuses the replacement after the retries, the save
   fails with `STATE_ERROR` and leaves the old file instead of writing it in place.
   (#303 review)
-- `license()` recorded its level without the machine lock, so a concurrent
-  `set --receive` could save an older copy of `machine.json` over it. Both now keep the
-  other's change. (#303 review)
+- `license()` ran without the machine lock, so a concurrent `set --receive` could save an
+  older copy of `machine.json` over the license, and a `clean` could reset the disk after
+  the guest verified the level, leaving the record claiming a license the fresh disk did
+  not have. The renew, its verification and the record now all happen under the lock.
+  (#303 review)
+- If saving `machine.json` fails right after QEMU spawns, the new QEMU is stopped instead
+  of being left running with nothing recording it. A status refresh in `list`/`get`
+  whose save fails no longer fails the call. `start --dry-run --receive` now checks the
+  slot (user NIC, port conflicts) as a real start does. (#303 review)
 - **`timeoutExtra` now applies when `start()` boots a machine that already exists**:
   one `add()` made, or one that has booted before. Only a new machine's start used to
   add it. On the CLI, `quickchr start <name> --timeout-extra` and the `timeout-extra`

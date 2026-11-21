@@ -1210,30 +1210,31 @@ function createInstance(state: MachineState): ChrInstance {
 		async license(opts: LicenseOptions): Promise<void> {
 			assertProvisioningSupportedVersion(state.version, "apply a license");
 			const level = opts.level === undefined ? undefined : normalizeLicenseLevel(opts.level);
-			const auth = resolveAuth(state);
-			await renewLicense(ports.http, { ...opts, level }, undefined, undefined, undefined, auth.header);
-			// Same contract as the first-boot step and as setDeviceMode(): the level is
-			// recorded as intent (so `clean()` replays it) and as fact, and the step joins
-			// the record the window reads (so a later `start --license-level` with the same
-			// level is "already applied", not refused). Credentials are never recorded.
-			// Without a level, renew does not verify one, so there is nothing to record.
-			// Recorded under the machine lock, like every other writer of the record: a
-			// concurrent `set --receive` re-reads after this save instead of writing its
-			// older snapshot over it (#303 review). The renew itself runs unlocked — it
-			// talks only to the guest.
-			if (level) {
-				await withMachineLock(state, "license", async () => {
-					const current = loadMachine(state.name);
-					if (current) {
-						current.license = level;
-						current.licenseLevel = level;
-						saveMachine(current);
-					}
-					state.license = level;
-					state.licenseLevel = level;
-					recordProvisioningStep(state, "license");
-				});
-			}
+			// The machine lock covers the renew and its verification as well as the
+			// record (#303 review): a `clean` or relaunch in between could otherwise reset
+			// the disk after the guest verified the level, and the record would claim a
+			// license — and a closed provisioning window — the fresh disk does not have.
+			// It also keeps a concurrent `set --receive` from saving over the record.
+			await withMachineLock(state, "license", async () => {
+				const auth = resolveAuth(state);
+				await renewLicense(ports.http, { ...opts, level }, undefined, undefined, undefined, auth.header);
+				// Same contract as the first-boot step and as setDeviceMode(): the level is
+				// recorded as intent (so `clean()` replays it) and as fact, and the step
+				// joins the record the window reads (so a later `start --license-level`
+				// with the same level is "already applied", not refused). Credentials are
+				// never recorded. Without a level, renew does not verify one, so there is
+				// nothing to record.
+				if (!level) return;
+				const current = loadMachine(state.name);
+				if (current) {
+					current.license = level;
+					current.licenseLevel = level;
+					saveMachine(current);
+				}
+				state.license = level;
+				state.licenseLevel = level;
+				recordProvisioningStep(state, "license");
+			});
 		},
 
 		async setDeviceMode(options: DeviceModeOptions, logger?: ProgressLogger): Promise<void> {
@@ -1929,7 +1930,7 @@ async function hardRebootMachine(
 	// A power-cycle always boots normally: the replacement QEMU carries no -S,
 	// so a frozen marker from before must not survive it.
 	state.frozen = undefined;
-	saveMachine(state);
+	await saveSpawnedState(state, pid);
 
 	return method;
 }
@@ -2011,6 +2012,19 @@ export function refreshMachineState(state: MachineState): void {
  *  It cannot reopen or close a window by accident. Every caller requires a running
  *  machine, and a running machine has `lastStartedAt`, so the window was already shut
  *  before this wrote anything. */
+/** The first save after a spawn. If it fails — `saveMachine()` refuses with
+ *  `STATE_ERROR` when Windows keeps the old file locked — the record does not name this
+ *  QEMU, and the caller's error path releases the lock and claims. Stop the process
+ *  first so no VM is left running that nothing tracks (#303 review). Exported for tests. */
+export async function saveSpawnedState(state: MachineState, pid: number): Promise<void> {
+	try {
+		saveMachine(state);
+	} catch (err) {
+		try { await stopQemu(pid); } catch { /* best effort */ }
+		throw err;
+	}
+}
+
 function recordProvisioningStep(state: MachineState, step: ProvisioningStep): void {
 	const steps = [...new Set([...(state.provisioning?.steps ?? []), step])];
 	const record = { at: new Date().toISOString(), steps };
@@ -2426,11 +2440,16 @@ async function pickNewMachineResources(
 	return { portBase, ports, networks, receivePorts };
 }
 
-/** Every host port the given machines hold outside their blocks' live probe — forwards
- *  and receive slots — with a label naming the owner. */
+/** Every host port the given machines hold — each whole port block (an unmapped offset
+ *  is an auto extra's slot, or QEMU's IPC socket on Windows), forwards and receive
+ *  slots — with a label naming the owner. A new machine's auto extras run past its own
+ *  block from the fifth on, so the allocator checks them against this too (#303 review). */
 function hostsHeldBy(machines: ReceiveCheckMachine[]): Map<number, string> {
 	const held = new Map<number, string>();
 	for (const m of machines) {
+		if (m.portBase) {
+			for (let i = 0; i < PORTS_PER_BLOCK; i++) held.set(m.portBase + i, `machine "${m.name}" (port block offset +${i})`);
+		}
 		for (const p of Object.values(m.ports ?? {})) held.set(p.host, `machine "${m.name}" (forward "${p.name}")`);
 		for (const r of m.receivePorts ?? []) held.set(r.port, `machine "${m.name}" (receive "${r.name}")`);
 	}
@@ -2486,8 +2505,9 @@ async function changeReceivePorts(
 }
 
 /** {@link changeReceivePorts}, also returning the slots the locked record held before
- *  the change — the only trustworthy "before", since the handle's may be stale. */
-async function changeReceivePortsDetailed(
+ *  the change — the only trustworthy "before", since the handle's may be stale. Exported
+ *  for the CLI's removal report; not part of the package API. */
+export async function changeReceivePortsDetailed(
 	state: MachineState,
 	change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined },
 ): Promise<{ before: ReceivePort[]; after: ReceivePort[] }> {
@@ -3130,7 +3150,7 @@ export class QuickCHR {
 			state.lastAccel = accel;
 		}
 
-		saveMachine(state);
+		await saveSpawnedState(state, pid);
 		unpersistedSocketClaim = undefined;
 		storageLease.release();
 
@@ -3164,7 +3184,7 @@ export class QuickCHR {
 				throw await failProvisioning(err, instance, undefined);
 			}
 			state.pid = pid;
-			saveMachine(state);
+			await saveSpawnedState(state, pid);
 			booted = await instance.waitForBoot(bootTimeout, probe);
 		}
 
@@ -3564,7 +3584,7 @@ export class QuickCHR {
 		// Frozen returns before the post-boot lastAccel recording below, so a
 		// frozen relaunch records the launch accelerator for continue().
 		if (launch?.frozen) state.lastAccel = accel;
-		saveMachine(state);
+		await saveSpawnedState(state, pid);
 		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);

@@ -502,3 +502,64 @@ describe("receive slots — Codex re-review fixes (#303)", () => {
 		expect(readdirSync(state.machineDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
 	});
 });
+
+describe("receive slots — final Codex review fixes (#303)", () => {
+	test("an explicit portBase whose auto extras run into another machine's block is refused", async () => {
+		writeMachine(baseState("other", { status: "stopped", pid: undefined, portBase: 41110, ports: {} }));
+		// Eleven auto extras take +6..+16, so 41110–41116 fall in the other machine's block.
+		const extraPorts = Array.from({ length: 11 }, (_, i) => ({ name: `x${i}`, host: 0, guest: 1000 + i, proto: "tcp" as const }));
+		await expect(
+			QuickCHR.start({ name: "fresh", version: "7.22.1", arch: "x86", dryRun: true, portBase: 41100, extraPorts }),
+		).rejects.toThrow(/41110 .*machine "other" \(port block offset \+0\)/);
+	});
+
+	test("a replacement save sets the old mode even under a restrictive umask", async () => {
+		if (process.platform === "win32") return;
+		const { chmodSync, statSync } = await import("node:fs");
+		const { saveMachine } = await import("../../src/lib/state.ts");
+		const state = baseState("alpha", { status: "stopped", pid: undefined });
+		writeMachine(state);
+		const file = join(state.machineDir, "machine.json");
+		chmodSync(file, 0o660);
+		const previous = process.umask(0o077);
+		try {
+			saveMachine(state);
+		} finally {
+			process.umask(previous);
+		}
+		expect(statSync(file).mode & 0o777).toBe(0o660);
+	});
+
+	test("a status refresh whose save fails does not fail the caller", async () => {
+		if (process.platform === "win32" || process.getuid?.() === 0) return;
+		const { chmodSync } = await import("node:fs");
+		const { acquireLockNow, machineLockPath } = await import("../../src/lib/lock.ts");
+		const { markMachineStopped } = await import("../../src/lib/state.ts");
+		const state = baseState("alpha", { pid: 2 ** 22 + 12345 });
+		writeMachine(state);
+		// Create the lock directory, then make the machine directory read-only so only
+		// the temp-file write fails.
+		acquireLockNow(machineLockPath(state.machineDir), "status").release();
+		chmodSync(state.machineDir, 0o500);
+		try {
+			const copy = JSON.parse(JSON.stringify(state));
+			expect(() => markMachineStopped(copy)).not.toThrow();
+			expect(copy.status).toBe("stopped");
+		} finally {
+			chmodSync(state.machineDir, 0o755);
+		}
+	});
+
+	test("a failed save right after a spawn stops the spawned process", async () => {
+		if (process.platform === "win32") return;
+		const { saveSpawnedState } = await import("../../src/lib/quickchr.ts");
+		const child = Bun.spawn(["sleep", "30"]);
+		// A machine directory under a regular file: the save fails with ENOTDIR.
+		const blocker = join(TEST_DIR, "not-a-dir");
+		mkdirSync(TEST_DIR, { recursive: true });
+		writeFileSync(blocker, "");
+		const state = baseState("alpha", { machineDir: join(blocker, "alpha"), pid: child.pid });
+		await expect(saveSpawnedState(state, child.pid)).rejects.toBeDefined();
+		expect(await Promise.race([child.exited.then(() => "exited"), Bun.sleep(6000).then(() => "running")])).toBe("exited");
+	}, 15_000);
+});
