@@ -51,6 +51,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   Such a start is refused unless it doesn't wait for boot (`--no-wait`, `--fg`),
   since quickchr reaches the guest through the user NIC. If you relied on the old
   behaviour, drop `--no-network`. (#287)
+- **`QuickCHR.add({ onProgress })` no longer prints image lines to stdout.** `add()`
+  dropped its logger on the way to the image cache, so `Using cached image…` and the
+  download lines went to `console.log` even with a progress callback. (#290)
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a

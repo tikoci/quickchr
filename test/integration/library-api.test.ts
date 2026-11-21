@@ -1,4 +1,5 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
+import { imageTarget } from "./image-target.ts";
 
 /**
  * Integration test — library API usage patterns (mimics bun test consumer).
@@ -71,5 +72,36 @@ describe.skipIf(SKIP)("library API", () => {
 		expect(instance.state.status).toBe("stopped");
 		expect(instance.ports.http).toBeGreaterThan(0);
 		expect(instance.restUrl).toContain("http://127.0.0.1:");
+	});
+
+	// #290: a caller that passes onProgress gets its lines there, and nothing on
+	// stdout. add() used to drop its logger on the way to the image cache. A cache
+	// miss takes the same logger (ensureCachedImage hands it to the download), so the
+	// test warms the cache first to keep it fast and deterministic.
+	test("add({ onProgress }) writes nothing to stdout", async () => {
+		const { QuickCHR } = await import("../../src/index.ts");
+		const { ensureCachedImage } = await import("../../src/lib/images.ts");
+		const { createLogger } = await import("../../src/lib/log.ts");
+		const target = imageTarget();
+		const version = "version" in target ? target.version : await QuickCHR.resolveVersion(target.channel);
+		await ensureCachedImage(version, "x86", undefined, createLogger(() => {}));
+
+		const name = `onprogress-${process.pid}`;
+		const lines: string[] = [];
+		const stdout: string[] = [];
+		const logSpy = spyOn(console, "log").mockImplementation((...a: unknown[]) => { stdout.push(a.join(" ")); });
+		const writeSpy = spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+			stdout.push(String(chunk));
+			return true;
+		});
+		try {
+			await QuickCHR.add({ version, arch: "x86", name, onProgress: (m) => lines.push(m) });
+		} finally {
+			logSpy.mockRestore();
+			writeSpy.mockRestore();
+			try { await QuickCHR.get(name)?.remove(); } catch { /* best effort */ }
+		}
+		expect(stdout).toEqual([]);
+		expect(lines.some((l) => l.includes("Using cached image"))).toBe(true);
 	});
 });

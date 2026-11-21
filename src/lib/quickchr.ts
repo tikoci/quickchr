@@ -2629,7 +2629,10 @@ export class QuickCHR {
 		// add() always creates, so the full name rules apply before any I/O.
 		if (opts.name !== undefined) assertValidResourceName(opts.name, "machine");
 
-		warnVersionWithChannel(opts, createLogger(opts.onProgress));
+		// One logger for the whole call: a caller that passes onProgress gets every line
+		// there and nothing on stdout (#290).
+		const logger = createLogger(opts.onProgress);
+		warnVersionWithChannel(opts, logger);
 		let version: string;
 		if (opts.version) {
 			if (!isValidVersion(opts.version)) {
@@ -2662,7 +2665,7 @@ export class QuickCHR {
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
-		if (opts.license !== undefined) warnLicenseIntent(opts.license, createLogger(opts.onProgress));
+		if (opts.license !== undefined) warnLicenseIntent(opts.license, logger);
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -2694,7 +2697,7 @@ export class QuickCHR {
 		}
 		const { lock, portBase, ports, networks, receivePorts } = claimed;
 		try {
-			const cachedImg = await ensureCachedImage(version, arch);
+			const cachedImg = await ensureCachedImage(version, arch, undefined, logger);
 			const diskArtifacts = await ensureConfiguredDisks(
 				machineDir,
 				diskOpts.bootSize,
