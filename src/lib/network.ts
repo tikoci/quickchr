@@ -103,7 +103,7 @@ export function validateExplicitExtraPorts(
 	extraPorts: PortMapping[] | undefined,
 	portBase: number,
 	excludePorts: ServiceName[] = [],
-	existingMachines: MachineState[] = [],
+	existingMachines: Array<Pick<MachineState, "name" | "ports" | "receivePorts"> & { portBase?: number | undefined }> = [],
 	ownMachineName?: string,
 ): void {
 	if (!extraPorts || extraPorts.length === 0) return;
@@ -117,8 +117,16 @@ export function validateExplicitExtraPorts(
 	const otherHosts = new Map<number, { machine: string; service: string }>();
 	for (const m of existingMachines) {
 		if (ownMachineName && m.name === ownMachineName) continue;
+		// The whole block, not just its mapped ports: unmapped offsets are where auto
+		// extras land, and on Windows +6..+8 are QEMU's own IPC sockets.
+		if (m.portBase) {
+			for (let i = 0; i < PORTS_PER_BLOCK; i++) otherHosts.set(m.portBase + i, { machine: m.name, service: `port block ${m.portBase}` });
+		}
 		for (const mapping of Object.values(m.ports ?? {})) {
 			otherHosts.set(mapping.host, { machine: m.name, service: mapping.name });
+		}
+		for (const slot of m.receivePorts ?? []) {
+			otherHosts.set(slot.port, { machine: m.name, service: `receive ${slot.name}` });
 		}
 	}
 
@@ -210,15 +218,32 @@ export async function findAvailablePortBlock(
 	excludePorts: ServiceName[] = [],
 	extraPorts: PortMapping[] = [],
 	startBase?: number,
+	reservedHosts: ReadonlySet<number> = new Set(),
 ): Promise<number> {
 	let base = startBase ?? allocatePortBlock(usedBases);
 	const maxAttempts = 20;
 
-	for (let attempt = 0; attempt < maxAttempts; attempt++) {
-		const mappings = buildPortMappings(base, excludePorts, extraPorts);
-		const conflicts = await checkPortConflicts(mappings);
-		if (conflicts.length === 0) {
-			return base;
+	// `maxAttempts` bounds the live probes; a block ruled out by a known reservation costs
+	// no probe, so it is not charged against the budget (#303 review).
+	for (let attempt = 0; attempt < maxAttempts && base + PORTS_PER_BLOCK - 1 <= 65535;) {
+		// `reservedHosts` are ports nothing may be listening on yet — receive slots and
+		// stopped machines' forwards (#299) — so the live probe cannot see them. Any of
+		// them inside the candidate block rules it out, mapped or not (an unmapped offset
+		// is still an auto extra's slot, or QEMU IPC on Windows). A fixed explicit forward
+		// outside the block that clashes is the caller's to fix, and
+		// validateExplicitExtraPorts() says so.
+		let reserved = false;
+		for (let i = 0; i < PORTS_PER_BLOCK && !reserved; i++) reserved = reservedHosts.has(base + i);
+		// Auto extras sit at +6+i (buildPortMappings), so a fifth one is already past the
+		// block — check every host they would take, not just the block (#303 review).
+		for (let i = 0; i < extraPorts.length && !reserved; i++) {
+			const extra = extraPorts[i];
+			if (extra && !extra.host) reserved = reservedHosts.has(base + 6 + i);
+		}
+		if (!reserved) {
+			attempt++;
+			const conflicts = await checkPortConflicts(buildPortMappings(base, excludePorts, extraPorts));
+			if (conflicts.length === 0) return base;
 		}
 		// Step past the probed conflict without stepping onto a used block: a block
 		// that is free on the wire can still belong to a stopped machine or to a

@@ -560,3 +560,7 @@ EACCES
 EBUSY
 EHOSTUNREACH
 ENETUNREACH
+guestfwd
+ipfix
+netflow
+qchrrx

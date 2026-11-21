@@ -65,6 +65,56 @@ describe("findAvailablePortBlock", () => {
 	});
 });
 
+describe("receive slots in the port checks (#299)", () => {
+	test("findAvailablePortBlock skips a block holding a reserved receive port", async () => {
+		const base = 47300;
+		expect(await findAvailablePortBlock([], [], [], base, new Set([base + 2]))).toBe(base + PORTS_PER_BLOCK);
+	});
+
+	test("a reserved port on a fixed explicit forward does not walk the allocator", async () => {
+		const base = 47320;
+		const fixed = [{ name: "app", host: 47999, guest: 80, proto: "tcp" as const }];
+		expect(await findAvailablePortBlock([], [], fixed, base, new Set([47999]))).toBe(base);
+	});
+
+	test("a reserved port on an unmapped offset of the candidate block rules the block out", async () => {
+		const base = 47340;
+		expect(await findAvailablePortBlock([], [], [], base, new Set([base + 6]))).toBe(base + PORTS_PER_BLOCK);
+	});
+
+	test("a reserved port where a fifth auto extra lands (+10, past the block) rules the block out", async () => {
+		const base = 47360;
+		const extras = Array.from({ length: 5 }, (_, i) => ({ name: `x${i}`, host: 0, guest: 1000 + i, proto: "tcp" as const }));
+		// Without the extras check this returned `base`. The next block holds +10 itself.
+		expect(await findAvailablePortBlock([], [], extras, base, new Set([base + 10]))).toBe(base + 2 * PORTS_PER_BLOCK);
+	});
+
+	test("reserved blocks do not use up the live-probe budget", async () => {
+		const base = 48000;
+		const reserved = new Set<number>();
+		for (let i = 0; i < 25; i++) reserved.add(base + i * PORTS_PER_BLOCK + 3);
+		expect(await findAvailablePortBlock([], [], [], base, reserved)).toBe(base + 25 * PORTS_PER_BLOCK);
+	});
+
+	test("an explicit forward inside another machine's block (unmapped offset) is a PORT_CONFLICT", () => {
+		const other = fakeMachine("chr-blk", { http: { name: "http", host: 9400, guest: 80, proto: "tcp" } });
+		expect(() =>
+			validateExplicitExtraPorts([{ name: "app", host: 9406, guest: 80, proto: "tcp" }], 9200, [], [other]),
+		).toThrow(/port block 9400/);
+	});
+
+	test("an explicit forward on another machine's receive port is a PORT_CONFLICT", () => {
+		const other = { ...fakeMachine("chr-rx", {}), receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" as const }] };
+		expect(() =>
+			validateExplicitExtraPorts([{ name: "x", host: 37008, guest: 37008, proto: "udp" }], 9200, [], [other]),
+		).toThrow(/receive tzsp/);
+	});
+
+	test("receive slots never become hostfwd directives", () => {
+		expect(buildHostfwdString(buildPortMappings(9100))).not.toContain("37008");
+	});
+});
+
 describe("buildPortMappings", () => {
 	test("builds default mappings from base", () => {
 		const ports = buildPortMappings(9100);

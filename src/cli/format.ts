@@ -112,6 +112,12 @@ export function formatPorts(ports: Record<string, { host: number; guest: number 
 		.join(" ");
 }
 
+/** Format receive slots (#299): where the guest sends, and the host port it lands on.
+ *  Empty string when there are none, so callers can skip the line. */
+export function formatReceive(slots: { name: string; port: number; proto: string }[] | undefined): string {
+	return (slots ?? []).map((r) => `${r.name} 10.0.2.2:${r.port} → 127.0.0.1:${r.port}/${r.proto}`).join(", ");
+}
+
 /** Format a network config array for display. */
 export function formatNetworks(networks: { specifier: unknown; id: string }[]): string {
 	if (!networks || networks.length === 0) return "none";

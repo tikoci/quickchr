@@ -11,6 +11,27 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Added
+
+- **Receive ports for traffic the guest sends** (TZSP, syslog, NetFlow).
+  `quickchr add lab --receive tzsp` reserves a named port: the guest sends to
+  `10.0.2.2:37008` and a host listener binds `127.0.0.1:37008`, unconnected. SLIRP
+  hides which machine sent a datagram, so the port is the label, and it is unique
+  across machines; a clash names the next free port (`--receive tzsp:37009`).
+  Known names fill the port: `tzsp` 37008, `netflow` 2055, `ipfix` 4739, `syslog`
+  5514. `quickchr set <name> --receive …` / `--no-receive <name>` work on a running
+  machine with no restart, since quickchr only reserves the port and adds no forward.
+  Library: `StartOptions.receivePorts`, `parseReceiveSpec`, `WELL_KNOWN_RECEIVE_PORTS`,
+  `ChrInstance.receive`, `addReceivePort()`, `removeReceivePort()`. `--forward tzsp`
+  now says to use `--receive`. (#299)
+- `quickchr inspect` / `descriptor()` add `hostGateway` (`{ address: "10.0.2.2",
+  captureInterface }`, or `null` when the machine has no user-mode NIC) and
+  `receive` (receive ports keyed by name). Additive: `descriptorVersion` stays 1.
+  `quickchr list <name> --json` adds `receivePorts`. (#299)
+- `ChrInstance.changeReceivePorts({ remove, add })` applies a receive change as one
+  validated step; `set --no-receive x --receive x:<port>` uses it, so a refused move
+  keeps the old slot. (#299)
+
 ### Changed
 
 - `examples/cmr/` has a new `--study repair`. It half-pairs a fresh client,
@@ -24,6 +45,27 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- A library `start({ dryRun: true })` naming an existing, stopped machine launched
+  it. It now returns a preview handle without spawning QEMU. (#303 review)
+- Port allocation now sees stopped machines' explicit forwards and in-flight creations'
+  resolved forward ports, so an explicit `portBase` or `--forward` can no longer land on
+  a port another machine holds. `machine.json` is written atomically (temp file +
+  rename), explicit forwards are checked against other machines' whole port blocks,
+  and `list`/`get` refreshing a dead machine's status take the machine lock and patch
+  only the status fields instead of rewriting a possibly stale record; a `start` that
+  meets such a refresh waits for it instead of failing. Replacing `machine.json` keeps
+  its file mode. If Windows still refuses the replacement after the retries, the save
+  fails with `STATE_ERROR` and leaves the old file instead of writing it in place.
+  (#303 review)
+- `license()` ran without the machine lock, so a concurrent `set --receive` could save an
+  older copy of `machine.json` over the license, and a `clean` could reset the disk after
+  the guest verified the level, leaving the record claiming a license the fresh disk did
+  not have. The renew, its verification and the record now all happen under the lock.
+  (#303 review)
+- If saving `machine.json` fails right after QEMU spawns, the new QEMU is stopped instead
+  of being left running with nothing recording it. A status refresh in `list`/`get`
+  whose save fails no longer fails the call. `start --dry-run --receive` now checks the
+  slot (user NIC, port conflicts) as a real start does. (#303 review)
 - **`timeoutExtra` now applies when `start()` boots a machine that already exists**:
   one `add()` made, or one that has booted before. Only a new machine's start used to
   add it. On the CLI, `quickchr start <name> --timeout-extra` and the `timeout-extra`

@@ -296,3 +296,270 @@ describe("descriptor() — v1 shape", () => {
 		await expect(instance?.descriptor()).rejects.toMatchObject({ code: "MACHINE_STOPPED" });
 	});
 });
+
+describe("descriptor() — hostGateway and receive (#299)", () => {
+	test("hostGateway is the user-mode gateway; receive omitted when the machine has none", async () => {
+		writeMachine(baseState("router"));
+		const descriptor = await QuickCHR.get("router")?.descriptor();
+		expect(descriptor?.hostGateway).toEqual({
+			address: "10.0.2.2",
+			captureInterface: process.platform === "darwin" ? "lo0" : "any",
+		});
+		expect(descriptor).not.toHaveProperty("receive");
+	});
+
+	test("hostGateway is null without a user-mode NIC", async () => {
+		writeMachine(baseState("router", { networks: [{ specifier: "shared", id: "net0" }] }));
+		const descriptor = await QuickCHR.get("router")?.descriptor();
+		expect(descriptor?.hostGateway).toBeNull();
+	});
+
+	test("receive is keyed by name with guest target and host bind", async () => {
+		writeMachine(baseState("router", { receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		const descriptor = await QuickCHR.get("router")?.descriptor();
+		expect(descriptor?.receive).toEqual({
+			tzsp: { transport: "udp", host: "127.0.0.1", hostPort: 37008, guestHost: "10.0.2.2", guestPort: 37008 },
+		});
+		// A receive slot is never a forward.
+		expect(descriptor?.customForwards?.some((f) => f.name === "tzsp") ?? false).toBe(false);
+	});
+});
+
+describe("ChrInstance receive slots (#299)", () => {
+	test("addReceivePort records and persists; same slot again is a no-op", async () => {
+		writeMachine(baseState("router", { status: "stopped", pid: undefined }));
+		const instance = QuickCHR.get("router");
+		expect(await instance?.addReceivePort("tzsp")).toEqual({ name: "tzsp", port: 37008, proto: "udp" });
+		expect(await instance?.addReceivePort("tzsp")).toEqual({ name: "tzsp", port: 37008, proto: "udp" });
+		expect(instance?.receive.tzsp?.hostPort).toBe(37008);
+		expect(QuickCHR.get("router")?.state.receivePorts).toEqual([{ name: "tzsp", port: 37008, proto: "udp" }]);
+	});
+
+	test("works on a running machine (no QEMU change)", async () => {
+		writeMachine(baseState("router"));
+		const instance = QuickCHR.get("router");
+		await instance?.addReceivePort({ name: "syslog", port: 5514, proto: "udp" });
+		const descriptor = await instance?.descriptor();
+		expect(descriptor?.receive?.syslog?.guestPort).toBe(5514);
+	});
+
+	test("the same name with a different port is refused", async () => {
+		writeMachine(baseState("router", { status: "stopped", pid: undefined, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		await expect(QuickCHR.get("router")?.addReceivePort("tzsp:37009")).rejects.toMatchObject({ code: "INVALID_RECEIVE_SPEC" });
+	});
+
+	test("a port another machine receives on is a PORT_CONFLICT naming the next one", async () => {
+		writeMachine(baseState("lab1", { status: "stopped", pid: undefined, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		writeMachine(baseState("lab2", { status: "stopped", pid: undefined, portBase: 19110, ports: {} }));
+		const err = await QuickCHR.get("lab2")?.addReceivePort("tzsp").catch((e: unknown) => e);
+		expect(err).toMatchObject({ code: "PORT_CONFLICT" });
+		expect(String((err as Error).message)).toContain("tzsp:37009");
+		expect(await QuickCHR.get("lab2")?.addReceivePort("tzsp:37009")).toEqual({ name: "tzsp", port: 37009, proto: "udp" });
+	});
+
+	test("no user-mode NIC is refused", async () => {
+		writeMachine(baseState("router", { status: "stopped", pid: undefined, networks: [{ specifier: "shared", id: "net0" }] }));
+		await expect(QuickCHR.get("router")?.addReceivePort("tzsp")).rejects.toMatchObject({ code: "INVALID_RECEIVE_SPEC" });
+	});
+
+	test("a user-mode NIC that is not ether1 is refused (no DHCP client there)", async () => {
+		writeMachine(baseState("router", {
+			status: "stopped",
+			pid: undefined,
+			networks: [{ specifier: "shared", id: "net0" }, { specifier: "user", id: "net1" }],
+		}));
+		await expect(QuickCHR.get("router")?.addReceivePort("tzsp")).rejects.toMatchObject({
+			code: "INVALID_RECEIVE_SPEC",
+			message: expect.stringContaining("ether1"),
+		});
+	});
+
+	test("removeReceivePort drops by name and reports a miss", async () => {
+		writeMachine(baseState("router", { status: "stopped", pid: undefined, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		const instance = QuickCHR.get("router");
+		expect(await instance?.removeReceivePort("TZSP")).toBe(true);
+		expect(await instance?.removeReceivePort("tzsp")).toBe(false);
+		expect(QuickCHR.get("router")?.state.receivePorts).toBeUndefined();
+	});
+});
+
+describe("receive slots — review fixes (#303)", () => {
+	test("a refused move via changeReceivePorts keeps the original slot on disk", async () => {
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined, receivePorts: [{ name: "syslog", port: 5514, proto: "udp" }] }));
+		writeMachine(baseState("beta", { status: "stopped", pid: undefined, portBase: 19110, ports: {}, receivePorts: [{ name: "syslog", port: 5515, proto: "udp" }] }));
+		await expect(
+			QuickCHR.get("alpha")?.changeReceivePorts({ remove: ["syslog"], add: ["syslog:5515"] }),
+		).rejects.toMatchObject({ code: "PORT_CONFLICT" });
+		expect(QuickCHR.get("alpha")?.state.receivePorts).toEqual([{ name: "syslog", port: 5514, proto: "udp" }]);
+		expect(await QuickCHR.get("alpha")?.changeReceivePorts({ remove: ["syslog"], add: ["syslog:5516"] })).toEqual([
+			{ name: "syslog", port: 5516, proto: "udp" },
+		]);
+	});
+
+	test("a dry-run start of a stopped machine previews receive slots without saving or launching", async () => {
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined }));
+		const instance = await QuickCHR.start({ name: "alpha", dryRun: true, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] });
+		expect(instance.receive.tzsp?.hostPort).toBe(37008);
+		const onDisk = QuickCHR.get("alpha")?.state;
+		expect(onDisk?.receivePorts).toBeUndefined();
+		expect(onDisk?.status).toBe("stopped");
+	});
+
+	test("an explicit portBase over another machine's receive port is a PORT_CONFLICT", async () => {
+		writeMachine(baseState("rx", { status: "stopped", pid: undefined, receivePorts: [{ name: "app", port: 19402, proto: "udp" }] }));
+		await expect(
+			QuickCHR.start({ name: "fresh", version: "7.22.1", arch: "x86", dryRun: true, portBase: 19400 }),
+		).rejects.toMatchObject({ code: "PORT_CONFLICT" });
+	});
+
+	test("a status refresh does not write back stale config over a newer receive change", async () => {
+		// A pid that cannot be alive, so the record is stale-running.
+		writeMachine(baseState("alpha", { pid: 2 ** 22 + 12345 }));
+		const stale = JSON.parse(JSON.stringify(baseState("alpha", { pid: 2 ** 22 + 12345 })));
+		// A concurrent `set --receive` lands after the stale read…
+		writeMachine(baseState("alpha", { pid: 2 ** 22 + 12345, receivePorts: [{ name: "syslog", port: 5514, proto: "udp" }] }));
+		// …and the refresh then marks the machine stopped.
+		const { markMachineStopped } = await import("../../src/lib/state.ts");
+		markMachineStopped(stale);
+		const onDisk = JSON.parse(await Bun.file(join(TEST_DIR, "machines", "alpha", "machine.json")).text());
+		expect(onDisk.status).toBe("stopped");
+		expect(onDisk.receivePorts).toEqual([{ name: "syslog", port: 5514, proto: "udp" }]);
+		expect(stale.status).toBe("stopped");
+	});
+});
+
+describe("receive slots — Copilot review fixes (#303)", () => {
+	test("a status refresh skips the write while another operation holds the machine lock", async () => {
+		const { acquireLockNow, machineLockPath } = await import("../../src/lib/lock.ts");
+		const { markMachineStopped } = await import("../../src/lib/state.ts");
+		const state = baseState("alpha", { pid: 2 ** 22 + 12345 });
+		writeMachine(state);
+		const held = acquireLockNow(machineLockPath(state.machineDir), "receive");
+		try {
+			const copy = JSON.parse(JSON.stringify(state));
+			markMachineStopped(copy);
+			expect(copy.status).toBe("stopped");
+			const onDisk = JSON.parse(await Bun.file(join(state.machineDir, "machine.json")).text());
+			expect(onDisk.status).toBe("running");
+		} finally {
+			held.release();
+		}
+	});
+
+	test("a dry-run receive preview on a machine without a user NIC is refused", async () => {
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined, networks: [{ specifier: "shared", id: "net0" }] }));
+		await expect(
+			QuickCHR.start({ name: "alpha", dryRun: true, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }),
+		).rejects.toMatchObject({ code: "INVALID_RECEIVE_SPEC" });
+	});
+});
+
+describe("receive slots — Codex re-review fixes (#303)", () => {
+	test("an explicit portBase whose unmapped offset is another machine's receive port is refused", async () => {
+		writeMachine(baseState("rx", { status: "stopped", pid: undefined, portBase: 19410, receivePorts: [{ name: "app", port: 19406, proto: "tcp" }] }));
+		await expect(
+			QuickCHR.start({ name: "fresh", version: "7.22.1", arch: "x86", dryRun: true, portBase: 19400 }),
+		).rejects.toThrow(/19406 \(port block offset \+6\)/);
+	});
+
+	test("a replacement save keeps machine.json's mode", async () => {
+		if (process.platform === "win32") return;
+		const { chmodSync, statSync } = await import("node:fs");
+		const state = baseState("alpha", { status: "stopped", pid: undefined });
+		writeMachine(state);
+		const file = join(state.machineDir, "machine.json");
+		chmodSync(file, 0o600);
+		await QuickCHR.get("alpha")?.addReceivePort("tzsp");
+		expect(statSync(file).mode & 0o777).toBe(0o600);
+	});
+
+	test("a stale handle cannot remove a recreated machine's slot", async () => {
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined }));
+		const stale = QuickCHR.get("alpha");
+		// Removed and created again under the same name.
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined, createdAt: "2026-02-02T00:00:00.000Z", receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
+		await expect(stale?.removeReceivePort("tzsp")).rejects.toMatchObject({ code: "MACHINE_NOT_FOUND" });
+		expect(QuickCHR.get("alpha")?.state.receivePorts).toEqual([{ name: "tzsp", port: 37008, proto: "udp" }]);
+	});
+
+	test("a failed save leaves the handle and disk unchanged and no temp file behind", async () => {
+		if (process.platform === "win32" || process.getuid?.() === 0) return;
+		const { chmodSync, readdirSync } = await import("node:fs");
+		const state = baseState("alpha", { status: "stopped", pid: undefined, receivePorts: [{ name: "syslog", port: 5514, proto: "udp" }] });
+		writeMachine(state);
+		const handle = QuickCHR.get("alpha");
+		// Create the lock directory first, then make the machine directory read-only so
+		// only the temp-file write fails.
+		await handle?.addReceivePort("syslog");
+		chmodSync(state.machineDir, 0o500);
+		try {
+			await expect(handle?.changeReceivePorts({ remove: ["syslog"], add: ["syslog:5515"] })).rejects.toBeDefined();
+		} finally {
+			chmodSync(state.machineDir, 0o755);
+		}
+		expect(handle?.receive.syslog?.hostPort).toBe(5514);
+		expect(QuickCHR.get("alpha")?.state.receivePorts).toEqual([{ name: "syslog", port: 5514, proto: "udp" }]);
+		expect(readdirSync(state.machineDir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+	});
+});
+
+describe("receive slots — final Codex review fixes (#303)", () => {
+	test("an explicit portBase whose auto extras run into another machine's block is refused", async () => {
+		writeMachine(baseState("other", { status: "stopped", pid: undefined, portBase: 41110, ports: {} }));
+		// Eleven auto extras take +6..+16, so 41110–41116 fall in the other machine's block.
+		const extraPorts = Array.from({ length: 11 }, (_, i) => ({ name: `x${i}`, host: 0, guest: 1000 + i, proto: "tcp" as const }));
+		await expect(
+			QuickCHR.start({ name: "fresh", version: "7.22.1", arch: "x86", dryRun: true, portBase: 41100, extraPorts }),
+		).rejects.toThrow(/41110 .*machine "other" \(port block offset \+0\)/);
+	});
+
+	test("a replacement save sets the old mode even under a restrictive umask", async () => {
+		if (process.platform === "win32") return;
+		const { chmodSync, statSync } = await import("node:fs");
+		const { saveMachine } = await import("../../src/lib/state.ts");
+		const state = baseState("alpha", { status: "stopped", pid: undefined });
+		writeMachine(state);
+		const file = join(state.machineDir, "machine.json");
+		chmodSync(file, 0o660);
+		const previous = process.umask(0o077);
+		try {
+			saveMachine(state);
+		} finally {
+			process.umask(previous);
+		}
+		expect(statSync(file).mode & 0o777).toBe(0o660);
+	});
+
+	test("a status refresh whose save fails does not fail the caller", async () => {
+		if (process.platform === "win32" || process.getuid?.() === 0) return;
+		const { chmodSync } = await import("node:fs");
+		const { acquireLockNow, machineLockPath } = await import("../../src/lib/lock.ts");
+		const { markMachineStopped } = await import("../../src/lib/state.ts");
+		const state = baseState("alpha", { pid: 2 ** 22 + 12345 });
+		writeMachine(state);
+		// Create the lock directory, then make the machine directory read-only so only
+		// the temp-file write fails.
+		acquireLockNow(machineLockPath(state.machineDir), "status").release();
+		chmodSync(state.machineDir, 0o500);
+		try {
+			const copy = JSON.parse(JSON.stringify(state));
+			expect(() => markMachineStopped(copy)).not.toThrow();
+			expect(copy.status).toBe("stopped");
+		} finally {
+			chmodSync(state.machineDir, 0o755);
+		}
+	});
+
+	test("a failed save right after a spawn stops the spawned process", async () => {
+		if (process.platform === "win32") return;
+		const { saveSpawnedState } = await import("../../src/lib/quickchr.ts");
+		const child = Bun.spawn(["sleep", "30"]);
+		// A machine directory under a regular file: the save fails with ENOTDIR.
+		const blocker = join(TEST_DIR, "not-a-dir");
+		mkdirSync(TEST_DIR, { recursive: true });
+		writeFileSync(blocker, "");
+		const state = baseState("alpha", { machineDir: join(blocker, "alpha"), pid: child.pid });
+		await expect(saveSpawnedState(state, child.pid)).rejects.toBeDefined();
+		expect(await Promise.race([child.exited.then(() => "exited"), Bun.sleep(6000).then(() => "running")])).toBe("exited");
+	}, 15_000);
+});

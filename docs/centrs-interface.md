@@ -116,6 +116,8 @@ interface Descriptor {
 
   customForwards?: CustomForward[];        // only if quickchr has forwards beyond the three services above
   networks?: NetworkTopologyEntry[];       // topology-only; see "Multi-network awareness"
+  hostGateway?: HostGateway | null;        // guest's view of the host; null with no user NIC (#299)
+  receive?: Record<string, ReceiveEndpoint>; // guest→host receive slots by name (#299)
 }
 ```
 
@@ -394,6 +396,31 @@ consumer isn't silently blind to them:
   counts as "extra."
 - `networks` is genuinely additive under the forward-compat policy — no version bump
   even if added after the rest of v1 ships.
+
+### Guest→host: `hostGateway` and `receive` (#299)
+
+Additive within v1, so no `descriptorVersion` bump.
+
+```ts
+interface HostGateway { address: "10.0.2.2"; captureInterface: string } // "lo0" macOS, "any" elsewhere
+interface ReceiveEndpoint {
+  transport: "udp" | "tcp";
+  host: "127.0.0.1";   // where the listener binds — UNCONNECTED (recvfrom, not connect)
+  hostPort: number;
+  guestHost: "10.0.2.2"; // where the guest sends
+  guestPort: number;     // always equals hostPort: SLIRP does not translate the port
+}
+```
+
+- `hostGateway` is always present on a v1 descriptor from this version on: `null`
+  when the machine has no `"user"` NIC (there is no `10.0.2.2` to send to), otherwise
+  the object. A consumer must not hardcode `10.0.2.2`.
+- `receive` is present only when the machine has receive slots (`--receive`,
+  `receivePorts`). It is keyed by the slot name (lowercase), like `services`, so
+  `.receive.tzsp.hostPort` works in `jq`. A slot is never also listed in
+  `customForwards` — it is not a forward.
+- SLIRP rewrites the guest's source to `127.0.0.1:<ephemeral>`, so the slot's port is
+  the only reliable label for which machine sent a datagram.
 
 ### Other non-goals (binding, carried over)
 

@@ -295,7 +295,8 @@ Not sure which mechanism fits your traffic (host→guest service, host receiving
 guest-originated UDP, L2 broadcasts, VM↔VM links, real LAN)? See the
 [networking recipes guide](./docs/networking-recipes.md) — a "traffic shape →
 mechanism" decision table. The CLI flags map 1:1 to the library:
-`--add-network` ↔ `StartOptions.networks`, `--forward` ↔ `StartOptions.extraPorts`.
+`--add-network` ↔ `StartOptions.networks`, `--forward` ↔ `StartOptions.extraPorts`,
+`--receive` ↔ `StartOptions.receivePorts`.
 
 ### Port Layout
 
@@ -335,6 +336,22 @@ Reusing a built-in service name such as `winbox` pins/replaces that service's
 host port for the machine. Existing machines keep the mapping stored in
 `machine.json`; recreate the machine to change fixed service ports cleanly.
 
+### Receive Ports (guest → host)
+
+`--receive <name>[:port][/proto]` gives a machine a named port for traffic the
+**guest sends** (TZSP, syslog, NetFlow). The guest sends to `10.0.2.2:<port>`; your
+listener binds `127.0.0.1:<port>` unconnected. quickchr only reserves the port — no
+`hostfwd` — so `quickchr set <name> --receive …` works on a running machine.
+
+```bash
+quickchr add lab --receive tzsp            # 37008/udp (also: netflow 2055, ipfix 4739, syslog 5514)
+quickchr add lab2 --receive tzsp:37009     # ports are unique across machines
+quickchr list lab --json | jq '.receivePorts'   # any status; `inspect` once it runs
+```
+
+SLIRP hides which machine sent a datagram, so the port is the label. See the
+[networking recipes guide](./docs/networking-recipes.md) §2.
+
 ### Machine Descriptors and Subprocess Environments
 
 `quickchr inspect <name> [--json]` emits a stable, versioned
@@ -344,7 +361,8 @@ quickchr ↔ centrs interface contract
 [`docs/centrs-interface.md`](docs/centrs-interface.md)): status, machine
 identity, and a per-service `services` map (`rest-api`, `native-api`, `ssh`)
 giving host/port/transport/`tls`/availability/auth for each, plus optional
-`customForwards` and `networks`. `--json` is accepted for parity; inspect
+`customForwards` and `networks`, `hostGateway` (the guest's view of the host,
+`null` with no user-mode NIC) and `receive` (named receive ports). `--json` is accepted for parity; inspect
 output is always JSON. It has no `env` field — use `quickchr env` for
 subprocess env vars.
 

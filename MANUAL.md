@@ -228,6 +228,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--boot-size <size>` | — | Resize qcow2 boot disk; needs `qemu-img`; explicit raw is refused |
 | `--add-disk <size>` | — | Extra blank qcow2 disk; repeatable |
 | `--forward <spec>` | — | Extra hostfwd port or built-in service host-port pin; repeatable. See §Custom port forwards. |
+| `--receive <spec>` | — | Guest→host receive port (`name[:port][/proto]`, e.g. `tzsp`); repeatable. See §7 "Receive slots". |
 | `--add-package <pkg>` | — | Provisioning, repeatable, ≥ 7.20.8 |
 | `--install-all-packages` | false | Provisioning, ≥ 7.20.8 |
 | `--add-user <user:pass>` | — | Provisioning, ≥ 7.20.8 |
@@ -632,6 +633,8 @@ flags that were asked for so it can be run as given.
 | `--device-mode-disable <f,…>` | Set one or more to no. |
 | `--qemu-arg <arg>` | Replace the recorded QEMU passthrough args (repeatable, space-form only). Stopped only; takes effect on the next start. |
 | `--clear-qemu-args` | Drop the recorded QEMU passthrough args. Stopped only. |
+| `--receive <spec>` | Reserve a guest→host receive port (repeatable). Running or stopped; no restart. §7 "Receive slots". |
+| `--no-receive <name>` | Drop a receive slot by name (repeatable). Applied before `--receive`. |
 
 **Device-mode restarts the machine.** RouterOS only applies a device-mode change
 across a power cycle, and quickchr owns the power button — which is why this lives
@@ -1091,7 +1094,8 @@ inspect` — the quickchr ↔ centrs interface contract (issue #71,
 [`docs/centrs-interface.md`](docs/centrs-interface.md)): machine identity,
 status, a per-service `services` map (`rest-api`, `native-api`, `ssh` — each
 with host/port/transport/`tls`/availability/auth), optional
-`customForwards`/`networks`, and timestamps. It is intentionally
+`customForwards`/`networks`, `hostGateway` (`null` without a user-mode NIC),
+optional `receive`, and timestamps. It is intentionally
 **running-only** and throws `MACHINE_STOPPED` for stopped machines. It has
 no `env` field — use `subprocessEnv()` for env-var-shaped connection facts.
 
@@ -1121,6 +1125,7 @@ redact before logging or attaching to bug reports.
 | `portBase` | number | auto | First of 10 ports |
 | `excludePorts` | ServiceName[] | `[]` | e.g., `["winbox"]` |
 | `extraPorts` | PortMapping[] | `[]` | Custom forwards |
+| `receivePorts` | ReceivePort[] | `[]` | Guest→host receive slots (§7); needs a `user` NIC |
 | `packages` | string[] | `[]` | Provisioning |
 | `installAllPackages` | boolean | `false` | Provisioning |
 | `user` | `{ name, password }` | — | Provisioning |
@@ -1175,7 +1180,11 @@ const chr = await QuickCHR.start({
 To **receive** UDP a guest sends, no forward is needed — bind an *unconnected*
 host socket and have the guest send to `chr.hostGatewayIp` (`10.0.2.2`); see
 [`docs/networking-recipes.md`](docs/networking-recipes.md) §2 and
-[`examples/udp-gateway/`](examples/udp-gateway/).
+[`examples/udp-gateway/`](examples/udp-gateway/). To give that port a name that is
+unique across machines and shows up in `descriptor()`, use `receivePorts`
+(`ReceivePort[]`, built with `parseReceiveSpec("tzsp")`), or on an existing handle
+`addReceivePort()` / `removeReceivePort()`; `chr.receive.<name>` gives
+`{ transport, host, hostPort, guestHost, guestPort }`. See §7 "Receive slots".
 
 ### Version & channel helpers
 
@@ -1461,7 +1470,7 @@ Picking among the specifiers/forwards by *goal* — full guide with recipes in
 |---|---|
 | Reach a guest TCP/UDP service (REST, SSH, SNMP, container port) | `user` NIC + `--forward`/`extraPorts` (`hostfwd`) |
 | Reach a guest on many/dynamic ports | `--forward name:9200-9210:2000-2010/udp` (range) |
-| Receive UDP the **guest sends** (syslog, NetFlow, TZSP, a reply) | gateway path — guest → `10.0.2.2:<port>`, host binds an **unconnected** socket; **no forward** |
+| Receive UDP the **guest sends** (syslog, NetFlow, TZSP, a reply) | gateway path — guest → `10.0.2.2:<port>`, host binds an **unconnected** socket; **no forward**. `--receive` names the port per machine |
 | Receive guest L2 frames/broadcasts (MNDP, MAC-Telnet) | `socket-connect` NIC ([`docs/mndp.md`](docs/mndp.md)) |
 | L2 link between two VMs | `socket::<name>` |
 | Real LAN presence / DHCP from host | `shared` / `bridged:<iface>` |
@@ -1509,6 +1518,47 @@ Resolution chains:
 > `NetworkSpecifier` type names, which are spelled with a dash rather than a colon:
 > `socket:listen:5000` on the command line is `{ type: "socket-listen", port: 5000 }`
 > in TypeScript.
+
+### Receive slots (`--receive`)
+
+A **receive slot** names a port for traffic the *guest sends* to the host (TZSP
+sniffer streaming, mangle `sniff-tzsp`, remote syslog, NetFlow/IPFIX). The guest
+sends to the user-mode gateway `10.0.2.2:<port>`; SLIRP delivers it to host loopback
+`<port>` (the port is not translated). SLIRP rewrites the source to
+`127.0.0.1:<ephemeral>`, so the port is the only way to tell machines apart — each
+slot's port is unique across quickchr machines. The `user` NIC has to be ether1 (listed
+first): RouterOS adds a DHCP client only there.
+
+```sh
+quickchr add lab --receive tzsp                  # 37008/udp
+quickchr add lab2 --receive tzsp:37009           # second machine
+quickchr set lab --receive myapp:9400/udp        # running or stopped, no restart
+quickchr set lab --no-receive myapp
+quickchr list lab --json | jq .receivePorts      # any status: [{ name, port, proto }]
+quickchr start lab && quickchr inspect lab | jq .receive   # running only: { "tzsp": { hostPort, guestHost, guestPort, … } }
+```
+
+- Spec `name[:port][/proto]`. Registry defaults (`WELL_KNOWN_RECEIVE_PORTS`): `tzsp`
+  37008, `netflow`/`traffic-flow` 2055, `ipfix` 4739, `syslog` 5514 (an unprivileged
+  stand-in for 514). Other names need a port. Proto defaults to `udp`.
+- quickchr **reserves** the port and never binds it — no `hostfwd`. Bind the listener
+  on `127.0.0.1:<port>`, **unconnected**.
+- A port another machine forwards or receives on, one this machine forwards, or one
+  inside any machine's 10-port block (Windows puts QEMU's monitor/serial/QGA TCP
+  sockets at +6..+8) is `PORT_CONFLICT`, and the message names the next free port.
+  The same name with a different port is `INVALID_RECEIVE_SPEC` unless the same call
+  removes it: `set lab --no-receive syslog --receive syslog:5515` moves it as one
+  change (library: `changeReceivePorts({ remove, add })`), and a refused move keeps
+  the old slot.
+- `start` on an existing machine (including `--fg` attaching to a running one) records
+  `--receive` slots it does not have yet instead of ignoring them. A library
+  `dryRun` previews them without saving.
+- Needs a `user` NIC; refused otherwise.
+- A foreground session (`start --fg`) holds the machine lock until QEMU exits, so
+  `set --receive` from another shell is refused with `MACHINE_LOCKED` while it runs.
+  Add slots before a foreground boot (`start <name> --fg --receive …` records them),
+  or run in the background.
+- `--forward tzsp` is refused with a pointer to `--receive`: a forward is host→guest.
 
 ### Named L2 sockets
 
@@ -1667,6 +1717,10 @@ machines and TCP-probes for a free block.
 | +7 | (reserved — serial TCP, when used) | — |
 | +8 | (reserved — QGA TCP, when used) | — |
 | +9 | (spare — `extraPorts`) | — |
+
+Receive slots (§7) are not part of the block: their ports are explicit or registry
+defaults, outside the block allocator, and never a `hostfwd`. The allocator still
+steps past a block that holds another machine's receive port.
 
 Defaults map the first six offsets. `--no-winbox`, `--no-api-ssl`, and
 `excludePorts: ["…"]` skip individual mappings. `extraPorts:

@@ -57,6 +57,7 @@ import {
 	isOrphanMachineDir,
 	listOrphanMachineDirs,
 	refreshAllStatuses,
+	markMachineStopped,
 	isMachineRunning,
 	isMachineForeign,
 	ensureDir,
@@ -106,6 +107,8 @@ import {
 	withRecordedLicenseLevel,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
+import type { ReceivePort } from "./types.ts";
+import { normalizeReceivePort, planReceiveChange, receiveEndpoints, validateReceivePorts, type ReceiveCheckMachine } from "./receive-spec.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
 import { admitStorage, estimateMachineCreation, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
@@ -802,6 +805,11 @@ async function cleanUnderLock(state: MachineState): Promise<void> {
 	state.cleanedAt = cleanedAt;
 }
 
+/** Where gateway-relayed (loopback) traffic can be captured on this host. */
+function captureInterfaceForHost(): string {
+	return process.platform === "darwin" ? "lo0" : "any";
+}
+
 /** Create a ChrInstance handle from persisted MachineState. */
 function createInstance(state: MachineState): ChrInstance {
 	const ports = toChrPorts(state.ports);
@@ -974,6 +982,10 @@ function createInstance(state: MachineState): ChrInstance {
 			},
 			...(customForwards.length > 0 ? { customForwards } : {}),
 			networks,
+			hostGateway: hasUserModeNetwork(state.networks)
+				? { address: HOST_GATEWAY_IP, captureInterface: captureInterfaceForHost() }
+				: null,
+			...((state.receivePorts?.length ?? 0) > 0 ? { receive: receiveEndpoints(state.receivePorts) } : {}),
 		};
 	};
 
@@ -984,8 +996,27 @@ function createInstance(state: MachineState): ChrInstance {
 		restUrl,
 		sshPort: ports.ssh,
 		portBase: state.portBase,
-		captureInterface: process.platform === "darwin" ? "lo0" : "any",
+		captureInterface: captureInterfaceForHost(),
 		hostGatewayIp: HOST_GATEWAY_IP,
+		get receive() {
+			return receiveEndpoints(state.receivePorts);
+		},
+
+		async addReceivePort(spec: ReceivePort | string): Promise<ReceivePort> {
+			const slot = normalizeReceivePort(spec);
+			const after = await changeReceivePorts(state, { add: [slot] });
+			return after.find((r) => r.name === slot.name) ?? slot;
+		},
+
+		async removeReceivePort(name: string): Promise<boolean> {
+			const key = name.trim().toLowerCase();
+			const { before, after } = await changeReceivePortsDetailed(state, { remove: [key] });
+			return before.some((r) => r.name === key) && !after.some((r) => r.name === key);
+		},
+
+		changeReceivePorts(change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined }): Promise<ReceivePort[]> {
+			return changeReceivePorts(state, change);
+		},
 
 		async waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean> {
 			if (readinessProbeFor(state.version) === "api") {
@@ -1179,14 +1210,21 @@ function createInstance(state: MachineState): ChrInstance {
 		async license(opts: LicenseOptions): Promise<void> {
 			assertProvisioningSupportedVersion(state.version, "apply a license");
 			const level = opts.level === undefined ? undefined : normalizeLicenseLevel(opts.level);
-			const auth = resolveAuth(state);
-			await renewLicense(ports.http, { ...opts, level }, undefined, undefined, undefined, auth.header);
-			// Same contract as the first-boot step and as setDeviceMode(): the level is
-			// recorded as intent (so `clean()` replays it) and as fact, and the step joins
-			// the record the window reads (so a later `start --license-level` with the same
-			// level is "already applied", not refused). Credentials are never recorded.
-			// Without a level, renew does not verify one, so there is nothing to record.
-			if (level) {
+			// The machine lock covers the renew and its verification as well as the
+			// record (#303 review): a `clean` or relaunch in between could otherwise reset
+			// the disk after the guest verified the level, and the record would claim a
+			// license — and a closed provisioning window — the fresh disk does not have.
+			// It also keeps a concurrent `set --receive` from saving over the record.
+			await withMachineLock(state, "license", async () => {
+				const auth = resolveAuth(state);
+				await renewLicense(ports.http, { ...opts, level }, undefined, undefined, undefined, auth.header);
+				// Same contract as the first-boot step and as setDeviceMode(): the level is
+				// recorded as intent (so `clean()` replays it) and as fact, and the step
+				// joins the record the window reads (so a later `start --license-level`
+				// with the same level is "already applied", not refused). Credentials are
+				// never recorded. Without a level, renew does not verify one, so there is
+				// nothing to record.
+				if (!level) return;
 				const current = loadMachine(state.name);
 				if (current) {
 					current.license = level;
@@ -1196,7 +1234,7 @@ function createInstance(state: MachineState): ChrInstance {
 				state.license = level;
 				state.licenseLevel = level;
 				recordProvisioningStep(state, "license");
-			}
+			});
 		},
 
 		async setDeviceMode(options: DeviceModeOptions, logger?: ProgressLogger): Promise<void> {
@@ -1892,7 +1930,7 @@ async function hardRebootMachine(
 	// A power-cycle always boots normally: the replacement QEMU carries no -S,
 	// so a frozen marker from before must not survive it.
 	state.frozen = undefined;
-	saveMachine(state);
+	await saveSpawnedState(state, pid);
 
 	return method;
 }
@@ -1974,6 +2012,19 @@ export function refreshMachineState(state: MachineState): void {
  *  It cannot reopen or close a window by accident. Every caller requires a running
  *  machine, and a running machine has `lastStartedAt`, so the window was already shut
  *  before this wrote anything. */
+/** The first save after a spawn. If it fails — `saveMachine()` refuses with
+ *  `STATE_ERROR` when Windows keeps the old file locked — the record does not name this
+ *  QEMU, and the caller's error path releases the lock and claims. Stop the process
+ *  first so no VM is left running that nothing tracks (#303 review). Exported for tests. */
+export async function saveSpawnedState(state: MachineState, pid: number): Promise<void> {
+	try {
+		saveMachine(state);
+	} catch (err) {
+		try { await stopQemu(pid); } catch { /* best effort */ }
+		throw err;
+	}
+}
+
 function recordProvisioningStep(state: MachineState, step: ProvisioningStep): void {
 	const steps = [...new Set([...(state.provisioning?.steps ?? []), step])];
 	const record = { at: new Date().toISOString(), steps };
@@ -2346,19 +2397,151 @@ function assertPortBaseFree(
 async function pickNewMachineResources(
 	name: string,
 	opts: StartOptions,
-): Promise<{ portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[] }> {
-	const machines = loadAllMachines();
+): Promise<{ portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[]; receivePorts: ReceivePort[] }> {
+	// Reservations before machine.json: a creation saves its machine.json before it
+	// releases its reservation, so reading in this order cannot miss it in both places.
 	const reserved = listReservations(name);
+	const machines = loadAllMachines();
 	if (opts.portBase) assertPortBaseFree(opts.portBase, name, machines, reserved);
+	const receivePorts = (opts.receivePorts ?? []).map(normalizeReceivePort);
+	const others: ReceiveCheckMachine[] = [...reservationsAsMachines(reserved), ...machines].filter((m) => m.name !== name);
+	const held = hostsHeldBy(others);
+	// Receive slots and stopped machines' forwards are reservations nothing listens on,
+	// so the block probe cannot see them; this machine's own receive slots may not land
+	// in its block either.
+	const reservedHosts = new Set(held.keys());
+	for (const r of receivePorts) reservedHosts.add(r.port);
 	const usedBases = [...getUsedPortBases(), ...reserved.map((r) => r.portBase)];
-	const portBase = opts.portBase || await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts);
-	validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, machines, name);
+	const portBase = opts.portBase || await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts, undefined, reservedHosts);
+	validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, others, name);
 	const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
+	// Every offset of the block, mapped or not (an unmapped one is an auto extra's slot,
+	// or QEMU's IPC socket on Windows), plus any explicit forward outside it.
+	const ownHosts = new Map<number, string>();
+	for (let i = 0; i < PORTS_PER_BLOCK; i++) ownHosts.set(portBase + i, `port block offset +${i}`);
+	for (const p of Object.values(ports)) ownHosts.set(p.host, `"${p.name}"`);
+	for (const [host, label] of ownHosts) {
+		const owner = held.get(host);
+		if (owner) {
+			throw new QuickCHRError(
+				"PORT_CONFLICT",
+				`Port ${host} (${label}) is already used by ${owner}.${opts.portBase ? " Pick another portBase, or omit it to have one allocated." : ""}`,
+			);
+		}
+	}
 
 	const usedMacs = getUsedMacs();
 	for (const r of reserved) for (const mac of r.macs) usedMacs.add(mac);
 	const networks = assignMacs(name, resolveStartNetworks(opts.networks, opts.network), usedMacs);
-	return { portBase, ports, networks };
+	if (receivePorts.length > 0) {
+		assertReceiveReachable(networks, name);
+		validateReceivePorts(receivePorts, name, ports, [], others, portBase);
+	}
+	return { portBase, ports, networks, receivePorts };
+}
+
+/** Every host port the given machines hold — each whole port block (an unmapped offset
+ *  is an auto extra's slot, or QEMU's IPC socket on Windows), forwards and receive
+ *  slots — with a label naming the owner. A new machine's auto extras run past its own
+ *  block from the fifth on, so the allocator checks them against this too (#303 review). */
+function hostsHeldBy(machines: ReceiveCheckMachine[]): Map<number, string> {
+	const held = new Map<number, string>();
+	for (const m of machines) {
+		if (m.portBase) {
+			for (let i = 0; i < PORTS_PER_BLOCK; i++) held.set(m.portBase + i, `machine "${m.name}" (port block offset +${i})`);
+		}
+		for (const p of Object.values(m.ports ?? {})) held.set(p.host, `machine "${m.name}" (forward "${p.name}")`);
+		for (const r of m.receivePorts ?? []) held.set(r.port, `machine "${m.name}" (receive "${r.name}")`);
+	}
+	return held;
+}
+
+/** In-flight creations as far as the port checks are concerned (#299): their block,
+ *  every forward host they resolved, and their receive slots. */
+function reservationsAsMachines(reserved: ReturnType<typeof listReservations>): ReceiveCheckMachine[] {
+	return reserved.map((r) => ({
+		name: r.name,
+		portBase: r.portBase,
+		ports: Object.fromEntries((r.hosts ?? []).map((host, i) => [`pending-${i}`, { name: `pending-${i}`, host, guest: 0, proto: "tcp" as const }])),
+		receivePorts: (r.receivePorts ?? []).map((port) => ({ name: "pending", port, proto: "udp" as const })),
+	}));
+}
+
+/** Receive slots ride the user-mode gateway; on any other NIC there is no `10.0.2.2`.
+ *  The user NIC has to be ether1 (`networks[0]`): RouterOS adds a DHCP client only
+ *  there, so on ether2 the guest has no `10.0.2.x` address to send from (#303 review). */
+function assertReceiveReachable(networks: NetworkConfig[], name: string): void {
+	if (!hasUserModeNetwork(networks)) {
+		throw new QuickCHRError(
+			"INVALID_RECEIVE_SPEC",
+			`Machine "${name}" has no user-mode NIC, so it has no 10.0.2.2 gateway to receive through. Add one (--add-network user, first) or send to the host over the machine's other network.`,
+		);
+	}
+	if (networks[0]?.specifier !== "user") {
+		throw new QuickCHRError(
+			"INVALID_RECEIVE_SPEC",
+			`Machine "${name}" has its user-mode NIC after "${networks[0]?.specifier}", not as ether1. RouterOS adds a DHCP client only on ether1, so the guest has no 10.0.2.x address and cannot reach the 10.0.2.2 gateway. List "user" first.`,
+		);
+	}
+}
+
+/** The other machines and in-flight creations a receive change is checked against.
+ *  Reservations first, for the reason given in `pickNewMachineResources()`. */
+function receiveCheckMachines(name: string): ReceiveCheckMachine[] {
+	const reserved = listReservations(name);
+	return [...reservationsAsMachines(reserved), ...loadAllMachines()];
+}
+
+/** Apply a receive-slot change to an existing machine as one step (#299): removals
+ *  and additions are validated together and saved once, so a refused change leaves the
+ *  record untouched. No QEMU change: valid on a running or stopped machine. Holds the
+ *  machine lock, then the allocation lock so the cross-machine check cannot race a
+ *  creation or another machine's change. Returns the machine's slots afterwards. */
+async function changeReceivePorts(
+	state: MachineState,
+	change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined },
+): Promise<ReceivePort[]> {
+	return (await changeReceivePortsDetailed(state, change)).after;
+}
+
+/** {@link changeReceivePorts}, also returning the slots the locked record held before
+ *  the change — the only trustworthy "before", since the handle's may be stale. Exported
+ *  for the CLI's removal report; not part of the package API. */
+export async function changeReceivePortsDetailed(
+	state: MachineState,
+	change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined },
+): Promise<{ before: ReceivePort[]; after: ReceivePort[] }> {
+	const add = (change.add ?? []).map(normalizeReceivePort);
+	const remove = change.remove ?? [];
+	if (add.length === 0 && remove.length === 0) return { before: state.receivePorts ?? [], after: state.receivePorts ?? [] };
+	// withMachineLock checks this handle still names the same machine (createdAt) before
+	// it refreshes the handle — so nothing here may refresh it first.
+	return withMachineLock(state, "receive", async () => {
+		if (add.length > 0) assertReceiveReachable(state.networks, state.name);
+		ensureDir(getDataDir());
+		const allocation = await acquireLock(allocationLockPath(), "allocate", {
+			waitMs: ALLOCATION_LOCK_WAIT_MS,
+			subject: "The port allocator",
+		});
+		try {
+			// Re-read after the allocation-lock wait and change only `receivePorts`, so a
+			// field another writer saved meanwhile is kept, not overwritten from this
+			// handle's snapshot (#303 review).
+			const current = loadMachine(state.name) ?? state;
+			const before = current.receivePorts ?? [];
+			const next = planReceiveChange(current, add, remove, receiveCheckMachines(state.name));
+			if (JSON.stringify(next) !== JSON.stringify(before)) {
+				const receivePorts = next.length > 0 ? next : undefined;
+				// Save first: a failed save must not leave the handle reporting a change
+				// that is not on disk.
+				saveMachine({ ...current, receivePorts });
+				state.receivePorts = receivePorts;
+			}
+			return { before, after: next };
+		} finally {
+			allocation.release();
+		}
+	});
 }
 
 /** Choose a new machine's resources and take its machine lock with them recorded in
@@ -2378,7 +2561,7 @@ export async function claimNewMachine(
 	name: string,
 	op: Extract<LockOperation, "add" | "start" | "foreground">,
 	opts: StartOptions,
-): Promise<{ lock: HeldLock; portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[] }> {
+): Promise<{ lock: HeldLock; portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[]; receivePorts: ReceivePort[] }> {
 	ensureDir(getDataDir());
 	const allocation = await acquireLock(allocationLockPath(), "allocate", {
 		waitMs: ALLOCATION_LOCK_WAIT_MS,
@@ -2392,6 +2575,8 @@ export async function claimNewMachine(
 			reserve: {
 				portBase: picked.portBase,
 				macs: picked.networks.flatMap((n) => (n.mac ? [n.mac] : [])),
+				hosts: Object.values(picked.ports).map((p) => p.host),
+				...(picked.receivePorts.length > 0 ? { receivePorts: picked.receivePorts.map((r) => r.port) } : {}),
 			},
 		};
 		// The lock lives in the directory, so the directory comes first. A refusal here
@@ -2507,7 +2692,7 @@ export class QuickCHR {
 			storageLease.release();
 			throw err;
 		}
-		const { lock, portBase, ports, networks } = claimed;
+		const { lock, portBase, ports, networks, receivePorts } = claimed;
 		try {
 			const cachedImg = await ensureCachedImage(version, arch);
 			const diskArtifacts = await ensureConfiguredDisks(
@@ -2536,6 +2721,7 @@ export class QuickCHR {
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
+				receivePorts: receivePorts.length > 0 ? receivePorts : undefined,
 				bootSize: diskOpts.bootSize,
 				extraDisks: diskOpts.extraDisks,
 				bootDiskFormat: diskArtifacts.bootDisk.format,
@@ -2717,6 +2903,20 @@ export class QuickCHR {
 			for (const ask of satisfied) {
 				(logger ?? createLogger()).status(`${ask.description} is already applied — nothing to do.`);
 			}
+			// A dry run never launches: preview the receive change without saving it.
+			if (opts.dryRun) {
+				const wantsReceive = (opts.receivePorts?.length ?? 0) > 0;
+				if (wantsReceive) assertReceiveReachable(existing.networks, existing.name);
+				const receivePorts = wantsReceive
+					? planReceiveChange(existing, (opts.receivePorts ?? []).map(normalizeReceivePort), [], receiveCheckMachines(existing.name))
+					: existing.receivePorts;
+				return createInstance({ ...existing, receivePorts });
+			}
+			// Receive slots are not provisioning — no guest I/O, no QEMU change — so an
+			// existing machine takes them now instead of refusing them (#299).
+			if ((opts.receivePorts?.length ?? 0) > 0) {
+				await changeReceivePorts(existing, { add: opts.receivePorts });
+			}
 			if (isMachineRunning(existing)) {
 				return createInstance(existing);
 			}
@@ -2774,7 +2974,7 @@ export class QuickCHR {
 		// claimed: a dry run persists nothing for another create to collide with.
 		if (opts.dryRun) {
 			const machineDir = getMachineDir(name);
-			const { portBase, ports, networks } = await pickNewMachineResources(name, opts);
+			const { portBase, ports, networks, receivePorts } = await pickNewMachineResources(name, opts);
 			const state: MachineState = {
 				name,
 				version,
@@ -2793,6 +2993,7 @@ export class QuickCHR {
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
 				extraPorts: opts.extraPorts ?? [],
+				receivePorts: receivePorts.length > 0 ? receivePorts : undefined,
 				bootSize: diskOpts.bootSize,
 				extraDisks: diskOpts.extraDisks,
 				bootDiskFormat: diskOpts.bootDiskFormat,
@@ -2837,7 +3038,7 @@ export class QuickCHR {
 			storageLease.release();
 			throw err;
 		}
-		const { lock, portBase, ports, networks: networkConfigs } = claimed;
+		const { lock, portBase, ports, networks: networkConfigs, receivePorts } = claimed;
 		// Endpoints are claimed before QEMU is spawned, because resolution needs to know
 		// which end this machine holds. A launch that fails before its state is persisted
 		// has no instance lifecycle to release them later, so a failed start would leave a
@@ -2879,6 +3080,7 @@ export class QuickCHR {
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
 			extraPorts: opts.extraPorts ?? [],
+			receivePorts: receivePorts.length > 0 ? receivePorts : undefined,
 			bootSize: diskOpts.bootSize,
 			extraDisks: diskOpts.extraDisks,
 			bootDiskFormat: bootDisk.format,
@@ -2948,7 +3150,7 @@ export class QuickCHR {
 			state.lastAccel = accel;
 		}
 
-		saveMachine(state);
+		await saveSpawnedState(state, pid);
 		unpersistedSocketClaim = undefined;
 		storageLease.release();
 
@@ -2982,7 +3184,7 @@ export class QuickCHR {
 				throw await failProvisioning(err, instance, undefined);
 			}
 			state.pid = pid;
-			saveMachine(state);
+			await saveSpawnedState(state, pid);
 			booted = await instance.waitForBoot(bootTimeout, probe);
 		}
 
@@ -3382,7 +3584,7 @@ export class QuickCHR {
 		// Frozen returns before the post-boot lastAccel recording below, so a
 		// frozen relaunch records the launch accelerator for continue().
 		if (launch?.frozen) state.lastAccel = accel;
-		saveMachine(state);
+		await saveSpawnedState(state, pid);
 		unpersistedSocketClaim = undefined;
 
 		const instance = createInstance(state);
@@ -3473,13 +3675,8 @@ export class QuickCHR {
 		const state = loadMachine(name);
 		if (!state) return null;
 
-		// Refresh PID status
-		if (state.status === "running" && !isMachineRunning(state)) {
-			state.status = "stopped";
-			state.pid = undefined;
-			state.frozen = undefined;
-			saveMachine(state);
-		}
+		// Refresh PID status — patching only the status fields (see markMachineStopped).
+		if (state.status === "running" && !isMachineRunning(state)) markMachineStopped(state);
 
 		return createInstance(state);
 	}

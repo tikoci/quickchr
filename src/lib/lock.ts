@@ -67,6 +67,9 @@ export type LockOperation =
 	| "remove"
 	| "device-mode"
 	| "install-package"
+	| "license"
+	| "receive"
+	| "status"
 	| "remove-orphan"
 	| "allocate"
 	| "storage";
@@ -77,6 +80,12 @@ export type LockOperation =
 export interface ResourceReservation {
 	portBase: number;
 	macs: string[];
+	/** Every forward host port the creation resolved — its block and any explicit
+	 *  `--forward` outside it — so a concurrent receive slot or explicit forward cannot
+	 *  take one before `machine.json` is saved (#299). */
+	hosts?: number[];
+	/** Receive-slot ports the creation will record (#299). */
+	receivePorts?: number[];
 }
 
 export interface LockRecord {
@@ -426,10 +435,23 @@ function attempt(lockDir: string, op: LockOperation, opts: AcquireLockOptions): 
  *  second `start` of one machine would only boot it twice. Throws `MACHINE_NOT_FOUND`
  *  if the lock's machine directory does not exist. */
 export function acquireLockNow(lockPath: string, op: LockOperation, opts: Omit<AcquireLockOptions, "waitMs" | "onWait"> = {}): HeldLock {
-	const result = attempt(lockPath, op, opts);
-	if ("lock" in result) return result.lock;
-	throw lockedError(opts.subject ?? "Machine", result.holder, 0);
+	const started = Date.now();
+	for (;;) {
+		const result = attempt(lockPath, op, opts);
+		if ("lock" in result) return result.lock;
+		// A `status` holder is a `list`/`get` refresh patching three fields; it lets go in
+		// milliseconds. Refusing a `start` over it would fail a command for being
+		// concurrent with a read (#303 review). A refresh itself never waits.
+		if (op !== "status" && result.holder?.op === "status" && Date.now() - started < STATUS_HOLDER_WAIT_MS) {
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+			continue;
+		}
+		throw lockedError(opts.subject ?? "Machine", result.holder, Date.now() - started);
+	}
 }
+
+/** How long {@link acquireLockNow} waits out a `status` holder before refusing. */
+const STATUS_HOLDER_WAIT_MS = 2_000;
 
 /** Take a lock, waiting up to `waitMs` for a live holder to release it. A dead holder's
  *  lock is taken over on sight; a `foreground` holder is never waited for, since it

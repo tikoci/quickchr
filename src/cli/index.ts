@@ -3,10 +3,11 @@
  * quickchr CLI entry point — command router.
  */
 
-import type { StartOptions, Arch, Channel, DeviceModeOptions, LicenseLevelInput, LicenseOptions, ServiceName, NetworkSpecifier } from "../lib/types.ts";
+import type { StartOptions, Arch, Channel, DeviceModeOptions, LicenseLevelInput, LicenseOptions, ServiceName, NetworkSpecifier, ReceivePort } from "../lib/types.ts";
 import { join } from "node:path";
 import { hasUserModeNetwork, parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
+import { parseReceiveSpec } from "../lib/receive-spec.ts";
 import { ADD_FLAGS, REMOVED_FLAGS, SET_FLAGS, START_FLAGS, VALUE_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
 import { QuickCHRError } from "../lib/types.ts";
 import { CENTRS_EXEC_TIP, CENTRS_SEE_ALSO, tip, tipsForError } from "./tips.ts";
@@ -57,7 +58,9 @@ export function parseFlags(
 				const key = arg.slice(2, eqIdx);
 				rejectRemovedFlag(key);
 				appendFlagValue(flags, key, arg.slice(eqIdx + 1));
-			} else if (arg.startsWith("--no-")) {
+			} else if (arg.startsWith("--no-") && !valueFlags.has(arg.slice(2))) {
+				// A value flag spelled `no-…` (`--no-receive <name>`) is a flag of its own,
+				// not the negation of `--receive`.
 				rejectRemovedFlag(arg.slice(5));
 				flags[arg.slice(5)] = false;
 			} else {
@@ -755,7 +758,7 @@ async function cmdAdd(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	rejectUnknownFlags(flags, ADD_FLAGS, "add");
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { bold, formatPorts, formatNetworks, dim } = await import("./format.ts");
+	const { bold, formatPorts, formatReceive, formatNetworks, dim } = await import("./format.ts");
 	const { resolveSetting } = await import("../lib/settings.ts");
 	await applyAccelFlag(flags);
 
@@ -780,6 +783,7 @@ async function cmdAdd(argv: string[]) {
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
+		receivePorts: flagList(flags, "receive").map(parseReceiveSpec),
 		qemuArgs: flagList(flags, "qemu-arg").length > 0 ? flagList(flags, "qemu-arg") : undefined,
 	};
 
@@ -808,6 +812,7 @@ async function cmdAdd(argv: string[]) {
 	console.log(`  CPU/Mem: ${state.cpu} vCPU${state.cpu > 1 ? "s" : ""}, ${state.mem} MB`);
 	console.log(`  Network: ${formatNetworks(state.networks ?? [])}`);
 	console.log(`  Ports:   ${formatPorts(state.ports)}`);
+	if (state.receivePorts?.length) console.log(`  Receive: ${formatReceive(state.receivePorts)}`);
 	if (isRouterOs6(state.version)) {
 		console.log(`  API:     127.0.0.1:${ports.api}  ${dim("(after start; RouterOS 6 is boot-only and has no REST)")}`);
 	} else {
@@ -1512,7 +1517,7 @@ export async function cmdStart(argv: string[]) {
 
 	// Build start options from flags
 	const { QuickCHR } = await import("../lib/quickchr.ts");
-	const { statusIcon, formatPorts, formatNetworks, link, bold, dim, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
+	const { statusIcon, formatPorts, formatReceive, formatNetworks, link, bold, dim, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 	const { resolveSetting } = await import("../lib/settings.ts");
 
 	const opts: StartOptions = {
@@ -1536,6 +1541,7 @@ export async function cmdStart(argv: string[]) {
 		bootSize: flag(flags, "boot-size"),
 		extraDisks: flagList(flags, "add-disk").length > 0 ? flagList(flags, "add-disk") : undefined,
 		extraPorts: flagList(flags, "forward").flatMap(expandForwardSpec),
+		receivePorts: flagList(flags, "receive").map(parseReceiveSpec),
 		dryRun: flagBool(flags, "dry-run"),
 		timeoutExtra: await resolveTimeoutExtraMs(flags),
 		qemuArgs: flagList(flags, "qemu-arg").length > 0 ? flagList(flags, "qemu-arg") : undefined,
@@ -1580,6 +1586,10 @@ export async function cmdStart(argv: string[]) {
 	opts.background = !wantFg;
 
 	if (opts.dryRun) {
+		// Receive slots are checked against the machine's NICs and every other machine's
+		// ports; the library's dry run does that without launching or saving, so a slot
+		// the real start would refuse is refused here too (#303 review).
+		if ((opts.receivePorts?.length ?? 0) > 0) await QuickCHR.start({ ...opts, dryRun: true });
 		console.log("Dry run — would start with options:", JSON.stringify(opts, null, 2));
 		return;
 	}
@@ -1590,6 +1600,10 @@ export async function cmdStart(argv: string[]) {
 	if (!opts.background && opts.wait !== false && !opts.frozen && opts.name) {
 		const runningMachine = QuickCHR.list().find((m) => m.name === opts.name && m.status === "running");
 		if (runningMachine) {
+			// Attaching skips start(), so record --receive here rather than drop it.
+			if ((opts.receivePorts?.length ?? 0) > 0) {
+				await QuickCHR.get(runningMachine.name)?.changeReceivePorts({ add: opts.receivePorts });
+			}
 			await attachSerial(runningMachine.name, runningMachine.machineDir);
 			return;
 		}
@@ -1632,6 +1646,7 @@ export async function cmdStart(argv: string[]) {
 		console.log(`  Version: ${instance.state.version} (${instance.state.arch})${v6 ? `  ${dim("boot-only: no REST, no provisioning")}` : ""}`);
 		console.log(`  Network: ${formatNetworks(instance.state.networks ?? [])}`);
 		console.log(`  Ports:   ${formatPorts(instance.state.ports)}`);
+		if (instance.state.receivePorts?.length) console.log(`  Receive: ${formatReceive(instance.state.receivePorts)}`);
 		if (v6) {
 			console.log(`  API:     127.0.0.1:${instance.ports.api}  ${dim(`(native API, user ${creds.user})`)}`);
 		} else {
@@ -1763,7 +1778,7 @@ async function cmdList(argv: string[] = []) {
 	const { ownerCommand } = await import("../lib/qemu.ts");
 
 	if (name) {
-		const { statusIcon, bold, dim, link, formatPorts, formatNetworks, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
+		const { statusIcon, bold, dim, link, formatPorts, formatReceive, formatNetworks, machineNotFoundMessage, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 
 		const instance = QuickCHR.get(name);
 		if (!instance) {
@@ -1785,6 +1800,7 @@ async function cmdList(argv: string[] = []) {
 				mem: s.mem,
 				networks: s.networks,
 				ports: s.ports,
+				receivePorts: s.receivePorts ?? [],
 				pid: s.pid ?? null,
 				foreign,
 				frozen: s.frozen ?? false,
@@ -1803,6 +1819,7 @@ async function cmdList(argv: string[] = []) {
 		console.log(`  CPU/Mem:    ${s.cpu} vCPU${s.cpu > 1 ? "s" : ""}, ${s.mem} MB`);
 		console.log(`  Network:    ${formatNetworks(s.networks)}`);
 		console.log(`  Ports:      ${formatPorts(s.ports)}`);
+		if (s.receivePorts?.length) console.log(`  Receive:    ${formatReceive(s.receivePorts)}`);
 		console.log(`  Status:     ${s.status}${s.pid ? ` (PID ${s.pid}${foreign ? ", owned by another user" : ""})` : ""}`);
 		if (s.frozen) {
 			console.log(`  Frozen:     yes — awaiting quickchr continue`);
@@ -2255,7 +2272,7 @@ async function cmdSet(argv: string[]) {
 	// --license` printed a usage error while `quickchr license --name lab` worked.
 	const name = positional[0] ?? flag(flags, "name");
 
-	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|p-unlimited]] [--package <pkg>[,<pkg>...]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>] [--qemu-arg <arg>] [--clear-qemu-args]";
+	const usage = "Usage: quickchr set <name> [--license [--level=p1|p10|p-unlimited]] [--package <pkg>[,<pkg>...]] [--device-mode <mode>] [--device-mode-enable <features>] [--device-mode-disable <features>] [--qemu-arg <arg>] [--clear-qemu-args] [--receive <spec>] [--no-receive <name>]";
 	if (!name) {
 		console.error(usage);
 		process.exit(1);
@@ -2285,14 +2302,22 @@ async function cmdSet(argv: string[]) {
 		throw new QuickCHRError("INVALID_ARGUMENT", "--qemu-arg and --clear-qemu-args conflict: --qemu-arg already replaces the recorded args wholesale");
 	}
 
-	if (!wantsLicense && !deviceMode && packages.length === 0 && !wantsQemuArgs) {
-		console.error("Nothing to set. Available flags: --license, --package, --device-mode, --device-mode-enable, --device-mode-disable, --qemu-arg, --clear-qemu-args");
+	// Parsed before anything applies, so a bad spec refuses the whole call.
+	const receiveAdd = flagList(flags, "receive").map(parseReceiveSpec);
+	const receiveRemove = flagList(flags, "no-receive");
+	const wantsReceive = receiveAdd.length > 0 || receiveRemove.length > 0;
+
+	if (!wantsLicense && !deviceMode && packages.length === 0 && !wantsQemuArgs && !wantsReceive) {
+		console.error("Nothing to set. Available flags: --license, --package, --device-mode, --device-mode-enable, --device-mode-disable, --qemu-arg, --clear-qemu-args, --receive, --no-receive");
 		process.exit(1);
 	}
 
 	// Recorded args first: they need a stopped machine, and failing fast here
 	// keeps a running-machine refusal from racing a device-mode power cycle.
 	if (wantsQemuArgs) await applyQemuArgsChange(name, qemuArgs, clearQemuArgs);
+	// Receive slots are a reservation only — no guest I/O, no reboot — so they go
+	// before anything that power-cycles the guest.
+	if (wantsReceive) await applyReceiveChange(name, receiveAdd, receiveRemove);
 
 	// Device-mode next: it power-cycles the guest, and anything applied beforehand
 	// would be read back across a reboot it did not expect. Packages after that — they
@@ -2342,6 +2367,39 @@ async function applyQemuArgsChange(name: string, qemuArgs: string[], clear: bool
 		console.log(`Cleared recorded QEMU args on ${bold(name)} — the next start boots without passthrough.`);
 	} else {
 		console.log(`Recorded QEMU args on ${bold(name)}: ${qemuArgs.join(" ")}`);
+	}
+}
+
+/** `set <name> --receive <spec> / --no-receive <name>` (#299). A receive slot is a
+ *  host-port reservation with no QEMU side, so it applies to a running or stopped
+ *  machine alike, immediately. Removals first, so `--no-receive tzsp --receive
+ *  tzsp:37009` moves a slot in one call. */
+async function applyReceiveChange(name: string, add: ReceivePort[], remove: string[]) {
+	const { QuickCHR, changeReceivePortsDetailed } = await import("../lib/quickchr.ts");
+	const { bold, formatReceive, machineNotFoundMessage } = await import("./format.ts");
+
+	const instance = QuickCHR.get(name);
+	if (!instance) {
+		console.error(machineNotFoundMessage(name));
+		process.exit(1);
+	}
+	// One change, validated and saved once: a refused --receive leaves the removals
+	// undone too, so moving a slot cannot lose it. `before` is what the locked record
+	// held, not this handle's snapshot, so the removal report is true.
+	const { before, after } = await changeReceivePortsDetailed(instance.state, { add, remove });
+	for (const slot of remove) {
+		const key = slot.trim().toLowerCase();
+		const had = before.some((r) => r.name === key);
+		const reAdded = add.some((r) => r.name === key);
+		if (!had) console.log(`${bold(name)} has no receive slot "${slot}" — nothing to remove.`);
+		else if (!reAdded) console.log(`Removed receive slot "${key}" from ${bold(name)}.`);
+	}
+	for (const spec of add) {
+		const slot = after.find((r) => r.name === spec.name) ?? spec;
+		console.log(`Receive on ${bold(name)}: ${formatReceive([slot])}`);
+	}
+	if (add.length > 0) {
+		console.log("  Guest sends to the 10.0.2.2 address; bind the 127.0.0.1 port unconnected on the host.");
 	}
 }
 
@@ -3741,7 +3799,7 @@ Commands:
   remove [<name>|--all]   Remove instance(s) and disk
   clean [<name>|--all]    Reset instance disk to fresh image
   get <name> [group]      Show machine config (license, device-mode, admin)
-  set <name> [flags]      Change a booted machine (license, packages, device-mode)
+  set <name> [flags]      Change a booted machine (license, packages, device-mode, receive)
   license <name>          Deprecated — use 'set <name> --license'
   disk <name>             Show disk details for an instance
   snapshot <name> [cmd]   Manage snapshots (list/save/load/delete)
@@ -3803,6 +3861,13 @@ Options:
                           --forward winbox:9300      (host pinned, guest from registry)
                           --forward myapp:9200:7777/udp  (fully explicit)
                           --forward btest:9200-9210:2000-2010/udp  (range, e.g. dynamic ports)
+  --receive <spec>      Reserve a guest→host receive port (repeatable): the guest sends to
+                        10.0.2.2:<port>, the host binds 127.0.0.1:<port> unconnected.
+                        Spec: name[:port][/proto]. Known names fill the port:
+                        tzsp 37008, netflow 2055, ipfix 4739, syslog 5514 (all udp).
+                          --receive tzsp             (37008/udp)
+                          --receive tzsp:37009       (a second machine)
+                          --receive myapp:9400/udp   (unknown name: port required)
   --install-all-packages  Install all packages on first boot
   --add-user <u:p>      Create user on first boot (name:password)
   --disable-admin       Disable the default admin account on first boot
@@ -3926,6 +3991,9 @@ Options:
                         name:hostStart-hostEnd[:guestStart-guestEnd][/proto].
                         Examples: smb, winbox:9300, myapp:9200:7777/udp,
                         btest:9200-9210:2000-2010/udp.
+  --receive <spec>      Reserve a guest→host receive port (repeatable). Spec:
+                        name[:port][/proto]; tzsp 37008, netflow 2055, ipfix 4739,
+                        syslog 5514 by name. Guest sends to 10.0.2.2:<port>.
   --add-user <u:p>      Create user with name:password
   --disable-admin       Disable the default admin account
   --secure-login        Create a managed login; use --disable-admin to disable admin
@@ -4138,6 +4206,17 @@ Flags:
                       one element per flag). The machine must be stopped; takes
                       effect on the next start.
   --clear-qemu-args   Drop the recorded QEMU passthrough args. Stopped only.
+  --receive <spec>    Reserve a guest→host receive port (repeatable), e.g. tzsp,
+                      tzsp:37009, myapp:9400/udp. Running or stopped; no restart.
+  --no-receive <name> Drop a receive slot by name (repeatable). Runs before --receive.
+
+Receive notes:
+  A receive slot is a reservation: quickchr never binds it and adds no forward.
+  The guest sends to 10.0.2.2:<port>; your listener binds 127.0.0.1:<port>
+  unconnected. The port is unique across quickchr machines — a clash names the
+  next free port. Read it back: quickchr list <name> --json (any status) or
+  quickchr inspect <name> (running). A foreground session (start --fg) holds the
+  machine lock until QEMU exits; pass --receive to that start instead.
 
 Packages notes:
   Installing a package reboots the machine to activate it. The machine must be

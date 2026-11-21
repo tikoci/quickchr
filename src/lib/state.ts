@@ -2,7 +2,8 @@
  * Machine state persistence — JSON files in ~/.local/share/quickchr/machines/.
  */
 
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { absoluteEnvPath, isFullyQualifiedPath, userHomeDir } from "./paths.ts";
 import type { MachineState, } from "./types.ts";
@@ -10,6 +11,8 @@ import { QuickCHRError } from "./types.ts";
 import { networkModeToConfigs } from "./network.ts";
 import { assertPathSafeName, isPathSafeName } from "./names.ts";
 import { pidLiveness } from "./pid.ts";
+import { renameWithRetry } from "./rename.ts";
+import { acquireLockNow, type HeldLock, legacyMachineLockPath, machineLockPath } from "./lock.ts";
 
 /** Get the quickchr data directory root. Override with QUICKCHR_DATA_DIR env var.
  *  Always absolute: a relative QUICKCHR_DATA_DIR is refused, and the default comes
@@ -101,10 +104,105 @@ export function ensureDir(dir: string): void {
 	mkdirSync(dir, { recursive: true });
 }
 
-/** Save machine state to disk. */
+/** Save machine state to disk.
+ *
+ *  Written to a temporary file and renamed over `machine.json`, so a reader never sees
+ *  a truncated or empty file mid-write — the port allocator would otherwise skip the
+ *  machine and hand out ports it holds (#299). Windows refuses the rename while another
+ *  process holds the file open without delete sharing (an antivirus or indexer scan,
+ *  typically), so a refusal is retried by {@link renameWithRetry} (about 1.6 s). After
+ *  that the save fails with `STATE_ERROR` and the previous `machine.json` stays: writing in place
+ *  could publish a partial file, and a machine the allocator cannot read is one whose
+ *  ports it hands out again (#303 review). */
 export function saveMachine(state: MachineState): void {
 	ensureDir(state.machineDir);
-	writeFileSync(machineJsonPath(state.name), JSON.stringify(state, null, "\t") + "\n");
+	const target = machineJsonPath(state.name);
+	const body = JSON.stringify(state, null, "\t") + "\n";
+	// A replacement keeps the file's mode (machine.json can hold a password) and, when
+	// root saves a user's machine, its owner — what writing in place used to preserve.
+	let existing: { mode: number; uid: number; gid: number } | undefined;
+	try {
+		const st = statSync(target);
+		existing = { mode: st.mode & 0o777, uid: st.uid, gid: st.gid };
+	} catch { /* new file */ }
+	// Unique per save, created exclusively: two saves in one process (workers share a
+	// pid) must not write or rename each other's temp file.
+	const tmp = join(state.machineDir, `.machine.json.${process.pid}.${randomUUID()}.tmp`);
+	try {
+		writeFileSync(tmp, body, { flag: "wx", ...(existing ? { mode: existing.mode } : {}) });
+		// `mode` on create is masked by the umask, so set it outright: a 0660 file saved
+		// under umask 077 must stay 0660.
+		if (existing) {
+			try { chmodSync(tmp, existing.mode); } catch { /* best effort */ }
+		}
+		if (existing && process.getuid?.() === 0 && existing.uid !== 0) {
+			try { chownSync(tmp, existing.uid, existing.gid); } catch { /* best effort */ }
+		}
+		try {
+			renameWithRetry(tmp, target);
+		} catch (err) {
+			const code = (err as { code?: string }).code;
+			if (process.platform !== "win32" || (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY")) throw err;
+			throw new QuickCHRError(
+				"STATE_ERROR",
+				`Could not replace ${target} (${code}): another program has it open — an antivirus or indexer scan, typically. The previous state is unchanged; retry the command.`,
+			);
+		}
+	} finally {
+		// Gone after a successful rename; anything else (a failed write, a refused rename)
+		// must not leave a temp file behind.
+		try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+	}
+}
+
+/** Record that a machine's QEMU is gone: status `stopped`, no pid, not frozen.
+ *
+ *  Takes the machine lock without waiting, then re-reads `machine.json` and changes only
+ *  those fields, so a status refresh cannot write back stale config over a change made
+ *  meanwhile — a receive slot added by `set --receive` while `list` was running, for one
+ *  (#299). Every writer of a live record (`set --receive`, `start`, `stop`, …) holds that
+ *  lock, so while it is held the refresh skips the write: the holder saves its own state,
+ *  and the next refresh retries. The caller's object gets the three fields either way. */
+export function markMachineStopped(state: MachineState): void {
+	state.status = "stopped";
+	state.pid = undefined;
+	state.frozen = undefined;
+	let lock: HeldLock;
+	try {
+		lock = acquireLockNow(machineLockPath(state.machineDir), "status", {
+			legacyPath: legacyMachineLockPath(state.machineDir),
+			subject: `Machine "${state.name}"`,
+		});
+	} catch {
+		return;
+	}
+	try {
+		const current = loadMachine(state.name);
+		if (!current) return;
+		if (current.status === "running" && current.pid && pidLiveness(current.pid) !== "dead") return;
+		current.status = "stopped";
+		current.pid = undefined;
+		current.frozen = undefined;
+		// Best effort: the caller already has the computed status, and a save refused
+		// (a scanner holding the file on Windows, a read-only directory) must not fail
+		// `list()`/`get()`. The next refresh tries again.
+		try { saveMachine(current); } catch { /* best effort */ }
+	} finally {
+		releaseStatusLock(lock);
+	}
+}
+
+/** Release a status-refresh lock without letting a failure escape `list()`/`get()`.
+ *  The release appends a marker, which can fail (a full disk); it is retried once, and
+ *  if it still fails the holder record names this pid until the process exits — the
+ *  lock module treats a dead pid's lock as free. */
+function releaseStatusLock(lock: HeldLock): void {
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			lock.release();
+			return;
+		} catch { /* retry once */ }
+	}
 }
 
 /** The fields every caller dereferences without guarding, with the `typeof` each must
@@ -395,12 +493,7 @@ export function isMachineForeign(state: MachineState): boolean {
 export function refreshAllStatuses(): MachineState[] {
 	const machines = loadAllMachines();
 	for (const m of machines) {
-		if (m.status === "running" && !isMachineRunning(m)) {
-			m.status = "stopped";
-			m.pid = undefined;
-			m.frozen = undefined;
-			saveMachine(m);
-		}
+		if (m.status === "running" && !isMachineRunning(m)) markMachineStopped(m);
 	}
 	return machines;
 }
