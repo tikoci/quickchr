@@ -564,3 +564,6 @@ guestfwd
 ipfix
 netflow
 qchrrx
+libuv
+MAXCONNECT
+chardevs
