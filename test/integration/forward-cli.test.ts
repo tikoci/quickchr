@@ -119,12 +119,15 @@ describe.skipIf(SKIP)("CLI --forward flag end-to-end", () => {
 	}, bootTestTimeout());
 });
 
-type Answer = { text: string; reason: "line" | "close" | "refused" | "error" | "timeout" };
+/** `connected` is tracked apart from `reason`, so an accepted-but-silent port
+ *  (`connected: true, reason: "timeout"`) is not mistaken for one that never accepted. */
+type Answer = { text: string; reason: "line" | "close" | "refused" | "error" | "timeout"; connected: boolean };
 
 /** Who answers on a port: read an unsolicited greeting if one comes (QEMU's monitor
  *  sends a "QEMU …" banner on connect), otherwise send one HTTP request, and settle once
- *  on the first complete line, a close, an error or the timeout. The reason tells a
- *  refused port from an accepted-but-silent one.
+ *  on the first complete line, a close, an error or the timeout. `reason` and
+ *  `connected` together tell a refused port, one that never accepted, and an
+ *  accepted-but-silent one apart.
  *
  *  Deliberately not `chrGet()`: the question is *who* answers — RouterOS's web server
  *  or one of QEMU's own sockets — which an HTTP client would only report as a parse
@@ -133,6 +136,7 @@ function whoAnswers(port: number, timeoutMs: number): Promise<Answer> {
 	return new Promise((resolve) => {
 		let text = "";
 		let settled = false;
+		let connected = false;
 		const socket = createConnection({ host: "127.0.0.1", port });
 		const settle = (reason: Answer["reason"]) => {
 			if (settled) return;
@@ -140,11 +144,12 @@ function whoAnswers(port: number, timeoutMs: number): Promise<Answer> {
 			clearTimeout(timer);
 			clearTimeout(greetWait);
 			socket.destroy();
-			resolve({ text: text.slice(0, 200), reason });
+			resolve({ text: text.slice(0, 200), reason, connected });
 		};
 		const timer = setTimeout(() => settle("timeout"), timeoutMs);
 		let greetWait: ReturnType<typeof setTimeout> | undefined;
 		socket.once("connect", () => {
+			connected = true;
 			greetWait = setTimeout(() => {
 				if (!text) socket.write("GET / HTTP/1.0\r\nHost: chr\r\n\r\n");
 			}, 1_000);
@@ -163,9 +168,9 @@ function whoAnswers(port: number, timeoutMs: number): Promise<Answer> {
  * the same port, so nothing fails at startup. This checks who actually answers on each
  * forward, and that quickchr still reaches its own monitor.
  *
- * Grounded on windows-latest, QEMU 11.1.0 (integration.yml run 44915869197): QEMU's
- * sockets win. +6 answers with the monitor banner, +7 is the guest's serial console
- * (the request is typed in as a login), +8 is silent. Linux and macOS (Unix sockets for
+ * Grounded on windows-latest, QEMU 11.1.0 (integration.yml runs 44915869197 and
+ * 44918428359): QEMU's sockets win. +6 answers with the monitor banner, +7 is the
+ * guest's serial console (the request is typed in as a login), +8 accepts and is silent. Linux and macOS (Unix sockets for
  * IPC) reach RouterOS on all three.
  */
 describe.skipIf(SKIP)("automatic forwards on the Windows IPC offsets (#57)", () => {
@@ -199,18 +204,28 @@ describe.skipIf(SKIP)("automatic forwards on the Windows IPC offsets (#57)", () 
 			for (const host of hosts) answers.push(await whoAnswers(host as number, 5_000));
 			const monitor = await monitorCommand(instance.state.machineDir, "info status", 5_000, base);
 			console.log(`[#57 probe] platform=${process.platform} portBase=${base}`);
-			for (const [i, a] of answers.entries()) console.log(`[#57 probe] ${names[i]} (+${6 + i}): ${a.reason} ${JSON.stringify(a.text)}`);
+			for (const [i, a] of answers.entries()) console.log(`[#57 probe] ${names[i]} (+${6 + i}): ${a.reason}${a.connected ? "" : " (never connected)"} ${JSON.stringify(a.text)}`);
 			console.log(`[#57 probe] monitor "info status": ${JSON.stringify(monitor.slice(0, 200))}`);
 			expect(monitor).toContain("VM status: running");
 
 			if (process.platform === "win32") {
 				// Known #57 behaviour, asserted exactly so a different failure is not
-				// mistaken for it: QEMU's monitor greets on +6 before any request. When
-				// #57 moves extras off +6..+8 this goes red: delete this branch so Windows
-				// takes the assertions below like everyone else.
-				expect(answers[0]?.reason).toBe("line");
-				expect(answers[0]?.text).toStartWith("QEMU ");
-				expect(answers[0]?.text).toContain("monitor");
+				// mistaken for it (runs 44915869197, 44918428359). When #57 moves extras
+				// off +6..+8 this goes red: delete this branch so Windows takes the
+				// assertions below like everyone else.
+				const [mon, serial, qga] = answers;
+				// +6: QEMU's monitor greets before any request.
+				expect(mon?.reason).toBe("line");
+				expect(mon?.text).toStartWith("QEMU ");
+				expect(mon?.text).toContain("monitor");
+				// +7: the guest's serial console, at its login prompt, echoes the request
+				// back as a typed login name.
+				expect(serial?.reason).toBe("line");
+				expect(serial?.text).toStartWith("GET / HTTP/1.0");
+				// +8: QGA accepts the connection and says nothing to an HTTP request.
+				expect(qga?.connected).toBe(true);
+				expect(qga?.reason).toBe("timeout");
+				expect(qga?.text).toBe("");
 				return;
 			}
 			for (const a of answers) {

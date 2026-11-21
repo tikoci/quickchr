@@ -23,6 +23,7 @@ import {
 	writeLastFileSidecar,
 	LAST_FILE_SIDECAR,
 } from "../../scripts/ci-file-watchdog.ts";
+import { bootTestTimeoutFor, TEST_ARCH } from "../integration/timeouts.ts";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,6 +45,14 @@ describe("capSecondsFor — the checked-in cap table", () => {
 		// pay a cold download the window never measured. 2 s x 2 would kill it.
 		expect(capSecondsFor("test/integration/library-api.test.ts")).toBe(CAP_FLOOR_S);
 		expect(capSecondsFor("test/integration/file-transfer.test.ts")).toBe(CAP_FLOOR_S);
+	});
+
+	test("the floor outlives one failed same-arch TCG boot and its forensics", () => {
+		// A cap below a boot test's own timeout kills the file while
+		// captureBootFailure() is still writing, so a TCG boot failure arrives with
+		// no evidence (#106, CodeRabbit on #304). TEST_ARCH is the host-native arch,
+		// so this is the same-arch budget on any host that runs the unit suite.
+		expect(CAP_FLOOR_S * 1000).toBe(bootTestTimeoutFor(TEST_ARCH, "tcg"));
 	});
 
 	test("an unknown file falls back to the floor rather than going unbounded", () => {

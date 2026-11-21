@@ -176,7 +176,12 @@ its own next deadline (#110 rule 4). `OBSERVED_MAX_S` in that script holds the w
 duration per file over a **named** window: runs
 [30657533896](https://github.com/tikoci/quickchr/actions/runs/30657533896) and
 [30665449265](https://github.com/tikoci/quickchr/actions/runs/30665449265), both at `2899be4` — 14
-legs, 168 `test-file` records. The cap is `clamp(observed × 2, 600 s, 1200 s)`. Re-derive with:
+legs, 168 `test-file` records. The cap is `clamp(observed × 2, 840 s, 1200 s)`. The 840 s floor is
+not observed: it is one single-boot test's own timeout on a same-arch TCG leg
+(`bootTestTimeoutFor(native, "tcg")` = 480 s boot + 180 s forensics + 180 s body), so a boot that
+times out on windows-x86 or macos-arm64 still gets its `captureBootFailure()` report written before
+the watchdog can fire. A unit test pins the floor to that function. It was 600 s until #304, which
+killed such a file mid-forensics. Re-derive the observed column with:
 
 ```sh
 git fetch origin ci-data
