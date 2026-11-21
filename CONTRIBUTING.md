@@ -30,7 +30,10 @@ Every issue states a **Done-when** so the finish line is explicit. Label each wi
 - a **priority** — `P1` (take next) … `P4` (polish);
 - a **type** — `bug` / `enhancement` / `documentation`, plus `research` (produces a
   repro/`REPORT.md`, not shipped code) or `needs-decision` (changes a persisted-state / port /
-  public-API contract — the maintainer decides direction before work starts).
+  public-API contract — the maintainer decides direction before work starts);
+- optionally `waiting` — parked until something outside quickchr changes (evidence or a
+  recurrence, an environment we don't have, upstream or house work). The latest comment says
+  what it waits on; remove the label when that arrives.
 
 Open a Pull Request against a filed issue for review (PRs are wired to automated review).
 

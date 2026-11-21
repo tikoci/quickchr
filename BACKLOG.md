@@ -3,7 +3,7 @@
 This file is a **map**, not a work log. Open work is tracked in
 **[GitHub Issues](https://github.com/tikoci/quickchr/issues)**; see
 [CONTRIBUTING.md "Tracking work"](./CONTRIBUTING.md#tracking-work) for the full scheme
-and the label legend (`area:*`, `P1`–`P4`, `research`, `needs-decision`).
+and the label legend (`area:*`, `P1`–`P4`, `research`, `needs-decision`, `waiting`).
 
 ## Where things live
 
@@ -41,7 +41,8 @@ stay correct as issues open and close:
   [P4](https://github.com/tikoci/quickchr/labels/P4)
 - **By type** —
   [research](https://github.com/tikoci/quickchr/labels/research) (produces a `REPORT.md`) ·
-  [needs-decision](https://github.com/tikoci/quickchr/labels/needs-decision) (maintainer call first)
+  [needs-decision](https://github.com/tikoci/quickchr/labels/needs-decision) (maintainer call first) ·
+  [waiting](https://github.com/tikoci/quickchr/labels/waiting) (parked on something outside; latest comment says what)
 
 ## Anchors worth naming
 
