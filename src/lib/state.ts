@@ -101,10 +101,45 @@ export function ensureDir(dir: string): void {
 	mkdirSync(dir, { recursive: true });
 }
 
-/** Save machine state to disk. */
+/** Save machine state to disk.
+ *
+ *  Written to a temporary file and renamed over `machine.json`, so a reader never sees
+ *  a truncated or empty file mid-write — the port allocator would otherwise skip the
+ *  machine and hand out ports it holds (#299). Windows can refuse the rename while
+ *  another process has the file open; that falls back to the plain write. */
 export function saveMachine(state: MachineState): void {
 	ensureDir(state.machineDir);
-	writeFileSync(machineJsonPath(state.name), JSON.stringify(state, null, "\t") + "\n");
+	const target = machineJsonPath(state.name);
+	const body = JSON.stringify(state, null, "\t") + "\n";
+	const tmp = join(state.machineDir, `.machine.json.${process.pid}.tmp`);
+	try {
+		writeFileSync(tmp, body);
+		renameSync(tmp, target);
+	} catch (err) {
+		try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+		const code = (err as { code?: string }).code;
+		if (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") throw err;
+		writeFileSync(target, body);
+	}
+}
+
+/** Record that a machine's QEMU is gone: status `stopped`, no pid, not frozen.
+ *
+ *  Re-reads `machine.json` and changes only those fields, so a status refresh that read
+ *  the record earlier cannot write back stale config over a change made since — a
+ *  receive slot added by `set --receive` while `list` was running, for one (#299). The
+ *  caller's object gets the same three fields. */
+export function markMachineStopped(state: MachineState): void {
+	state.status = "stopped";
+	state.pid = undefined;
+	state.frozen = undefined;
+	const current = loadMachine(state.name);
+	if (!current) return;
+	if (current.status === "running" && current.pid && pidLiveness(current.pid) !== "dead") return;
+	current.status = "stopped";
+	current.pid = undefined;
+	current.frozen = undefined;
+	saveMachine(current);
 }
 
 /** The fields every caller dereferences without guarding, with the `typeof` each must
@@ -395,12 +430,7 @@ export function isMachineForeign(state: MachineState): boolean {
 export function refreshAllStatuses(): MachineState[] {
 	const machines = loadAllMachines();
 	for (const m of machines) {
-		if (m.status === "running" && !isMachineRunning(m)) {
-			m.status = "stopped";
-			m.pid = undefined;
-			m.frozen = undefined;
-			saveMachine(m);
-		}
+		if (m.status === "running" && !isMachineRunning(m)) markMachineStopped(m);
 	}
 	return machines;
 }

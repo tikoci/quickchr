@@ -57,6 +57,7 @@ import {
 	isOrphanMachineDir,
 	listOrphanMachineDirs,
 	refreshAllStatuses,
+	markMachineStopped,
 	isMachineRunning,
 	isMachineForeign,
 	ensureDir,
@@ -107,7 +108,7 @@ import {
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
 import type { ReceivePort } from "./types.ts";
-import { normalizeReceivePort, otherMachinesReceivePorts, receiveEndpoints, validateReceivePorts, type ReceiveCheckMachine } from "./receive-spec.ts";
+import { normalizeReceivePort, planReceiveChange, receiveEndpoints, validateReceivePorts, type ReceiveCheckMachine } from "./receive-spec.ts";
 import type { GuestExec } from "./guest-snapshot.ts";
 import { toChrPorts } from "./network.ts";
 import { admitStorage, estimateMachineCreation, formatQuickchrUsage, getQuickchrStorageReport } from "./storage.ts";
@@ -1002,20 +1003,21 @@ function createInstance(state: MachineState): ChrInstance {
 		},
 
 		async addReceivePort(spec: ReceivePort | string): Promise<ReceivePort> {
-			const [slot] = await recordReceivePorts(state, [spec]);
-			return slot as ReceivePort;
+			const slot = normalizeReceivePort(spec);
+			const after = await changeReceivePorts(state, { add: [slot] });
+			return after.find((r) => r.name === slot.name) ?? slot;
 		},
 
 		async removeReceivePort(name: string): Promise<boolean> {
 			const key = name.trim().toLowerCase();
-			return withMachineLock(state, "receive", async () => {
-				const current = state.receivePorts ?? [];
-				if (!current.some((r) => r.name === key)) return false;
-				const rest = current.filter((r) => r.name !== key);
-				state.receivePorts = rest.length > 0 ? rest : undefined;
-				saveMachine(state);
-				return true;
-			});
+			refreshMachineState(state);
+			if (!(state.receivePorts ?? []).some((r) => r.name === key)) return false;
+			const after = await changeReceivePorts(state, { remove: [key] });
+			return !after.some((r) => r.name === key);
+		},
+
+		changeReceivePorts(change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined }): Promise<ReceivePort[]> {
+			return changeReceivePorts(state, change);
 		},
 
 		async waitForBoot(timeoutMs?: number, stats?: BootProbeStats): Promise<boolean> {
@@ -2378,35 +2380,61 @@ async function pickNewMachineResources(
 	name: string,
 	opts: StartOptions,
 ): Promise<{ portBase: number; ports: Record<string, PortMapping>; networks: NetworkConfig[]; receivePorts: ReceivePort[] }> {
-	const machines = loadAllMachines();
+	// Reservations before machine.json: a creation saves its machine.json before it
+	// releases its reservation, so reading in this order cannot miss it in both places.
 	const reserved = listReservations(name);
+	const machines = loadAllMachines();
 	if (opts.portBase) assertPortBaseFree(opts.portBase, name, machines, reserved);
 	const receivePorts = (opts.receivePorts ?? []).map(normalizeReceivePort);
-	const receiveCheck = [...machines, ...reservationsAsMachines(reserved)];
-	// Receive slots are reservations nothing listens on yet, so the block probe cannot
-	// see them: neither another machine's nor this machine's own may land in the block.
-	const reservedHosts = otherMachinesReceivePorts(receiveCheck, name);
+	const others: ReceiveCheckMachine[] = [...reservationsAsMachines(reserved), ...machines].filter((m) => m.name !== name);
+	const held = hostsHeldBy(others);
+	// Receive slots and stopped machines' forwards are reservations nothing listens on,
+	// so the block probe cannot see them; this machine's own receive slots may not land
+	// in its block either.
+	const reservedHosts = new Set(held.keys());
 	for (const r of receivePorts) reservedHosts.add(r.port);
 	const usedBases = [...getUsedPortBases(), ...reserved.map((r) => r.portBase)];
 	const portBase = opts.portBase || await findAvailablePortBlock(usedBases, opts.excludePorts, opts.extraPorts, undefined, reservedHosts);
-	validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, machines, name);
+	validateExplicitExtraPorts(opts.extraPorts, portBase, opts.excludePorts, others, name);
 	const ports = buildPortMappings(portBase, opts.excludePorts, opts.extraPorts);
+	for (const p of Object.values(ports)) {
+		const owner = held.get(p.host);
+		if (owner) {
+			throw new QuickCHRError(
+				"PORT_CONFLICT",
+				`Port ${p.host} ("${p.name}") is already used by ${owner}.${opts.portBase ? " Pick another portBase, or omit it to have one allocated." : ""}`,
+			);
+		}
+	}
 
 	const usedMacs = getUsedMacs();
 	for (const r of reserved) for (const mac of r.macs) usedMacs.add(mac);
 	const networks = assignMacs(name, resolveStartNetworks(opts.networks, opts.network), usedMacs);
 	if (receivePorts.length > 0) {
 		assertReceiveReachable(networks, name);
-		validateReceivePorts(receivePorts, name, ports, [], receiveCheck);
+		validateReceivePorts(receivePorts, name, ports, [], others, portBase);
 	}
 	return { portBase, ports, networks, receivePorts };
 }
 
-/** In-flight creations as far as the receive-slot check is concerned (#299). */
+/** Every host port the given machines hold outside their blocks' live probe — forwards
+ *  and receive slots — with a label naming the owner. */
+function hostsHeldBy(machines: ReceiveCheckMachine[]): Map<number, string> {
+	const held = new Map<number, string>();
+	for (const m of machines) {
+		for (const p of Object.values(m.ports ?? {})) held.set(p.host, `machine "${m.name}" (forward "${p.name}")`);
+		for (const r of m.receivePorts ?? []) held.set(r.port, `machine "${m.name}" (receive "${r.name}")`);
+	}
+	return held;
+}
+
+/** In-flight creations as far as the port checks are concerned (#299): their block,
+ *  every forward host they resolved, and their receive slots. */
 function reservationsAsMachines(reserved: ReturnType<typeof listReservations>): ReceiveCheckMachine[] {
 	return reserved.map((r) => ({
 		name: r.name,
-		ports: {},
+		portBase: r.portBase,
+		ports: Object.fromEntries((r.hosts ?? []).map((host, i) => [`pending-${i}`, { name: `pending-${i}`, host, guest: 0, proto: "tcp" as const }])),
 		receivePorts: (r.receivePorts ?? []).map((port) => ({ name: "pending", port, proto: "udp" as const })),
 	}));
 }
@@ -2421,43 +2449,40 @@ function assertReceiveReachable(networks: NetworkConfig[], name: string): void {
 	}
 }
 
-/** Record receive slots on an existing machine (#299). No QEMU change: valid on a
- *  running or stopped machine. Holds the machine lock, then the allocation lock so the
- *  cross-machine check cannot race a creation or another machine's add. */
-async function recordReceivePorts(state: MachineState, requested: Array<ReceivePort | string>): Promise<ReceivePort[]> {
-	const slots = requested.map(normalizeReceivePort);
-	if (slots.length === 0) return [];
+/** The other machines and in-flight creations a receive change is checked against.
+ *  Reservations first, for the reason given in `pickNewMachineResources()`. */
+function receiveCheckMachines(name: string): ReceiveCheckMachine[] {
+	const reserved = listReservations(name);
+	return [...reservationsAsMachines(reserved), ...loadAllMachines()];
+}
+
+/** Apply a receive-slot change to an existing machine as one step (#299): removals
+ *  and additions are validated together and saved once, so a refused change leaves the
+ *  record untouched. No QEMU change: valid on a running or stopped machine. Holds the
+ *  machine lock, then the allocation lock so the cross-machine check cannot race a
+ *  creation or another machine's change. Returns the machine's slots afterwards. */
+async function changeReceivePorts(
+	state: MachineState,
+	change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined },
+): Promise<ReceivePort[]> {
+	const add = (change.add ?? []).map(normalizeReceivePort);
+	const remove = change.remove ?? [];
+	if (add.length === 0 && remove.length === 0) return state.receivePorts ?? [];
 	return withMachineLock(state, "receive", async () => {
-		assertReceiveReachable(state.networks, state.name);
+		if (add.length > 0) assertReceiveReachable(state.networks, state.name);
 		ensureDir(getDataDir());
 		const allocation = await acquireLock(allocationLockPath(), "allocate", {
 			waitMs: ALLOCATION_LOCK_WAIT_MS,
 			subject: "The port allocator",
 		});
 		try {
-			const current = state.receivePorts ?? [];
-			const fresh: ReceivePort[] = [];
-			for (const slot of slots) {
-				const have = current.find((r) => r.name === slot.name);
-				if (!have) {
-					fresh.push(slot);
-				} else if (have.port !== slot.port || have.proto !== slot.proto) {
-					throw new QuickCHRError(
-						"INVALID_RECEIVE_SPEC",
-						`Machine "${state.name}" already receives "${slot.name}" on ${have.port}/${have.proto}. Remove it first: quickchr set ${shellQuote(state.name)} --no-receive ${slot.name}`,
-					);
-				}
-			}
-			if (fresh.length > 0) {
-				validateReceivePorts(fresh, state.name, state.ports, current, [
-					...loadAllMachines(),
-					...reservationsAsMachines(listReservations(state.name)),
-				]);
-				state.receivePorts = [...current, ...fresh];
+			const before = state.receivePorts ?? [];
+			const next = planReceiveChange(state, add, remove, receiveCheckMachines(state.name));
+			if (JSON.stringify(next) !== JSON.stringify(before)) {
+				state.receivePorts = next.length > 0 ? next : undefined;
 				saveMachine(state);
 			}
-			const recorded = state.receivePorts ?? [];
-			return slots.map((s) => recorded.find((r) => r.name === s.name) ?? s);
+			return next;
 		} finally {
 			allocation.release();
 		}
@@ -2495,6 +2520,7 @@ export async function claimNewMachine(
 			reserve: {
 				portBase: picked.portBase,
 				macs: picked.networks.flatMap((n) => (n.mac ? [n.mac] : [])),
+				hosts: Object.values(picked.ports).map((p) => p.host),
 				...(picked.receivePorts.length > 0 ? { receivePorts: picked.receivePorts.map((r) => r.port) } : {}),
 			},
 		};
@@ -2822,10 +2848,17 @@ export class QuickCHR {
 			for (const ask of satisfied) {
 				(logger ?? createLogger()).status(`${ask.description} is already applied — nothing to do.`);
 			}
+			// A dry run never launches: preview the receive change without saving it.
+			if (opts.dryRun) {
+				const receivePorts = (opts.receivePorts?.length ?? 0) > 0
+					? planReceiveChange(existing, (opts.receivePorts ?? []).map(normalizeReceivePort), [], receiveCheckMachines(existing.name))
+					: existing.receivePorts;
+				return createInstance({ ...existing, receivePorts });
+			}
 			// Receive slots are not provisioning — no guest I/O, no QEMU change — so an
 			// existing machine takes them now instead of refusing them (#299).
-			if ((opts.receivePorts?.length ?? 0) > 0 && !opts.dryRun) {
-				await recordReceivePorts(existing, opts.receivePorts ?? []);
+			if ((opts.receivePorts?.length ?? 0) > 0) {
+				await changeReceivePorts(existing, { add: opts.receivePorts });
 			}
 			if (isMachineRunning(existing)) {
 				return createInstance(existing);
@@ -3585,13 +3618,8 @@ export class QuickCHR {
 		const state = loadMachine(name);
 		if (!state) return null;
 
-		// Refresh PID status
-		if (state.status === "running" && !isMachineRunning(state)) {
-			state.status = "stopped";
-			state.pid = undefined;
-			state.frozen = undefined;
-			saveMachine(state);
-		}
+		// Refresh PID status — patching only the status fields (see markMachineStopped).
+		if (state.status === "running" && !isMachineRunning(state)) markMachineStopped(state);
 
 		return createInstance(state);
 	}

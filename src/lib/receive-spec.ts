@@ -15,7 +15,8 @@
  */
 
 import { lookupReceivePort } from "./guest-ports.ts";
-import { HOST_GATEWAY_IP, type MachineState, type PortMapping, QuickCHRError, type ReceiveEndpoint, type ReceivePort } from "./types.ts";
+import { shellQuote } from "./names.ts";
+import { HOST_GATEWAY_IP, type MachineState, PORTS_PER_BLOCK, type PortMapping, QuickCHRError, type ReceiveEndpoint, type ReceivePort } from "./types.ts";
 
 function fail(spec: string, reason: string): never {
 	throw new QuickCHRError("INVALID_RECEIVE_SPEC", `Invalid --receive spec "${spec}": ${reason}`);
@@ -88,15 +89,21 @@ export function receiveEndpoints(slots: ReceivePort[] | undefined): Record<strin
 
 type PortOwner = { machine: string; label: string };
 
-/** The part of a machine the receive-slot check reads. */
-export type ReceiveCheckMachine = Pick<MachineState, "name" | "ports" | "receivePorts">;
+/** The part of a machine the receive-slot check reads. `portBase` is optional so an
+ *  in-flight creation's reservation can stand in for a machine. */
+export type ReceiveCheckMachine = Pick<MachineState, "name" | "ports" | "receivePorts"> & { portBase?: number | undefined };
 
-/** Every host port a machine holds: forwards (incl. services) and receive slots. */
-function machinePorts(ports: Record<string, PortMapping> | undefined, receive: ReceivePort[] | undefined): Array<[number, string]> {
-	return [
-		...Object.values(ports ?? {}).map((p): [number, string] => [p.host, `forward "${p.name}"`]),
-		...(receive ?? []).map((r): [number, string] => [r.port, `receive "${r.name}"`]),
-	];
+/** Every host port a machine holds: its whole port block (services, auto extras and,
+ *  on Windows, QEMU's own monitor/serial/QGA TCP sockets at +6..+8), explicit forwards,
+ *  and receive slots. */
+function machinePorts(m: Pick<ReceiveCheckMachine, "ports" | "receivePorts" | "portBase">): Array<[number, string]> {
+	const out: Array<[number, string]> = [];
+	if (m.portBase) {
+		for (let i = 0; i < PORTS_PER_BLOCK; i++) out.push([m.portBase + i, `port block ${m.portBase}–${m.portBase + PORTS_PER_BLOCK - 1}`]);
+	}
+	for (const p of Object.values(m.ports ?? {})) out.push([p.host, `forward "${p.name}"`]);
+	for (const r of m.receivePorts ?? []) out.push([r.port, `receive "${r.name}"`]);
+	return out;
 }
 
 /** Host ports held by other machines' receive slots — for the forward/block checks,
@@ -113,11 +120,12 @@ export function otherMachinesReceivePorts(machines: ReceiveCheckMachine[], ownNa
 /**
  * Check receive slots about to be recorded on `ownName`.
  *
- * Refuses a duplicate name, a port another requested slot takes, a port this machine
- * forwards (`ownPorts`) or already receives on (`ownReceive`, minus same-name entries
- * being replaced), and a port any other machine forwards or receives on. A port clash
- * is `PORT_CONFLICT` and names the next free port, so a second machine's `tzsp` can
- * take `+1` without guessing.
+ * Refuses a duplicate name, a port another requested slot takes, a port inside this
+ * machine's port block (`ownPortBase`) or forwarded by it (`ownPorts`), a port it
+ * already receives on (`ownReceive`, minus same-name entries being replaced), and a
+ * port inside any other machine's block or forwarded or received by it. A port clash is
+ * `PORT_CONFLICT` and names the next free port, so a second machine's `tzsp` can take
+ * `+1` without guessing.
  */
 export function validateReceivePorts(
 	requested: ReceivePort[],
@@ -125,16 +133,17 @@ export function validateReceivePorts(
 	ownPorts: Record<string, PortMapping>,
 	ownReceive: ReceivePort[],
 	machines: ReceiveCheckMachine[],
+	ownPortBase?: number,
 ): void {
 	const taken = new Map<number, PortOwner>();
-	for (const [port, label] of machinePorts(ownPorts, undefined)) taken.set(port, { machine: ownName, label });
+	for (const [port, label] of machinePorts({ ports: ownPorts, portBase: ownPortBase })) taken.set(port, { machine: ownName, label });
 	const requestedNames = new Set(requested.map((r) => r.name));
 	for (const r of ownReceive) {
 		if (!requestedNames.has(r.name)) taken.set(r.port, { machine: ownName, label: `receive "${r.name}"` });
 	}
 	for (const m of machines) {
 		if (m.name === ownName) continue;
-		for (const [port, label] of machinePorts(m.ports, m.receivePorts)) taken.set(port, { machine: m.name, label });
+		for (const [port, label] of machinePorts(m)) taken.set(port, { machine: m.name, label });
 	}
 
 	const seenNames = new Set<string>();
@@ -146,13 +155,48 @@ export function validateReceivePorts(
 		const owner = taken.get(r.port);
 		if (owner) {
 			const where = owner.machine === ownName ? `this machine's ${owner.label}` : `machine "${owner.machine}" (${owner.label})`;
+			const next = nextFreePort(r.port, taken);
 			throw new QuickCHRError(
 				"PORT_CONFLICT",
-				`Receive port ${r.port} for "${r.name}" is already used by ${where}. Next free port: ${nextFreePort(r.port, taken)} — e.g. --receive ${r.name}:${nextFreePort(r.port, taken)}`,
+				`Receive port ${r.port} for "${r.name}" is already used by ${where}. Next free port: ${next} — e.g. --receive ${r.name}:${next}`,
 			);
 		}
 		taken.set(r.port, { machine: ownName, label: `receive "${r.name}"` });
 	}
+}
+
+/**
+ * The receive slots a machine ends up with after removing `remove` (by name) and adding
+ * `add`, validated as one change (#299). Pure: the caller saves the result, so a
+ * refused change leaves the record as it was — `--no-receive syslog --receive
+ * syslog:5515` cannot drop the old slot and then fail to add the new one.
+ *
+ * Adding a slot the machine already has with the same port and proto is a no-op; the
+ * same name with a different port is `INVALID_RECEIVE_SPEC` unless that name is also
+ * being removed.
+ */
+export function planReceiveChange(
+	machine: Pick<MachineState, "name" | "ports" | "portBase" | "receivePorts">,
+	add: ReceivePort[],
+	remove: string[],
+	machines: ReceiveCheckMachine[],
+): ReceivePort[] {
+	const removeSet = new Set(remove.map((n) => n.trim().toLowerCase()));
+	const kept = (machine.receivePorts ?? []).filter((r) => !removeSet.has(r.name));
+	const fresh: ReceivePort[] = [];
+	for (const slot of add) {
+		const have = kept.find((r) => r.name === slot.name);
+		if (!have) {
+			fresh.push(slot);
+		} else if (have.port !== slot.port || have.proto !== slot.proto) {
+			throw new QuickCHRError(
+				"INVALID_RECEIVE_SPEC",
+				`Machine "${machine.name}" already receives "${slot.name}" on ${have.port}/${have.proto}. Move it in one call: quickchr set ${shellQuote(machine.name)} --no-receive ${slot.name} --receive ${slot.name}:${slot.port}`,
+			);
+		}
+	}
+	validateReceivePorts(fresh, machine.name, machine.ports, kept, machines, machine.portBase);
+	return [...kept, ...fresh];
 }
 
 function nextFreePort(from: number, taken: Map<number, PortOwner>): number {

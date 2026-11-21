@@ -103,7 +103,7 @@ export function validateExplicitExtraPorts(
 	extraPorts: PortMapping[] | undefined,
 	portBase: number,
 	excludePorts: ServiceName[] = [],
-	existingMachines: MachineState[] = [],
+	existingMachines: Array<Pick<MachineState, "name" | "ports" | "receivePorts">> = [],
 	ownMachineName?: string,
 ): void {
 	if (!extraPorts || extraPorts.length === 0) return;
@@ -220,9 +220,13 @@ export async function findAvailablePortBlock(
 
 	for (let attempt = 0; attempt < maxAttempts; attempt++) {
 		const mappings = buildPortMappings(base, excludePorts, extraPorts);
-		// `reservedHosts` are ports nothing may be listening on yet — another machine's
-		// receive slots (#299) — so the live probe below cannot see them.
-		const reserved = Object.values(mappings).some((m) => reservedHosts.has(m.host));
+		// `reservedHosts` are ports nothing may be listening on yet — receive slots and
+		// stopped machines' forwards (#299) — so the live probe below cannot see them.
+		// Only the block's own ports move with the base: a fixed explicit forward that
+		// clashes is the caller's to fix, and validateExplicitExtraPorts() says so.
+		const reserved = Object.values(mappings).some(
+			(m) => m.host >= base && m.host < base + PORTS_PER_BLOCK && reservedHosts.has(m.host),
+		);
 		const conflicts = reserved ? [] : await checkPortConflicts(mappings);
 		if (!reserved && conflicts.length === 0) {
 			return base;

@@ -132,9 +132,10 @@ quickchr inspect lab1 | jq -r .receive.tzsp.hostPort    # → 37008
 
 ```ts
 const chr = await QuickCHR.start({ name: "lab1", receivePorts: [parseReceiveSpec("tzsp")] });
-const { guestHost, guestPort, hostPort } = chr.receive.tzsp;
-// listener: dgram bind(hostPort, "127.0.0.1") — unconnected
-await chr.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${guestHost}:${guestPort}`);
+const tzsp = chr.receive.tzsp;   // ReceiveEndpoint | undefined under noUncheckedIndexedAccess
+if (!tzsp) throw new Error("lab1 has no tzsp receive slot");
+// listener: dgram bind(tzsp.hostPort, "127.0.0.1") — unconnected
+await chr.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${tzsp.guestHost}:${tzsp.guestPort}`);
 ```
 
 - **A reservation only.** quickchr never binds the port and emits no `hostfwd`, which is
@@ -146,8 +147,11 @@ await chr.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${guest
   (alias `traffic-flow`) 2055, `ipfix` 4739, `syslog` **5514** — not 514, so the
   listener needs no root; RouterOS sets the remote port. Anything else needs a port;
   proto defaults to `udp`.
-- **Unique across machines.** A port any machine forwards or receives on is a
-  `PORT_CONFLICT` that names the next free port. Ports are explicit or registry
+- **Unique across machines.** A port any machine forwards or receives on, or one
+  inside any machine's port block (on Windows QEMU's own monitor/serial/QGA sockets
+  live at +6..+8), is a `PORT_CONFLICT` that names the next free port. Moving a slot
+  (`--no-receive syslog --receive syslog:5515`) is one change: if the new port is
+  refused, the old slot stays. Ports are explicit or registry
   defaults for now; auto-allocation from the port block waits for
   [#57](https://github.com/tikoci/quickchr/issues/57).
 - **Needs the `user` NIC.** `inspect`'s `hostGateway` is `null` without one, and

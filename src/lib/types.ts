@@ -822,6 +822,7 @@ export interface ChrInstance {
 	 *  {@link addReceivePort}/{@link removeReceivePort} on this handle.
 	 *  @example
 	 *  const tzsp = instance.receive.tzsp; // { hostPort: 37008, guestHost: "10.0.2.2", ... }
+	 *  if (!tzsp) throw new Error("no tzsp receive slot");
 	 *  await instance.exec(`/tool/sniffer/set streaming-enabled=yes streaming-server=${tzsp.guestHost}:${tzsp.guestPort}`);
 	 */
 	readonly receive: Record<string, ReceiveEndpoint>;
@@ -834,6 +835,11 @@ export interface ChrInstance {
 	addReceivePort(spec: ReceivePort | string): Promise<ReceivePort>;
 	/** Drop a receive slot by name. Returns `false` when the machine had none by that name. */
 	removeReceivePort(name: string): Promise<boolean>;
+	/** Remove (by name) and add receive slots as one change, validated together and saved
+	 *  once — a refused change leaves the machine's slots as they were, so moving a slot
+	 *  (`{ remove: ["syslog"], add: ["syslog:5515"] }`) cannot lose it. Returns the
+	 *  machine's slots afterwards. */
+	changeReceivePorts(change: { add?: Array<ReceivePort | string> | undefined; remove?: string[] | undefined }): Promise<ReceivePort[]>;
 
 	/** Check or wait for readiness — REST, or a native-API login on RouterOS 6 (#182).
 	 *  After `QuickCHR.start()` the returned instance is already ready, so this returns

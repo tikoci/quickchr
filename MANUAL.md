@@ -1541,12 +1541,16 @@ quickchr inspect lab | jq .receive               # { "tzsp": { hostPort, guestHo
   stand-in for 514). Other names need a port. Proto defaults to `udp`.
 - quickchr **reserves** the port and never binds it — no `hostfwd`. Bind the listener
   on `127.0.0.1:<port>`, **unconnected**.
-- A port another machine forwards or receives on (or this machine forwards) is
-  `PORT_CONFLICT`, and the message names the next free port. The same name with a
-  different port is `INVALID_RECEIVE_SPEC` — `--no-receive` it first, or pass both in
-  one `set` call.
-- `start` on an existing machine records `--receive` slots it does not have yet
-  instead of ignoring them.
+- A port another machine forwards or receives on, one this machine forwards, or one
+  inside any machine's 10-port block (Windows puts QEMU's monitor/serial/QGA TCP
+  sockets at +6..+8) is `PORT_CONFLICT`, and the message names the next free port.
+  The same name with a different port is `INVALID_RECEIVE_SPEC` unless the same call
+  removes it: `set lab --no-receive syslog --receive syslog:5515` moves it as one
+  change (library: `changeReceivePorts({ remove, add })`), and a refused move keeps
+  the old slot.
+- `start` on an existing machine (including `--fg` attaching to a running one) records
+  `--receive` slots it does not have yet instead of ignoring them. A library
+  `dryRun` previews them without saving.
 - Needs a `user` NIC; refused otherwise.
 - `--forward tzsp` is refused with a pointer to `--receive`: a forward is host→guest.
 

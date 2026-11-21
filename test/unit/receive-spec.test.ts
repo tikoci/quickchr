@@ -4,6 +4,7 @@ import { parseForwardSpec } from "../../src/lib/forward-spec.ts";
 import {
 	normalizeReceivePort,
 	parseReceiveSpec,
+	planReceiveChange,
 	receiveEndpoint,
 	receiveEndpoints,
 	validateReceivePorts,
@@ -153,5 +154,59 @@ describe("registry separation", () => {
 
 	test("defaults are unprivileged", () => {
 		for (const r of WELL_KNOWN_RECEIVE_PORTS) expect(r.defaultPort).toBeGreaterThanOrEqual(1024);
+	});
+});
+
+describe("review fixes (#303)", () => {
+	const ownPorts: Record<string, PortMapping> = { http: { name: "http", host: 9400, guest: 80, proto: "tcp" } };
+
+	test("a port inside another machine's block is taken (Windows QEMU IPC lives at +6..+8)", () => {
+		const other: ReceiveCheckMachine = { name: "win", portBase: 9400, ports: {}, receivePorts: [] };
+		expect(() => validateReceivePorts([{ name: "app", port: 9406, proto: "tcp" }], "lab", {}, [], [other])).toThrow("port block 9400–9409");
+		// The hint skips the whole block.
+		expect(() => validateReceivePorts([{ name: "app", port: 9406, proto: "tcp" }], "lab", {}, [], [other])).toThrow("--receive app:9410");
+	});
+
+	test("a port inside this machine's own block is taken", () => {
+		expect(() => validateReceivePorts([{ name: "app", port: 9407, proto: "udp" }], "lab", ownPorts, [], [], 9400)).toThrow("this machine's port block");
+	});
+
+	test("an in-flight creation's resolved forward hosts are taken", () => {
+		const pending: ReceiveCheckMachine = {
+			name: "creating",
+			portBase: 9500,
+			ports: { "pending-0": { name: "pending-0", host: 9600, guest: 0, proto: "tcp" } },
+			receivePorts: [],
+		};
+		expect(() => validateReceivePorts([{ name: "x", port: 9600, proto: "udp" }], "lab", {}, [], [pending])).toThrow('machine "creating"');
+	});
+});
+
+describe("planReceiveChange", () => {
+	const machine = {
+		name: "alpha",
+		portBase: 9100,
+		ports: {},
+		receivePorts: [{ name: "syslog", port: 5514, proto: "udp" as const }],
+	};
+	const beta: ReceiveCheckMachine = { name: "beta", ports: {}, receivePorts: [{ name: "syslog", port: 5515, proto: "udp" }] };
+
+	test("moving a slot is one change", () => {
+		expect(planReceiveChange(machine, [{ name: "syslog", port: 5516, proto: "udp" }], ["syslog"], [beta])).toEqual([
+			{ name: "syslog", port: 5516, proto: "udp" },
+		]);
+	});
+
+	test("a refused move throws and leaves the input untouched", () => {
+		expect(() => planReceiveChange(machine, [{ name: "syslog", port: 5515, proto: "udp" }], ["syslog"], [beta])).toThrow('machine "beta"');
+		expect(machine.receivePorts).toEqual([{ name: "syslog", port: 5514, proto: "udp" }]);
+	});
+
+	test("same name, different port, without a removal points at the one-call move", () => {
+		expect(() => planReceiveChange(machine, [{ name: "syslog", port: 5516, proto: "udp" }], [], [])).toThrow("--no-receive syslog --receive syslog:5516");
+	});
+
+	test("re-adding the same slot is a no-op; removing an absent name is ignored", () => {
+		expect(planReceiveChange(machine, [{ name: "syslog", port: 5514, proto: "udp" }], ["nope"], [])).toEqual(machine.receivePorts);
 	});
 });

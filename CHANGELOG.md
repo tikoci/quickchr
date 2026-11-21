@@ -28,6 +28,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   captureInterface }`, or `null` when the machine has no user-mode NIC) and
   `receive` (receive ports keyed by name). Additive: `descriptorVersion` stays 1.
   `quickchr list <name> --json` adds `receivePorts`. (#299)
+- `ChrInstance.changeReceivePorts({ remove, add })` applies a receive change as one
+  validated step; `set --no-receive x --receive x:<port>` uses it, so a refused move
+  keeps the old slot. (#299)
 
 ### Changed
 
@@ -42,6 +45,13 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- A library `start({ dryRun: true })` naming an existing, stopped machine launched
+  it. It now returns a preview handle without spawning QEMU. (#303 review)
+- Port allocation now sees stopped machines' explicit forwards and in-flight creations'
+  resolved forward ports, so an explicit `portBase` or `--forward` can no longer land on
+  a port another machine holds. `machine.json` is written atomically (temp file +
+  rename), and `list`/`get` refreshing a dead machine's status patch only the status
+  fields instead of rewriting a possibly stale record. (#303 review)
 - **`timeoutExtra` now applies when `start()` boots a machine that already exists**:
   one `add()` made, or one that has booted before. Only a new machine's start used to
   add it. On the CLI, `quickchr start <name> --timeout-extra` and the `timeout-extra`

@@ -370,3 +370,48 @@ describe("ChrInstance receive slots (#299)", () => {
 		expect(QuickCHR.get("router")?.state.receivePorts).toBeUndefined();
 	});
 });
+
+describe("receive slots — review fixes (#303)", () => {
+	test("a refused move via changeReceivePorts keeps the original slot on disk", async () => {
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined, receivePorts: [{ name: "syslog", port: 5514, proto: "udp" }] }));
+		writeMachine(baseState("beta", { status: "stopped", pid: undefined, portBase: 19110, ports: {}, receivePorts: [{ name: "syslog", port: 5515, proto: "udp" }] }));
+		await expect(
+			QuickCHR.get("alpha")?.changeReceivePorts({ remove: ["syslog"], add: ["syslog:5515"] }),
+		).rejects.toMatchObject({ code: "PORT_CONFLICT" });
+		expect(QuickCHR.get("alpha")?.state.receivePorts).toEqual([{ name: "syslog", port: 5514, proto: "udp" }]);
+		expect(await QuickCHR.get("alpha")?.changeReceivePorts({ remove: ["syslog"], add: ["syslog:5516"] })).toEqual([
+			{ name: "syslog", port: 5516, proto: "udp" },
+		]);
+	});
+
+	test("a dry-run start of a stopped machine previews receive slots without saving or launching", async () => {
+		writeMachine(baseState("alpha", { status: "stopped", pid: undefined }));
+		const instance = await QuickCHR.start({ name: "alpha", dryRun: true, receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] });
+		expect(instance.receive.tzsp?.hostPort).toBe(37008);
+		const onDisk = QuickCHR.get("alpha")?.state;
+		expect(onDisk?.receivePorts).toBeUndefined();
+		expect(onDisk?.status).toBe("stopped");
+	});
+
+	test("an explicit portBase over another machine's receive port is a PORT_CONFLICT", async () => {
+		writeMachine(baseState("rx", { status: "stopped", pid: undefined, receivePorts: [{ name: "app", port: 19402, proto: "udp" }] }));
+		await expect(
+			QuickCHR.start({ name: "fresh", version: "7.22.1", arch: "x86", dryRun: true, portBase: 19400 }),
+		).rejects.toMatchObject({ code: "PORT_CONFLICT" });
+	});
+
+	test("a status refresh does not write back stale config over a newer receive change", async () => {
+		// A pid that cannot be alive, so the record is stale-running.
+		writeMachine(baseState("alpha", { pid: 2 ** 22 + 12345 }));
+		const stale = JSON.parse(JSON.stringify(baseState("alpha", { pid: 2 ** 22 + 12345 })));
+		// A concurrent `set --receive` lands after the stale read…
+		writeMachine(baseState("alpha", { pid: 2 ** 22 + 12345, receivePorts: [{ name: "syslog", port: 5514, proto: "udp" }] }));
+		// …and the refresh then marks the machine stopped.
+		const { markMachineStopped } = await import("../../src/lib/state.ts");
+		markMachineStopped(stale);
+		const onDisk = JSON.parse(await Bun.file(join(TEST_DIR, "machines", "alpha", "machine.json")).text());
+		expect(onDisk.status).toBe("stopped");
+		expect(onDisk.receivePorts).toEqual([{ name: "syslog", port: 5514, proto: "udp" }]);
+		expect(stale.status).toBe("stopped");
+	});
+});

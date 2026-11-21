@@ -71,6 +71,12 @@ describe("receive slots in the port checks (#299)", () => {
 		expect(await findAvailablePortBlock([], [], [], base, new Set([base + 2]))).toBe(base + PORTS_PER_BLOCK);
 	});
 
+	test("a reserved port on a fixed explicit forward does not walk the allocator", async () => {
+		const base = 47320;
+		const fixed = [{ name: "app", host: 47999, guest: 80, proto: "tcp" as const }];
+		expect(await findAvailablePortBlock([], [], fixed, base, new Set([47999]))).toBe(base);
+	});
+
 	test("an explicit forward on another machine's receive port is a PORT_CONFLICT", () => {
 		const other = { ...fakeMachine("chr-rx", {}), receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" as const }] };
 		expect(() =>

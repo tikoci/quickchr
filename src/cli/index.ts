@@ -1596,6 +1596,10 @@ export async function cmdStart(argv: string[]) {
 	if (!opts.background && opts.wait !== false && !opts.frozen && opts.name) {
 		const runningMachine = QuickCHR.list().find((m) => m.name === opts.name && m.status === "running");
 		if (runningMachine) {
+			// Attaching skips start(), so record --receive here rather than drop it.
+			if ((opts.receivePorts?.length ?? 0) > 0) {
+				await QuickCHR.get(runningMachine.name)?.changeReceivePorts({ add: opts.receivePorts });
+			}
 			await attachSerial(runningMachine.name, runningMachine.machineDir);
 			return;
 		}
@@ -2375,12 +2379,19 @@ async function applyReceiveChange(name: string, add: ReceivePort[], remove: stri
 		console.error(machineNotFoundMessage(name));
 		process.exit(1);
 	}
+	// One change, validated and saved once: a refused --receive leaves the removals
+	// undone too, so moving a slot cannot lose it.
+	const before = instance.state.receivePorts ?? [];
+	const after = await instance.changeReceivePorts({ add, remove });
 	for (const slot of remove) {
-		const removed = await instance.removeReceivePort(slot);
-		console.log(removed ? `Removed receive slot "${slot}" from ${bold(name)}.` : `${bold(name)} has no receive slot "${slot}" — nothing to remove.`);
+		const key = slot.trim().toLowerCase();
+		const had = before.some((r) => r.name === key);
+		const reAdded = add.some((r) => r.name === key);
+		if (!had) console.log(`${bold(name)} has no receive slot "${slot}" — nothing to remove.`);
+		else if (!reAdded) console.log(`Removed receive slot "${key}" from ${bold(name)}.`);
 	}
 	for (const spec of add) {
-		const slot = await instance.addReceivePort(spec);
+		const slot = after.find((r) => r.name === spec.name) ?? spec;
 		console.log(`Receive on ${bold(name)}: ${formatReceive([slot])}`);
 	}
 	if (add.length > 0) {

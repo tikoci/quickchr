@@ -78,6 +78,10 @@ export type LockOperation =
 export interface ResourceReservation {
 	portBase: number;
 	macs: string[];
+	/** Every forward host port the creation resolved — its block and any explicit
+	 *  `--forward` outside it — so a concurrent receive slot or explicit forward cannot
+	 *  take one before `machine.json` is saved (#299). */
+	hosts?: number[];
 	/** Receive-slot ports the creation will record (#299). */
 	receivePorts?: number[];
 }
