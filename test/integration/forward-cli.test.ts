@@ -179,7 +179,7 @@ describe.skipIf(SKIP)("automatic forwards on the Windows IPC offsets (#57)", () 
 	beforeAll(async () => { await cleanupMachine(NAME); });
 	afterAll(async () => { await cleanupMachine(NAME); });
 
-	test("each forward at +6..+8 reaches the guest's web server, and the monitor still answers", async () => {
+	test("who answers on +6..+8: RouterOS, or on Windows QEMU's own sockets (#57); the monitor still answers", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { monitorCommand } = await import("../../src/lib/channels.ts");
 		const { parseUsernetTable } = await import("../../src/lib/diagnostics.ts");
