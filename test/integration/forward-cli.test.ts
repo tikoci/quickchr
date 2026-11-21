@@ -113,3 +113,63 @@ describe.skipIf(SKIP)("CLI --forward flag end-to-end", () => {
 		}
 	}, bootTestTimeout());
 });
+
+/** Send one HTTP request over a raw socket and return whatever answers first.
+ *  Deliberately not `chrGet()`: the question is *who* answers on the port — RouterOS's
+ *  web server or one of QEMU's own sockets (the monitor greets with a "QEMU …" banner,
+ *  which an HTTP client would only report as a parse error). */
+function firstBytes(port: number, timeoutMs: number): Promise<string> {
+	return new Promise((resolve) => {
+		const chunks: Buffer[] = [];
+		const socket = createConnection({ host: "127.0.0.1", port });
+		const done = () => {
+			clearTimeout(timer);
+			socket.destroy();
+			resolve(Buffer.concat(chunks).toString("utf8").slice(0, 200));
+		};
+		const timer = setTimeout(done, timeoutMs);
+		socket.once("connect", () => socket.write("GET / HTTP/1.0\r\nHost: chr\r\n\r\n"));
+		socket.on("data", (d: Buffer) => {
+			chunks.push(d);
+			if (Buffer.concat(chunks).length > 64) done();
+		});
+		socket.once("close", done);
+		socket.once("error", done);
+	});
+}
+
+/**
+ * Automatic forwards take offsets +6, +7, +8 of the port block. On Windows those are
+ * also QEMU's monitor, serial and QGA TCP sockets (#57), and Windows lets both bind
+ * the same port, so nothing fails at startup. This checks who actually answers on each
+ * forward, and that quickchr still reaches its own monitor.
+ */
+describe.skipIf(SKIP)("automatic forwards on the Windows IPC offsets (#57)", () => {
+	const NAME = "integration-forward-ipc";
+
+	beforeAll(async () => { await cleanupMachine(NAME); });
+	afterAll(async () => { await cleanupMachine(NAME); });
+
+	test("each forward at +6..+8 reaches the guest's web server, and the monitor still answers", async () => {
+		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
+		const { monitorCommand } = await import("../../src/lib/channels.ts");
+		const extraPorts = ["ipc6", "ipc7", "ipc8"].map((name) => ({ name, host: 0, guest: 80, proto: "tcp" as const }));
+		const instance = await QuickCHR.start({ name: NAME, background: true, extraPorts });
+		try {
+			const base = instance.state.portBase;
+			const answers: Record<string, string> = {};
+			for (const name of ["ipc6", "ipc7", "ipc8"]) {
+				const host = instance.state.ports[name]?.host as number;
+				answers[`${name} (${host}, +${host - base})`] = await firstBytes(host, 5_000);
+			}
+			const monitor = await monitorCommand(instance.state.machineDir, "info status", 5_000, base).catch((e: unknown) => `ERROR: ${e}`);
+			console.log(`[#57 probe] platform=${process.platform} portBase=${base}`);
+			for (const [k, v] of Object.entries(answers)) console.log(`[#57 probe] ${k}: ${JSON.stringify(v)}`);
+			console.log(`[#57 probe] monitor "info status": ${JSON.stringify(monitor.slice(0, 200))}`);
+			for (const v of Object.values(answers)) expect(v).toStartWith("HTTP/1.");
+			expect(monitor).toContain("running");
+		} finally {
+			try { await instance.stop(); } catch { /* ignore */ }
+		}
+	}, bootTestTimeout());
+});
