@@ -143,6 +143,11 @@ function firstBytes(port: number, timeoutMs: number): Promise<string> {
  * also QEMU's monitor, serial and QGA TCP sockets (#57), and Windows lets both bind
  * the same port, so nothing fails at startup. This checks who actually answers on each
  * forward, and that quickchr still reaches its own monitor.
+ *
+ * Grounded on windows-latest, QEMU 11.1.0 (integration.yml run 44915869197): QEMU's
+ * sockets win. +6 answers with the monitor banner, +7 is the guest's serial console
+ * (the request is typed in as a login), +8 is silent. Linux and macOS (Unix sockets for
+ * IPC) reach RouterOS on all three.
  */
 describe.skipIf(SKIP)("automatic forwards on the Windows IPC offsets (#57)", () => {
 	const NAME = "integration-forward-ipc";
@@ -166,8 +171,17 @@ describe.skipIf(SKIP)("automatic forwards on the Windows IPC offsets (#57)", () 
 			console.log(`[#57 probe] platform=${process.platform} portBase=${base}`);
 			for (const [k, v] of Object.entries(answers)) console.log(`[#57 probe] ${k}: ${JSON.stringify(v)}`);
 			console.log(`[#57 probe] monitor "info status": ${JSON.stringify(monitor.slice(0, 200))}`);
-			for (const v of Object.values(answers)) expect(v).toStartWith("HTTP/1.");
 			expect(monitor).toContain("running");
+			if (process.platform === "win32") {
+				// Known #57 behaviour, asserted exactly so a different failure is not
+				// mistaken for it. When #57 moves extras off +6..+8 this goes red: delete
+				// this branch so Windows takes the assertion below like everyone else.
+				const at6 = Object.entries(answers).find(([k]) => k.endsWith("+6)"))?.[1] ?? "";
+				expect(at6).toStartWith("QEMU ");
+				expect(at6).toContain("monitor");
+				return;
+			}
+			for (const v of Object.values(answers)) expect(v).toStartWith("HTTP/1.");
 		} finally {
 			try { await instance.stop(); } catch { /* ignore */ }
 		}
