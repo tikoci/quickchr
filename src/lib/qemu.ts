@@ -561,31 +561,40 @@ function readPidfile(machineDir: string): number | undefined {
  *  With no usable `qemu.pid`, see {@link scanForQemu}. */
 export function liveQemuFor(machineDir: string): LiveQemu | undefined {
 	const pid = readPidfile(machineDir);
-	if (pid === undefined) return scanForQemu(machineDir);
-	if (pidLiveness(pid) === "dead") return undefined;
-	const argv = processArgv(pid);
-	if (argv === undefined) {
-		// ps also fails for a process that exited between the checks.
-		return pidLiveness(pid) === "dead" ? undefined : { pid, verified: false };
+	if (pid !== undefined && pidLiveness(pid) !== "dead") {
+		const argv = processArgv(pid);
+		if (argv === undefined) {
+			// ps also fails for a process that exited between the checks.
+			if (pidLiveness(pid) !== "dead") return { pid, verified: false };
+		} else {
+			const target = canonicalPath(machineDir);
+			if (argvPaths(argv).some((path) => canonicalPath(dirname(path)) === target)) return { pid, verified: true };
+			const segment = `${sep}machines${sep}${basename(machineDir)}${sep}`;
+			if (argv.some((arg) => arg.includes(segment))) return { pid, verified: false };
+		}
 	}
-	const target = canonicalPath(machineDir);
-	if (argvPaths(argv).some((path) => canonicalPath(dirname(path)) === target)) return { pid, verified: true };
-	const segment = `${sep}machines${sep}${basename(machineDir)}${sep}`;
-	if (argv.some((arg) => arg.includes(segment))) return { pid, verified: false };
-	return undefined;
+	// No pidfile, a dead pid, or a pid that is not this QEMU: another QEMU may still
+	// hold the directory (a later start whose pidfile write was lost).
+	return scanForQemu(machineDir);
 }
 
 /** With no usable `qemu.pid`, find the QEMU by its command line: a `qemu-system-*`
  *  process with a file argument in `machineDir`. Releases before #294 wrote the pidfile
  *  only after the 1.5 s startup check, and a kill or failed write can still lose it.
- *  Only a canonical-path match counts here: with no pidfile tying a pid to this
- *  directory, a same-named machine under another data dir is not this one.
- *  Linux reads `/proc`; macOS runs one `ps`, whose space-joined output loses a path
- *  that contains a space. Windows has no cheap equivalent, so nothing is found there. */
+ *  Also used when the pidfile's pid is dead or is not this directory's QEMU.
+ *  Only this directory's own path counts here: with no pidfile tying a pid to it,
+ *  a same-named machine under another data dir is not this one. Linux reads
+ *  `/proc`; macOS runs one `ps` and also matches the directory in the joined
+ *  command line, since a path with a space cannot be split back out. Windows has
+ *  no cheap equivalent, so nothing is found there. */
 function scanForQemu(machineDir: string): LiveQemu | undefined {
 	const target = canonicalPath(machineDir);
+	// macOS `ps` joins argv with spaces, so a path containing a space never parses
+	// back out; the joined text still contains the directory itself.
+	const prefixes = [...new Set([target, resolve(machineDir)])].map((dir) => `${dir}${sep}`);
 	for (const [pid, argv] of qemuProcesses()) {
 		if (argvPaths(argv).some((path) => canonicalPath(dirname(path)) === target)) return { pid, verified: true };
+		if (argv.some((arg) => prefixes.some((prefix) => arg.includes(prefix)))) return { pid, verified: true };
 	}
 	return undefined;
 }
@@ -614,7 +623,7 @@ function qemuProcesses(): Array<[number, string[]]> {
 				const m = /^\s*(\d+)\s+(.+)$/.exec(line);
 				if (!m) continue;
 				const words = (m[2] as string).split(/\s+/);
-				if (isQemu(words[0])) found.push([Number(m[1]), words]);
+				if (isQemu(words[0])) found.push([Number(m[1]), [m[2] as string, ...words]]);
 			}
 		} catch { /* no ps: nothing found */ }
 	}

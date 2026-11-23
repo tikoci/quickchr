@@ -196,6 +196,29 @@ describe("removeOrphan with a live QEMU (#294)", () => {
 			expect(QuickCHR.removeOrphan("no-pid-other")).toBe(true);
 		});
 
+		test("a dead pid in qemu.pid does not hide a later QEMU still using the directory", async () => {
+			const dir = getMachineDir("dead-pid-live");
+			const gone = spawnIdle();
+			const goneExited = gone.exited;
+			gone.kill();
+			await goneExited;
+			orphanWithPid("dead-pid-live", gone.pid);
+			const qemu = spawnQemuNamed(diskArg(dir));
+			expect(liveQemuFor(dir)).toEqual({ pid: qemu.pid, verified: true });
+			expect(errorOf(() => QuickCHR.removeOrphan("dead-pid-live")).code).toBe("MACHINE_RUNNING");
+			expect(existsSync(dir)).toBe(true);
+		});
+
+		test("with no qemu.pid, a data dir whose path has a space still matches", () => {
+			// macOS ps joins argv with spaces; the scan must not depend on splitting it.
+			process.env.QUICKCHR_DATA_DIR = join(root, "CHR labs");
+			const dir = getMachineDir("spaced");
+			mkdirSync(dir, { recursive: true });
+			const qemu = spawnQemuNamed(diskArg(dir));
+			expect(liveQemuFor(dir)).toEqual({ pid: qemu.pid, verified: true });
+			expect(errorOf(() => QuickCHR.removeOrphan("spaced")).code).toBe("MACHINE_RUNNING");
+		});
+
 		test("the hint quotes a legacy name the shell would split", () => {
 			const dir = getMachineDir("old lab");
 			const qemu = spawnIdle(diskArg(dir));
