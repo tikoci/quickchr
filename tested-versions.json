@@ -420,13 +420,18 @@
 	"7.25.2": {
 		"linux-arm64": {
 			"conclusion": "pass",
-			"date": "2026-11-23T14:40:08.602Z",
-			"run_id": "45186910173"
+			"date": "2026-11-23T17:18:58.605Z",
+			"run_id": "45215995749"
 		},
 		"linux-x86": {
 			"conclusion": "pass",
-			"date": "2026-11-23T15:27:18.671Z",
-			"run_id": "45196980366"
+			"date": "2026-11-23T17:06:50.170Z",
+			"run_id": "45215995749"
+		},
+		"macos-arm64": {
+			"conclusion": "pass",
+			"date": "2026-11-23T17:23:37.608Z",
+			"run_id": "45215995749"
 		},
 		"windows-x86": {
 			"conclusion": "fail",
