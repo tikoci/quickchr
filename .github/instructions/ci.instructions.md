@@ -62,7 +62,7 @@ The repo has several workflows, each with a distinct purpose:
 |----------|------|---------|---------|
 | **CI** | `ci.yml` | push/PR to `main`, `workflow_dispatch` | Fast quality gate (~3-5 min, no QEMU): lint, unit, Windows unit, PR freshness gate |
 | **Main Integration** | `main.yml` | push to `main` (except docs-only — `paths-ignore`), `workflow_dispatch` | The continuous integration-test signal: full suite on linux/x86_64 + linux/aarch64 |
-| **Weekly Sweep** | `sweep.yml` | schedule (Mon 05:37 UTC), `workflow_dispatch` | All-platform sweep + examples smoke (separate file so a red TCG leg never blocks PRs) |
+| **Weekly Sweep** | `sweep.yml` | schedule (Mon 05:37 UTC), `workflow_dispatch` | Sweep of the `all` platforms (linux-x86, linux-arm64, macos-arm64, windows-x86; macos-x86 is explicit-dispatch only, #305) + examples smoke (separate file so a red TCG leg never blocks PRs) |
 | **Integration** | `integration.yml` | `workflow_dispatch`, `workflow_call` | THE reusable integration unit — any platform × RouterOS target × test filter |
 | **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1` or `PSScriptAnalyzerSettings.psd1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
 | **Release** | `release.yml` | `workflow_dispatch` only | One-click gate → tag/GitHub Release → npm publish from committed `package.json` |
@@ -105,11 +105,13 @@ turns the gate green again. Never "fix" the gate by weakening the verdict logic.
 
 ### Weekly Sweep (sweep.yml)
 
-Monday 05:37 UTC (or `gh workflow run sweep.yml`): the four `all` platforms (not macos-x86, #305) + the examples smoke
-harness, via `integration.yml` with `platforms=all` and `tcg-smoke: true` (the weekly
-cadence bounds TCG legs to the smoke subset — `anchor.test.ts`, `receive-ports.test.ts`,
+Monday 05:37 UTC (or `gh workflow run sweep.yml`): the four `all` platforms — linux-x86,
+linux-arm64, macos-arm64, windows-x86 — + the examples smoke harness, via `integration.yml`
+with `platforms=all` and `tcg-smoke: true`. macos-x86 is not in `all` (#305) and runs only
+on an explicit `integration.yml` dispatch that names it. The weekly
+cadence bounds the windows-x86 TCG leg to the smoke subset — `anchor.test.ts`, `receive-ports.test.ts`,
 `forward-cli.test.ts` — to cap cost; the full-suite-on-TCG "find
-out" path is a manual `integration.yml` dispatch, where `tcg-smoke` defaults OFF).
+out" path is a manual `integration.yml` dispatch, where `tcg-smoke` defaults OFF.
 Deliberately a separate workflow from `main.yml` so a red TCG leg **never** trips the PR
 freshness gate — but a red sweep is still a real failure to investigate, never green-washed.
 
@@ -624,12 +626,20 @@ single run, `collect-metrics: true`).
   tested-versions.json and the red run stays visible. After investigating/fixing, re-run
   manually: `gh workflow run integration.yml -f platforms=linux-x86 -f routeros-targets=<version> -f collect-metrics=true`
 - Known-broken betas: `-f skip-versions=7.24beta3,...` on a manual dispatch.
-- **A record the check can't read fails the check** (#284). Only a 404 for the file on an
-  existing `ci-data` branch (the bootstrap case) reads as `{}`. A 5xx is retried twice;
-  after that, or on any other error (token or permission, a missing `ci-data` branch, a
-  file that isn't a JSON object), the `check` job fails with `gh`'s output in the log and
-  nothing is dispatched. Reading an unreadable record as empty would re-dispatch every
-  version, including the ones that already failed.
+- **A record the check can't read fails the check** (#284). The step reads `ci-data`'s
+  root tree (branch → tree SHA → that tree) rather than the contents API, because a
+  contents 404 looks the same whether the file is absent or the API hiccuped. Only a
+  complete (`truncated: false`) tree with no `tested-versions.json` entry reads as `{}`
+  (the bootstrap case). Otherwise the entry must be a regular-file blob, fetched by SHA and
+  checked against `git hash-object`, and the content must be exactly one JSON object in
+  the shape `scripts/ci-metrics.ts` writes: version → platform id → `{ run_id, date,
+  conclusion }`, conclusion `pass` or `fail` (`jq -es`, so two concatenated objects or an
+  empty `{}` record fail). A 5xx is retried twice per request; after that, or on any
+  other error (a 404 anywhere, token or permission, a missing `ci-data` branch), the
+  `check` job fails with `gh`'s output in the log and nothing is dispatched. Reading an
+  unreadable record as empty would re-dispatch every version, including the ones that
+  already failed. Changing the record's shape in `ci-metrics.ts` means changing that jq
+  filter too.
 - Successful dispatched runs fold into tested-versions.json via the normal aggregate
   path, so the next day's check is a no-op for that version.
 
@@ -637,7 +647,7 @@ single run, `collect-metrics: true`).
 
 The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Windows-only tests (`describe.skipIf(process.platform !== "win32")`) in:
 
-- `test/unit/windows-paths.test.ts` — `getDataDir()` (`LOCALAPPDATA`/`USERPROFILE`), `getMachinesDir()`, `getCacheDir()`, `findCommandOnPath()` resolves through `PATHEXT` (it uses `Bun.which`, not a `where.exe` spawn, which cost ~75 ms per lookup on windows-latest, #269), `detectPackageManager()` returns `"winget"`
+- `test/unit/windows-paths.test.ts` — `getDataDir()` (`LOCALAPPDATA`/`USERPROFILE`), `getMachinesDir()`, `getCacheDir()`, `findCommandOnPath()` resolves in process (not a `where.exe` spawn, which cost ~75 ms per lookup on windows-latest, #269) and must agree with `where.exe`'s first result for `cmd`, `bun` and `git`, `detectPackageManager()` returns `"winget"`
 - `test/unit/windows-channels.test.ts` — on Windows, `buildQemuArgs` produces TCP-localhost chardev paths (`host=127.0.0.1,port=portBase+N`: monitor +6, serial +7, qga +8), because QEMU's Winsock `bind()` cannot handle `\\.\pipe\` paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` when the TCP port is not listening; `stopMachineByName` handles no `.sock` files
 - `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`. The spawn path is shared with POSIX since #159; the non-Windows half is `test/unit/posix-detach.test.ts`, which signals a real process group and is skipped on Windows (no process groups to signal)
 
@@ -721,8 +731,10 @@ step's own cap is deliberately left unchanged.
 natively (`process.arch=arm64`), but choco's QEMU 11.1.0 is an x64 build
 (`PE32+ … x86-64`) running under Windows' x64 emulation. `qemu-system-aarch64 --version`
 and `-M none` work; every TCG machine (`-M virt`, and `qemu-system-x86_64 -M pc`) exits
-with code 255 within a second and prints nothing, so every boot fails as "QEMU exited
-immediately". Mechanism unknown. Inferred: TCG's runtime code generation under x64 emulation. The id comes
+within a second and prints nothing, with status 255 as Bun reported it. Bun keeps only
+the low byte of a Windows exit status, so 255 is that byte, not the full status; the probe
+now runs QEMU through a .NET helper to capture all 32 bits, and a rerun records it.
+Every boot therefore fails as "QEMU exited immediately". Mechanism unknown. Inferred: TCG's runtime code generation under x64 emulation. The id comes
 back when a native arm64 QEMU for Windows is available to install. Re-run the probe
 (`gh workflow run lab.yml -f lab=windows-arm64-qemu`) before adding it.
 

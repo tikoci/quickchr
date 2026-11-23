@@ -355,7 +355,7 @@ async function ghJson<T>(path: string): Promise<T | undefined> {
  *  `filter=all` is mandatory: the API defaults to `latest`, which returns only
  *  the most recent check run per NAME. A sweep dispatches `platforms=all`
  *  against `main` repeatedly, so the same SHA accumulates a
- *  `leg: macos-x86 · stable` from every one of them — the default would hand
+ *  `leg: windows-x86 · stable` from every one of them — the default would hand
  *  this run its successor's check run. `external_id` carries the run id, and anything that
  *  does not parse as ours is skipped. */
 async function fetchCheckpoints(sha: string, runId: string, attempt: string): Promise<Map<string, CheckpointView>> {
