@@ -26,7 +26,6 @@ Requirements:
 
 import argparse
 import os
-import platform
 import socket
 import struct
 import subprocess
@@ -202,9 +201,9 @@ def main() -> None:
     elif os.environ.get("QUICKCHR"):
         QUICKCHR = os.environ["QUICKCHR"].split()
 
+    # Forwarded unchanged: quickchr resolves `auto` to the physical host's arch,
+    # which platform.machine() gets wrong for an x86_64 Python under Rosetta (#293).
     arch = args.arch
-    if arch == "auto":
-        arch = "arm64" if platform.machine() in ("arm64", "aarch64") else "x86"
 
     # 1. Host TCP server on an ephemeral loopback port.
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

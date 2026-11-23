@@ -181,8 +181,8 @@ describe("cacheKey default arch (#293)", () => {
 		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
 		Object.defineProperty(process, "arch", { value: "x64", configurable: true });
 		resetAppleSiliconHostCache();
-		(Bun as unknown as { spawnSync: unknown }).spawnSync = () => ({
-			exitCode: 0,
+		(Bun as unknown as { spawnSync: unknown }).spawnSync = (cmd: string[]) => ({
+			exitCode: cmd.join(" ") === "/usr/sbin/sysctl -n hw.optional.arm64" ? 0 : 1,
 			stdout: new TextEncoder().encode("1\n"),
 			stderr: new Uint8Array(),
 		});

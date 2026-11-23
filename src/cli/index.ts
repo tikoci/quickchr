@@ -3684,8 +3684,10 @@ async function cmdDoctor(argv: string[] = []) {
 	const { flags } = parseFlags(argv);
 	const asJson = flagBool(flags, "json");
 	const { QuickCHR } = await import("../lib/quickchr.ts");
+	const { resolveSetting } = await import("../lib/settings.ts");
 
-	const result = await QuickCHR.doctor();
+	// Judge prerequisites against the arch `add`/`start` would pick (#293).
+	const result = await QuickCHR.doctor(resolveSetting("default-arch").value as Arch | "auto" | undefined);
 
 	if (asJson) {
 		// Best-effort: cache entries older than current long-term (offline → empty).

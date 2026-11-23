@@ -3765,17 +3765,26 @@ export class QuickCHR {
 		}
 	}
 
-	/** Run doctor checks for prerequisites. */
-	static async doctor(): Promise<DoctorResult> {
+	/**
+	 * Run doctor checks for prerequisites.
+	 *
+	 * `arch` is the guest arch the caller will start by default; it decides which
+	 * missing QEMU binary or firmware is an `error` and which only a `warn`.
+	 * Omitted (or `"auto"`), it is the physical host's ({@link hostChrArch}). The CLI
+	 * passes its `default-arch` setting, so a host configured for x86 guests is not
+	 * failed over a missing arm64 QEMU (#293).
+	 */
+	static async doctor(arch?: Arch | "auto"): Promise<DoctorResult> {
 		const checks: DoctorResult["checks"] = [];
+		const defaultArch = resolveArch(arch);
 
 		checks.push(await bunRuntimeCheck());
 
 		// QEMU for each arch
-		for (const arch of ARCHES) {
-			const qemuName = arch === "arm64" ? "qemu-system-aarch64" : "qemu-system-x86_64";
+		for (const qemuArch of ARCHES) {
+			const qemuName = qemuArch === "arm64" ? "qemu-system-aarch64" : "qemu-system-x86_64";
 			try {
-				const qemuBin = requireQemu(arch);
+				const qemuBin = requireQemu(qemuArch);
 				const ver = getQemuVersion(qemuBin);
 				checks.push({
 					label: qemuName,
@@ -3786,7 +3795,7 @@ export class QuickCHR {
 				const hint = getQemuInstallHint();
 				checks.push({
 					label: qemuName,
-					status: arch === hostChrArch() ? "error" : "warn",
+					status: qemuArch === defaultArch ? "error" : "warn",
 					detail: `not found — ${hint}`,
 				});
 			}
@@ -3803,7 +3812,7 @@ export class QuickCHR {
 		} catch {
 			checks.push({
 				label: "UEFI firmware",
-				status: hostChrArch() === "arm64" ? "error" : "warn",
+				status: defaultArch === "arm64" ? "error" : "warn",
 				detail: "not found (needed for arm64 CHR)",
 			});
 		}

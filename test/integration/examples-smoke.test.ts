@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { QuickCHR } from "../../src/index.ts";
 import { defaultBootTimeout } from "../../src/lib/quickchr.ts";
 import { runExample } from "../../examples/lib.ts";
-import { detectAccel } from "../../src/lib/platform.ts";
+import { detectAccel, hostChrArch } from "../../src/lib/platform.ts";
 
 /**
  * examples-smoke — runs a CURATED SUBSET of the runnable examples end-to-end.
@@ -30,9 +30,10 @@ const QUICKCHR_ENV = { QUICKCHR: `bun run ${resolve(REPO, "src/cli/index.ts")}` 
 // sync with it) — otherwise bun's own test timeout SIGTERMs the harness process
 // before QuickCHR's internal BOOT_TIMEOUT + cleanup path ever runs, turning a
 // diagnosable failure into a bare exit-143 and leaking the QEMU process (#89).
-// Examples run host-native arch, so this never hits the (much larger) cross-arch
-// TCG factor — guestArch names what defaultBootTimeout/detectAccel actually take.
-const guestArch: "x86" | "arm64" = process.arch === "arm64" ? "arm64" : "x86";
+// Examples run the default (physical host) arch, so this never hits the (much
+// larger) cross-arch TCG factor — guestArch names what defaultBootTimeout/detectAccel
+// actually take. hostChrArch(), not process.arch: under Rosetta the default is arm64 (#293).
+const guestArch: "x86" | "arm64" = hostChrArch();
 const accel = SKIP ? "tcg" : await detectAccel(guestArch);
 const bootBudgetMs = defaultBootTimeout(guestArch, false, accel);
 // Floor at the prior flat constant (tuned for kvm/hvf: 180s boot + 180s of

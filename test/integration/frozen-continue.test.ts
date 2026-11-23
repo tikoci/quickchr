@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout, TEST_ACCEL } from "./timeouts.ts";
+import { bootTestTimeout, TEST_ACCEL, TEST_ARCH } from "./timeouts.ts";
 
 /**
  * Integration test — `start --frozen` + `quickchr continue` (#214).
@@ -13,7 +13,7 @@ import { bootTestTimeout, TEST_ACCEL } from "./timeouts.ts";
  */
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION || process.platform === "win32";
-const arch = process.arch === "arm64" ? "arm64" : "x86";
+const arch = TEST_ARCH;
 
 async function cleanupMachine(name: string): Promise<void> {
 	const { QuickCHR } = await import("../../src/lib/quickchr.ts");

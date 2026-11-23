@@ -3,7 +3,7 @@ import { accelTimeoutFactor, detectAccel, isCrossArchEmulation } from "../../src
 import { restGet } from "../../src/lib/rest.ts";
 import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout } from "./timeouts.ts";
+import { bootTestTimeout, TEST_ARCH } from "./timeouts.ts";
 
 /**
  * Anchor test — RouterOS REST API schema stability.
@@ -41,7 +41,7 @@ describe.skipIf(SKIP)("RouterOS REST schema anchor", () => {
 
 			instance = await QuickCHR.start({
 				...imageTarget(),
-				arch: process.arch === "arm64" ? "arm64" : "x86",
+				arch: TEST_ARCH,
 				background: true,
 				name: MACHINE_NAME,
 			});

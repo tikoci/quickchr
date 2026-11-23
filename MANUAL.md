@@ -105,7 +105,10 @@ Reports prerequisite status, accelerator availability, image cache
 size, machine count, free disk space, and shell-completion install
 state. The disk check measures the data dir's filesystem and warns when free
 space is under `storage-reserve` + 2 GiB. Exit code is `0` when no checks return
-`error` (warnings are OK).
+`error` (warnings are OK). A missing QEMU binary (or UEFI firmware) is an `error`
+only for the default guest arch, the `default-arch` setting or else the physical
+host's; for the other arch it is a warning. The library's `QuickCHR.doctor(arch)`
+takes that arch, and defaults to the physical host's.
 
 ```bash
 quickchr doctor              # human-readable
@@ -862,7 +865,7 @@ Precedence per key (highest wins): CLI flag > `QUICKCHR_<KEY>` env var >
 | Key | Consumed by | Type | Built-in default |
 |---|---|---|---|
 | `default-channel` | `add`/`start`'s `--channel`, wizard's channel prompt | `stable`\|`long-term`\|`testing`\|`development` | `stable` |
-| `default-arch` | `add`/`start`'s `--arch`, wizard's arch prompt | `arm64`\|`x86`\|`auto` | `auto` (host native) |
+| `default-arch` | `add`/`start`'s `--arch`, wizard's arch prompt, `doctor`'s QEMU checks | `arm64`\|`x86`\|`auto` | `auto` (host native) |
 | `accel` | `add`/`start`'s `--accel`; every `detectAccel()` call in the run | `auto`\|`tcg`\|`hvf`\|`kvm` | `auto` (detect) |
 | `cache-max-size` | Auto-prune cap applied after each successful `start` | size string (e.g. `2G`, `512M`) | `2G` |
 | `storage-reserve` | Free space creating a machine or filling the cache must leave, beyond what it writes | size string | `2G` |
@@ -953,7 +956,7 @@ QuickCHR.get(name: string): ChrInstance | null
 QuickCHR.listUnreadable(): Array<{ name: string; error: string }>
 QuickCHR.listOrphans(): string[]
 QuickCHR.removeOrphan(name: string): boolean
-QuickCHR.doctor(): Promise<DoctorResult>
+QuickCHR.doctor(arch?: Arch | "auto"): Promise<DoctorResult>
 QuickCHR.resolveVersion(channel: Channel): Promise<string>
 ```
 
@@ -1752,28 +1755,36 @@ arch:
 
 | Host | Guest | Accel |
 |---|---|---|
-| macOS x86_64 | x86 | HVF |
+| macOS x86_64 | x86 (default) | HVF |
 | macOS x86_64 | arm64 | TCG |
-| macOS arm64 (native bun) | arm64 | TCG |
+| macOS arm64 (native bun) | arm64 (default) | TCG |
 | macOS arm64 (native bun) | x86 | TCG |
-| macOS arm64 (Rosetta bun) | arm64 | TCG |
+| macOS arm64 (Rosetta bun) | arm64 (default) | TCG |
 | macOS arm64 (Rosetta bun) | x86 | TCG |
 | Linux x86_64 + `/dev/kvm` writable | x86 | KVM |
 | Linux aarch64 + `/dev/kvm` writable | arm64 | KVM |
 | any other combo | any | TCG |
 
+`(default)` marks the guest arch quickchr picks when none is given (see below).
 `Bun` running under Rosetta on Apple Silicon reports `process.arch ===
-"x64"`, so quickchr checks `sysctl.proc_translated` to identify the physical
-arm64 host. Auto-selection uses TCG for both guest architectures there: HVF
+"x64"`, so quickchr reads `hw.optional.arm64` (1 on Apple Silicon, even under
+Rosetta) to identify the physical arm64 host. Auto-selection uses TCG for both guest architectures there: HVF
 cannot virtualize x86 across architectures, and current arm64 CHR images need
 AArch32 userspace support that Apple Silicon does not provide. Use `--accel`
 (or `QUICKCHR_ACCEL` / the `accel` setting) only to override this deliberately.
 
-The same check sets the **default guest arch**: with no `--arch` (or `auto`), quickchr
-picks the physical host's arch, which `hostChrArch()` returns. Under Rosetta that is
-`arm64`, so the default guest is same-arch TCG rather than x86 under cross-arch TCG
-(#293). Machine creation, `cacheKey()`/`cacheAdd()` and the setup wizard all use it,
-and the `default-arch` setting still wins when it names an arch.
+The same check sets the **default guest arch**, the physical host's, which
+`hostChrArch()` returns. Under Rosetta that is `arm64`, so the default guest is
+same-arch TCG rather than x86 under cross-arch TCG (#293). Precedence:
+
+- **CLI:** `--arch` when given. Without it, the `default-arch` setting; its built-in
+  value `auto` means the physical host's arch. An explicit `--arch auto` always
+  selects the physical host's arch, whatever `default-arch` says.
+- **Library:** `arch` when given; omitting it, or passing `"auto"`, selects the
+  physical host's arch. The library does not read the `default-arch` setting.
+
+Machine creation, `cacheKey()`/`cacheAdd()`, the setup wizard and `doctor` all
+follow this.
 
 ### Boot timeout
 
