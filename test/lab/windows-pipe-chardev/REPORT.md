@@ -9,7 +9,8 @@ maintainer's 2026-11-21 comment.
 exactly one client for the life of the VM. After that client disconnects, every
 reconnect fails: 0/50 for the monitor, 0/50 for serial and 0/50 for QGA, in both
 runs. The pipe chardev also stops QEMU from starting until each pipe has a
-client. Under this result, +6..+8 stays reserved on every OS.
+client. So `-chardev pipe` can't replace the Windows IPC ports; whether +6..+8
+stays reserved on every OS is still open on #57 (see "AF_UNIX" below).
 
 There's a separate finding that bears on the same decision. **AF_UNIX sockets
 (`-chardev socket,path=…`) did reconnect on Windows**: 50/50 for the monitor and
@@ -30,7 +31,7 @@ including today's TCP (see "QGA" below).
 | Runs | [44945337412](https://github.com/tikoci/quickchr/actions/runs/44945337412) (commit `988ccfe`), [44946995156](https://github.com/tikoci/quickchr/actions/runs/44946995156) (commit `521e009`) |
 
 Exact argv for the pipe arm (run 2, machine A). The other arms differ only in the
-three `-chardev` specs:
+three `-chardev` specs. Later probe revisions bind hostfwd to `127.0.0.1`:
 
 ```text
 qemu-system-x86_64 -name lab-a-b9yk -M pc -m 512 -smp 1 -accel tcg,tb-size=256
@@ -62,7 +63,9 @@ disconnect:
   `:put [/system identity get name]` framed by a sentinel (the same scheme as
   `consoleExec`). Expect the machine's name, which was set over serial at boot.
 - **QGA:** send `guest-sync-delimited` and `guest-ping`, and wait 3 s for a
-  `"return"`.
+  `"return"`. That is what the runs below used. Any `"return"` passed, including
+  the sync reply. No Windows trial got one, so the 0/50 results stand. The
+  probe now requires the sync reply with its id, then the ping's own reply.
 
 ## Results
 
@@ -95,9 +98,15 @@ Further pipe-arm checks on machine A (both runs unless a run is named):
   attempts on the monitor pipe, made after the first client closed, each failed
   with "The semaphore timeout period has expired" (`ERROR_SEM_TIMEOUT` from
   `WaitNamedPipe`).
-- **The VM keeps running.** QEMU stayed alive and REST through hostfwd answered
-  `HTTP 200` at the end, about 15 minutes after the channels went dead. The
-  channels are lost; the VM isn't.
+- **The QEMU process keeps running.** It was still alive at the end, about 15
+  minutes after the channels went dead. A bare `fetch()` of
+  `/rest/system/identity` through hostfwd then got `HTTP 200` with each
+  machine's own name, the identity set over serial at boot (run 2's log). That
+  is consistent with the guest staying responsive, but it is supporting
+  evidence only: the probe didn't check the body at the time, and Bun's
+  connection pool can return a stale response (`bun-http.instructions.md`).
+  Later probe revisions record `guestHttpResponsive` only for a 200 whose
+  name matches. The channels are lost; the process isn't.
 
 ### First client and startup (pipe)
 
@@ -161,7 +170,8 @@ fresh-connection trials each across two runs, with latency the same as TCP.
 
 If quickchr adopted this, the open points are:
 
-- **The usable `sun_path` limit on Windows is 107 bytes**, measured in run
+- **On the tested combination, 107 ASCII bytes passed and 108 failed** (the
+  client's connect got `EINVAL`), measured in run
   [45220066588](https://github.com/tikoci/quickchr/actions/runs/45220066588) (see
   "sun_path on Windows" below). A realistic quickchr path fits only with a short
   name. The longest allowed name does not fit.
@@ -186,27 +196,29 @@ length that worked.
 | 108 | starts | created | **`EINVAL`** | — |
 | 109, 110, 130 | exits 1: `UNIX socket path '…' is too long` | — | `ENOENT` | — |
 
-- **107 bytes is the most a client can use.** QEMU accepts 108 (it fills all 108 bytes of
+- **107 bytes was the most a client could use on this combination** (windows-latest,
+  QEMU 11.1.0, Bun 1.4.4, ASCII paths). QEMU accepts 108 (it fills all 108 bytes of
   `sun_path` without a terminating NUL) but Bun's connect rejects that path with `EINVAL`.
   On Linux both QEMU and the client accept 108 (local run, QEMU 11.1.2), so Windows is one
   byte shorter. Inferred, not tested: Winsock's `connect` requires the NUL inside
   `sun_path`.
 - **At 107 bytes the channels behave as on short paths.** Monitor 50/50 (p50 53 ms) and
   serial 50/50 (p50 78 ms) fresh-connection trials, a second client while the first was
-  connected, and REST through hostfwd at the end. QGA refused as in every other Windows
+  connected, and a bare `fetch()` through hostfwd at the end that got `HTTP 200` with the
+  serial-set identity (supporting evidence only, as above). QGA refused as in every other Windows
   run (see the next section).
-- **What fits.** quickchr's channel path is
+- **What fits** (arithmetic from the measured limit, not a run). quickchr's channel path is
   `C:\Users\<user>\AppData\Local\quickchr\machines\<name>\monitor.sock`: 55 bytes plus the
   user and machine names, so `len(user) + len(name)` must be at most 52 bytes. On the
   runner (`runneradmin`, 11) a name can have 41 bytes. Machine names may have 64, and
   profile folders named for domain accounts (such as `jane.doe.CORP`) are common, so the default layout
   fails for long names on many real machines. Non-ASCII user names take more than one
   byte per character (inferred; tested with ASCII only).
-- **So AF_UNIX on Windows needs its own socket location** to drop the IPC ports. Two
-  possible options: a short per-machine directory (for example a hash of the machine
-  dir under `%LOCALAPPDATA%\qc\`), or a refusal at create time for a path over 107
-  bytes, as `socket-registry.ts` already does for inter-VM sockets. That choice belongs to
-  #57, not this lab.
+- **What this leaves open for #57.** Under the default layout, AF_UNIX on Windows
+  doesn't fit every allowed name. The options are a shorter socket location (for
+  example a hash of the machine dir under `%LOCALAPPDATA%\qc\`), a refusal at create
+  time for a path over 107 bytes (as `socket-registry.ts` already does for inter-VM
+  sockets), or keeping the TCP IPC ports. That choice belongs to #57, not this lab.
 
 ## QGA on Windows (all arms)
 
@@ -217,7 +229,10 @@ unix**, QGA accepted the boot-time client plus 0–5 further clients, then refus
 every later connect with `ECONNREFUSED`. This happened in both runs, including
 run 2, where nothing else touched QGA before the trials. Monitor and serial on
 the same QEMU kept reconnecting. On Linux with KVM (local dry-run of this
-harness), 5/5 TCP and 3/3 AF_UNIX QGA trials connected and answered. The
+harness), 5/5 TCP and 3/3 AF_UNIX QGA trials connected and received QGA
+replies. That run counted any `"return"` as a pass, so the sync reply alone
+would have passed and a `guest-ping` reply wasn't verified; the probe now
+requires the ping's own reply. The
 mechanism on Windows is **unknown**. Inferred, unverified: the socket chardev
 stops re-listening when its virtio-serial port has never been opened by the
 guest. It doesn't change the verdict, because a channel that can't answer under

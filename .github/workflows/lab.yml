@@ -33,10 +33,15 @@ on:
           - all
           - ssh-os-baseline
           - windows-pipe-chardev
-      chardev_arms:
-        description: "windows-pipe-chardev: JSON list of arms to run"
-        type: string
-        default: '["pipe","tcp","unix"]'
+      chardev_arm:
+        description: "windows-pipe-chardev: which arm to run"
+        type: choice
+        default: all
+        options:
+          - all
+          - pipe
+          - tcp
+          - unix
   push:
     paths:
       - ".github/workflows/lab.yml"
@@ -162,7 +167,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arm: ${{ fromJSON(inputs.chardev_arms || '["pipe","tcp","unix"]') }}
+        # A choice input, so the value is one of its options; push events have
+        # no inputs and run every arm.
+        arm: ${{ fromJSON((!inputs.chardev_arm || inputs.chardev_arm == 'all') && '["pipe","tcp","unix"]' || format('["{0}"]', inputs.chardev_arm)) }}
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
@@ -192,6 +199,7 @@ jobs:
           "$qemu_dir/qemu-system-x86_64.exe" --version
 
       - name: Probe (${{ matrix.arm }})
+        id: probe
         shell: bash
         env:
           ARM: ${{ matrix.arm }}
@@ -208,24 +216,44 @@ jobs:
           bun run test/lab/windows-pipe-chardev/probe.ts --arm "$ARM" --trials 50 \
             --work "$work" "${extra[@]}" --hard-cap-ms 3300000 2>&1 | tee probe.log
 
+      # The probe stops and awaits its own QEMU children; this is the safety net,
+      # and a QEMU still running here is a probe cleanup bug worth a warning.
       - name: Reap QEMU
         if: always()
         shell: bash
-        run: taskkill //F //IM qemu-system-x86_64.exe || true
+        run: |
+          # taskkill exits non-zero when no such process exists.
+          if taskkill //F //IM qemu-system-x86_64.exe; then
+            echo "::warning::QEMU was still running after the probe exited; killed it"
+          fi
 
       # upload-artifact needs every file under one root, and the unix leg's work
       # dir is on C: while the workspace is on D:, so gather the outputs first.
+      # Best effort when the probe failed; a probe that succeeded must have
+      # written results-<arm>.json.
       - name: Gather probe outputs
         if: always()
         shell: bash
+        env:
+          ARM: ${{ matrix.arm }}
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
         run: |
           mkdir -p lab-out
           cp probe.log lab-out/ 2>/dev/null || true
-          cp "$PROBE_WORK"/results-*.json lab-out/ 2>/dev/null || true
-          for log in "$PROBE_WORK"/*/qemu.log; do
-            [ -f "$log" ] && cp "$log" "lab-out/$(basename "$(dirname "$log")")-qemu.log"
-          done
+          work="${PROBE_WORK:-}"
+          if [ -z "$work" ]; then
+            echo "::warning::PROBE_WORK is unset (the probe step did not start); nothing to gather"
+          else
+            cp "$work/results-$ARM.json" lab-out/ 2>/dev/null || true
+            for log in "$work"/*/qemu.log; do
+              [ -f "$log" ] && cp "$log" "lab-out/$(basename "$(dirname "$log")")-qemu.log"
+            done
+          fi
           ls -l lab-out
+          if [ "$PROBE_OUTCOME" = success ] && [ ! -f "lab-out/results-$ARM.json" ]; then
+            echo "::error::the probe succeeded but wrote no results-$ARM.json"
+            exit 1
+          fi
 
       - name: Upload probe artifacts
         if: always()

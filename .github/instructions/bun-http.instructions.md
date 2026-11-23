@@ -14,8 +14,15 @@ resolving the A record via public DNS and connecting over the IPv4 literal (Host
 + TLS SNI preserved) — resilience to a misconfigured/transient resolver. See
 DESIGN.md decision #9.
 
-**No exceptions.** Do not use bare `fetch()` for external download/upgrade URLs,
-and do not use `fetch()` or inline `node:http` for CHR REST calls.
+**No exceptions in `src/` or integration tests.** Do not use bare `fetch()` for
+external download/upgrade URLs, and do not use `fetch()` or inline `node:http`
+for CHR REST calls. The rule exists so that code which talks to RouterOS gets
+its timeouts and connection handling from one place.
+
+**One narrow allowance:** a lab probe under `test/lab/` whose subject is not
+RouterOS REST (a QEMU transport, say) may use bare `fetch()` for an incidental
+check against the CHR. No REPORT conclusion may rest on that response alone:
+Bun's pool can return a stale response when a port is reused (Bug 1 below).
 
 Import pattern:
 ```typescript

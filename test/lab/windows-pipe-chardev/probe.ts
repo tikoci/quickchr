@@ -27,7 +27,9 @@
  *   3. close the held clients, then N fresh connect → command → disconnect trials
  *      per channel (monitor `info status`, serial `:put [/system identity get
  *      name]`, QGA `guest-ping`)
- *   4. liveness: QEMU process alive, REST through hostfwd answers
+ *   4. liveness: QEMU process alive; REST through hostfwd answers 200 with the
+ *      identity set over serial (a bare fetch(), an incidental check that
+ *      bun-http.instructions.md allows in a lab probe — supporting evidence only)
  *
  * `pipe` also boots a second machine at the same time and checks that each
  * machine's pipes reach that machine, and spawns a third QEMU that reuses the
@@ -45,11 +47,14 @@
  * machine's monitor socket at exactly N bytes; `max` uses the longest length the
  * sweep found working, so the full run sits at the limit.
  * Writes <work>/results-<arm>.json and appends a summary to $GITHUB_STEP_SUMMARY.
+ * Every QEMU child (machines and sweep) is stopped and awaited before exit, on
+ * success, error, Ctrl-C and the hard cap alike. hostfwd binds 127.0.0.1 only
+ * (the guest's admin password is empty), and each machine dir must not exist yet.
  * `tcp` and `unix` also run on Linux/macOS, which is how the harness is debugged.
  */
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import os from "node:os";
 import { join, resolve } from "node:path";
@@ -84,6 +89,9 @@ function nameForMonitorPath(bytes: number): string {
 	return `lab-unix-${"n".repeat(pad)}`;
 }
 const NAME_ARG = arg("name", "");
+/** A machine name becomes a directory under --work: one path component, no separators or dots-only names. */
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+if (NAME_ARG && !NAME_RE.test(NAME_ARG)) throw new Error(`--name must be one path component matching ${NAME_RE}, got ${JSON.stringify(NAME_ARG)}`);
 const SWEEP = arg("sun-path-sweep", "")
 	.split(",")
 	.filter(Boolean)
@@ -149,7 +157,9 @@ function buildArgv(m: Machine, disk: string): string[] {
 		"-m", "512", "-smp", "1",
 		"-accel", ACCEL === "tcg" ? "tcg,tb-size=256" : ACCEL,
 		"-drive", `file=${disk},format=raw,if=virtio`,
-		"-netdev", `user,id=net0,hostfwd=tcp::${m.portBase}-:80`,
+		// Loopback only: the guest's admin has an empty password. (The runs in
+		// the REPORT used `tcp::<port>`, i.e. all interfaces, on CI runners.)
+		"-netdev", `user,id=net0,hostfwd=tcp:127.0.0.1:${m.portBase}-:80`,
 		"-device", "virtio-net-pci,netdev=net0",
 		"-display", "none",
 		"-chardev", chardevSpec(m, "monitor"),
@@ -183,11 +193,13 @@ function openConn(ep: Endpoint, timeoutMs = CONNECT_TIMEOUT_MS): Promise<OpenRes
 		let done = false;
 		const sock = ep.kind === "path" ? connect({ path: ep.path }) : connect(ep.port, ep.host);
 		const conn: Conn = { sock, buf: "", closed: false };
+		openConns.add(conn);
 		sock.on("data", (d: Buffer) => {
 			conn.buf += d.toString("latin1");
 		});
 		sock.on("close", () => {
 			conn.closed = true;
+			openConns.delete(conn);
 		});
 		const timer = setTimeout(() => {
 			if (done) return;
@@ -231,7 +243,7 @@ async function waitFor(c: Conn, pred: (buf: string) => boolean, timeoutMs: numbe
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		if (pred(c.buf)) return true;
-		if (c.closed) return pred(c.buf);
+		if (c.closed || stopping) return pred(c.buf);
 		await Bun.sleep(25);
 	}
 	return pred(c.buf);
@@ -282,6 +294,7 @@ async function serialLogin(c: Conn, timeoutMs: number): Promise<{ ok: boolean; w
 			continue;
 		}
 		if (c.closed) return { ok: false, why: "closed" };
+		if (stopping) return { ok: false, why: "stopping" };
 		if (Date.now() - lastPoke > 2000) {
 			c.sock.write("\r");
 			lastPoke = Date.now();
@@ -308,15 +321,41 @@ async function serialExec(c: Conn, cmd: string, timeoutMs: number): Promise<{ ok
 	return { ok: true, out: lines.join("\n") };
 }
 
-/** QGA: sync + ping on a fresh connection; any `{"return"` back counts as a reply. */
+/** The JSON objects in a QGA byte stream (0xFF is guest-sync-delimited's delimiter). */
+function qgaReplies(buf: string): Record<string, unknown>[] {
+	const out: Record<string, unknown>[] = [];
+	for (const line of buf.replace(/\xff/g, "\n").split(/\r?\n/)) {
+		const t = line.trim();
+		if (!t.startsWith("{")) continue;
+		try {
+			const v: unknown = JSON.parse(t);
+			if (v && typeof v === "object" && !Array.isArray(v)) out.push(v as Record<string, unknown>);
+		} catch {
+			/* partial line; the next poll sees the rest */
+		}
+	}
+	return out;
+}
+
+/** QGA: `guest-sync-delimited` until its own id comes back, then `guest-ping`,
+ *  which passes only on its own `{"return": {}}` after the sync reply. */
 async function qgaPing(c: Conn, timeoutMs: number): Promise<{ ok: boolean; out: string; why?: string }> {
+	const deadline = Date.now() + timeoutMs;
 	const id = Math.floor(Math.random() * 1e9);
+	const shown = () => c.buf.replace(/\xff/g, "").trim().slice(0, 200);
 	c.sock.write(`${JSON.stringify({ execute: "guest-sync-delimited", arguments: { id } })}\n`);
+	const synced = await waitFor(c, (b) => qgaReplies(b).some((r) => r.return === id), timeoutMs);
+	if (!synced) return { ok: false, out: shown(), why: c.closed ? "closed" : "no-sync-reply" };
+	const off = c.buf.length;
 	c.sock.write(`${JSON.stringify({ execute: "guest-ping" })}\n`);
-	const got = await waitFor(c, (b) => b.includes('"return"'), timeoutMs);
-	return got
-		? { ok: true, out: c.buf.replace(/\xff/g, "").trim().slice(0, 200) }
-		: { ok: false, out: c.buf.slice(0, 200), why: c.closed ? "closed" : "no-reply" };
+	const answered = (b: string) => qgaReplies(b.slice(off)).some((r) => "return" in r || "error" in r);
+	if (!(await waitFor(c, answered, Math.max(0, deadline - Date.now())))) {
+		return { ok: false, out: shown(), why: c.closed ? "closed" : "no-ping-reply" };
+	}
+	const reply = qgaReplies(c.buf.slice(off)).find((r) => "return" in r || "error" in r);
+	const ret = reply?.return;
+	const ok = !!ret && typeof ret === "object" && !Array.isArray(ret) && Object.keys(ret).length === 0;
+	return ok ? { ok: true, out: shown() } : { ok: false, out: shown(), why: "ping-error" };
 }
 
 // ── results ─────────────────────────────────────────────────────────────────
@@ -351,6 +390,8 @@ const results: {
 	duplicateName?: unknown;
 	crossCheck?: unknown;
 	sunPath?: { channelPaths: Record<string, { path: string; bytes: number }>; sweep: SweepResult[] };
+	/** How each QEMU child ended when the probe stopped it. */
+	cleanup?: { pid?: number; label: string; result: string }[];
 } = {
 	arm: ARM,
 	env: {},
@@ -366,6 +407,50 @@ const results: {
 function note(msg: string): void {
 	log(`NOTE ${msg}`);
 	results.notes.push(msg);
+}
+
+// ── process and connection bookkeeping (see finish()) ───────────────────────
+/** Every QEMU child the probe spawned, machine or sweep, with a label. */
+const children = new Map<ChildProcess, string>();
+/** Every client socket still open. */
+const openConns = new Set<Conn>();
+/** The parent's copies of the qemu.log descriptors. */
+const logDescriptors: number[] = [];
+const machines: Machine[] = [];
+/** Set once shutdown starts: waits return early and loops stop. */
+let stopping = false;
+
+function checkStop(): void {
+	if (stopping) throw new Error("stopping");
+}
+
+function hasExited(p: ChildProcess): boolean {
+	return p.exitCode !== null || p.signalCode !== null;
+}
+
+function waitExit(p: ChildProcess, ms: number): Promise<boolean> {
+	if (hasExited(p)) return Promise.resolve(true);
+	return new Promise((res) => {
+		const t = setTimeout(() => res(hasExited(p)), ms);
+		p.once("exit", () => {
+			clearTimeout(t);
+			res(true);
+		});
+	});
+}
+
+/** Stop one child and confirm it exited: SIGTERM, then SIGKILL, then (Windows) taskkill /T. */
+async function stopChild(p: ChildProcess, label: string): Promise<string> {
+	if (p.pid === undefined) return "never started";
+	if (hasExited(p)) return "had exited";
+	p.kill();
+	if (await waitExit(p, 5000)) return "exited after kill";
+	p.kill("SIGKILL");
+	if (await waitExit(p, 5000)) return "exited after SIGKILL";
+	if (isWin) spawnSync("taskkill", ["/F", "/T", "/PID", String(p.pid)], { timeout: 10_000 });
+	if (await waitExit(p, 5000)) return "exited after taskkill";
+	note(`${label}: pid ${p.pid} still running after kill, SIGKILL${isWin ? " and taskkill" : ""}`);
+	return "still running";
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -388,16 +473,42 @@ function alive(m: Machine): boolean {
 	}
 }
 
-async function restIdentity(m: Machine, timeoutMs = 20_000): Promise<string> {
+/** Identity each machine was given over serial (only when the set command ran). */
+const identitySet = new Map<string, string>();
+
+interface RestCheck {
+	status?: number;
+	body?: string;
+	error?: string;
+	/** 200 and `name` exactly the identity set over serial. */
+	guestHttpResponsive: boolean;
+}
+
+/** An incidental bare fetch() — this probe's subject is the QEMU chardevs, not
+ *  REST (see bun-http.instructions.md). Bun's pool can hand back a stale
+ *  response on a reused port, so this is supporting evidence only. */
+async function restIdentity(m: Machine, timeoutMs = 20_000): Promise<RestCheck> {
 	try {
 		const r = await fetch(`http://127.0.0.1:${m.portBase}/rest/system/identity`, {
 			headers: { Authorization: `Basic ${btoa("admin:")}` },
 			signal: AbortSignal.timeout(timeoutMs),
 		});
-		return `HTTP ${r.status} ${(await r.text()).slice(0, 120)}`;
+		const body = (await r.text()).slice(0, 200);
+		let name: unknown;
+		try {
+			name = (JSON.parse(body) as { name?: unknown }).name;
+		} catch {
+			/* not JSON */
+		}
+		const want = identitySet.get(m.name);
+		return { status: r.status, body, guestHttpResponsive: r.status === 200 && want !== undefined && name === want };
 	} catch (e) {
-		return `error: ${(e as Error).message}`;
+		return { error: (e as Error).message, guestHttpResponsive: false };
 	}
+}
+
+function showRest(r: RestCheck): string {
+	return r.error ? `error: ${r.error}` : `HTTP ${r.status} ${r.body} (guestHttpResponsive=${r.guestHttpResponsive})`;
 }
 
 function tcpListening(port: number): Promise<boolean> {
@@ -422,8 +533,10 @@ function tcpListening(port: number): Promise<boolean> {
 function spawnMachine(m: Machine, disk: string): void {
 	m.argv = buildArgv(m, disk);
 	const logFd = openSync(join(m.dir, "qemu.log"), "a");
+	logDescriptors.push(logFd);
 	const [bin, ...rest] = m.argv;
 	const proc = spawn(bin as string, rest, { stdio: ["ignore", logFd, logFd], windowsHide: true });
+	children.set(proc, m.name);
 	m.proc = proc;
 	if (proc.pid !== undefined) m.pid = proc.pid;
 	proc.on("exit", (code, signal) => {
@@ -446,7 +559,7 @@ async function connectHeld(m: Machine, ch: Channel, budgetMs: number): Promise<{
 		const r = await openConn(endpoint(m, ch), 3000);
 		if (r.conn) return { conn: r.conn, attempts, ms: Date.now() - started };
 		lastErr = r.err;
-		if (m.exit) break;
+		if (m.exit || stopping) break;
 		await Bun.sleep(200);
 	}
 	return { attempts, ms: Date.now() - started, ...(lastErr ? { lastErr } : {}) };
@@ -550,10 +663,12 @@ async function sunPathSweep(): Promise<SweepResult[]> {
 	const base = join(WORK, "sweep");
 	const out: SweepResult[] = [];
 	for (const bytes of SWEEP) {
+		checkStop();
 		const path = pathOfLength(base, bytes);
 		mkdirSync(join(path, ".."), { recursive: true });
 		const argv = ["-M", "none", "-display", "none", "-nodefaults", "-chardev", `socket,id=m0,path=${path},server=on,wait=off`, "-mon", "chardev=m0,mode=readline"];
 		const proc = spawn(QEMU, argv, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+		children.set(proc, `sweep-${bytes}`);
 		let output = "";
 		proc.stdout?.on("data", (d: Buffer) => (output += d.toString()));
 		proc.stderr?.on("data", (d: Buffer) => (output += d.toString()));
@@ -569,8 +684,7 @@ async function sunPathSweep(): Promise<SweepResult[]> {
 			r.monitor = m.ok ? m.out.trim() : `fail: ${m.why}`;
 			await closeConn(c.conn);
 		}
-		if (exit === undefined) proc.kill();
-		await Bun.sleep(300);
+		await stopChild(proc, `sweep-${bytes}`);
 		r.output = output
 			.split(/\r?\n/)
 			.filter((l) => l.trim() && !l.includes("is deprecated"))
@@ -615,11 +729,18 @@ async function main(): Promise<void> {
 
 	const tag = Date.now().toString(36).slice(-4);
 	const names = ARM === "pipe" ? [`lab-a-${tag}`, `lab-b-${tag}`] : [name || `lab-${ARM}-${tag}`];
-	const machines: Machine[] = names.map((name, k) => {
+	for (const [k, name] of names.entries()) {
+		if (!NAME_RE.test(name)) throw new Error(`machine name ${JSON.stringify(name)} is not one path component`);
 		const dir = join(WORK, name);
-		mkdirSync(dir, { recursive: true });
-		return { name, dir, portBase: 9300 + k * 10, argv: [] };
-	});
+		// Exclusive: a reused name must not overwrite another run's disk or sockets.
+		try {
+			mkdirSync(dir);
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`${dir} already exists; remove it or pick another --name/--work`);
+			throw e;
+		}
+		machines.push({ name, dir, portBase: 9300 + k * 10, argv: [] });
+	}
 
 	if (ARM === "unix") {
 		const channelPaths: Record<string, { path: string; bytes: number }> = {};
@@ -631,180 +752,179 @@ async function main(): Promise<void> {
 		log(`channel socket paths ${JSON.stringify(channelPaths)}`);
 	}
 
-	try {
-		// ── phase 0: spawn, and (pipe) watch what QEMU does with no client ──
-		for (const m of machines) {
-			const disk = join(m.dir, "disk.img");
-			copyFileSync(img, disk);
-			spawnMachine(m, disk);
-		}
-		if (ARM === "pipe") {
-			for (let s = 0; s <= 10; s += 2) {
-				for (const m of machines) {
-					const snap = {
-						atS: s,
-						machine: m.name,
-						alive: alive(m),
-						pipes: listPipes(`quickchr-${m.name}-`),
-						hostfwdListening: await tcpListening(m.portBase),
-					};
-					results.phase0.push(snap);
-					log(`phase0 ${JSON.stringify(snap)}`);
-				}
-				if (s < 10) await Bun.sleep(2000);
+	// ── phase 0: spawn, and (pipe) watch what QEMU does with no client ──
+	for (const m of machines) {
+		const disk = join(m.dir, "disk.img");
+		copyFileSync(img, disk, constants.COPYFILE_EXCL);
+		checkStop();
+		spawnMachine(m, disk);
+	}
+	if (ARM === "pipe") {
+		for (let s = 0; s <= 10; s += 2) {
+			for (const m of machines) {
+				const snap = {
+					atS: s,
+					machine: m.name,
+					alive: alive(m),
+					pipes: listPipes(`quickchr-${m.name}-`),
+					hostfwdListening: await tcpListening(m.portBase),
+				};
+				results.phase0.push(snap);
+				log(`phase0 ${JSON.stringify(snap)}`);
 			}
+			if (s < 10) await Bun.sleep(2000);
 		}
+	}
 
-		// ── phase 1: held clients, boot ──
-		const held = new Map<string, Conn>();
-		await Promise.all(
-			machines.map(async (m) => {
-				for (const ch of CHANNELS) {
-					const h = await connectHeld(m, ch, 60_000);
-					const key = `${m.name}/${ch}`;
-					results.held[`${key}/connect`] = { attempts: h.attempts, ms: h.ms, lastErr: h.lastErr ?? null, connected: !!h.conn };
-					log(`held ${key}: connected=${!!h.conn} attempts=${h.attempts} ms=${h.ms} lastErr=${h.lastErr ?? "-"}`);
-					if (h.conn) held.set(key, h.conn);
-					if (ARM === "pipe") log(`  pipes now: ${listPipes(`quickchr-${m.name}-`).join(", ")}`);
-				}
-				if (ARM === "pipe") results.held[`${m.name}/hostfwdListeningAfterAllHeld`] = await tcpListening(m.portBase);
-			}),
-		);
-
-		await Promise.all(
-			machines.map(async (m) => {
-				const mon = held.get(`${m.name}/monitor`);
-				if (mon) {
-					const n = await monitorCmd(mon, "info name", 10_000);
-					const s = await monitorCmd(mon, "info status", 10_000);
-					results.held[`${m.name}/monitor`] = { infoName: n, infoStatus: s };
-					log(`held ${m.name}/monitor: info name → ${n.out} | info status → ${s.out}`);
-				}
-				const ser = held.get(`${m.name}/serial`);
-				if (ser) {
-					const bootStart = Date.now();
-					const booted = await waitFor(ser, (b) => b.includes("Login:"), BOOT_BUDGET_MS);
-					const bootMs = Date.now() - bootStart;
-					log(`held ${m.name}/serial: Login: seen=${booted} after ${bootMs}ms`);
-					const login = booted ? await serialLogin(ser, 300_000) : { ok: false, why: "no-boot" };
-					const set = login.ok ? await serialExec(ser, `/system identity set name=${identityOf(m)}`, 30_000) : null;
-					const get = login.ok ? await serialExec(ser, ":put [/system identity get name]", 30_000) : null;
-					results.held[`${m.name}/serial`] = { booted, bootMs, login, set, get };
-					log(`held ${m.name}/serial: login=${login.ok} identity → ${get?.out}`);
-				}
-				const qga = held.get(`${m.name}/qga`);
-				if (qga) {
-					const p = await qgaPing(qga, 10_000);
-					results.held[`${m.name}/qga`] = p;
-					log(`held ${m.name}/qga: ping ok=${p.ok} ${p.why ?? ""}`);
-				}
-				results.liveness[`${m.name}/restAfterBoot`] = await restIdentity(m);
-				log(`${m.name}: REST after boot → ${results.liveness[`${m.name}/restAfterBoot`]}`);
-			}),
-		);
-
-		// ── phase 2: a second client while the held one is still connected ──
-		// pipe: here, on the boot-time clients (the only ones a pipe ever gets).
-		// tcp/unix: after the trials, so this step cannot disturb them (run 1
-		// had it here and QGA refused every later connect on both arms).
-		const m0 = machines[0] as Machine;
-		if (ARM === "pipe") await concurrentPhase(m0, held);
-
-		// ── phase 3: close the held clients, then N fresh trials per channel ──
-		for (const c of held.values()) await closeConn(c);
-		log("held clients closed");
-		await Bun.sleep(1000);
-		for (const m of machines) results.liveness[`${m.name}/aliveAfterHeldClose`] = alive(m);
-
-		if (ARM === "pipe" && isWin) {
-			// Independent client: .NET NamedPipeClientStream, to separate a Bun
-			// client quirk from QEMU's server behaviour.
-			const ps = `$p=New-Object System.IO.Pipes.NamedPipeClientStream('.','${pipeName(m0, "monitor")}',[System.IO.Pipes.PipeDirection]::InOut); try { $p.Connect(3000); 'connected'; $b=New-Object byte[] 256; $t=$p.ReadAsync($b,0,256); if ($t.Wait(3000)) { 'read ' + $t.Result + ': ' + [Text.Encoding]::ASCII.GetString($b,0,$t.Result) } else { 'no-data' } } catch { 'ERR: ' + $_.Exception.GetType().Name + ': ' + $_.Exception.Message } finally { $p.Dispose() }`;
-			const out: string[] = [];
-			for (let k = 0; k < 3; k++) {
-				const r = spawnSync("powershell", ["-NoProfile", "-Command", ps], { encoding: "utf8", timeout: 20_000 });
-				out.push((r.stdout + r.stderr).trim().replace(/\s+/g, " "));
-			}
-			results.crossCheck = { client: ".NET NamedPipeClientStream, monitor pipe, after held close", attempts: out };
-			log(`crossCheck ${JSON.stringify(out)}`);
-		}
-
-		for (const ch of CHANNELS) {
-			const trials: Trial[] = [];
-			for (let i = 1; i <= TRIALS; i++) {
-				const t = await trial(m0, ch, i);
-				trials.push(t);
-				if (i <= 3 || !t.ok || i % 10 === 0) log(`trial ${m0.name}/${ch} #${i}: ${JSON.stringify(t)}`);
-				await Bun.sleep(100);
-			}
-			results.channels.push({ channel: ch, machine: m0.name, trials });
-			log(`SUMMARY ${m0.name}/${ch}: ${summarize(trials)}`);
-		}
-		// Second machine: a shorter monitor run, enough to show it is independent.
-		for (const m of machines.slice(1)) {
-			const trials: Trial[] = [];
-			for (let i = 1; i <= 10; i++) trials.push(await trial(m, "monitor", i));
-			results.channels.push({ channel: "monitor", machine: m.name, trials });
-			log(`SUMMARY ${m.name}/monitor: ${summarize(trials)}`);
-		}
-
-		if (ARM === "pipe") {
-			// Longer than libuv's 30 s WaitNamedPipe on ERROR_PIPE_BUSY, so a
-			// slow-to-rearm pipe is not mistaken for a dead one.
-			const long: unknown[] = [];
-			for (let k = 0; k < 2; k++) {
-				const r = await openConn(endpoint(m0, "monitor"), 40_000);
-				long.push({ connected: !!r.conn, ms: r.ms, err: r.err ?? null });
-				await closeConn(r.conn);
-			}
-			results.liveness.pipeLongTimeoutReconnects = long;
-			log(`long-timeout monitor reconnects ${JSON.stringify(long)}`);
-		} else {
-			const fresh = new Map<string, Conn>();
+	// ── phase 1: held clients, boot ──
+	const held = new Map<string, Conn>();
+	await Promise.all(
+		machines.map(async (m) => {
 			for (const ch of CHANNELS) {
-				const r = await openConn(endpoint(m0, ch));
-				if (r.conn) fresh.set(`${m0.name}/${ch}`, r.conn);
+				const h = await connectHeld(m, ch, 60_000);
+				const key = `${m.name}/${ch}`;
+				results.held[`${key}/connect`] = { attempts: h.attempts, ms: h.ms, lastErr: h.lastErr ?? null, connected: !!h.conn };
+				log(`held ${key}: connected=${!!h.conn} attempts=${h.attempts} ms=${h.ms} lastErr=${h.lastErr ?? "-"}`);
+				if (h.conn) held.set(key, h.conn);
+				if (ARM === "pipe") log(`  pipes now: ${listPipes(`quickchr-${m.name}-`).join(", ")}`);
 			}
-			await concurrentPhase(m0, fresh);
-			for (const c of fresh.values()) await closeConn(c);
-			// And does each channel still take a fresh client after that?
-			const after: Record<string, unknown> = {};
-			for (const ch of CHANNELS) after[ch] = await trial(m0, ch, 0);
-			results.liveness.trialAfterConcurrent = after;
-			log(`trial after concurrent ${JSON.stringify(after)}`);
-		}
+			if (ARM === "pipe") results.held[`${m.name}/hostfwdListeningAfterAllHeld`] = await tcpListening(m.portBase);
+		}),
+	);
 
-		// ── duplicate pipe name (pipe only) ──
-		if (ARM === "pipe") {
-			const dupArgv = ["-M", "none", "-display", "none", "-chardev", `pipe,id=dup0,path=${pipeName(m0, "monitor")}`, "-mon", "chardev=dup0,mode=readline"];
-			const started = Date.now();
-			const r = spawnSync(QEMU, dupArgv, { encoding: "utf8", timeout: 15_000 });
-			results.duplicateName = {
-				argv: [QEMU, ...dupArgv].join(" "),
-				status: r.status,
-				signal: r.signal,
-				timedOut: r.error ? String(r.error) : null,
-				ms: Date.now() - started,
-				output: (r.stdout + r.stderr).trim().slice(0, 400),
-			};
-			log(`duplicateName ${JSON.stringify(results.duplicateName)}`);
-		}
+	await Promise.all(
+		machines.map(async (m) => {
+			const mon = held.get(`${m.name}/monitor`);
+			if (mon) {
+				const n = await monitorCmd(mon, "info name", 10_000);
+				const s = await monitorCmd(mon, "info status", 10_000);
+				results.held[`${m.name}/monitor`] = { infoName: n, infoStatus: s };
+				log(`held ${m.name}/monitor: info name → ${n.out} | info status → ${s.out}`);
+			}
+			const ser = held.get(`${m.name}/serial`);
+			if (ser) {
+				const bootStart = Date.now();
+				const booted = await waitFor(ser, (b) => b.includes("Login:"), BOOT_BUDGET_MS);
+				const bootMs = Date.now() - bootStart;
+				log(`held ${m.name}/serial: Login: seen=${booted} after ${bootMs}ms`);
+				const login = booted ? await serialLogin(ser, 300_000) : { ok: false, why: "no-boot" };
+				const set = login.ok ? await serialExec(ser, `/system identity set name=${identityOf(m)}`, 30_000) : null;
+				if (set?.ok) identitySet.set(m.name, identityOf(m));
+				const get = login.ok ? await serialExec(ser, ":put [/system identity get name]", 30_000) : null;
+				results.held[`${m.name}/serial`] = { booted, bootMs, login, set, get };
+				log(`held ${m.name}/serial: login=${login.ok} identity → ${get?.out}`);
+			}
+			const qga = held.get(`${m.name}/qga`);
+			if (qga) {
+				const p = await qgaPing(qga, 10_000);
+				results.held[`${m.name}/qga`] = p;
+				log(`held ${m.name}/qga: ping ok=${p.ok} ${p.why ?? ""}`);
+			}
+			const rest = await restIdentity(m);
+			results.liveness[`${m.name}/restAfterBoot`] = rest;
+			log(`${m.name}: REST after boot → ${showRest(rest)}`);
+		}),
+	);
 
-		// ── phase 4: liveness ──
-		for (const m of machines) {
-			results.liveness[`${m.name}/aliveAtEnd`] = alive(m);
-			results.liveness[`${m.name}/restAtEnd`] = await restIdentity(m);
-			log(`${m.name}: alive=${alive(m)} REST at end → ${results.liveness[`${m.name}/restAtEnd`]}`);
+	// ── phase 2: a second client while the held one is still connected ──
+	// pipe: here, on the boot-time clients (the only ones a pipe ever gets).
+	// tcp/unix: after the trials, so this step cannot disturb them (run 1
+	// had it here and QGA refused every later connect on both arms).
+	const m0 = machines[0] as Machine;
+	if (ARM === "pipe") await concurrentPhase(m0, held);
+
+	// ── phase 3: close the held clients, then N fresh trials per channel ──
+	for (const c of held.values()) await closeConn(c);
+	log("held clients closed");
+	await Bun.sleep(1000);
+	for (const m of machines) results.liveness[`${m.name}/aliveAfterHeldClose`] = alive(m);
+
+	if (ARM === "pipe" && isWin) {
+		// Independent client: .NET NamedPipeClientStream, to separate a Bun
+		// client quirk from QEMU's server behaviour.
+		const ps = `$p=New-Object System.IO.Pipes.NamedPipeClientStream('.','${pipeName(m0, "monitor")}',[System.IO.Pipes.PipeDirection]::InOut); try { $p.Connect(3000); 'connected'; $b=New-Object byte[] 256; $t=$p.ReadAsync($b,0,256); if ($t.Wait(3000)) { 'read ' + $t.Result + ': ' + [Text.Encoding]::ASCII.GetString($b,0,$t.Result) } else { 'no-data' } } catch { 'ERR: ' + $_.Exception.GetType().Name + ': ' + $_.Exception.Message } finally { $p.Dispose() }`;
+		const out: string[] = [];
+		for (let k = 0; k < 3; k++) {
+			const r = spawnSync("powershell", ["-NoProfile", "-Command", ps], { encoding: "utf8", timeout: 20_000 });
+			out.push((r.stdout + r.stderr).trim().replace(/\s+/g, " "));
 		}
-	} finally {
-		for (const m of machines) {
-			results.machines.push({ name: m.name, portBase: m.portBase, argv: m.argv, ...(m.pid ? { pid: m.pid } : {}), ...(m.exit ? { exit: m.exit } : {}) });
-			if (m.proc && !m.exit) m.proc.kill();
+		results.crossCheck = { client: ".NET NamedPipeClientStream, monitor pipe, after held close", attempts: out };
+		log(`crossCheck ${JSON.stringify(out)}`);
+	}
+
+	for (const ch of CHANNELS) {
+		const trials: Trial[] = [];
+		for (let i = 1; i <= TRIALS; i++) {
+			checkStop();
+			const t = await trial(m0, ch, i);
+			trials.push(t);
+			if (i <= 3 || !t.ok || i % 10 === 0) log(`trial ${m0.name}/${ch} #${i}: ${JSON.stringify(t)}`);
+			await Bun.sleep(100);
 		}
-		const outPath = join(WORK, `results-${ARM}.json`);
-		writeFileSync(outPath, JSON.stringify(results, null, 2));
-		log(`wrote ${outPath}`);
-		writeSummary();
+		results.channels.push({ channel: ch, machine: m0.name, trials });
+		log(`SUMMARY ${m0.name}/${ch}: ${summarize(trials)}`);
+	}
+	// Second machine: a shorter monitor run, enough to show it is independent.
+	for (const m of machines.slice(1)) {
+		const trials: Trial[] = [];
+		for (let i = 1; i <= 10; i++) {
+			checkStop();
+			trials.push(await trial(m, "monitor", i));
+		}
+		results.channels.push({ channel: "monitor", machine: m.name, trials });
+		log(`SUMMARY ${m.name}/monitor: ${summarize(trials)}`);
+	}
+
+	if (ARM === "pipe") {
+		// Longer than libuv's 30 s WaitNamedPipe on ERROR_PIPE_BUSY, so a
+		// slow-to-rearm pipe is not mistaken for a dead one.
+		const long: unknown[] = [];
+		for (let k = 0; k < 2; k++) {
+			const r = await openConn(endpoint(m0, "monitor"), 40_000);
+			long.push({ connected: !!r.conn, ms: r.ms, err: r.err ?? null });
+			await closeConn(r.conn);
+		}
+		results.liveness.pipeLongTimeoutReconnects = long;
+		log(`long-timeout monitor reconnects ${JSON.stringify(long)}`);
+	} else {
+		const fresh = new Map<string, Conn>();
+		for (const ch of CHANNELS) {
+			const r = await openConn(endpoint(m0, ch));
+			if (r.conn) fresh.set(`${m0.name}/${ch}`, r.conn);
+		}
+		await concurrentPhase(m0, fresh);
+		for (const c of fresh.values()) await closeConn(c);
+		// And does each channel still take a fresh client after that?
+		const after: Record<string, unknown> = {};
+		for (const ch of CHANNELS) after[ch] = await trial(m0, ch, 0);
+		results.liveness.trialAfterConcurrent = after;
+		log(`trial after concurrent ${JSON.stringify(after)}`);
+	}
+
+	// ── duplicate pipe name (pipe only) ──
+	if (ARM === "pipe") {
+		const dupArgv = ["-M", "none", "-display", "none", "-chardev", `pipe,id=dup0,path=${pipeName(m0, "monitor")}`, "-mon", "chardev=dup0,mode=readline"];
+		const started = Date.now();
+		const r = spawnSync(QEMU, dupArgv, { encoding: "utf8", timeout: 15_000 });
+		results.duplicateName = {
+			argv: [QEMU, ...dupArgv].join(" "),
+			status: r.status,
+			signal: r.signal,
+			timedOut: r.error ? String(r.error) : null,
+			ms: Date.now() - started,
+			output: (r.stdout + r.stderr).trim().slice(0, 400),
+		};
+		log(`duplicateName ${JSON.stringify(results.duplicateName)}`);
+	}
+
+	// ── phase 4: liveness ──
+	checkStop();
+	for (const m of machines) {
+		results.liveness[`${m.name}/aliveAtEnd`] = alive(m);
+		const rest = await restIdentity(m);
+		results.liveness[`${m.name}/restAtEnd`] = rest;
+		results.liveness[`${m.name}/guestHttpResponsiveAtEnd`] = rest.guestHttpResponsive;
+		log(`${m.name}: alive=${alive(m)} REST at end → ${showRest(rest)}`);
 	}
 }
 
@@ -839,26 +959,48 @@ function writeSummary(): void {
 	if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${text}\n`);
 }
 
-const hardCap = setTimeout(() => {
-	note("hard cap reached — writing partial results");
+// ── shutdown: one path for success, error, Ctrl-C and the hard cap ─────────
+const hardCap = setTimeout(() => void finish(2, "hard cap reached — stopping, writing partial results"), Number(arg("hard-cap-ms", "3000000")));
+process.on("SIGINT", () => void finish(130, "interrupted (SIGINT)"));
+
+let finishing = false;
+/** Stop probe activity, close clients, stop and await every QEMU child, write
+ *  results, then exit. Later callers (main unwinding after the hard cap) wait. */
+async function finish(code: number, reason?: string): Promise<void> {
+	if (finishing) return new Promise(() => {});
+	finishing = true;
+	clearTimeout(hardCap);
+	if (reason) note(reason);
+	stopping = true;
+	for (const c of openConns) c.sock.destroy();
+	results.cleanup = await Promise.all([...children].map(async ([p, label]) => ({ ...(p.pid !== undefined ? { pid: p.pid } : {}), label, result: await stopChild(p, label) })));
+	for (const fd of logDescriptors.splice(0)) {
+		try {
+			closeSync(fd);
+		} catch {
+			/* already closed */
+		}
+	}
+	for (const m of machines) {
+		results.machines.push({ name: m.name, portBase: m.portBase, argv: m.argv, ...(m.pid ? { pid: m.pid } : {}), ...(m.exit ? { exit: m.exit } : {}) });
+	}
+	try {
+		mkdirSync(WORK, { recursive: true });
+		const outPath = join(WORK, `results-${ARM}.json`);
+		writeFileSync(outPath, JSON.stringify(results, null, 2));
+		log(`wrote ${outPath}`);
+	} catch (e) {
+		console.error(`could not write results: ${(e as Error).message}`);
+		if (code === 0) code = 1;
+	}
 	writeSummary();
-	writeFileSync(join(WORK, `results-${ARM}.json`), JSON.stringify(results, null, 2));
-	process.exit(2);
-}, Number(arg("hard-cap-ms", "3000000")));
+	process.exit(code);
+}
 
 main()
-	.then(() => {
-		clearTimeout(hardCap);
-		process.exit(0);
-	})
+	.then(() => finish(0))
 	.catch((e) => {
 		console.error(e);
-		results.notes.push(`fatal: ${(e as Error).stack ?? e}`);
-		try {
-			writeFileSync(join(WORK, `results-${ARM}.json`), JSON.stringify(results, null, 2));
-		} catch {
-			/* ignore */
-		}
-		process.exit(1);
+		return finish(1, `fatal: ${(e as Error).stack ?? e}`);
 	});
 
