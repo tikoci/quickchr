@@ -199,7 +199,7 @@ length that worked.
   `C:\Users\<user>\AppData\Local\quickchr\machines\<name>\monitor.sock`: 55 bytes plus the
   user and machine names, so `len(user) + len(name)` must be at most 52 bytes. On the
   runner (`runneradmin`, 11) a name can have 41 bytes. Machine names may have 64, and
-  profile folders such as `firstname.lastname.DOMAIN` are common, so the default layout
+  profile folders named for domain accounts (such as `jane.doe.CORP`) are common, so the default layout
   fails for long names on many real machines. Non-ASCII user names take more than one
   byte per character (inferred; tested with ASCII only).
 - **So AF_UNIX on Windows needs its own socket location** to drop the IPC ports. Two

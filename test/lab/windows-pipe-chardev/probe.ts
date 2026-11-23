@@ -808,6 +808,11 @@ async function main(): Promise<void> {
 	}
 }
 
+/** A markdown table cell: one line, backslashes then pipes escaped (Windows paths carry both). */
+function cell(text: string): string {
+	return text.replace(/\s+/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+}
+
 function writeSummary(): void {
 	const lines: string[] = [];
 	lines.push(`## windows-pipe-chardev — arm \`${ARM}\``, "");
@@ -821,8 +826,8 @@ function writeSummary(): void {
 		if (results.sunPath.sweep.length) {
 			lines.push("", "`sun_path` sweep (bare QEMU, monitor socket only):", "", "| bytes | QEMU up | socket file | connect | monitor / QEMU output |", "|---|---|---|---|---|");
 			for (const r of results.sunPath.sweep) {
-				const detail = (r.monitor ?? r.output).replace(/\s+/g, " ").replace(/\|/g, "\\|").slice(0, 160);
-				lines.push(`| ${r.bytes} | ${r.qemuUp ? "yes" : `no (exit ${r.exit})`} | ${r.socketFileExists ? "yes" : "no"} | ${r.connect} | ${detail} |`);
+				const detail = cell((r.monitor ?? r.output).slice(0, 160));
+				lines.push(`| ${r.bytes} | ${r.qemuUp ? "yes" : `no (exit ${r.exit})`} | ${r.socketFileExists ? "yes" : "no"} | ${cell(r.connect)} | ${detail} |`);
 			}
 		}
 	}
