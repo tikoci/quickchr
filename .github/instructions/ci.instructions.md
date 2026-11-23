@@ -105,7 +105,7 @@ turns the gate green again. Never "fix" the gate by weakening the verdict logic.
 
 ### Weekly Sweep (sweep.yml)
 
-Monday 05:37 UTC (or `gh workflow run sweep.yml`): all five platforms + the examples smoke
+Monday 05:37 UTC (or `gh workflow run sweep.yml`): the four `all` platforms (not macos-x86, #305) + the examples smoke
 harness, via `integration.yml` with `platforms=all` and `tcg-smoke: true` (the weekly
 cadence bounds TCG legs to the smoke subset — `anchor.test.ts`, `receive-ports.test.ts`,
 `forward-cli.test.ts` — to cap cost; the full-suite-on-TCG "find
@@ -151,7 +151,7 @@ gh run list --workflow integration.yml --limit 1   # grab the run id
 gh run watch <run-id> --exit-status                # wait for the verdict
 ```
 
-A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix job (unknown platform ids, malformed targets, or two targets resolving to one version on one platform **fail the plan** — a typo never produces an empty green run, and a dispatch that cannot produce attributable results never runs). **There is no `continue-on-error` anywhere**, and **no implicit narrowing either**: every platform — including the TCG ones (macos-x86, windows-x86) — runs the full suite by default; a `platforms=all` dispatch means all platforms, full set. TCG legs are slow (they get a 300-minute timeout when running the full suite) — pass `tcg-smoke=true` to bound them to the curated smoke subset when you only need a boot+REST pulse (the weekly sweep does): `anchor.test.ts`, plus `receive-ports.test.ts` and `forward-cli.test.ts` — host networking that behaves differently on Windows, where QEMU's IPC sockets share the port block's +6..+8 offsets with automatic forwards (#57). Those two added ~1.5 min to windows-x86. **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
+A `plan` job resolves `platforms` × `routeros-targets` into one cross-OS matrix job (unknown platform ids, malformed targets, or two targets resolving to one version on one platform **fail the plan** — a typo never produces an empty green run, and a dispatch that cannot produce attributable results never runs). **There is no `continue-on-error` anywhere**, and **no implicit narrowing either**: every platform, including the slow ones (macos-x86, windows-x86), runs the full suite by default; a `platforms=all` dispatch means every platform in the alias, full set. **`all` is `linux-x86,linux-arm64,macos-arm64,windows-x86`** (#305): `macos-x86` runs only when named, because GitHub is retiring the Intel macOS runners. TCG legs are slow (they get a 300-minute timeout when running the full suite) — pass `tcg-smoke=true` to bound them to the curated smoke subset when you only need a boot+REST pulse (the weekly sweep does): `anchor.test.ts`, plus `receive-ports.test.ts` and `forward-cli.test.ts` — host networking that behaves differently on Windows, where QEMU's IPC sockets share the port block's +6..+8 offsets with automatic forwards (#57). Those two added ~1.5 min to windows-x86. **Examples are held to the same bar as the code** — a broken example REDS the workflow on every platform it ran on. `lint-powershell` (PSScriptAnalyzer, gating) runs whenever `run-examples` is on — it `uses:` the reusable `lint-powershell.yml`, which **also runs on its own** for any push/PR touching `examples/**/*.ps1` or `examples/PSScriptAnalyzerSettings.psd1` ([#28](https://github.com/tikoci/quickchr/issues/28)).
 
 Every integration job records per-file wall-clock timing to `integration-timing.txt` and assembles `metrics.ndjson` (both in the artifact) — see "CI metrics (ci-data)" below ([#30](https://github.com/tikoci/quickchr/issues/30)).
 
@@ -637,7 +637,7 @@ single run, `collect-metrics: true`).
 
 The `windows-unit-tests` job runs `bun test test/unit/` on `windows-latest`. Windows-only tests (`describe.skipIf(process.platform !== "win32")`) in:
 
-- `test/unit/windows-paths.test.ts` — `getDataDir()` (`LOCALAPPDATA`/`USERPROFILE`), `getMachinesDir()`, `getCacheDir()`, `findCommandOnPath()` uses `where.exe`, `detectPackageManager()` returns `"winget"`
+- `test/unit/windows-paths.test.ts` — `getDataDir()` (`LOCALAPPDATA`/`USERPROFILE`), `getMachinesDir()`, `getCacheDir()`, `findCommandOnPath()` resolves through `PATHEXT` (it uses `Bun.which`, not a `where.exe` spawn, which cost ~75 ms per lookup on windows-latest, #269), `detectPackageManager()` returns `"winget"`
 - `test/unit/windows-channels.test.ts` — on Windows, `buildQemuArgs` produces TCP-localhost chardev paths (`host=127.0.0.1,port=portBase+N`: monitor +6, serial +7, qga +8), because QEMU's Winsock `bind()` cannot handle `\\.\pipe\` paths; `monitorCommand`/`serialStreams` throw `MACHINE_STOPPED` when the TCP port is not listening; `stopMachineByName` handles no `.sock` files
 - `test/unit/windows-spawn.test.ts` — `spawnQemu` uses `node:child_process.spawn` with `detached: true` + `windowsHide: true`; calls `child.unref()`. The spawn path is shared with POSIX since #159; the non-Windows half is `test/unit/posix-detach.test.ts`, which signals a real process group and is skipped on Windows (no process groups to signal)
 
@@ -682,11 +682,11 @@ Inputs split into **platforms** (where), **targets** (which RouterOS), **modes**
 
 | Input | Type | Default | Effect |
 |-------|------|---------|--------|
-| `platforms` | string | `linux-x86` | Comma-separated platform ids, or alias `gating` (= linux-x86,linux-arm64,macos-arm64) / `all`. Unknown ids fail the plan job. |
+| `platforms` | string | `linux-x86` | Comma-separated platform ids, or alias `gating` (= linux-x86,linux-arm64,macos-arm64) / `all` (= gating + windows-x86; macos-x86 only by name, #305). Unknown ids fail the plan job. |
 | `run-integration` | boolean | **true** | Run `test/integration/` on each selected platform. |
 | `run-examples` | boolean | **true** | Run the examples smoke harness on each matrix leg + `lint-powershell`. Default ON — pass `false` for narrow/lab dispatches. |
 | `test-filter` | string | "" | Integration: comma-separated test file names — e.g. `"exec.test.ts,anchor.test.ts"`; empty = all files |
-| `tcg-smoke` | boolean | false | Bound TCG platforms (macos-x86, windows-x86) to the smoke subset (`anchor.test.ts`, `receive-ports.test.ts`, `forward-cli.test.ts`) when `test-filter` is empty. Off = full suite everywhere. |
+| `tcg-smoke` | boolean | false | Bound the extended-budget platforms (macos-x86, windows-x86) to the smoke subset (`anchor.test.ts`, `receive-ports.test.ts`, `forward-cli.test.ts`) when `test-filter` is empty. Off = full suite everywhere. |
 | `example-filter` | string | "" | Examples: comma-separated example names — e.g. `"quickstart,rollback"`; empty = curated subset. A typo fails fast (the harness validates against known names). |
 | `routeros-targets` | string | "" | Comma-separated RouterOS targets — channels (`stable`/`long-term`/`testing`/`development`) and/or pinned versions (`7.22.1`, `7.24beta2`). **Each target crosses with each platform** (matrix legs). Empty = stable. Feeds both integration and examples. |
 | `collect-metrics` | boolean | **true** (dispatch) | Push this run's boot/test timing to the `ci-data` branch. Default ON for dispatches — a run without recorded results is a wasted run. (`workflow_call` default is false; wrappers opt in explicitly.) |
@@ -715,6 +715,16 @@ the HVF path. `macos-x86` is bare metal and `detectAccel()` returns `hvf` there;
 its extended timeout is about #76, not about its accelerator. A source-built
 QEMU (`qemu-version`) adds **+20 min** to the affected leg's job budget; the test
 step's own cap is deliberately left unchanged.
+
+**No `windows-arm64` platform yet (#305).** A first dispatch on `windows-11-arm` (run
+45220931492) and the `windows-arm64-qemu` lab probe (run 45225288560) found: Bun 1.4.4 runs
+natively (`process.arch=arm64`), but choco's QEMU 11.1.0 is an x64 build
+(`PE32+ … x86-64`) running under Windows' x64 emulation. `qemu-system-aarch64 --version`
+and `-M none` work; every TCG machine (`-M virt`, and `qemu-system-x86_64 -M pc`) exits
+with code 255 within a second and prints nothing, so every boot fails as "QEMU exited
+immediately". Mechanism unknown. Inferred: TCG's runtime code generation under x64 emulation. The id comes
+back when a native arm64 QEMU for Windows is available to install. Re-run the probe
+(`gh workflow run lab.yml -f lab=windows-arm64-qemu`) before adding it.
 
 **`linux-arm64` is a TCG leg.** It read "KVM if available" until 2026-10-22, but every
 `main.yml` run from 2026-09-20 on detected `tcg` (12 of 12). Its `long` budget class
@@ -752,7 +762,7 @@ stand on the whole suite?):
 gh workflow run integration.yml -f platforms=all
 ```
 
-That is full suite + examples + metrics on all five platforms; expect the TCG legs to
+That is full suite + examples + metrics on the four `all` platforms (add `macos-x86` by name); expect the TCG legs to
 take hours. Red legs are the answer, not a problem with the run.
 
 **The examples smoke harness** (`test/integration/examples-smoke.test.ts`) runs a curated subset of runnable examples end-to-end — one representative per language *for the current OS* (`.ts` everywhere; `.sh`/`.py`-via-`uv` on POSIX; `.ps1` on Windows) — plus an intentional failure-path case that asserts teardown fires on error. `trial-license` is excluded (MikroTik rate-limits). Double-gated by `QUICKCHR_INTEGRATION` + `EXAMPLES_SMOKE` so the integration jobs don't pay for example boots; the `examples-smoke` job sets both via `bun run smoke:examples`.

@@ -25,12 +25,12 @@ name: Integration
 #   macos-arm64  macos-15           arm64 CHR  TCG   long budget (see note below)
 #   macos-x86    macos-15-intel     x86 CHR    HVF   extended budget
 #   windows-x86  windows-latest     x86 CHR    TCG   extended budget (no hw accel — slow)
-#   windows-arm64 windows-11-arm    arm64 CHR  TCG   extended budget; opt-in, not in `all` (#305)
 #   gating  = linux-x86,linux-arm64,macos-arm64
 #   all     = linux-x86,linux-arm64,macos-arm64,windows-x86
-# macos-x86 and windows-arm64 run only when named: GitHub is retiring the Intel
-# macOS runners, and windows-arm64 exists so the dispatch is there when needed
-# (#305).
+# macos-x86 runs only when named: GitHub is retiring the Intel macOS runners
+# (#305). There is no windows-arm64 id: choco's QEMU on windows-11-arm is an
+# x64 build, and under Windows' x64 emulation every TCG machine exits at once
+# (test/lab/windows-arm64-qemu, #305).
 #
 # The accelerator column and the budget column are deliberately independent —
 # see the platform table in the plan job for the grounding behind each value.
@@ -98,7 +98,7 @@ on:
     inputs:
       platforms:
         type: string
-        description: "Comma-separated platform ids (linux-x86, linux-arm64, macos-arm64, macos-x86, windows-x86, windows-arm64) or an alias: 'gating' (linux-x86,linux-arm64,macos-arm64) / 'all' (gating + windows-x86; macos-x86 and windows-arm64 only by name)"
+        description: "Comma-separated platform ids (linux-x86, linux-arm64, macos-arm64, macos-x86, windows-x86) or an alias: 'gating' (linux-x86,linux-arm64,macos-arm64) / 'all' (gating + windows-x86; macos-x86 only by name)"
         default: "linux-x86"
       run-integration:
         type: boolean
@@ -114,7 +114,7 @@ on:
         default: ""
       tcg-smoke:
         type: boolean
-        description: "Bound the extended-budget platforms (macos-x86, windows-x86, windows-arm64) to the smoke subset (anchor, receive-ports, forward-cli) when test-filter is empty. Off = full suite everywhere (those legs are slow — extended timeout)."
+        description: "Bound the extended-budget platforms (macos-x86, windows-x86) to the smoke subset (anchor, receive-ports, forward-cli) when test-filter is empty. Off = full suite everywhere (those legs are slow — extended timeout)."
         default: false
       example-filter:
         type: string
@@ -302,9 +302,6 @@ jobs:
           #                                 inside 60 min there — an open question
           #                                 (#76), not an accel fact.
           #   windows-x86            tcg  — no hardware acceleration available.
-          #   windows-arm64          tcg  — windows-11-arm; opt-in only (#305). QEMU
-          #                                 is choco's x64 build, run under Windows'
-          #                                 x64 emulation; see ci.instructions.md.
           table() {
             case "$1" in
               linux-x86)   echo 'linux/x86_64|ubuntu-latest|kvm|standard' ;;
@@ -312,7 +309,6 @@ jobs:
               macos-arm64) echo 'macos/arm64|macos-15|tcg|long' ;;
               macos-x86)   echo 'macos/x86_64|macos-15-intel|hvf|extended' ;;
               windows-x86) echo 'windows/x86_64|windows-latest|tcg|extended' ;;
-              windows-arm64) echo 'windows/arm64|windows-11-arm|tcg|extended' ;;
               *) return 1 ;;
             esac
           }
@@ -345,7 +341,7 @@ jobs:
             # input on a macOS/Windows leg would run the DISTRO qemu while the
             # run is labelled with a version it never used.
             case ",$LIST," in
-              *,macos-arm64,*|*,macos-x86,*|*,windows-x86,*|*,windows-arm64,*)
+              *,macos-arm64,*|*,macos-x86,*|*,windows-x86,*)
                 echo "::error::qemu-version is Linux-only, but platforms resolved to '$LIST'. Restrict the dispatch to linux-x86 and/or linux-arm64, or drop qemu-version."
                 exit 1 ;;
             esac
@@ -397,12 +393,12 @@ jobs:
           for id in "${IDS[@]}"; do
             [ -z "$id" ] && continue
             if ! row=$(table "$id"); then
-              echo "::error::Unknown platform id '$id' (valid: linux-x86, linux-arm64, macos-arm64, macos-x86, windows-x86, windows-arm64, gating, all)"
+              echo "::error::Unknown platform id '$id' (valid: linux-x86, linux-arm64, macos-arm64, macos-x86, windows-x86, gating, all)"
               exit 1
             fi
             IFS='|' read -r label runner accel budget <<< "$row"
             guest_arch=x86
-            case "$id" in linux-arm64|macos-arm64|windows-arm64) guest_arch=arm64 ;; esac
+            case "$id" in linux-arm64|macos-arm64) guest_arch=arm64 ;; esac
             # smoke is OPT-IN (tcg-smoke input), never an implicit narrowing: an
             # explicit platforms=all/windows-x86 dispatch means the full suite.
             # Eligibility follows `budget`, not the accelerator: the point of the
@@ -692,7 +688,7 @@ jobs:
         run: |
           guest_arch=x86
           case "${{ matrix.id }}" in
-            linux-arm64|macos-arm64|windows-arm64) guest_arch=arm64 ;;
+            linux-arm64|macos-arm64) guest_arch=arm64 ;;
           esac
           # Resolve the detected accelerator first, outside the reporting block,
           # so the summary can state it instead of restating a matrix constant.

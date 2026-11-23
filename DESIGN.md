@@ -279,8 +279,9 @@ with a layered design:
   PRs merge only while the latest completed main run is green, so a red main visibly
   blocks everything instead of rotting in the Actions list. Superseded push runs cancel;
   cancelled runs carry no signal (the gate skips them).
-- **`sweep.yml`** — weekly all-platform sweep (+ examples smoke). A separate file from
-  main.yml *by design*: its TCG legs (macos-x86, windows-x86 — bounded to the smoke
+- **`sweep.yml`** — weekly sweep of the `all` platforms (+ examples smoke); `all` leaves out
+  macos-x86, which runs only when named (#305). A separate file from
+  main.yml *by design*: its slow legs (windows-x86 — bounded to the smoke
   subset via `tcg-smoke: true` to cap weekly cost: `anchor.test.ts`, plus
   `receive-ports.test.ts` and `forward-cli.test.ts` for the host networking that differs
   on Windows) may red without blocking PRs,

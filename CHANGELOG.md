@@ -45,6 +45,12 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- **Windows: commands that look up a binary are faster.** quickchr resolved each command
+  on PATH by spawning `where.exe`, about 75 ms per lookup on a GitHub windows-latest
+  runner, and `quickchr doctor` made nine of them (~0.7 s). Lookups now happen in process
+  (`Bun.which`, honouring `PATHEXT`): `doctor --json` went from ~765 ms to ~80 ms there.
+  (#269)
+
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a
