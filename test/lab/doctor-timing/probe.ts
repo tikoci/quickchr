@@ -9,7 +9,7 @@
  *            the test does (empty data dir, HOME pointed at it), N times;
  *   baseline `bun -e 0` and `bun src/cli/index.ts --help`, to split Bun
  *            startup and module loading from doctor's own work;
- *   inproc   `QuickCHR.doctor()` in this process with Bun.spawnSync wrapped, so
+ *   inProcess   `QuickCHR.doctor()` in this process with Bun.spawnSync wrapped, so
  *            each child process doctor starts is timed by command line.
  *
  * Run:  bun run test/lab/doctor-timing/probe.ts --runs 15
@@ -62,7 +62,7 @@ for (let i = 0; i < RUNS; i++) {
 }
 result.cli = { doctor: { runs: cli, ...stats(cli) }, bunStartup: { runs: bunStart, ...stats(bunStart) }, help: { runs: help, ...stats(help) } };
 
-// ── inproc: each child process doctor starts, by command ──
+// ── inProcess: each child process doctor starts, by command ──
 rmSync(DATA, { recursive: true, force: true });
 mkdirSync(DATA, { recursive: true });
 process.env.QUICKCHR_DATA_DIR = DATA;
@@ -92,7 +92,7 @@ for (run = 0; run < RUNS; run++) {
 const byCmd = new Map<string, number[]>();
 for (const s of spawns) byCmd.set(s.cmd, [...(byCmd.get(s.cmd) ?? []), s.ms]);
 const perRunSpawnMs = totals.map((_, r) => spawns.filter((s) => s.run === r).reduce((a, s) => a + s.ms, 0));
-result.inproc = {
+result.inProcess = {
 	importMs,
 	doctor: { runs: totals, ...stats(totals) },
 	spawnMsPerRun: perRunSpawnMs,
@@ -104,7 +104,7 @@ rmSync(DATA, { recursive: true, force: true });
 writeFileSync("doctor-timing.json", `${JSON.stringify(result, null, 2)}\n`);
 
 const c = result.cli as Record<string, ReturnType<typeof stats> & { runs: number[] }>;
-const ip = result.inproc as { importMs: number; doctor: ReturnType<typeof stats> & { runs: number[] }; spawnMsPerRun: number[]; byCommand: (ReturnType<typeof stats> & { cmd: string; first: number })[] };
+const ip = result.inProcess as { importMs: number; doctor: ReturnType<typeof stats> & { runs: number[] }; spawnMsPerRun: number[]; byCommand: (ReturnType<typeof stats> & { cmd: string; first: number })[] };
 const row = (name: string, s: ReturnType<typeof stats> & { runs?: number[] }) => `| ${name} | ${s.min} | ${s.p50} | ${s.p90} | ${s.max} | ${s.runs ? s.runs.join(" ") : ""} |`;
 const lines = [
 	`## doctor-timing — ${process.platform}/${process.arch}, Bun ${Bun.version}, ${RUNS} runs`,

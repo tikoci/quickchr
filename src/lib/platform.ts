@@ -70,15 +70,13 @@ export function detectPackageManager(): PackageManager {
 	return "unknown";
 }
 
-/** Find a command on PATH. Uses `where.exe` on Windows and `which` elsewhere. */
+/** Find a command on PATH (honouring `PATHEXT` on Windows), in process.
+ *  This was a `where.exe` / `which` spawn per lookup. On a windows-latest runner each
+ *  `where.exe` took ~75 ms and `doctor()` makes nine lookups, which is most of its
+ *  ~0.7 s there (#269, `test/lab/doctor-timing`). */
 export function findCommandOnPath(cmd: string): string | undefined {
 	try {
-		const probe = process.platform === "win32" ? ["where.exe", cmd] : ["which", cmd];
-		const result = Bun.spawnSync(probe, { stdout: "pipe", stderr: "pipe" });
-		if (result.exitCode !== 0) return undefined;
-		const output = new TextDecoder().decode(result.stdout).trim();
-		const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
-		return firstLine || undefined;
+		return Bun.which(cmd) ?? undefined;
 	} catch {
 		return undefined;
 	}

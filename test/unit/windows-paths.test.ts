@@ -5,7 +5,7 @@
  * Tests cover:
  * - getDataDir() reading LOCALAPPDATA / USERPROFILE fallback / QUICKCHR_DATA_DIR override
  * - getMachinesDir() / getCacheDir() derived paths
- * - findCommandOnPath() uses where.exe
+ * - findCommandOnPath() resolves through PATHEXT (Bun.which)
  * - detectPackageManager() returns "winget"
  */
 import { describe, test, expect, afterEach } from "bun:test";
@@ -63,7 +63,7 @@ describe.skipIf(!isWindows)("Windows platform detection", () => {
 		expect(detectPackageManager()).toBe("winget");
 	});
 
-	test("findCommandOnPath uses where.exe and returns a string for cmd.exe", () => {
+	test("findCommandOnPath resolves cmd (via PATHEXT) to a string", () => {
 		// cmd.exe is always present on Windows — use it as a known-present command.
 		const result = findCommandOnPath("cmd");
 		expect(typeof result).toBe("string");

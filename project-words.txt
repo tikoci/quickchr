@@ -564,3 +564,5 @@ guestfwd
 ipfix
 netflow
 qchrrx
+NTSTATUS
+PATHEXT
