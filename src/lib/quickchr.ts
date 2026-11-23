@@ -69,7 +69,7 @@ import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
 import { pidLiveness } from "./pid.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, liveQemuFor, clearStalePidfile, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, mergeSnapshotMetadata, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
@@ -625,6 +625,9 @@ async function stopUnderLock(state: MachineState): Promise<void> {
 /** Persist stopped state and release endpoints. Caller holds the lifecycle lock. */
 function finalizeStoppedState(state: MachineState): void {
 	unregisterSocketMembers(state);
+	// A background QEMU leaves qemu.pid behind; once it has exited, a stale pid there
+	// could later be reused by an unrelated process (#294).
+	clearStalePidfile(state.machineDir);
 	// A frozen marker belongs to a live QEMU held at reset — a stopped machine
 	// holds nothing, so the flag goes with the pid (#214).
 	const current = loadMachine(state.name);
@@ -858,6 +861,12 @@ function createInstance(state: MachineState): ChrInstance {
 		// of disableAdmin.
 		const sentinelUnresolvable = state.user?.password === STORED_IN_SECRETS_PASSWORD && !storedCreds;
 		const credentialsAvailable = !disableAdminLockout && !sentinelUnresolvable;
+		// Port forwards ride on QEMU user-mode hostfwd. A machine with no user-mode NIC
+		// (`networks: []`, or only shared/bridged/socket NICs) still has `state.ports`
+		// allocated, but nothing listens on them, so none of them is advertised.
+		const hostfwd = hasUserModeNetwork(state.networks);
+		const noForwardReason = (label: string) =>
+			`no forwarded port for ${label}: the machine has no user-mode network`;
 
 		const buildHttpService = (
 			securePM: PortMapping | undefined,
@@ -874,6 +883,7 @@ function createInstance(state: MachineState): ChrInstance {
 			// so excluded plain ports still resolve when a secure forward is available
 			// (with `tls: true`). Secure preference can return once boot provisioning
 			// installs a certificate and enables www-ssl.
+			if (!hostfwd) return { available: false, unavailableReason: noForwardReason(serviceLabel) };
 			const chosen = plainPM ?? securePM;
 			if (!chosen) {
 				return { available: false, unavailableReason: `no forwarded port for ${serviceLabel}` };
@@ -925,7 +935,9 @@ function createInstance(state: MachineState): ChrInstance {
 		sshModes.push("agent-or-config");
 		if (credentialsAvailable) sshModes.push("password");
 
-		const sshService: SshServiceEndpoint = !sshPM
+		const sshService: SshServiceEndpoint = !hostfwd
+			? { available: false, unavailableReason: noForwardReason("ssh") }
+			: !sshPM
 			? { available: false, unavailableReason: "no forwarded port for ssh" }
 			: {
 					available: true,
@@ -950,7 +962,7 @@ function createInstance(state: MachineState): ChrInstance {
 					},
 				};
 
-		const customForwards: CustomForward[] = Object.entries(state.ports)
+		const customForwards: CustomForward[] = Object.entries(hostfwd ? state.ports : {})
 			.filter(([name]) => !CANONICAL_PORT_NAMES.has(name))
 			.map(([name, pm]) => ({
 				name,
@@ -2629,7 +2641,10 @@ export class QuickCHR {
 		// add() always creates, so the full name rules apply before any I/O.
 		if (opts.name !== undefined) assertValidResourceName(opts.name, "machine");
 
-		warnVersionWithChannel(opts, createLogger(opts.onProgress));
+		// One logger for the whole call: a caller that passes onProgress gets every line
+		// there and nothing on stdout (#290).
+		const logger = createLogger(opts.onProgress);
+		warnVersionWithChannel(opts, logger);
 		let version: string;
 		if (opts.version) {
 			if (!isValidVersion(opts.version)) {
@@ -2658,11 +2673,15 @@ export class QuickCHR {
 		// say why, not first ask for QEMU to be installed.
 		if (hasProvisioningMutations(mutations)) {
 			assertProvisioningSupportedVersion(version, describeProvisioningOperation(mutations));
+			// Provisioning runs at first boot over the user NIC's forwards. A machine saved
+			// without one could never apply it, and a later start cannot add the NIC: it
+			// boots the stored topology. Refuse now, as a fresh start() does.
+			assertProvisioningReachable(resolveStartNetworks(opts.networks, opts.network), opts.name);
 		}
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
-		if (opts.license !== undefined) warnLicenseIntent(opts.license, createLogger(opts.onProgress));
+		if (opts.license !== undefined) warnLicenseIntent(opts.license, logger);
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -2694,7 +2713,7 @@ export class QuickCHR {
 		}
 		const { lock, portBase, ports, networks, receivePorts } = claimed;
 		try {
-			const cachedImg = await ensureCachedImage(version, arch);
+			const cachedImg = await ensureCachedImage(version, arch, undefined, logger);
 			const diskArtifacts = await ensureConfiguredDisks(
 				machineDir,
 				diskOpts.bootSize,
@@ -3699,7 +3718,9 @@ export class QuickCHR {
 	}
 
 	/** Delete a half-created machine directory. Returns false when `name` is a real
-	 *  machine (use `get(name)?.remove()`) or does not exist at all.
+	 *  machine (use `get(name)?.remove()`) or does not exist at all. Throws
+	 *  `MACHINE_RUNNING`, deleting nothing, when a QEMU for that directory is still
+	 *  running (#294).
 	 *
 	 *  A crash or SIGKILL can strand a directory even with add()'s cleanup in place, and
 	 *  a stranded directory blocks re-add while being invisible to `list` — so clearing
@@ -3721,6 +3742,28 @@ export class QuickCHR {
 		try {
 			// The creator may have finished between the check above and the lock.
 			if (!isOrphanMachineDir(name)) return false;
+			// A start killed after spawning QEMU but before saving machine.json leaves a
+			// running VM here, and nothing else records it. Deleting the directory would
+			// strand that VM untracked, so refuse and name it (#294).
+			const live = liveQemuFor(getMachineDir(name));
+			if (live?.verified) {
+				throw new QuickCHRError(
+					"MACHINE_RUNNING",
+					`Machine directory "${name}" has no readable machine.json, but its QEMU is still running (PID ${live.pid}). Nothing was deleted.`,
+					`Stop that process (${process.platform === "win32" ? `taskkill /PID ${live.pid} /F` : `kill ${live.pid}`}), then run 'quickchr remove ${shellQuote(name)}' again.`,
+				);
+			}
+			if (live) {
+				// Identity unknown (Windows, another user's process, or an unresolvable
+				// path): refuse, but don't hand out a kill command for a pid that may
+				// belong to something else.
+				const pidfile = join(getMachineDir(name), "qemu.pid");
+				throw new QuickCHRError(
+					"MACHINE_RUNNING",
+					`Machine directory "${name}" has no readable machine.json, and process ${live.pid} from its qemu.pid is still running; quickchr could not confirm whether it is this machine's QEMU. Nothing was deleted.`,
+					`If PID ${live.pid} is this machine's QEMU, stop it; if it is not, delete ${shellQuote(pidfile)}. Then run 'quickchr remove ${shellQuote(name)}' again.`,
+				);
+			}
 			removeState(name);
 			return true;
 		} finally {
