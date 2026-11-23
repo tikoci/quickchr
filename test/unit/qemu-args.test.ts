@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -12,6 +12,7 @@ import {
 	type QemuLaunchConfig,
 } from "../../src/lib/qemu.ts";
 import type { MachineState, PortMapping } from "../../src/lib/types.ts";
+import * as platform from "../../src/lib/platform.ts";
 import { requireQemu } from "../../src/lib/platform.ts";
 import { MAX_EXTRA_DISKS, normalizeDiskOptions } from "../../src/lib/disk.ts";
 
@@ -407,7 +408,14 @@ describe("buildQemuArgs — extra disks", () => {
 		}
 	});
 
+	// x86 argv needs no firmware, so these run without QEMU installed (CI's unit job has none).
+	const withoutQemu = () => {
+		spyOn(platform, "requireQemu").mockReturnValue("qemu-system-x86_64");
+	};
+	afterEach(() => mock.restore());
+
 	test("x86 disks are virtio-blk-pci at fixed slots, never if=virtio (#257)", async () => {
+		withoutQemu();
 		const args = await buildQemuArgs(makeConfig({
 			arch: "x86",
 			extraDisks: [
@@ -422,6 +430,7 @@ describe("buildQemuArgs — extra disks", () => {
 	});
 
 	test("disk slots don't depend on the NIC count, and disks precede the NICs (#257)", async () => {
+		withoutQemu();
 		const disks = [
 			{ path: "/tmp/quickchr-test-machine/extra-0.qcow2", format: "qcow2" as const },
 			{ path: "/tmp/quickchr-test-machine/extra-1.qcow2", format: "qcow2" as const },
