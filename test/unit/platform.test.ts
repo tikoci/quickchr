@@ -524,16 +524,31 @@ describe("UEFI firmware beside a QEMU's own data dirs (#254)", () => {
 		expect(findEfiFirmware(none)).toBeUndefined();
 		const code = touch("root", "usr", "share", "AAVMF", "AAVMF_CODE.fd");
 		const vars = touch("root", "usr", "share", "AAVMF", "AAVMF_VARS.fd");
-		const qemu = join(tmp, "bin", "qemu-system-aarch64");
+		// Windows resolves PATH in process (#269), so it needs a real file on a real PATH;
+		// elsewhere the mocked `which` answers.
+		const win = process.platform === "win32";
+		const qemu = win ? touch("bin", "qemu-system-aarch64.exe") : join(tmp, "bin", "qemu-system-aarch64");
+		const savedPath = process.env.PATH;
+		const savedPathext = process.env.PATHEXT;
+		if (win) {
+			process.env.PATH = join(tmp, "bin");
+			process.env.PATHEXT = ".exe"; // the stub's own casing, so a simulated run on Linux finds it too
+		}
 		mockSpawnSync((cmd) => {
-			if (cmd[0] === qemu) {
-				expect(cmd).toEqual([qemu, "-L", "help"]);
+			if (cmd[0]?.toLowerCase() === qemu.toLowerCase()) {
+				expect(cmd.slice(1)).toEqual(["-L", "help"]);
 				return { exitCode: 0, stdout: `${join(tmp, "root", "usr", "share", "qemu")}\n/usr/share/qemu\n` };
 			}
-			// `which` / `where.exe` resolving qemu-system-aarch64 on PATH.
-			return cmd[1] === "qemu-system-aarch64" ? { exitCode: 0, stdout: `${qemu}\n` } : { exitCode: 1 };
+			// `which` resolving qemu-system-aarch64 on PATH.
+			return cmd[0] === "which" && cmd[1] === "qemu-system-aarch64" ? { exitCode: 0, stdout: `${qemu}\n` } : { exitCode: 1 };
 		});
-		expect(findEfiFirmware(none)).toEqual({ code, vars });
+		try {
+			expect(findEfiFirmware(none)).toEqual({ code, vars });
+		} finally {
+			process.env.PATH = savedPath;
+			if (savedPathext === undefined) delete process.env.PATHEXT;
+			else process.env.PATHEXT = savedPathext;
+		}
 	});
 
 	test("findEfiFirmware does not ask QEMU when a standard path matches", () => {
