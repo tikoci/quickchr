@@ -41,7 +41,7 @@ for (const c of cases) {
 	const ms = Math.round(performance.now() - t);
 	const killed = proc.signalCode !== null || (!quick && ms >= 7_900);
 	const hex = code !== null && code < 0 ? `0x${(code >>> 0).toString(16).toUpperCase()}` : code !== null && code > 255 ? `0x${code.toString(16).toUpperCase()}` : String(code);
-	const text = `${out}${err}`.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim().slice(0, 200);
+	const text = `${out}${err}`.replace(/\s+/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim().slice(0, 200);
 	const verdict = quick ? (code === 0 ? "ok" : `exit ${hex}`) : killed ? "ran until killed (ok)" : `exited after ${ms} ms, code ${hex}`;
 	rows.push(`| ${c.name} | ${verdict} | ${text} |`);
 	console.log(`${c.name}: ${verdict} ${text}`);

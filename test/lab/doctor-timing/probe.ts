@@ -121,7 +121,7 @@ const lines = [
 	"",
 	"| child process | n | first | min | p50 | p90 | max |",
 	"|---|---|---|---|---|---|---|",
-	...ip.byCommand.map((b) => `| \`${b.cmd.replace(/\|/g, "\\|")}\` | ${b.n} | ${b.first} | ${b.min} | ${b.p50} | ${b.p90} | ${b.max} |`),
+	...ip.byCommand.map((b) => `| \`${b.cmd.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")}\` | ${b.n} | ${b.first} | ${b.min} | ${b.p50} | ${b.p90} | ${b.max} |`),
 	"",
 ];
 const text = lines.join("\n");
