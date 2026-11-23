@@ -35,12 +35,21 @@
  *
  * Run (Windows, QEMU on PATH):
  *   bun run test/lab/windows-pipe-chardev/probe.ts --arm pipe --trials 50
+ *
+ * The `sun_path` check for `unix` (#57): `--work` set to the real data-dir layout
+ * (`%LOCALAPPDATA%\quickchr\machines`), `--name` a long machine name, and
+ * `--sun-path-sweep 104,107,108,109` first starts a bare QEMU per listed byte
+ * length, with only a monitor socket at a path of exactly that many bytes, and
+ * records whether QEMU accepts the path and a client can use it.
+ * `--monitor-path-bytes N` (instead of `--name`) picks a name that puts the
+ * machine's monitor socket at exactly N bytes; `max` uses the longest length the
+ * sweep found working, so the full run sits at the limit.
  * Writes <work>/results-<arm>.json and appends a summary to $GITHUB_STEP_SUMMARY.
  * `tcp` and `unix` also run on Linux/macOS, which is how the harness is debugged.
  */
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, mkdirSync, openSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import os from "node:os";
 import { join, resolve } from "node:path";
@@ -65,9 +74,25 @@ const BOOT_BUDGET_MS = Number(arg("boot-budget-ms", "900000"));
 const CONNECT_TIMEOUT_MS = Number(arg("connect-timeout-ms", "5000"));
 const ACCEL = arg("accel", "tcg");
 const QEMU = arg("qemu", "qemu-system-x86_64");
+/** A byte count, or `max`: the longest `--sun-path-sweep` length QEMU accepted and a client used. */
+const MONITOR_PATH_BYTES = arg("monitor-path-bytes", "");
+/** `--monitor-path-bytes N` names the machine so its monitor socket path is N bytes. */
+function nameForMonitorPath(bytes: number): string {
+	const fixed = Buffer.byteLength(join(WORK, "lab-unix-", "monitor.sock"));
+	const pad = bytes - fixed;
+	if (pad < 0) throw new Error(`--work is too long for a ${bytes}-byte monitor path`);
+	return `lab-unix-${"n".repeat(pad)}`;
+}
+const NAME_ARG = arg("name", "");
+const SWEEP = arg("sun-path-sweep", "")
+	.split(",")
+	.filter(Boolean)
+	.map(Number);
 if (!["pipe", "tcp", "unix"].includes(ARM)) throw new Error(`--arm must be pipe|tcp|unix, got ${ARM}`);
 const isWin = process.platform === "win32";
 if (ARM === "pipe" && !isWin) throw new Error("--arm pipe needs Windows: QEMU's pipe chardev is a FIFO pair elsewhere");
+if ((NAME_ARG || MONITOR_PATH_BYTES) && ARM === "pipe") throw new Error("--name/--monitor-path-bytes are for one-machine arms (tcp, unix)");
+if (MONITOR_PATH_BYTES === "max" && !SWEEP.length) throw new Error("--monitor-path-bytes max needs --sun-path-sweep");
 
 const T0 = Date.now();
 function log(msg: string): void {
@@ -83,6 +108,12 @@ interface Machine {
 	pid?: number;
 	argv: string[];
 	exit?: { code: number | null; signal: string | null; atMs: number };
+}
+
+/** RouterOS refuses a long identity ("too long"), and `--monitor-path-bytes` can
+ *  make a long machine name, so the serial checks use a prefix. */
+function identityOf(m: Machine): string {
+	return m.name.slice(0, 32);
 }
 
 const OFFSET: Record<Channel, number> = { monitor: 6, serial: 7, qga: 8 };
@@ -319,6 +350,7 @@ const results: {
 	liveness: Record<string, unknown>;
 	duplicateName?: unknown;
 	crossCheck?: unknown;
+	sunPath?: { channelPaths: Record<string, { path: string; bytes: number }>; sweep: SweepResult[] };
 } = {
 	arm: ARM,
 	env: {},
@@ -439,7 +471,7 @@ async function trial(m: Machine, ch: Channel, i: number): Promise<Trial> {
 			if (!l.ok) res = { ok: false, out: stripAnsi(c.buf).slice(-200), why: l.why ?? "login" };
 			else {
 				res = await serialExec(c, ":put [/system identity get name]", 15_000);
-				if (res.ok && !res.out.includes(m.name)) res = { ...res, ok: false, why: "wrong-identity" };
+				if (res.ok && !res.out.replace(/\s+/g, "").includes(identityOf(m))) res = { ...res, ok: false, why: "wrong-identity" };
 			}
 		} else {
 			res = await qgaPing(c, 3000);
@@ -493,6 +525,63 @@ async function concurrentPhase(m0: Machine, held: Map<string, Conn>): Promise<vo
 	}
 }
 
+// ── sun_path sweep (unix) ───────────────────────────────────────────────────
+interface SweepResult {
+	bytes: number;
+	path: string;
+	/** QEMU still running after the wait, i.e. it accepted the chardev path. */
+	qemuUp: boolean;
+	exit?: number | null;
+	output: string;
+	socketFileExists: boolean;
+	connect: string;
+	monitor?: string;
+}
+
+/** A path of exactly `bytes` bytes (ASCII, so bytes = chars) under `base`. */
+function pathOfLength(base: string, bytes: number): string {
+	const fixed = join(base, "x", "m.sock");
+	const pad = bytes - Buffer.byteLength(fixed) + 1;
+	if (pad < 1) throw new Error(`--work is too long for a ${bytes}-byte sweep path`);
+	return join(base, "p".repeat(pad), "m.sock");
+}
+
+async function sunPathSweep(): Promise<SweepResult[]> {
+	const base = join(WORK, "sweep");
+	const out: SweepResult[] = [];
+	for (const bytes of SWEEP) {
+		const path = pathOfLength(base, bytes);
+		mkdirSync(join(path, ".."), { recursive: true });
+		const argv = ["-M", "none", "-display", "none", "-nodefaults", "-chardev", `socket,id=m0,path=${path},server=on,wait=off`, "-mon", "chardev=m0,mode=readline"];
+		const proc = spawn(QEMU, argv, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+		let output = "";
+		proc.stdout?.on("data", (d: Buffer) => (output += d.toString()));
+		proc.stderr?.on("data", (d: Buffer) => (output += d.toString()));
+		let exit: number | null | undefined;
+		proc.on("exit", (code) => (exit = code));
+		await Bun.sleep(3000);
+		const r: SweepResult = { bytes: Buffer.byteLength(path), path, qemuUp: exit === undefined, output: "", socketFileExists: existsSync(path), connect: "-" };
+		if (exit !== undefined) r.exit = exit;
+		const c = await openConn({ kind: "path", path }, 3000);
+		r.connect = c.conn ? "ok" : (c.err ?? "?");
+		if (c.conn) {
+			const m = await monitorCmd(c.conn, "info version", 3000);
+			r.monitor = m.ok ? m.out.trim() : `fail: ${m.why}`;
+			await closeConn(c.conn);
+		}
+		if (exit === undefined) proc.kill();
+		await Bun.sleep(300);
+		r.output = output
+			.split(/\r?\n/)
+			.filter((l) => l.trim() && !l.includes("is deprecated"))
+			.join(" ")
+			.slice(0, 300);
+		out.push(r);
+		log(`sun_path sweep ${JSON.stringify(r)}`);
+	}
+	return out;
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
 	mkdirSync(WORK, { recursive: true });
@@ -514,13 +603,33 @@ async function main(): Promise<void> {
 	const img = await ensureCachedImage(version, "x86", join(WORK, "cache"));
 	log(`image ${img}`);
 
+	const sweep = SWEEP.length ? await sunPathSweep() : [];
+	let name = NAME_ARG;
+	if (MONITOR_PATH_BYTES === "max") {
+		const best = Math.max(...sweep.filter((r) => r.qemuUp && r.monitor && !r.monitor.startsWith("fail")).map((r) => r.bytes));
+		if (!Number.isFinite(best)) throw new Error("no --sun-path-sweep length worked; nothing to run at the limit");
+		name = nameForMonitorPath(best);
+	} else if (MONITOR_PATH_BYTES) {
+		name = nameForMonitorPath(Number(MONITOR_PATH_BYTES));
+	}
+
 	const tag = Date.now().toString(36).slice(-4);
-	const names = ARM === "pipe" ? [`lab-a-${tag}`, `lab-b-${tag}`] : [`lab-${ARM}-${tag}`];
+	const names = ARM === "pipe" ? [`lab-a-${tag}`, `lab-b-${tag}`] : [name || `lab-${ARM}-${tag}`];
 	const machines: Machine[] = names.map((name, k) => {
 		const dir = join(WORK, name);
 		mkdirSync(dir, { recursive: true });
 		return { name, dir, portBase: 9300 + k * 10, argv: [] };
 	});
+
+	if (ARM === "unix") {
+		const channelPaths: Record<string, { path: string; bytes: number }> = {};
+		for (const ch of CHANNELS) {
+			const ep = endpoint(machines[0] as Machine, ch);
+			if (ep.kind === "path") channelPaths[ch] = { path: ep.path, bytes: Buffer.byteLength(ep.path) };
+		}
+		results.sunPath = { channelPaths, sweep };
+		log(`channel socket paths ${JSON.stringify(channelPaths)}`);
+	}
 
 	try {
 		// ── phase 0: spawn, and (pipe) watch what QEMU does with no client ──
@@ -578,7 +687,7 @@ async function main(): Promise<void> {
 					const bootMs = Date.now() - bootStart;
 					log(`held ${m.name}/serial: Login: seen=${booted} after ${bootMs}ms`);
 					const login = booted ? await serialLogin(ser, 300_000) : { ok: false, why: "no-boot" };
-					const set = login.ok ? await serialExec(ser, `/system identity set name=${m.name}`, 30_000) : null;
+					const set = login.ok ? await serialExec(ser, `/system identity set name=${identityOf(m)}`, 30_000) : null;
 					const get = login.ok ? await serialExec(ser, ":put [/system identity get name]", 30_000) : null;
 					results.held[`${m.name}/serial`] = { booted, bootMs, login, set, get };
 					log(`held ${m.name}/serial: login=${login.ok} identity → ${get?.out}`);
@@ -706,6 +815,17 @@ function writeSummary(): void {
 	if (results.machines[0]) lines.push("argv:", "```text", results.machines[0].argv.join(" "), "```", "");
 	lines.push("| machine | channel | result |", "|---|---|---|");
 	for (const c of results.channels) lines.push(`| ${c.machine} | ${c.channel} | ${summarize(c.trials)} |`);
+	if (results.sunPath) {
+		lines.push("", "Channel socket paths:", "", "| channel | bytes | path |", "|---|---|---|");
+		for (const [ch, p] of Object.entries(results.sunPath.channelPaths)) lines.push(`| ${ch} | ${p.bytes} | \`${p.path}\` |`);
+		if (results.sunPath.sweep.length) {
+			lines.push("", "`sun_path` sweep (bare QEMU, monitor socket only):", "", "| bytes | QEMU up | socket file | connect | monitor / QEMU output |", "|---|---|---|---|---|");
+			for (const r of results.sunPath.sweep) {
+				const detail = (r.monitor ?? r.output).replace(/\s+/g, " ").replace(/\|/g, "\\|").slice(0, 160);
+				lines.push(`| ${r.bytes} | ${r.qemuUp ? "yes" : `no (exit ${r.exit})`} | ${r.socketFileExists ? "yes" : "no"} | ${r.connect} | ${detail} |`);
+			}
+		}
+	}
 	lines.push("", "<details><summary>phase0 / held / concurrent / liveness / duplicate / crossCheck</summary>", "", "```json");
 	lines.push(JSON.stringify({ notes: results.notes, phase0: results.phase0, held: results.held, concurrent: results.concurrent, liveness: results.liveness, duplicateName: results.duplicateName, crossCheck: results.crossCheck }, null, 2));
 	lines.push("```", "", "</details>", "");

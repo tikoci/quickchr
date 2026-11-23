@@ -33,6 +33,10 @@ on:
           - all
           - ssh-os-baseline
           - windows-pipe-chardev
+      chardev_arms:
+        description: "windows-pipe-chardev: JSON list of arms to run"
+        type: string
+        default: '["pipe","tcp","unix"]'
   push:
     paths:
       - ".github/workflows/lab.yml"
@@ -150,12 +154,15 @@ jobs:
   # needs no IPC TCP ports at portBase+6..+8. One leg per arm: `pipe` is the
   # question, `tcp` is today's production layout as the control, `unix` tries
   # AF_UNIX sockets on Windows. Real CHR, x86 under TCG (no accel on the runner).
+  # The `unix` leg puts its machine under the real data-dir layout
+  # (%LOCALAPPDATA%\quickchr\machines), sweeps socket path lengths to find the
+  # sun_path limit, then runs at the longest length that worked.
   windows-pipe-chardev:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lab == 'all' || inputs.lab == 'windows-pipe-chardev' }}
     strategy:
       fail-fast: false
       matrix:
-        arm: [pipe, tcp, unix]
+        arm: ${{ fromJSON(inputs.chardev_arms || '["pipe","tcp","unix"]') }}
     runs-on: windows-latest
     timeout-minutes: 75
     steps:
@@ -191,8 +198,14 @@ jobs:
         timeout-minutes: 60
         run: |
           set -o pipefail
+          work="$RUNNER_TEMP/lp"
+          extra=()
+          if [ "$ARM" = unix ]; then
+            work="$LOCALAPPDATA\quickchr\machines"
+            extra=(--sun-path-sweep "100,104,106,107,108,109,110,130" --monitor-path-bytes max)
+          fi
           bun run test/lab/windows-pipe-chardev/probe.ts --arm "$ARM" --trials 50 \
-            --work "$RUNNER_TEMP/lp" --hard-cap-ms 3300000 2>&1 | tee probe.log
+            --work "$work" "${extra[@]}" --hard-cap-ms 3300000 2>&1 | tee probe.log
 
       - name: Reap QEMU
         if: always()
@@ -208,4 +221,6 @@ jobs:
             probe.log
             ${{ runner.temp }}/lp/results-*.json
             ${{ runner.temp }}/lp/*/qemu.log
+            ~/AppData/Local/quickchr/machines/results-*.json
+            ~/AppData/Local/quickchr/machines/*/qemu.log
           if-no-files-found: warn
