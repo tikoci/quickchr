@@ -3,7 +3,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import type { AccelMode, EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo, DoctorCheck } from "./types.ts";
 import { QuickCHRError as QError, parseAccelMode } from "./types.ts";
 // settings-file.ts, not settings.ts: the latter's graph (cache → state → network
@@ -70,11 +70,18 @@ export function detectPackageManager(): PackageManager {
 	return "unknown";
 }
 
-/** Find a command on PATH. Uses `where.exe` on Windows and `which` elsewhere. */
+/** Find a command with `which` on POSIX or an in-process lookup on Windows.
+ *  Each `where.exe` spawn cost ~75 ms in the Windows doctor probe (#269). */
 export function findCommandOnPath(cmd: string): string | undefined {
 	try {
-		const probe = process.platform === "win32" ? ["where.exe", cmd] : ["which", cmd];
-		const result = Bun.spawnSync(probe, { stdout: "pipe", stderr: "pipe" });
+		if (process.platform === "win32") {
+			return resolveWindowsCommand(cmd, {
+				path: process.env.PATH ?? "",
+				pathext: process.env.PATHEXT,
+				cwd: process.cwd(),
+			});
+		}
+		const result = Bun.spawnSync(["which", cmd], { stdout: "pipe", stderr: "pipe" });
 		if (result.exitCode !== 0) return undefined;
 		const output = new TextDecoder().decode(result.stdout).trim();
 		const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
@@ -82,6 +89,53 @@ export function findCommandOnPath(cmd: string): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/** cmd.exe's PATHEXT when the variable is unset. */
+const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+
+interface WindowsLookupEnv {
+	/** `PATH`, `;`-separated. Entries may be quoted; empty entries are skipped. */
+	path: string;
+	/** `PATHEXT`; unset falls back to cmd.exe's `.COM;.EXE;.BAT;.CMD`. */
+	pathext?: string | undefined;
+	/** Searched before any PATH entry, as cmd.exe and `where.exe` do. */
+	cwd: string;
+	/** Is this a regular file? Defaults to a stat; Windows file names are
+	 *  case-insensitive, so a test on a case-sensitive host injects its own. */
+	isFile?: (path: string) => boolean;
+}
+
+function statIsFile(p: string): boolean {
+	try {
+		return statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Resolve a command the way `where.exe` (and cmd.exe) does, without spawning it:
+ * the current directory first, then each PATH entry in order (surrounding quotes
+ * stripped, empty entries skipped). A name with an extension is tried as written.
+ * For other names, try PATHEXT in order, ignoring duplicate extensions by case.
+ * A command with a directory component is resolved against `cwd` alone.
+ */
+export function resolveWindowsCommand(cmd: string, env: WindowsLookupEnv): string | undefined {
+	if (!cmd) return undefined;
+	const isFile = env.isFile ?? statIsFile;
+	const extensions = new Set((env.pathext ?? DEFAULT_PATHEXT).split(";").map((ext) => ext.trim().toLowerCase()).filter(Boolean));
+	const names = win32.extname(cmd) ? [cmd] : Array.from(extensions, (ext) => `${cmd}${ext}`);
+	const dirs = /[\\/:]/.test(cmd)
+		? [env.cwd]
+		: [env.cwd, ...env.path.split(";").map((dir) => dir.replace(/^"(.*)"$/, "$1")).filter(Boolean)];
+	for (const dir of dirs) {
+		for (const name of names) {
+			const candidate = resolve(env.cwd, dir, name);
+			if (isFile(candidate)) return candidate;
+		}
+	}
+	return undefined;
 }
 
 /** Check if a command exists on PATH. */

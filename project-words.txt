@@ -306,6 +306,7 @@ notrunc
 npk
 nsec
 nsh
+ntstatus
 nul
 nvram
 oci
@@ -321,6 +322,7 @@ parange
 paravirt
 passwordless
 patchless
+pathext
 pauth
 payam
 pci

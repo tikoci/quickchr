@@ -279,14 +279,15 @@ with a layered design:
   PRs merge only while the latest completed main run is green, so a red main visibly
   blocks everything instead of rotting in the Actions list. Superseded push runs cancel;
   cancelled runs carry no signal (the gate skips them).
-- **`sweep.yml`** — weekly all-platform sweep (+ examples smoke). A separate file from
-  main.yml *by design*: its TCG legs (macos-x86, windows-x86 — bounded to the smoke
-  subset via `tcg-smoke: true` to cap weekly cost: `anchor.test.ts`, plus
-  `receive-ports.test.ts` and `forward-cli.test.ts` for the host networking that differs
-  on Windows) may red without blocking PRs,
-  but are never green-washed — red is red. On manual `integration.yml` dispatches TCG
-  legs run the FULL suite by default (`tcg-smoke` defaults off): `platforms=all` means
-  all platforms, full set — smoke is opt-in, never an implicit narrowing.
+- **`sweep.yml`** — weekly sweep of the four `all` platforms (linux-x86, linux-arm64,
+  macos-arm64, windows-x86) plus examples smoke. The sweep applies the integration
+  smoke subset to windows-x86 to cap weekly cost. With `tcg-smoke: true`, that leg
+  runs `anchor.test.ts`, `receive-ports.test.ts`, and `forward-cli.test.ts`.
+  macos-x86 is **explicit-dispatch only** (#305) as GitHub retires its Intel runners.
+  Select it in an `integration.yml` dispatch with `-f platforms=macos-x86`.
+  The sweep runs separately from `main.yml` so its failures remain visible without
+  blocking PRs. A manual `integration.yml` dispatch with `platforms=all` runs the
+  full suite on the four members by default. The smoke subset is opt-in.
 - **`integration.yml`** — the single reusable integration unit (`workflow_call` +
   `workflow_dispatch`). A plan job resolves **`platforms` × `routeros-targets`** (both
   comma lists; `gating`/`all` platform aliases) into one cross-OS matrix — one dispatch
