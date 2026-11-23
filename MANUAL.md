@@ -1314,7 +1314,10 @@ afterAll(async () => { await chr?.remove(); });
   directory with no readable `machine.json` instead, which `QuickCHR.listOrphans()`
   names. `start()` writes `machine.json` only after spawning QEMU, so that QEMU may
   still be running. `QuickCHR.removeOrphan(name)` then refuses with `MACHINE_RUNNING`,
-  naming the pid, and deletes nothing; stop that process and call it again (#294). On a
+  naming the pid from `qemu.pid`, and deletes nothing (#294). If its message says the
+  process is this machine's QEMU, stop it and call again. If it says quickchr could not
+  confirm that, check the pid first: stop it only if it is this machine's QEMU, and
+  otherwise delete the stale `qemu.pid` before calling again. On a
   throwaway CI runner with its own `QUICKCHR_DATA_DIR`, both kinds go away with the
   runner.
 

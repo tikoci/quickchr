@@ -164,11 +164,18 @@ describe("qemu.pid lifecycle (#294)", () => {
 	test("spawnQemu records the pid before its early-exit check", async () => {
 		const dir = join(root, "spawned");
 		const pending = spawnQemu([process.execPath, "-e", "await Bun.sleep(60_000)"], dir, true);
-		await Bun.sleep(300);
-		// The check sleeps 1.5 s; a launcher killed now must still leave a record.
-		const early = readFileSync(join(dir, "qemu.pid"), "utf8");
-		const { pid } = await pending;
-		pids.push(pid);
+		let early: string | undefined;
+		let pid = 0;
+		try {
+			await Bun.sleep(300);
+			// The check sleeps 1.5 s; a launcher killed now must still leave a record.
+			early = readFileSync(join(dir, "qemu.pid"), "utf8");
+		} finally {
+			// Register the child even when the early read throws (the regression this
+			// test catches), so afterEach kills it instead of leaving it for 60 s.
+			({ pid } = await pending);
+			pids.push(pid);
+		}
 		expect(early).toBe(String(pid));
 	});
 

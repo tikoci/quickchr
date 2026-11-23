@@ -53,7 +53,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   provisioning options on a machine with no user NIC (it could never apply them).
   `--no-network` together with `--add-network` is now an error; to use only the
   networks you list, pass `--add-network` alone. If you relied on the old behaviour,
-  drop `--no-network`. (#287)
+  drop `--no-network`. `descriptor()` on a machine with no user NIC now reports
+  `rest-api`, `native-api` and `ssh` as unavailable and lists no `customForwards`,
+  since QEMU forwards host ports only through the user NIC. (#287)
 - **`QuickCHR.add({ onProgress })` no longer prints image lines to stdout.** `add()`
   dropped its logger on the way to the image cache, so `Using cached image…` and the
   download lines went to `console.log` even with a progress callback. (#290)

@@ -314,6 +314,21 @@ describe("descriptor() — hostGateway and receive (#299)", () => {
 		expect(descriptor?.hostGateway).toBeNull();
 	});
 
+	test("no user-mode NIC: allocated ports are not advertised as services or forwards", async () => {
+		for (const networks of [[], [{ specifier: "shared" as const, id: "net0" }]]) {
+			writeMachine(baseState("router", { networks }));
+			const descriptor = await QuickCHR.get("router")?.descriptor();
+			for (const id of ["rest-api", "native-api", "ssh"] as const) {
+				const service = descriptor?.services[id];
+				expect(service).toEqual({
+					available: false,
+					unavailableReason: `no forwarded port for ${id}: the machine has no user-mode network`,
+				});
+			}
+			expect(descriptor).not.toHaveProperty("customForwards");
+		}
+	});
+
 	test("receive is keyed by name with guest target and host bind", async () => {
 		writeMachine(baseState("router", { receivePorts: [{ name: "tzsp", port: 37008, proto: "udp" }] }));
 		const descriptor = await QuickCHR.get("router")?.descriptor();

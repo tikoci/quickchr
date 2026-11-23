@@ -861,6 +861,12 @@ function createInstance(state: MachineState): ChrInstance {
 		// of disableAdmin.
 		const sentinelUnresolvable = state.user?.password === STORED_IN_SECRETS_PASSWORD && !storedCreds;
 		const credentialsAvailable = !disableAdminLockout && !sentinelUnresolvable;
+		// Port forwards ride on QEMU user-mode hostfwd. A machine with no user-mode NIC
+		// (`networks: []`, or only shared/bridged/socket NICs) still has `state.ports`
+		// allocated, but nothing listens on them, so none of them is advertised.
+		const hostfwd = hasUserModeNetwork(state.networks);
+		const noForwardReason = (label: string) =>
+			`no forwarded port for ${label}: the machine has no user-mode network`;
 
 		const buildHttpService = (
 			securePM: PortMapping | undefined,
@@ -877,6 +883,7 @@ function createInstance(state: MachineState): ChrInstance {
 			// so excluded plain ports still resolve when a secure forward is available
 			// (with `tls: true`). Secure preference can return once boot provisioning
 			// installs a certificate and enables www-ssl.
+			if (!hostfwd) return { available: false, unavailableReason: noForwardReason(serviceLabel) };
 			const chosen = plainPM ?? securePM;
 			if (!chosen) {
 				return { available: false, unavailableReason: `no forwarded port for ${serviceLabel}` };
@@ -928,7 +935,9 @@ function createInstance(state: MachineState): ChrInstance {
 		sshModes.push("agent-or-config");
 		if (credentialsAvailable) sshModes.push("password");
 
-		const sshService: SshServiceEndpoint = !sshPM
+		const sshService: SshServiceEndpoint = !hostfwd
+			? { available: false, unavailableReason: noForwardReason("ssh") }
+			: !sshPM
 			? { available: false, unavailableReason: "no forwarded port for ssh" }
 			: {
 					available: true,
@@ -953,7 +962,7 @@ function createInstance(state: MachineState): ChrInstance {
 					},
 				};
 
-		const customForwards: CustomForward[] = Object.entries(state.ports)
+		const customForwards: CustomForward[] = Object.entries(hostfwd ? state.ports : {})
 			.filter(([name]) => !CANONICAL_PORT_NAMES.has(name))
 			.map(([name, pm]) => ({
 				name,
