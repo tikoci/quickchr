@@ -423,7 +423,7 @@ async function run() {
 		for (const m of hosts) published[m.host] = m.sha256File?.hash;
 		const order = i % 2 === 0 ? [...HOSTS] : [...HOSTS].reverse();
 		const transfers: Transfer[] = [];
-		let mode: "full" | "windows" | "skipped" = "skipped";
+		let mode: "full" | "windows" | "skipped";
 		if (!Number.isFinite(size) || hosts.some((m) => m.head?.status !== 200)) {
 			mode = "skipped";
 		} else if (spent + 2 * size <= fullBudget) {
