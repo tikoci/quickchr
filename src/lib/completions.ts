@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlink
 import { join, dirname } from "node:path";
 import { listMachineNames, getMachinesDir } from "./state.ts";
 import { userHomeDir } from "./paths.ts";
+import { findCommandOnPath } from "./platform.ts";
 
 export type SupportedShell = "bash" | "zsh" | "fish";
 const SUPPORTED_SHELLS: SupportedShell[] = ["bash", "zsh", "fish"];
@@ -51,11 +52,7 @@ export function detectCurrentShell(): ShellInfo {
 	// Resolve full path for the detected binary (or fall back to $SHELL).
 	let shell: string;
 	if (detectedBinary) {
-		const probe = process.platform === "win32" ? ["where.exe", detectedBinary] : ["which", detectedBinary];
-		const which = Bun.spawnSync(probe, { stdout: "pipe", stderr: "pipe" });
-		shell = which.exitCode === 0
-			? new TextDecoder().decode(which.stdout).trim().split(/\r?\n/)[0] ?? detectedBinary
-			: detectedBinary;
+		shell = findCommandOnPath(detectedBinary) ?? detectedBinary;
 	} else {
 		const shellEnv = process.env.SHELL ?? "";
 		shell = shellEnv || "unknown";
@@ -75,8 +72,8 @@ export function detectCurrentShell(): ShellInfo {
 		}
 	}
 
-	// Handle both POSIX (/) and Windows (\) separators — `where.exe bash` on
-	// windows-latest returns paths like "C:\Program Files\Git\bin\bash.exe".
+	// Handle both POSIX (/) and Windows (\) separators — on windows-latest
+	// `findCommandOnPath("bash")` returns paths like "C:\Program Files\Git\bin\bash.exe".
 	const binary = (shell.split(/[\\/]/).at(-1) ?? shell).replace(/\.exe$/i, "");
 	const supported = (SUPPORTED_SHELLS as string[]).includes(binary);
 

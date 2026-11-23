@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout } from "./timeouts.ts";
+import { bootTestTimeout, TEST_ARCH } from "./timeouts.ts";
 
 const SKIP = !process.env.QUICKCHR_INTEGRATION;
 
@@ -112,7 +112,7 @@ describe.skipIf(SKIP)("disk support", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { getDiskInfo } = await import("../../src/lib/disk.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -171,7 +171,7 @@ describe.skipIf(SKIP)("disk support", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { getDiskInfo } = await import("../../src/lib/disk.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		const name = "integration-disk-qcow2-restart";
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
@@ -214,7 +214,7 @@ describe.skipIf(SKIP)("disk support", () => {
 	test("monitor savevm/loadvm restores guest state on qcow2 boot disk", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 		const snapshotName = "snap1";
 

@@ -22,6 +22,11 @@ function installQemuStubs() {
 		const path = join(STUB_BIN, bin);
 		writeFileSync(path, `#!/bin/sh\necho "stub ${bin} was executed — this test must not reach QEMU" >&2\nexit 1\n`);
 		chmodSync(path, 0o755);
+		// Windows finds commands through PATHEXT, as it would the real
+		// qemu-system-x86_64.exe, so the stub needs an extension there.
+		if (process.platform === "win32") {
+			writeFileSync(`${path}.cmd`, `@echo stub ${bin} was executed - this test must not reach QEMU 1>&2\r\n@exit /b 1\r\n`);
+		}
 	}
 }
 

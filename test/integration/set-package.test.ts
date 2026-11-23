@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { join } from "node:path";
 import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout } from "./timeouts.ts";
+import { bootTestTimeout, TEST_ARCH } from "./timeouts.ts";
 
 /**
  * Integration tests — `quickchr set <name> --package …` (#24).
@@ -36,7 +36,7 @@ describe.skipIf(SKIP)("set --package", () => {
 		// Not `new URL(...).pathname`: on Windows that is "/D:/...", which bun cannot load (#196).
 		const cli = join(import.meta.dir, "../../src/cli/index.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {

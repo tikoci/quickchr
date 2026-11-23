@@ -21,6 +21,8 @@ Each subdirectory is a self-contained lab covering one subsystem:
 | `full-suite-resource-trend/` | Does full-suite cost inflate with position, or stay flat? (#76) | — | `ci.instructions.md` |
 | `managed-bridged/` | Managed `bridged:<iface>` network on hosted runners vs a real LAN (#270) | 1 | `testing.instructions.md` |
 | `download-origin/` | `download.mikrotik.com` vs `cdn.mikrotik.com`: bytes, headers, timing, freshness (#146) | — | `DESIGN.md` |
+| `doctor-timing/` | Where `quickchr doctor --json` spends its time on Windows vs Linux (#269); `lab.yml` job | — | `REPORT.md` |
+| `windows-arm64-qemu/` | Does choco's QEMU run on a Windows ARM64 runner? (#305); `lab.yml` job | — | `ci.instructions.md` |
 
 Each directory contains:
 

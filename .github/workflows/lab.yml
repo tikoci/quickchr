@@ -33,6 +33,8 @@ on:
           - all
           - ssh-os-baseline
           - download-origin
+          - doctor-timing
+          - windows-arm64-qemu
       download-origin-budget-mb:
         description: "download-origin only: MB of full artifacts to hash per runner (both hosts count)"
         type: string
@@ -191,3 +193,74 @@ jobs:
             download-origin-results/
             probe.log
           if-no-files-found: warn
+
+  # test/lab/doctor-timing — where does `quickchr doctor --json` spend its time?
+  # (issue #269). The unit test that spawns it runs under bun:test's 5 s default
+  # and Windows runners have reached 4–5 s. Same setup as ci.yml's unit-test jobs
+  # (no QEMU installed), Linux as the contrast. Times the CLI spawn as the test
+  # does, Bun startup, and each child process doctor() starts.
+  doctor-timing:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lab == 'all' || inputs.lab == 'doctor-timing' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: Probe doctor timing
+        shell: bash
+        run: bun run test/lab/doctor-timing/probe.ts --runs 20
+      - name: Upload probe results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: doctor-timing-${{ matrix.os }}
+          path: doctor-timing.json
+          if-no-files-found: warn
+
+  # test/lab/windows-arm64-qemu — does choco's QEMU run on a Windows ARM64 runner?
+  # (issue #305). The first windows-arm64 integration dispatch saw every boot exit
+  # immediately with no error text; this records full exit codes for growing argv
+  # (through a pwsh/.NET helper: Bun keeps only the low byte of a Windows status).
+  windows-arm64-qemu:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lab == 'all' || inputs.lab == 'windows-arm64-qemu' }}
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Install QEMU (choco, as integration.yml does)
+        shell: bash
+        run: |
+          set -eo pipefail
+          # choco can exit 0 having installed nothing ("installed 0/0 packages")
+          # or part of the package, so check for both binaries the probe runs.
+          qemu_dir="/c/Program Files/qemu"
+          bins=("$qemu_dir/qemu-system-x86_64.exe" "$qemu_dir/qemu-system-aarch64.exe")
+          for attempt in 1 2 3; do
+            choco install qemu -y --no-progress || true
+            missing=()
+            for bin in "${bins[@]}"; do
+              [ -f "$bin" ] || missing+=("${bin##*/}")
+            done
+            if [ "${#missing[@]}" -eq 0 ]; then break; fi
+            echo "::warning::choco install qemu left out: ${missing[*]} (attempt $attempt/3)"
+            if [ "$attempt" -lt 3 ]; then sleep "$((20 * attempt))"; fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::QEMU install failed: missing ${missing[*]} in $qemu_dir after 3 attempts"
+            exit 1
+          fi
+          file -- "${bins[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+          pwsh --version
+      - name: Probe
+        shell: bash
+        run: bun run test/lab/windows-arm64-qemu/probe.ts

@@ -3,7 +3,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import type { AccelMode, EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo, DoctorCheck } from "./types.ts";
 import { QuickCHRError as QError, parseAccelMode } from "./types.ts";
 // settings-file.ts, not settings.ts: the latter's graph (cache → state → network
@@ -70,11 +70,18 @@ export function detectPackageManager(): PackageManager {
 	return "unknown";
 }
 
-/** Find a command on PATH. Uses `where.exe` on Windows and `which` elsewhere. */
+/** Find a command with `which` on POSIX or an in-process lookup on Windows.
+ *  Each `where.exe` spawn cost ~75 ms in the Windows doctor probe (#269). */
 export function findCommandOnPath(cmd: string): string | undefined {
 	try {
-		const probe = process.platform === "win32" ? ["where.exe", cmd] : ["which", cmd];
-		const result = Bun.spawnSync(probe, { stdout: "pipe", stderr: "pipe" });
+		if (process.platform === "win32") {
+			return resolveWindowsCommand(cmd, {
+				path: process.env.PATH ?? "",
+				pathext: process.env.PATHEXT,
+				cwd: process.cwd(),
+			});
+		}
+		const result = Bun.spawnSync(["which", cmd], { stdout: "pipe", stderr: "pipe" });
 		if (result.exitCode !== 0) return undefined;
 		const output = new TextDecoder().decode(result.stdout).trim();
 		const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
@@ -82,6 +89,53 @@ export function findCommandOnPath(cmd: string): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/** cmd.exe's PATHEXT when the variable is unset. */
+const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+
+interface WindowsLookupEnv {
+	/** `PATH`, `;`-separated. Entries may be quoted; empty entries are skipped. */
+	path: string;
+	/** `PATHEXT`; unset falls back to cmd.exe's `.COM;.EXE;.BAT;.CMD`. */
+	pathext?: string | undefined;
+	/** Searched before any PATH entry, as cmd.exe and `where.exe` do. */
+	cwd: string;
+	/** Is this a regular file? Defaults to a stat; Windows file names are
+	 *  case-insensitive, so a test on a case-sensitive host injects its own. */
+	isFile?: (path: string) => boolean;
+}
+
+function statIsFile(p: string): boolean {
+	try {
+		return statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Resolve a command the way `where.exe` (and cmd.exe) does, without spawning it:
+ * the current directory first, then each PATH entry in order (surrounding quotes
+ * stripped, empty entries skipped). A name with an extension is tried as written.
+ * For other names, try PATHEXT in order, ignoring duplicate extensions by case.
+ * A command with a directory component is resolved against `cwd` alone.
+ */
+export function resolveWindowsCommand(cmd: string, env: WindowsLookupEnv): string | undefined {
+	if (!cmd) return undefined;
+	const isFile = env.isFile ?? statIsFile;
+	const extensions = new Set((env.pathext ?? DEFAULT_PATHEXT).split(";").map((ext) => ext.trim().toLowerCase()).filter(Boolean));
+	const names = win32.extname(cmd) ? [cmd] : Array.from(extensions, (ext) => `${cmd}${ext}`);
+	const dirs = /[\\/:]/.test(cmd)
+		? [env.cwd]
+		: [env.cwd, ...env.path.split(";").map((dir) => dir.replace(/^"(.*)"$/, "$1")).filter(Boolean)];
+	for (const dir of dirs) {
+		for (const name of names) {
+			const candidate = resolve(env.cwd, dir, name);
+			if (isFile(candidate)) return candidate;
+		}
+	}
+	return undefined;
 }
 
 /** Check if a command exists on PATH. */
@@ -185,8 +239,19 @@ export function qgaKvmWarning(): string | null {
 /** Whether guestArch differs from the physical host CPU architecture.
  *  Cross-arch TCG is significantly slower and needs more memory/timeout. */
 export function isCrossArchEmulation(guestArch: "x86" | "arm64"): boolean {
-	const hostIsArm64 = isAppleSiliconHost() || (process.platform !== "darwin" && process.arch === "arm64");
-	return (guestArch === "arm64") !== hostIsArm64;
+	return guestArch !== hostChrArch();
+}
+
+/**
+ * The CHR architecture of the physical host: the guest arch quickchr picks when
+ * `arch` is omitted or `"auto"` (`add()`, `start()`, `cacheKey()`, `cacheAdd()`).
+ * An x64 Bun under Rosetta on Apple Silicon reports `process.arch === "x64"`, but
+ * the host is arm64, so this answers `"arm64"` there (#293): an arm64 guest is
+ * same-arch TCG, an x86 one cross-arch TCG (#97). The CLI's `default-arch` setting
+ * wins over this when it names an arch.
+ */
+export function hostChrArch(): "x86" | "arm64" {
+	return process.arch === "arm64" || isAppleSiliconHost() ? "arm64" : "x86";
 }
 
 /**
@@ -210,6 +275,12 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
  * Whether the physical host is Apple Silicon, including when quickchr itself
  * runs as an x64 process under Rosetta.
  *
+ * For an x64 process on macOS this asks the hardware, not the process:
+ * `hw.optional.arm64` is 1 on Apple Silicon even under Rosetta and absent on
+ * Intel Macs.  (`sysctl.proc_translated` would describe the `sysctl` child,
+ * which macOS may launch natively, #293.)  `sysctl` is run by absolute path so
+ * a PATH without /usr/sbin cannot turn the answer into "Intel".
+ *
  * Apple Silicon implements **no AArch32 at any exception level**: its
  * `ID_AA64PFR0_EL1` reports AArch64-only for EL0 and EL1, and HVF passes that
  * hardware register straight through to the guest (the `-cpu` model is inert
@@ -232,7 +303,7 @@ export function isAppleSiliconHost(): boolean {
 	if (process.arch !== "x64") return false;
 	if (appleSiliconHostMemo !== undefined) return appleSiliconHostMemo;
 	try {
-		const result = Bun.spawnSync(["sysctl", "-n", "sysctl.proc_translated"], {
+		const result = Bun.spawnSync(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"], {
 			stdout: "pipe",
 			stderr: "pipe",
 		});
@@ -245,7 +316,7 @@ export function isAppleSiliconHost(): boolean {
 	return appleSiliconHostMemo;
 }
 
-/** @internal Test-only: clear the memoized Rosetta probe between mocked runs. */
+/** @internal Test-only: clear the memoized Apple Silicon probe between mocked runs. */
 export function resetAppleSiliconHostCache(): void {
 	appleSiliconHostMemo = undefined;
 }

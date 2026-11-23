@@ -107,6 +107,16 @@ describe("start --all forwards secure-login per machine (#193)", () => {
 		expect(secureLoginByMachine()).toEqual({ "a-fresh": true, "b-booted": true, "c-fresh": true });
 	});
 
+	test("--no-identity reaches every machine as false; absent, none gets a value (#265)", async () => {
+		replaceStart();
+		await cmdStart(["--all", "--no-identity"]);
+		expect(calls.map((c) => c.identity)).toEqual([false, false, false]);
+
+		calls = [];
+		await cmdStart(["--all"]);
+		expect(calls.map((c) => c.identity)).toEqual([undefined, undefined, undefined]);
+	});
+
 	test("a refusal stops the batch after the machines before it have started", async () => {
 		replaceStart("b-booted");
 		await expect(cmdStart(["--all", "--secure-login"])).rejects.toThrow("refused b-booted");

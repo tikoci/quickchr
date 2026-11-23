@@ -1,11 +1,14 @@
 name: Weekly Sweep
 
-# Weekly all-platform verification: everything main.yml's per-push run does NOT
-# cover — macos/arm64 (full suite, HVF), macos/x86 + windows/x86 (TCG, bounded
-# to the smoke subset here to cap weekly cost: anchor, plus receive-ports and
-# forward-cli for the host networking that differs on Windows) — plus the examples smoke
-# harness on every platform. The full-suite-on-TCG "find out" path is a manual
-# integration.yml dispatch (where tcg-smoke defaults OFF).
+# Weekly verification of integration.yml's `all` platforms: linux-x86,
+# linux-arm64, macos-arm64 (full suite) and windows-x86 (TCG, bounded to the
+# smoke subset here to cap weekly cost: anchor, plus receive-ports and
+# forward-cli for the host networking that differs on Windows) — plus the
+# examples smoke harness on each. macos-x86 is not in `all` (GitHub is retiring
+# the Intel macOS runners, #305): it runs only on an explicit dispatch,
+#   gh workflow run integration.yml -f platforms=macos-x86
+# The full-suite-on-TCG "find out" path is a manual integration.yml dispatch
+# (where tcg-smoke defaults OFF).
 #
 # Deliberately a SEPARATE workflow from main.yml: the PR freshness gate reads
 # main.yml runs only, so a red TCG leg here never blocks PRs. A red sweep is
@@ -30,7 +33,7 @@ concurrency:
 
 jobs:
   sweep:
-    name: All-platform sweep
+    name: Weekly sweep (linux-x86, linux-arm64, macos-arm64, windows-x86)
     uses: ./.github/workflows/integration.yml
     # contents: write flows down to the aggregate job (ci-data metrics push);
     # checks: write + actions: read carry the leg checkpoint and the

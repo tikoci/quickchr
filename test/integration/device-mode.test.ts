@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout } from "./timeouts.ts";
+import { bootTestTimeout, TEST_ARCH } from "./timeouts.ts";
 
 /**
  * Integration tests — device-mode provisioning.
@@ -39,7 +39,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
 
 		// Use native arch for HVF acceleration (fast boot)
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -71,7 +71,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 	test("deviceMode=skip boots without device-mode provisioning", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -104,7 +104,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 	test("mode=basic with enable/disable feature flags is applied and verified", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { readDeviceMode, resolveDeviceModeOptions, verifyDeviceMode } = await import("../../src/lib/device-mode.ts");
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		// Explicitly enable bandwidth-test and ipsec; disable smb.
@@ -158,7 +158,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -198,7 +198,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
 		const { QuickCHRError } = await import("../../src/lib/types.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -266,7 +266,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { readDeviceMode } = await import("../../src/lib/device-mode.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -307,7 +307,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		// Not `new URL(...).pathname`: on Windows that is "/D:/...", which bun cannot load (#196).
 		const cli = join(import.meta.dir, "../../src/cli/index.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -354,7 +354,7 @@ describe.skipIf(SKIP)("device-mode provisioning", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { QuickCHRError } = await import("../../src/lib/types.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
