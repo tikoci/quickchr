@@ -84,7 +84,7 @@ if (kind === "timeout") {
 		spyOn(deviceMode, "waitForDeviceModeApi").mockResolvedValue(undefined);
 		spyOn(deviceMode, "readDeviceMode").mockResolvedValue({ mode: "advanced", container: "no" });
 		spyOn(deviceMode, "startDeviceModeUpdate").mockImplementation(() => new Promise(() => {}));
-		await expect(QuickCHR._provisionInstance(instance, instance.state, { deviceMode: { enable: ["container"] } }, {
+		await expect(QuickCHR._provisionInstance(instance, instance.state, { deviceMode: { enable: ["container"] }, identity: false }, {
 			arch: "x86", machineDir, bootDisk: { path: factory, format: "raw" }, mem: 512, cpu: 1,
 			ports: state.ports, networks: state.networks, background: true, portBase: state.portBase,
 		})).rejects.toMatchObject({ code: "NETWORK_UNAVAILABLE" });

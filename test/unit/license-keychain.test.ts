@@ -134,6 +134,7 @@ describe.skipIf(!HAS_BUN_SECRETS)("MikroTik.com credentials never reach the keyc
 			const port = await licenseServer();
 			await QuickCHR._provisionInstance({} as ChrInstance, state(port), {
 				license: { account: "a@example.com", password: "pw", level: "p1" },
+				identity: false,
 			}, {} as never);
 			expect(keychainReads).toEqual([]);
 		}, 30_000);
@@ -141,7 +142,7 @@ describe.skipIf(!HAS_BUN_SECRETS)("MikroTik.com credentials never reach the keyc
 		test("a level alone with both env vars set: no keychain read", async () => {
 			setEnvPair();
 			const port = await licenseServer();
-			await QuickCHR._provisionInstance({} as ChrInstance, state(port), { license: "p1" }, {} as never);
+			await QuickCHR._provisionInstance({} as ChrInstance, state(port), { license: "p1", identity: false }, {} as never);
 			expect(keychainReads).toEqual([]);
 		}, 30_000);
 	});

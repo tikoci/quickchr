@@ -42,6 +42,7 @@ import {
 	isRouterOs6,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
+import { applyIdentity } from "./identity.ts";
 import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport, assertSocketVmnetReachable, probeSocketVmnetSockets, describeSocketVmnetProbe } from "./network.ts";
 import {
 	getUsedPortBases,
@@ -103,8 +104,9 @@ import {
 	assertProvisioningWindow,
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
-	pendingProvisioningFor,
+	firstBootProvisioning,
 	withRecordedLicenseLevel,
+	withStoredIdentity,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
 import type { ReceivePort } from "./types.ts";
@@ -1976,14 +1978,19 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 /** Persist what provisioning landed on the current disk, in state and on disk.
  *  A run with nothing to do still records — an empty `steps` says "provisioning ran
  *  and had nothing to apply", which is a different fact from never having run. */
-function recordProvisioning(state: MachineState, steps: ProvisioningStep[]): void {
+function recordProvisioning(state: MachineState, steps: ProvisioningStep[], identity: boolean | undefined): void {
 	const record = { at: new Date().toISOString(), steps };
 	const current = loadMachine(state.name);
 	if (current) {
 		current.provisioning = record;
+		// The merged identity intent this run honored, kept as intent (#265): a
+		// `start --no-identity` that provisions a machine `add` created must still
+		// skip the rename when `clean()` reopens the window and stored intent replays.
+		current.identity = identity;
 		saveMachine(current);
 	}
 	state.provisioning = record;
+	state.identity = identity;
 }
 
 /** Re-read `machine.json` into an existing state object, in place.
@@ -2729,6 +2736,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				identity: opts.identity,
 				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
@@ -2934,7 +2942,7 @@ export class QuickCHR {
 			}
 			// First boot of add()-created machine: apply pending provisioning from stored state
 			if (isProvisioningWindowOpen(existing)) {
-				const pendingOpts = pendingProvisioningFor(existing, {
+				const pendingOpts = firstBootProvisioning(existing, {
 					installAllPackages: opts.installAllPackages,
 					packages: opts.packages,
 					deviceMode: opts.deviceMode,
@@ -2942,29 +2950,28 @@ export class QuickCHR {
 					disableAdmin: opts.disableAdmin,
 					license: opts.license,
 					secureLogin: opts.secureLogin,
+					identity: opts.identity,
 				});
-				const hasPending = !!(
-					pendingOpts.installAllPackages ||
-					(pendingOpts.packages?.length ?? 0) > 0 ||
-					pendingOpts.deviceMode ||
-					pendingOpts.user ||
-					pendingOpts.disableAdmin ||
-					pendingOpts.license ||
-					pendingOpts.secureLogin === true
-				);
-				if (hasPending) {
-					// Before the boot, not after it: `_provisionInstance()` re-checks the
-					// version, but only once the guest is up — on RouterOS 6 that is a
-					// download-free boot spent on a refusal known in advance.
+				// Undefined unless a step changes something: identity rides along and
+				// never makes a first boot provision on its own, and a `{ mode: "skip" }`
+				// left by `--no-device-mode` asks for nothing (#265).
+				if (pendingOpts) {
 					const pendingMutations = {
 						...pendingOpts,
 						hasDeviceModeProvisioning: shouldApplyDeviceMode(resolveDeviceModeOptions(pendingOpts.deviceMode)),
 					};
+					// Before the boot, not after it: `_provisionInstance()` re-checks the
+					// version, but only once the guest is up — on RouterOS 6 that is a
+					// download-free boot spent on a refusal known in advance.
 					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
 					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertProvisioningReachable(existing.networks, existing.name);
 					pendingOpts.license = await resolveLicenseForBoot(pendingOpts.license);
+					// Only what the caller said: an omitted identity is read from the state
+					// _launchExisting() re-reads under the machine lock, so an opt-out stored
+					// by another run in between is honored and kept (#265).
+					pendingOpts.identity = opts.identity;
 					requireHostFor(existing.arch);
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger, opts.wait ?? true, sessionLaunch(opts));
 				}
@@ -3001,6 +3008,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				identity: opts.identity,
 				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
@@ -3088,6 +3096,7 @@ export class QuickCHR {
 			user: opts.user,
 			disableAdmin: opts.disableAdmin,
 			secureLogin: opts.secureLogin,
+			identity: opts.identity,
 			license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
@@ -3257,6 +3266,7 @@ export class QuickCHR {
 					disableAdmin: opts.disableAdmin,
 					license: opts.license,
 					secureLogin: opts.secureLogin,
+					identity: opts.identity,
 				}, launchConfig, logger);
 			} catch (err) {
 				// This call created the machine, so a failed run takes it away again.
@@ -3314,6 +3324,7 @@ export class QuickCHR {
 			disableAdmin?: boolean | undefined;
 			license?: LicenseInput | undefined;
 			secureLogin?: boolean | undefined;
+			identity?: boolean | undefined;
 		},
 		launchConfig: QemuLaunchConfig,
 		logger?: ProgressLogger,
@@ -3342,6 +3353,15 @@ export class QuickCHR {
 
 		// Give SSH a moment to start after HTTP comes up
 		await Bun.sleep(2000);
+
+		// First, before anything is installed: factory `admin:` is valid only here, and a
+		// failure costs a factory reset of an untouched disk (#265). Only an explicit
+		// `false` skips it.
+		if (opts.identity !== false) {
+			log.status(`Setting identity to "${machineState.name}"...`);
+			await applyIdentity(chrPorts.http, machineState.name, FACTORY_AUTH_HEADER);
+			applied.push("identity");
+		}
 
 		if (opts.installAllPackages) {
 			const installed = await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
@@ -3447,7 +3467,7 @@ export class QuickCHR {
 		// Stamped only here, after every requested step returned. A run that throws
 		// leaves the record absent, and the caller rolls the whole run back
 		// (`rollbackFailedProvisioning()`), so the retry starts from a factory disk.
-		recordProvisioning(machineState, applied);
+		recordProvisioning(machineState, applied, opts.identity);
 	}
 
 	/** Re-launch an existing stopped machine.
@@ -3467,22 +3487,15 @@ export class QuickCHR {
 			disableAdmin?: boolean | undefined;
 			license?: LicenseInput | undefined;
 			secureLogin?: boolean | undefined;
+			identity?: boolean | undefined;
 		},
 		logger?: ProgressLogger,
 		wait = true,
 		launch?: SessionLaunch,
 	): Promise<ChrInstance> {
-		const wantsProvisioning = (opts: typeof provisioningOpts) => !!(
-			opts && (
-				opts.installAllPackages ||
-				(opts.packages?.length ?? 0) > 0 ||
-				opts.deviceMode ||
-				opts.user ||
-				opts.disableAdmin ||
-				opts.license ||
-				opts.secureLogin === true
-			)
-		);
+		// Resolved device-mode, as in start(): a `{ mode: "skip" }` asks for nothing, and
+		// counting it would run `_provisionInstance()` with identity as its only step (#265).
+		const wantsProvisioning = (opts: typeof provisioningOpts) => !!opts && hasProvisioningRequest(opts);
 		let hasProvisioning = wantsProvisioning(provisioningOpts);
 		const lock = acquireLockNow(
 			machineLockPath(state.machineDir),
@@ -3510,6 +3523,9 @@ export class QuickCHR {
 			provisioningOpts = undefined;
 			hasProvisioning = false;
 		}
+		// An omitted identity means the stored intent as it is now, under the lock;
+		// start() leaves it unresolved for that reason (#265).
+		if (provisioningOpts) provisioningOpts = withStoredIdentity(provisioningOpts, state);
 
 		// Checks the disk this machine boots from — a qcow2 machine needs only boot.qcow2
 		// (#200) — and refuses, rather than rebuilds, a booted machine's missing disk.

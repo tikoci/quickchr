@@ -43,6 +43,9 @@ export interface ProvisioningRequest {
 	disableAdmin?: boolean | undefined;
 	license?: LicenseInput | undefined;
 	secureLogin?: boolean | undefined;
+	/** Only `false` means anything (skip the identity step, #265). It is never a
+	 *  request on its own, so no check in this module counts it as one. */
+	identity?: boolean | undefined;
 }
 
 /**
@@ -256,7 +259,38 @@ export function pendingProvisioningFor(
 		disableAdmin: request.disableAdmin ?? existing.disableAdmin,
 		license: pendingLicense(request.license, existing.license),
 		secureLogin: request.secureLogin ?? existing.secureLogin,
+		identity: request.identity ?? existing.identity,
 	};
+}
+
+/**
+ * The provisioning an `add()`-created machine's first boot runs, or `undefined` when
+ * it should boot without provisioning: the caller's request merged over stored
+ * intent ({@link pendingProvisioningFor}), kept only when a step in it changes
+ * something ({@link hasProvisioningRequest}).
+ *
+ * The test is on the merged request, with device-mode resolved — not on whether a
+ * field is set. `start --no-device-mode` over a stored `--device-mode-enable
+ * container` leaves a truthy `{ mode: "skip" }` that asks for nothing; counting it
+ * would run `_provisionInstance()` with the identity rename as its only step, and
+ * identity is a passenger that never provisions on its own (#265).
+ */
+export function firstBootProvisioning(
+	existing: MachineState,
+	request: ProvisioningRequest,
+): ProvisioningRequest | undefined {
+	const pending = pendingProvisioningFor(existing, request);
+	return hasProvisioningRequest(pending) ? pending : undefined;
+}
+
+/**
+ * `request` with an omitted `identity` filled from `state`'s stored intent. Called by
+ * `_launchExisting()` on the state it re-reads under the machine lock: `start()`
+ * passes only what the caller said, so an opt-out another run stored in between is
+ * honored here rather than overwritten by a stale snapshot (#265).
+ */
+export function withStoredIdentity<T extends { identity?: boolean | undefined }>(request: T, state: MachineState): T {
+	return request.identity === undefined ? { ...request, identity: state.identity } : request;
 }
 
 function pendingLicense(requested: LicenseInput | undefined, recorded: MachineState["license"]): LicenseInput | undefined {
