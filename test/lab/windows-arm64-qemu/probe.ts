@@ -4,11 +4,13 @@
  * The first `platforms=windows-arm64` dispatch (run 45220931492) installed choco's
  * QEMU 11.1.0 (an x64 build, run under Windows' x64 emulation) and every boot failed
  * with "QEMU exited immediately" and no error text. This runs QEMU with growing argv,
- * each for a few seconds, and records how it ended: still running (killed by us),
- * or its full exit code (a Windows NTSTATUS like 0xC000001D shows up here, where
- * bash would truncate it to 8 bits).
+ * each for a few seconds, and records how it ended: still running at the deadline
+ * (killed by the helper), or its full 32-bit exit status. Each case goes through
+ * run-case.ps1 (.NET Process) because Bun reports only the low byte of a Windows
+ * exit status: an NTSTATUS like 0xC000001D reads as 29, and 0xC0000005 as 5.
  *
- * Run (Windows, QEMU in C:\Program Files\qemu): bun run test/lab/windows-arm64-qemu/probe.ts
+ * Run (Windows, pwsh on PATH, QEMU in C:\Program Files\qemu):
+ *   bun run test/lab/windows-arm64-qemu/probe.ts
  */
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,32 +19,55 @@ const DIR = process.env.QEMU_DIR ?? "C:\\Program Files\\qemu";
 const A64 = join(DIR, "qemu-system-aarch64.exe");
 const X64 = join(DIR, "qemu-system-x86_64.exe");
 const CODE = join(DIR, "share", "edk2-aarch64-code.fd");
+const HELPER = join(import.meta.dir, "run-case.ps1");
+/** QEMU -drive option values escape a literal comma by doubling it. */
+const qemuOpt = (value: string) => value.replace(/,/g, ",,");
 
 const cases: { name: string; argv: string[] }[] = [
 	{ name: "aarch64 --version", argv: [A64, "--version"] },
 	{ name: "aarch64 -M none", argv: [A64, "-M", "none", "-display", "none", "-nodefaults"] },
 	{ name: "aarch64 -M virt tcg, no firmware", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg", "-m", "256", "-display", "none", "-nodefaults"] },
 	{ name: "aarch64 -M virt tcg tb-size=256", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg,tb-size=256", "-m", "512", "-display", "none", "-nodefaults"] },
-	{ name: "aarch64 -M virt tcg + edk2 code", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg,tb-size=256", "-m", "512", "-display", "none", "-nodefaults", "-drive", `if=pflash,format=raw,readonly=on,unit=0,file=${CODE}`] },
+	{ name: "aarch64 -M virt tcg + edk2 code", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg,tb-size=256", "-m", "512", "-display", "none", "-nodefaults", "-drive", `if=pflash,format=raw,readonly=on,unit=0,file=${qemuOpt(CODE)}`] },
 	{ name: "aarch64 -M virt tcg -cpu max", argv: [A64, "-M", "virt", "-cpu", "max", "-accel", "tcg", "-m", "256", "-display", "none", "-nodefaults"] },
 	{ name: "aarch64 -M virt tcg thread=single", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg,thread=single", "-m", "256", "-display", "none", "-nodefaults"] },
 	{ name: "x86_64 -M pc tcg", argv: [X64, "-M", "pc", "-accel", "tcg", "-m", "256", "-display", "none", "-nodefaults"] },
 	{ name: "x86_64 -M pc tcg tb-size=256", argv: [X64, "-M", "pc", "-accel", "tcg,tb-size=256", "-m", "512", "-display", "none", "-nodefaults"] },
 ];
 
+interface CaseResult {
+	killedAtDeadline: boolean;
+	exitCode: number;
+	exitCodeHex: string;
+	ms: number;
+	output: string;
+}
+
 const rows: string[] = [];
 for (const c of cases) {
-	const t = performance.now();
-	const proc = Bun.spawn(c.argv, { stdout: "pipe", stderr: "pipe" });
 	const quick = c.argv.includes("--version");
-	const timer = setTimeout(() => proc.kill(), quick ? 15_000 : 8_000);
-	const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-	clearTimeout(timer);
-	const ms = Math.round(performance.now() - t);
-	const killed = proc.signalCode !== null || (!quick && ms >= 7_900);
-	const hex = code !== null && code < 0 ? `0x${(code >>> 0).toString(16).toUpperCase()}` : code !== null && code > 255 ? `0x${code.toString(16).toUpperCase()}` : String(code);
-	const text = `${out}${err}`.replace(/\s+/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim().slice(0, 200);
-	const verdict = quick ? (code === 0 ? "ok" : `exit ${hex}`) : killed ? "ran until killed (ok)" : `exited after ${ms} ms, code ${hex}`;
+	const [file, ...args] = c.argv;
+	const proc = Bun.spawn(["pwsh", "-NoProfile", "-NonInteractive", "-File", HELPER], {
+		env: { ...process.env, PROBE_CASE: JSON.stringify({ file, args, timeoutMs: quick ? 15_000 : 8_000 }) },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [out, err, helperExit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+	let r: CaseResult;
+	try {
+		r = JSON.parse(out.trim().split(/\r?\n/).at(-1) ?? "") as CaseResult;
+	} catch {
+		const why = `${out}${err}`.replace(/\s+/g, " ").trim().slice(0, 200);
+		rows.push(`| ${c.name} | helper failed (exit ${helperExit}) | ${why.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")} |`);
+		console.log(`${c.name}: helper failed (exit ${helperExit}) ${why}`);
+		continue;
+	}
+	const text = r.output.replace(/\s+/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim().slice(0, 200);
+	const verdict = r.killedAtDeadline
+		? `still running at ${quick ? 15 : 8} s, killed (ok)`
+		: quick && r.exitCode === 0
+			? "ok"
+			: `exited after ${r.ms} ms, status ${r.exitCodeHex} (${r.exitCode})`;
 	rows.push(`| ${c.name} | ${verdict} | ${text} |`);
 	console.log(`${c.name}: ${verdict} ${text}`);
 }

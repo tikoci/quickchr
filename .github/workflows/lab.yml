@@ -178,7 +178,8 @@ jobs:
 
   # test/lab/windows-arm64-qemu — does choco's QEMU run on a Windows ARM64 runner?
   # (issue #305). The first windows-arm64 integration dispatch saw every boot exit
-  # immediately with no error text; this records full exit codes for growing argv.
+  # immediately with no error text; this records full exit codes for growing argv
+  # (through a pwsh/.NET helper: Bun keeps only the low byte of a Windows status).
   windows-arm64-qemu:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.lab == 'all' || inputs.lab == 'windows-arm64-qemu' }}
     runs-on: windows-11-arm
@@ -191,9 +192,36 @@ jobs:
       - name: Install QEMU (choco, as integration.yml does)
         shell: bash
         run: |
-          choco install qemu -y --no-progress || true
-          ls "/c/Program Files/qemu" | head -40
-          file "/c/Program Files/qemu/qemu-system-aarch64.exe" 2>/dev/null || true
+          # choco can exit 0 having installed nothing ("installed 0/0 packages")
+          # or part of the package, so check for both binaries the probe runs.
+          qemu_dir="/c/Program Files/qemu"
+          bins="qemu-system-x86_64.exe qemu-system-aarch64.exe"
+          missing=""
+          for attempt in 1 2 3; do
+            choco install qemu -y --no-progress || true
+            missing=""
+            for bin in $bins; do
+              [ -f "$qemu_dir/$bin" ] || missing="$missing $bin"
+            done
+            [ -z "$missing" ] && break
+            echo "::warning::choco install qemu left out:$missing (attempt $attempt/3)"
+            [ "$attempt" -lt 3 ] && sleep "$((20 * attempt))"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::QEMU install failed: missing$missing in C:\\Program Files\\qemu after 3 attempts"
+            exit 1
+          fi
+          # Each binary's architecture, from the PE header's Machine field.
+          for bin in $bins; do
+            f="$qemu_dir/$bin"
+            pe=$(od -An -t u4 -j 60 -N 4 "$f" | tr -d ' ')
+            machine=$(od -An -t x2 -j "$((pe + 4))" -N 2 "$f" | tr -d ' ')
+            case "$machine" in
+              8664) arch=x64 ;; aa64) arch=arm64 ;; 014c) arch=x86 ;; *) arch="unknown (0x$machine)" ;;
+            esac
+            echo "$bin: $arch" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+          pwsh --version
       - name: Probe
         shell: bash
         run: bun run test/lab/windows-arm64-qemu/probe.ts

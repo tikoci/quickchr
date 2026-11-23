@@ -21,12 +21,25 @@ import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const RUNS = Number(process.argv[process.argv.indexOf("--runs") + 1] || "15");
+/** `--runs N` (default 15): a positive safe integer, or the probe refuses to start. */
+function parseRuns(argv: string[]): number {
+	let runs = 15;
+	for (let i = 0; i < argv.length; i++) {
+		if (argv[i] !== "--runs") throw new Error(`doctor-timing: unknown argument '${argv[i]}' (usage: probe.ts [--runs N])`);
+		const raw = argv[++i];
+		if (raw === undefined || !/^[0-9]+$/.test(raw)) throw new Error(`doctor-timing: --runs needs a positive integer, got '${raw ?? ""}'`);
+		runs = Number(raw);
+		if (!Number.isSafeInteger(runs) || runs < 1) throw new Error(`doctor-timing: --runs needs a positive integer, got '${raw}'`);
+	}
+	return runs;
+}
+
+const RUNS = parseRuns(process.argv.slice(2));
 const ROOT = join(import.meta.dir, "../../..");
 const CLI = join(ROOT, "src/cli/index.ts");
 const DATA = join(tmpdir(), `doctor-timing-${process.pid}`);
 
-async function wall(argv: string[]): Promise<{ ms: number; exit: number }> {
+async function wall(argv: string[]): Promise<{ ms: number; exit: number; stdout: string; stderr: string }> {
 	rmSync(DATA, { recursive: true, force: true });
 	mkdirSync(DATA, { recursive: true });
 	const { QUICKCHR_ACCEL: _drop, ...env } = process.env;
@@ -36,9 +49,26 @@ async function wall(argv: string[]): Promise<{ ms: number; exit: number }> {
 		stdout: "pipe",
 		stderr: "pipe",
 	});
-	await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+	const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
 	const exit = await proc.exited;
-	return { ms: Math.round(performance.now() - t), exit };
+	return { ms: Math.round(performance.now() - t), exit, stdout, stderr };
+}
+
+/** A timing only counts if doctor actually ran: its `--json` output parses, has
+ *  `ok` and `checks`, and the exit code matches `ok` (0 when ok, 1 when not). */
+function checkDoctorRun(r: { exit: number; stdout: string; stderr: string }): void {
+	let doc: { ok?: unknown; checks?: unknown };
+	try {
+		doc = JSON.parse(r.stdout) as typeof doc;
+	} catch {
+		throw new Error(`doctor-timing: doctor --json printed no JSON (exit ${r.exit}): ${(r.stdout + r.stderr).slice(0, 500)}`);
+	}
+	if (typeof doc.ok !== "boolean" || !Array.isArray(doc.checks)) {
+		throw new Error(`doctor-timing: doctor --json lacks ok/checks: ${r.stdout.slice(0, 500)}`);
+	}
+	if (r.exit !== (doc.ok ? 0 : 1)) {
+		throw new Error(`doctor-timing: doctor --json said ok=${doc.ok} but exited ${r.exit}`);
+	}
 }
 
 function stats(xs: number[]): { n: number; min: number; p50: number; p90: number; max: number } {
@@ -56,7 +86,9 @@ const cli: number[] = [];
 const bunStart: number[] = [];
 const help: number[] = [];
 for (let i = 0; i < RUNS; i++) {
-	cli.push((await wall(["bun", CLI, "doctor", "--json"])).ms);
+	const doctorRun = await wall(["bun", CLI, "doctor", "--json"]);
+	checkDoctorRun(doctorRun);
+	cli.push(doctorRun.ms);
 	bunStart.push((await wall(["bun", "-e", "0"])).ms);
 	help.push((await wall(["bun", CLI, "--help"])).ms);
 }
@@ -84,8 +116,10 @@ const importMs = Math.round(performance.now() - importT);
 const totals: number[] = [];
 for (run = 0; run < RUNS; run++) {
 	const t = performance.now();
-	await QuickCHR.doctor();
-	totals.push(Math.round(performance.now() - t));
+	const res = (await QuickCHR.doctor()) as { ok?: unknown; checks?: unknown };
+	const ms = Math.round(performance.now() - t);
+	if (typeof res.ok !== "boolean" || !Array.isArray(res.checks)) throw new Error("doctor-timing: QuickCHR.doctor() returned no ok/checks");
+	totals.push(ms);
 }
 (Bun as unknown as { spawnSync: unknown }).spawnSync = realSpawnSync;
 
