@@ -17,11 +17,14 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   machine (packages, device-mode, license, `--add-user`, `--disable-admin` or
   `--secure-login`, including the `secure-login` setting), it now also sets
   `/system/identity` to the machine name, so machines are told apart in WinBox, MNDP
-  neighbor lists, the console prompt and `/app` container host names. A boot with no
-  provisioning keeps the factory identity, and `set` never renames. Opt out with
-  `--no-identity` on `add`/`start` (`StartOptions.identity: false`). **Library callers
-  that provision get this by default too.** The step is recorded as `identity` in
-  `machine.json`'s `provisioning.steps`. (#265)
+  neighbor lists, the console prompt and `/app` container host names. A boot-only
+  start leaves the current identity in place, and `set` never renames. Opt out with
+  `--no-identity` on `add`/`start` (`StartOptions.identity: false`); the opt-out is
+  kept as intent, so `clean()` and a plain `start` replay it. **Library callers that
+  provision get this by default too.** The step is recorded as `identity` in
+  `machine.json`'s `provisioning.steps`. RouterOS caps an identity at 64 bytes: every
+  name quickchr creates now fits, but a longer name from an older release fails the
+  step; start that machine with `--no-identity`. (#265)
 
 - **Receive ports for traffic the guest sends** (TZSP, syslog, NetFlow).
   `quickchr add lab --receive tzsp` reserves a named port: the guest sends to

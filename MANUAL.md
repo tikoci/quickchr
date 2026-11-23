@@ -237,7 +237,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--add-user <user:pass>` | — | Provisioning, ≥ 7.20.8 |
 | `--disable-admin` | false | Provisioning, ≥ 7.20.8 |
 | `--secure-login` / `--no-secure-login` | unset | Provisioning, ≥ 7.20.8. The only way to get the managed SSH key that centrs and other descriptor consumers need for SSH/SFTP: it creates the `quickchr` account with a batch-verified key. Without it, or when combined with `--add-user`, no key is created. First boot only; an already-booted machine cannot add the key later, so pass it at `add`/`start` (#253) |
-| `--no-identity` | — | Keep the factory `/system/identity`. By default, when quickchr provisions (any option above or below marked Provisioning), it also sets the identity to the machine name (#265). `--identity <x>` is refused: the identity is the machine name |
+| `--no-identity` | — | Leave `/system/identity` as it is. By default, when quickchr provisions (any option above or below marked Provisioning), it also sets the identity to the machine name (#265). `--identity <x>` is refused: the identity is the machine name |
 | `--license-level <l>` | — | `p1`, `p10`, `p-unlimited` (`unlimited` is accepted as `p-unlimited`), ≥ 7.20.8. On `add` only the level is recorded; credentials are resolved at the first `start` |
 | `--license-account <a>` | — | `start` only. MikroTik.com email. Without it: env `MIKROTIK_WEB_ACCOUNT`, then the secret store |
 | `--license-password <p>` | — | `start` only. Pairs with `--license-account`; if you give one of the two, the other comes from its env var (never from the secret store). Without either, `start` refuses before booting when no credential is found |
@@ -1141,7 +1141,7 @@ redact before logging or attaching to bug reports.
 | `user` | `{ name, password }` | — | Provisioning |
 | `disableAdmin` | boolean | `false` | Provisioning |
 | `secureLogin` | boolean | `false` | **`true` is the explicit trigger** for managed-account creation, including the batch-verified SSH key that `descriptor()` advertises (first boot only, #253) |
-| `identity` | boolean | default on | When provisioning runs, set `/system/identity` to the machine name. **Only `false` has an effect** (skip it); it never triggers provisioning by itself (#265) |
+| `identity` | boolean | default on | When provisioning runs, set `/system/identity` to the machine name. **Only `false` has an effect** (skip it); it never triggers provisioning by itself. Recorded as intent, and an explicit `true` overrides a recorded `false` (#265) |
 | `license` | `LicenseInput` | — | `"p1"` / `"p10"` / `"p-unlimited"` (`"unlimited"` is normalized to `"p-unlimited"`) or `LicenseOptions`. Only the level is recorded in `machine.json` (`license`); credentials are resolved from env vars / the secret store, and `start()` refuses before booting when none are found |
 | `deviceMode` | `DeviceModeOptions` | — | `{mode?, enable?[], disable?[]}` |
 | `installDeps` | boolean | — | **Deprecated, ignored.** Never installed anything; run `quickchr doctor` for install hints |
@@ -1346,10 +1346,22 @@ port mappings work on any 7.x.
 0. **Identity** — sets `/system/identity` to the machine name, so machines are
    told apart in WinBox, MNDP neighbor lists, the console prompt and `/app`
    container host names (#265). It runs first, with the factory `admin` login, and
-   only when another step below runs: a boot with no provisioning keeps the factory
-   identity (`CHR` on current images, `MikroTik` on older ones). `identity: false`
-   (`--no-identity`) skips it. `set` never renames. Recorded as the `identity`
-   step. RouterOS takes identities up to 64 bytes, which every quickchr name fits.
+   only when another step below runs: a boot-only start leaves the current identity
+   in place (on a fresh disk, `CHR` on current images, `MikroTik` on older ones).
+   `identity: false` (`--no-identity`) skips it. `set` never renames. Recorded as the
+   `identity` step. A `set` the guest answers with another menu's data (the post-boot
+   REST race) is sent again; a RouterOS refusal (4xx) on the set or the read-back
+   fails the step at once.
+
+   **Intent.** `add --no-identity` is recorded in `machine.json`, and so is the
+   identity choice of the first-boot `start` that provisions, so `clean()` followed
+   by a plain `start` replays it with the rest of the stored intent. An explicit
+   `identity: true` overrides a stored `false`; omitting it inherits the stored value.
+
+   **Length.** RouterOS takes identities up to 64 bytes (`failure: could not change
+   identity: too long` above that). Every name quickchr creates now fits; a machine
+   named by an older release can be longer. If RouterOS refuses such a name, the
+   step fails and the first boot rolls back: start it with `--no-identity`.
 1. **Packages** — `installAllPackages` or `packages[]` triggers SCP
    upload of `.npk` files to the SSH port, then `/system/reboot`.
    quickchr waits 2× the normal boot timeout (package init takes

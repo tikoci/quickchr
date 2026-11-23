@@ -305,8 +305,9 @@ export interface MachineConfig {
 	/** Managed-login intent, recorded at `add()`/`start()`. Same rule as
 	 *  {@link StartOptions.secureLogin}: only an explicit `true` creates the account. */
 	secureLogin?: boolean | undefined;
-	/** Identity intent, recorded at `add()`/`start()` (#265). Same rule as
-	 *  {@link StartOptions.identity}: only an explicit `false` has an effect. */
+	/** Identity intent, recorded at `add()`/`start()` and by the first-boot run that
+	 *  provisions (the merged value it honored), so `clean()` replays it (#265). Same
+	 *  rule as {@link StartOptions.identity}: only an explicit `false` has an effect. */
 	identity?: boolean | undefined;
 	portBase: number;
 	excludePorts: ServiceName[];
@@ -490,8 +491,11 @@ export interface StartOptions {
 	 *  rename. Unset and `true` are the same default. The identity never makes quickchr
 	 *  provision on its own: a start with no other provisioning step (no packages,
 	 *  device-mode, license, user, `disableAdmin` or `secureLogin: true`) leaves the
-	 *  factory identity alone, and so does `set`. On a machine whose first boot has
-	 *  passed, `false` asks for nothing and is accepted. CLI: `--no-identity`. */
+	 *  current identity in place, and so does `set`. On a machine whose first boot has
+	 *  passed, `false` asks for nothing and is accepted. The first-boot choice is kept
+	 *  as {@link MachineConfig.identity}, so `clean()` replays it: an explicit `true`
+	 *  overrides a stored `false`, and omitting it inherits the stored value.
+	 *  CLI: `--no-identity`. */
 	identity?: boolean | undefined;
 	/** Convenience alias: `noAuth: true` is equivalent to `secureLogin: false` —
 	 *  skip the managed `quickchr` user provisioning, leave admin password-less.

@@ -3,6 +3,7 @@ import {
 	appliedDeviceModeRecord,
 	assertProvisioningWindow,
 	classifyProvisioningRequest,
+	firstBootProvisioning,
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 	pendingProvisioningFor,
@@ -472,6 +473,18 @@ describe("identity is a passenger, never a request (#265)", () => {
 	test("identity alone requests nothing, either way", () => {
 		expect(hasProvisioningRequest({ identity: false })).toBe(false);
 		expect(hasProvisioningRequest({ identity: true })).toBe(false);
+	});
+
+	test("cancelling the sole stored provisioning option does not leave identity to run alone", () => {
+		// `add lab --device-mode-enable container`, then `start lab --no-device-mode
+		// --no-secure-login`: the merged device-mode is a truthy `{ mode: "skip" }`.
+		const added = machine({ deviceMode: { enable: ["container"] } });
+		expect(firstBootProvisioning(added, { deviceMode: { mode: "skip" }, secureLogin: false })).toBeUndefined();
+		// The same machine started plainly still provisions, identity included.
+		expect(firstBootProvisioning(added, {})?.deviceMode).toEqual({ enable: ["container"] });
+		// And so does any other stored step left standing beside the skipped one.
+		const withLicense = machine({ deviceMode: { enable: ["container"] }, license: "p1" });
+		expect(firstBootProvisioning(withLicense, { deviceMode: { mode: "skip" } })?.license).toBe("p1");
 	});
 
 	test("--no-identity on a machine past its first boot is a no-op, not a refusal", () => {

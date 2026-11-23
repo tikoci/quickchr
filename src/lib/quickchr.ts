@@ -104,7 +104,7 @@ import {
 	assertProvisioningWindow,
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
-	pendingProvisioningFor,
+	firstBootProvisioning,
 	withRecordedLicenseLevel,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
@@ -1977,14 +1977,19 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 /** Persist what provisioning landed on the current disk, in state and on disk.
  *  A run with nothing to do still records — an empty `steps` says "provisioning ran
  *  and had nothing to apply", which is a different fact from never having run. */
-function recordProvisioning(state: MachineState, steps: ProvisioningStep[]): void {
+function recordProvisioning(state: MachineState, steps: ProvisioningStep[], identity: boolean | undefined): void {
 	const record = { at: new Date().toISOString(), steps };
 	const current = loadMachine(state.name);
 	if (current) {
 		current.provisioning = record;
+		// The merged identity intent this run honored, kept as intent (#265): a
+		// `start --no-identity` that provisions a machine `add` created must still
+		// skip the rename when `clean()` reopens the window and stored intent replays.
+		current.identity = identity;
 		saveMachine(current);
 	}
 	state.provisioning = record;
+	state.identity = identity;
 }
 
 /** Re-read `machine.json` into an existing state object, in place.
@@ -2936,7 +2941,7 @@ export class QuickCHR {
 			}
 			// First boot of add()-created machine: apply pending provisioning from stored state
 			if (isProvisioningWindowOpen(existing)) {
-				const pendingOpts = pendingProvisioningFor(existing, {
+				const pendingOpts = firstBootProvisioning(existing, {
 					installAllPackages: opts.installAllPackages,
 					packages: opts.packages,
 					deviceMode: opts.deviceMode,
@@ -2946,25 +2951,17 @@ export class QuickCHR {
 					secureLogin: opts.secureLogin,
 					identity: opts.identity,
 				});
-				// `identity` is left out on purpose: it rides along with provisioning and
-				// never makes a first boot provision on its own (#265).
-				const hasPending = !!(
-					pendingOpts.installAllPackages ||
-					(pendingOpts.packages?.length ?? 0) > 0 ||
-					pendingOpts.deviceMode ||
-					pendingOpts.user ||
-					pendingOpts.disableAdmin ||
-					pendingOpts.license ||
-					pendingOpts.secureLogin === true
-				);
-				if (hasPending) {
-					// Before the boot, not after it: `_provisionInstance()` re-checks the
-					// version, but only once the guest is up — on RouterOS 6 that is a
-					// download-free boot spent on a refusal known in advance.
+				// Undefined unless a step changes something: identity rides along and
+				// never makes a first boot provision on its own, and a `{ mode: "skip" }`
+				// left by `--no-device-mode` asks for nothing (#265).
+				if (pendingOpts) {
 					const pendingMutations = {
 						...pendingOpts,
 						hasDeviceModeProvisioning: shouldApplyDeviceMode(resolveDeviceModeOptions(pendingOpts.deviceMode)),
 					};
+					// Before the boot, not after it: `_provisionInstance()` re-checks the
+					// version, but only once the guest is up — on RouterOS 6 that is a
+					// download-free boot spent on a refusal known in advance.
 					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
 					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
@@ -3465,7 +3462,7 @@ export class QuickCHR {
 		// Stamped only here, after every requested step returned. A run that throws
 		// leaves the record absent, and the caller rolls the whole run back
 		// (`rollbackFailedProvisioning()`), so the retry starts from a factory disk.
-		recordProvisioning(machineState, applied);
+		recordProvisioning(machineState, applied, opts.identity);
 	}
 
 	/** Re-launch an existing stopped machine.
@@ -3491,17 +3488,9 @@ export class QuickCHR {
 		wait = true,
 		launch?: SessionLaunch,
 	): Promise<ChrInstance> {
-		const wantsProvisioning = (opts: typeof provisioningOpts) => !!(
-			opts && (
-				opts.installAllPackages ||
-				(opts.packages?.length ?? 0) > 0 ||
-				opts.deviceMode ||
-				opts.user ||
-				opts.disableAdmin ||
-				opts.license ||
-				opts.secureLogin === true
-			)
-		);
+		// Resolved device-mode, as in start(): a `{ mode: "skip" }` asks for nothing, and
+		// counting it would run `_provisionInstance()` with identity as its only step (#265).
+		const wantsProvisioning = (opts: typeof provisioningOpts) => !!opts && hasProvisioningRequest(opts);
 		let hasProvisioning = wantsProvisioning(provisioningOpts);
 		const lock = acquireLockNow(
 			machineLockPath(state.machineDir),

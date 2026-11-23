@@ -253,14 +253,16 @@ function rejectUnknownFlags(
 	flags: Record<string, string | boolean | string[]>,
 	known: readonly string[],
 	command: string,
+	argv: readonly string[] = [],
 ): void {
 	const unknown = unknownFlags(flags, known);
 	if (unknown.length > 0) {
 		console.error(unknownFlagMessage(unknown, command));
 		process.exit(1);
 	}
-	// Before the valueless check, which would ask a bare `--identity` for a value (#265).
-	const identityError = known.includes("identity") ? identityFlagError(flags) : undefined;
+	// Before the valueless check, which would ask a bare `--identity` for a value, and
+	// from the raw arguments, where a later `--no-identity` cannot erase it (#265).
+	const identityError = known.includes("identity") ? identityFlagError(argv) : undefined;
 	if (identityError) {
 		console.error(identityError);
 		process.exit(1);
@@ -767,9 +769,9 @@ function printMachineListWithTip(
 		: `${dim("tip:")}  quickchr ${tipCommand} <name>`);
 }
 
-async function cmdAdd(argv: string[]) {
+export async function cmdAdd(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
-	rejectUnknownFlags(flags, ADD_FLAGS, "add");
+	rejectUnknownFlags(flags, ADD_FLAGS, "add", argv);
 	const { QuickCHR } = await import("../lib/quickchr.ts");
 	const { bold, formatPorts, formatReceive, formatNetworks, dim } = await import("./format.ts");
 	const { resolveSetting } = await import("../lib/settings.ts");
@@ -1474,7 +1476,7 @@ function startStatusLine(created: boolean, noWait: boolean): string {
 export async function cmdStart(argv: string[]) {
 	const { flags, positional } = parseFlags(argv);
 	applyTimeoutExtraShortFlag(argv, flags, positional);
-	rejectUnknownFlags(flags, START_FLAGS, "start");
+	rejectUnknownFlags(flags, START_FLAGS, "start", argv);
 	// Before the --all branch: both start paths must see the same override.
 	await applyAccelFlag(flags);
 	warnDeprecatedBackgroundFlag(flags);
@@ -3891,7 +3893,7 @@ Options:
   --disable-admin       Disable the default admin account on first boot
   --secure-login        Create a managed login; use --disable-admin to disable admin
   --no-secure-login     Keep admin with no password (skip managed account)
-  --no-identity         Keep the factory /system/identity. By default, when quickchr
+  --no-identity         Leave /system/identity as it is. By default, when quickchr
                         provisions (packages, device-mode, license, users or
                         secure-login), it also sets the identity to the machine name
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
@@ -4020,7 +4022,7 @@ Options:
   --disable-admin       Disable the default admin account
   --secure-login        Create a managed login; use --disable-admin to disable admin
   --no-secure-login     Keep admin with no password (skip managed account)
-  --no-identity         Keep the factory /system/identity. By default, when quickchr
+  --no-identity         Leave /system/identity as it is. By default, when quickchr
                         provisions (packages, device-mode, license, users or
                         secure-login), it also sets the identity to the machine name
   --port-base <port>    Starting port number (default: auto-allocated from 9100)

@@ -124,11 +124,19 @@ export const NEGATABLE_VALUE_FLAGS: ReadonlySet<string> = new Set(["device-mode"
 
 /** `--no-identity` is the only spelling (#265). The identity is the machine name, so a
  *  value, or a bare `--identity`, is refused by name rather than read as a second name.
- *  Returns the message, or undefined when the flag is absent or negated. */
-export function identityFlagError(flags: Record<string, string | boolean | string[]>): string | undefined {
-	const value = flags.identity;
-	if (value === undefined || value === false) return undefined;
-	return "--identity takes no value: quickchr sets the RouterOS identity to the machine name. Use --name to choose it, or --no-identity to keep the factory identity.";
+ *
+ *  Reads the raw arguments, not parsed flags: parsing keeps the last spelling, so
+ *  `--identity lab1 --no-identity` would reach a flag check as a plain `false` and the
+ *  refused value would be erased. Stops at `--`, after which nothing is a flag.
+ *  Returns the message, or undefined when no positive spelling was given. */
+export function identityFlagError(argv: readonly string[]): string | undefined {
+	for (const arg of argv) {
+		if (arg === "--") break;
+		if (arg === "--identity" || arg.startsWith("--identity=")) {
+			return "--identity takes no value: quickchr sets the RouterOS identity to the machine name. Use --name to choose it, or --no-identity to leave the identity as it is.";
+		}
+	}
+	return undefined;
 }
 
 /** Flags given without the value they require.

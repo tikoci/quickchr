@@ -164,7 +164,16 @@ describe("unknown flags on machine-creating commands (#156)", () => {
 	});
 
 	test("--identity <x> and bare --identity are refused by name and create nothing (#265)", async () => {
-		for (const args of [["add", "--identity", "lab1"], ["add", "--identity"], ["start", "--identity", "lab1", "--dry-run"]]) {
+		for (const args of [
+			["add", "--identity", "lab1"],
+			["add", "--identity"],
+			["start", "--identity", "lab1", "--dry-run"],
+			["start", "--identity=lab1", "--dry-run"],
+			// A later --no-identity must not erase the refused value: parsing keeps the
+			// last spelling, so the check reads the arguments as given.
+			["start", "--version", "7.24.4", "--dry-run", "--identity", "lab1", "--no-identity"],
+			["add", "--identity", "lab1", "--no-identity"],
+		]) {
 			const result = await runQuickchr(args);
 			expect({ args, exitCode: result.exitCode }).toEqual({ args, exitCode: 1 });
 			expect(result.stderr).toContain("--identity takes no value");
@@ -173,10 +182,19 @@ describe("unknown flags on machine-creating commands (#156)", () => {
 		expect(dataDirContents()).toEqual([]);
 	});
 
-	test("--no-identity is accepted by start and add (#265)", async () => {
+	test("--no-identity is accepted by start and reaches its options as false (#265)", async () => {
 		const result = await runQuickchr(["start", "--dry-run", "--version", "7.24.3", "--no-identity"]);
 		expect(result.exitCode).toBe(0);
-		expect(result.stdout).toContain("Dry run");
+		expect(result.stdout).toContain('"identity": false');
+		// Absent, it asks for nothing.
+		const plain = await runQuickchr(["start", "--dry-run", "--version", "7.24.3"]);
+		expect(plain.exitCode).toBe(0);
+		expect(plain.stdout).not.toContain('"identity"');
+	});
+
+	test("--identity after -- is not a flag, and is not refused as one (#265)", async () => {
+		const result = await runQuickchr(["start", "--dry-run", "--version", "7.24.3", "--no-identity", "--", "--identity"]);
+		expect(result.stderr).not.toContain("--identity takes no value");
 	});
 
 	test("--no-x negation is not mistaken for a missing value", async () => {

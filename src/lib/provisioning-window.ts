@@ -263,6 +263,26 @@ export function pendingProvisioningFor(
 	};
 }
 
+/**
+ * The provisioning an `add()`-created machine's first boot runs, or `undefined` when
+ * it should boot without provisioning: the caller's request merged over stored
+ * intent ({@link pendingProvisioningFor}), kept only when a step in it changes
+ * something ({@link hasProvisioningRequest}).
+ *
+ * The test is on the merged request, with device-mode resolved — not on whether a
+ * field is set. `start --no-device-mode` over a stored `--device-mode-enable
+ * container` leaves a truthy `{ mode: "skip" }` that asks for nothing; counting it
+ * would run `_provisionInstance()` with the identity rename as its only step, and
+ * identity is a passenger that never provisions on its own (#265).
+ */
+export function firstBootProvisioning(
+	existing: MachineState,
+	request: ProvisioningRequest,
+): ProvisioningRequest | undefined {
+	const pending = pendingProvisioningFor(existing, request);
+	return hasProvisioningRequest(pending) ? pending : undefined;
+}
+
 function pendingLicense(requested: LicenseInput | undefined, recorded: MachineState["license"]): LicenseInput | undefined {
 	return withRecordedLicenseLevel(requested, recorded) ?? recorded;
 }
