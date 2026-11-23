@@ -68,7 +68,9 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   command line names a file in the directory (compared by canonical path, so a
   symlinked data dir matches), with a `kill` hint. When the identity cannot be checked
   (Windows, another user's process on macOS), it still refuses, without a kill hint,
-  and says to delete `qemu.pid` if the process is not this machine's QEMU. (#294)
+  and says to delete `qemu.pid` if the process is not this machine's QEMU. With no
+  usable `qemu.pid` (an older release wrote it late), Linux and macOS look for a
+  `qemu-system-*` process with a file in the directory and refuse the same way. (#294)
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a

@@ -5,7 +5,7 @@
  * manages process spawn/stop, and handles PID tracking.
  */
 
-import { existsSync, writeFileSync, readFileSync, copyFileSync, statSync, openSync, closeSync, unlinkSync, truncateSync, realpathSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync, readdirSync, copyFileSync, statSync, openSync, closeSync, unlinkSync, truncateSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { Arch, BootDiskFormat, MachineState, NetworkMode, NetworkConfig, PortMapping } from "./types.ts";
 import { QuickCHRError } from "./types.ts";
@@ -556,10 +556,13 @@ function readPidfile(machineDir: string): number | undefined {
  *  It is returned unverified when the command line cannot be read (Windows, another
  *  user's process on macOS) or only names a `machines/<name>/` path that does not
  *  resolve here: refusing a removal is recoverable, deleting under a running VM is
- *  not. A command line that clearly belongs to something else is not this QEMU. */
+ *  not. A command line that clearly belongs to something else is not this QEMU.
+ *
+ *  With no usable `qemu.pid`, see {@link scanForQemu}. */
 export function liveQemuFor(machineDir: string): LiveQemu | undefined {
 	const pid = readPidfile(machineDir);
-	if (pid === undefined || pidLiveness(pid) === "dead") return undefined;
+	if (pid === undefined) return scanForQemu(machineDir);
+	if (pidLiveness(pid) === "dead") return undefined;
 	const argv = processArgv(pid);
 	if (argv === undefined) {
 		// ps also fails for a process that exited between the checks.
@@ -570,6 +573,52 @@ export function liveQemuFor(machineDir: string): LiveQemu | undefined {
 	const segment = `${sep}machines${sep}${basename(machineDir)}${sep}`;
 	if (argv.some((arg) => arg.includes(segment))) return { pid, verified: false };
 	return undefined;
+}
+
+/** With no usable `qemu.pid`, find the QEMU by its command line: a `qemu-system-*`
+ *  process with a file argument in `machineDir`. Releases before #294 wrote the pidfile
+ *  only after the 1.5 s startup check, and a kill or failed write can still lose it.
+ *  Only a canonical-path match counts here: with no pidfile tying a pid to this
+ *  directory, a same-named machine under another data dir is not this one.
+ *  Linux reads `/proc`; macOS runs one `ps`, whose space-joined output loses a path
+ *  that contains a space. Windows has no cheap equivalent, so nothing is found there. */
+function scanForQemu(machineDir: string): LiveQemu | undefined {
+	const target = canonicalPath(machineDir);
+	for (const [pid, argv] of qemuProcesses()) {
+		if (argvPaths(argv).some((path) => canonicalPath(dirname(path)) === target)) return { pid, verified: true };
+	}
+	return undefined;
+}
+
+/** Every readable `qemu-system-*` process with its argv, on Linux and macOS. */
+function qemuProcesses(): Array<[number, string[]]> {
+	const isQemu = (argv0: string | undefined) => argv0 !== undefined && basename(argv0).startsWith("qemu-system");
+	const found: Array<[number, string[]]> = [];
+	if (process.platform === "linux") {
+		let entries: string[];
+		try {
+			entries = readdirSync("/proc");
+		} catch {
+			return found;
+		}
+		for (const entry of entries) {
+			if (!/^\d+$/.test(entry)) continue;
+			const argv = processArgv(Number(entry));
+			if (argv && isQemu(argv[0])) found.push([Number(entry), argv]);
+		}
+	} else if (process.platform === "darwin") {
+		try {
+			const r = Bun.spawnSync(["/bin/ps", "-A", "-ww", "-o", "pid=,command="], { stdout: "pipe", stderr: "ignore", timeout: 5000 });
+			if (r.exitCode !== 0) return found;
+			for (const line of r.stdout.toString().split("\n")) {
+				const m = /^\s*(\d+)\s+(.+)$/.exec(line);
+				if (!m) continue;
+				const words = (m[2] as string).split(/\s+/);
+				if (isQemu(words[0])) found.push([Number(m[1]), words]);
+			}
+		} catch { /* no ps: nothing found */ }
+	}
+	return found;
 }
 
 /** Delete `machineDir/qemu.pid` when the process it names has exited. Background

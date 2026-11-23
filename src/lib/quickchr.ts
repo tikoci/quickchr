@@ -3750,7 +3750,7 @@ export class QuickCHR {
 				throw new QuickCHRError(
 					"MACHINE_RUNNING",
 					`Machine directory "${name}" has no readable machine.json, but its QEMU is still running (PID ${live.pid}). Nothing was deleted.`,
-					`Stop that process (${process.platform === "win32" ? `taskkill /PID ${live.pid} /F` : `kill ${live.pid}`}), then run 'quickchr remove ${name}' again.`,
+					`Stop that process (${process.platform === "win32" ? `taskkill /PID ${live.pid} /F` : `kill ${live.pid}`}), then run 'quickchr remove ${shellQuote(name)}' again.`,
 				);
 			}
 			if (live) {
@@ -3761,7 +3761,7 @@ export class QuickCHR {
 				throw new QuickCHRError(
 					"MACHINE_RUNNING",
 					`Machine directory "${name}" has no readable machine.json, and process ${live.pid} from its qemu.pid is still running; quickchr could not confirm whether it is this machine's QEMU. Nothing was deleted.`,
-					`If PID ${live.pid} is this machine's QEMU, stop it; if it is not, delete ${pidfile}. Then run 'quickchr remove ${name}' again.`,
+					`If PID ${live.pid} is this machine's QEMU, stop it; if it is not, delete ${shellQuote(pidfile)}. Then run 'quickchr remove ${shellQuote(name)}' again.`,
 				);
 			}
 			removeState(name);

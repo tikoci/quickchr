@@ -159,6 +159,50 @@ describe("removeOrphan with a live QEMU (#294)", () => {
 			expect(existsSync(join(real, "machines", "two"))).toBe(true);
 		});
 
+		/** A stand-in whose command line starts with a `qemu-system-*` program, as the
+		 *  process scan for a directory with no pidfile requires. */
+		function spawnQemuNamed(...args: string[]) {
+			const bin = join(root, "bin", "qemu-system-x86_64");
+			if (!existsSync(bin)) {
+				mkdirSync(join(root, "bin"), { recursive: true });
+				symlinkSync(process.execPath, bin);
+			}
+			const child = Bun.spawn([bin, "-e", "await Bun.sleep(60_000)", ...args], { stdout: "ignore", stderr: "ignore" });
+			children.push(child);
+			waitForArgv(child.pid);
+			return child;
+		}
+
+		test("with no qemu.pid, a QEMU whose files are in the directory still refuses", () => {
+			// Releases before #294 wrote qemu.pid only after the startup check, and a
+			// kill or failed write can still lose it.
+			const dir = getMachineDir("no-pid-live");
+			mkdirSync(dir, { recursive: true });
+			const qemu = spawnQemuNamed(diskArg(dir));
+			expect(liveQemuFor(dir)).toEqual({ pid: qemu.pid, verified: true });
+
+			const error = errorOf(() => QuickCHR.removeOrphan("no-pid-live"));
+			expect(error.code).toBe("MACHINE_RUNNING");
+			expect(error.installHint).toContain(`kill ${qemu.pid}`);
+			expect(existsSync(dir)).toBe(true);
+		});
+
+		test("with no qemu.pid, only a qemu-system process with a file here counts", () => {
+			const dir = getMachineDir("no-pid-other");
+			mkdirSync(dir, { recursive: true });
+			spawnIdle(diskArg(dir)); // not QEMU, e.g. something tailing a log in it
+			spawnQemuNamed(diskArg(getMachineDir("no-pid-other-sibling"))); // QEMU, elsewhere
+			expect(liveQemuFor(dir)).toBeUndefined();
+			expect(QuickCHR.removeOrphan("no-pid-other")).toBe(true);
+		});
+
+		test("the hint quotes a legacy name the shell would split", () => {
+			const dir = getMachineDir("old lab");
+			const qemu = spawnIdle(diskArg(dir));
+			orphanWithPid("old lab", qemu.pid);
+			expect(errorOf(() => QuickCHR.removeOrphan("old lab")).installHint).toContain("quickchr remove 'old lab'");
+		});
+
 		test("a machines/<name>/ path that does not resolve here refuses, without a kill hint", () => {
 			const elsewhere = spawnIdle(diskArg(join(root, "elsewhere", "machines", "same-name")));
 			const dir = orphanWithPid("same-name", elsewhere.pid);
