@@ -49,8 +49,8 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   on PATH by spawning `where.exe`, about 75 ms per lookup on a GitHub windows-latest
   runner, and `quickchr doctor` made nine of them (~0.7 s). On Windows, lookups now happen
   in process and follow `where.exe`'s order: the current directory, then each PATH entry,
-  trying `PATHEXT` extensions in order. With an in-process lookup, `doctor --json` went from
-  ~765 ms to ~80 ms there. Linux and macOS still use `which`. (#269)
+  trying `PATHEXT` extensions in order. `doctor --json` went from ~765 ms to ~170 ms
+  there. Linux and macOS still use `which`. (#269)
 
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the

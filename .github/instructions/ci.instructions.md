@@ -731,10 +731,12 @@ step's own cap is deliberately left unchanged.
 natively (`process.arch=arm64`), but choco's QEMU 11.1.0 is an x64 build
 (`PE32+ … x86-64`) running under Windows' x64 emulation. `qemu-system-aarch64 --version`
 and `-M none` work; every TCG machine (`-M virt`, and `qemu-system-x86_64 -M pc`) exits
-within a second and prints nothing, with status 255 as Bun reported it. Bun keeps only
-the low byte of a Windows exit status, so 255 is that byte, not the full status; the probe
-now runs QEMU through a .NET helper to capture all 32 bits, and a rerun records it.
-Every boot therefore fails as "QEMU exited immediately". Mechanism unknown. Inferred: TCG's runtime code generation under x64 emulation. The id comes
+within a second and prints nothing. Bun reported status 255, but Bun keeps only the low
+byte of a Windows exit status; the probe now runs QEMU through a .NET helper, and lab run
+45269622496 recorded the full status: **`0xC00000FF`** for all seven TCG cases
+(`STATUS_BAD_FUNCTION_TABLE` in ntstatus.h). Both choco binaries are x64 PE files.
+Every boot therefore fails as "QEMU exited immediately". Mechanism unknown. Inferred: TCG's runtime-generated code under x64 emulation (the status names a malformed
+unwind table). The id comes
 back when a native arm64 QEMU for Windows is available to install. Re-run the probe
 (`gh workflow run lab.yml -f lab=windows-arm64-qemu`) before adding it.
 
