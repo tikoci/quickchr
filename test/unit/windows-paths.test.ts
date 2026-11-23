@@ -5,7 +5,7 @@
  * Tests cover:
  * - getDataDir() reading LOCALAPPDATA / USERPROFILE fallback / QUICKCHR_DATA_DIR override
  * - getMachinesDir() / getCacheDir() derived paths
- * - findCommandOnPath() resolves through PATHEXT (Bun.which)
+ * - findCommandOnPath() resolves through PATHEXT, as where.exe does
  * - detectPackageManager() returns "winget"
  */
 import { describe, test, expect, afterEach } from "bun:test";
@@ -68,6 +68,17 @@ describe.skipIf(!isWindows)("Windows platform detection", () => {
 		const result = findCommandOnPath("cmd");
 		expect(typeof result).toBe("string");
 		expect(result?.length).toBeGreaterThan(0);
+	});
+
+	test("findCommandOnPath agrees with where.exe's first result", () => {
+		// The in-process resolver (#269) replaced a where.exe spawn; check it still
+		// picks what where.exe picks on a real runner, for a system command and two
+		// the runner puts on PATH.
+		for (const cmd of ["cmd", "bun", "git"]) {
+			const where = Bun.spawnSync(["where.exe", cmd], { stdout: "pipe", stderr: "pipe" });
+			const first = new TextDecoder().decode(where.stdout).split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+			expect(findCommandOnPath(cmd)?.toLowerCase()).toBe(where.exitCode === 0 ? first?.toLowerCase() : undefined);
+		}
 	});
 
 	test("findCommandOnPath returns undefined for a non-existent command", () => {

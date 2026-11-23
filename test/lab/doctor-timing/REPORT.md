@@ -33,6 +33,11 @@ The same lookups with `which` on Linux cost ~1 ms each.
 | CLI `--help` | 31 |
 | in-process `doctor()` | 20 (25) |
 
+Review of PR #315 replaced `Bun.which` (it differs from `where.exe`: fixed extension
+order, no current-directory lookup) with `resolveWindowsCommand()` in `platform.ts`, which
+follows `where.exe`'s order and, like `Bun.which`, stats candidate files in process. Linux
+and macOS went back to `which`. Not re-measured yet: the next `doctor-timing` run records it.
+
 ## Reading it
 
 - The test's 5 s budget now has ~25× headroom on an idle runner (p50 80 ms, cold

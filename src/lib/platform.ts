@@ -70,16 +70,94 @@ export function detectPackageManager(): PackageManager {
 	return "unknown";
 }
 
-/** Find a command on PATH (honouring `PATHEXT` on Windows), in process.
- *  This was a `where.exe` / `which` spawn per lookup. On a windows-latest runner each
- *  `where.exe` took ~75 ms and `doctor()` makes nine lookups, which is most of its
- *  ~0.7 s there (#269, `test/lab/doctor-timing`). */
+/** Find a command on PATH. `which` on Linux and macOS; on Windows an in-process
+ *  lookup that follows `where.exe` ({@link resolveWindowsCommand}).
+ *  Windows used to spawn `where.exe` too, and on a windows-latest runner each spawn
+ *  took ~75 ms; `doctor()` makes nine lookups, which was most of its ~0.7 s there
+ *  (#269, `test/lab/doctor-timing`). `Bun.which` is not a drop-in for either: it
+ *  skips the current directory and empty PATH entries on Windows and orders
+ *  extensions its own way, and on POSIX it ignores the empty-entry-means-cwd rule
+ *  `which` keeps. */
 export function findCommandOnPath(cmd: string): string | undefined {
 	try {
-		return Bun.which(cmd) ?? undefined;
+		if (process.platform === "win32") {
+			return resolveWindowsCommand(cmd, {
+				path: process.env.PATH ?? "",
+				pathext: process.env.PATHEXT,
+				cwd: process.cwd(),
+			});
+		}
+		const result = Bun.spawnSync(["which", cmd], { stdout: "pipe", stderr: "pipe" });
+		if (result.exitCode !== 0) return undefined;
+		const output = new TextDecoder().decode(result.stdout).trim();
+		const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+		return firstLine || undefined;
 	} catch {
 		return undefined;
 	}
+}
+
+/** cmd.exe's PATHEXT when the variable is unset. */
+const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+
+export interface WindowsLookupEnv {
+	/** `PATH`, `;`-separated. Entries may be quoted; empty entries are skipped. */
+	path: string;
+	/** `PATHEXT`; unset falls back to cmd.exe's `.COM;.EXE;.BAT;.CMD`. */
+	pathext?: string | undefined;
+	/** Searched before any PATH entry, as cmd.exe and `where.exe` do. */
+	cwd: string;
+	/** Is this a regular file? Defaults to a stat; Windows file names are
+	 *  case-insensitive, so a test on a case-sensitive host injects its own. */
+	isFile?: (path: string) => boolean;
+}
+
+function statIsFile(p: string): boolean {
+	try {
+		return statSync(p).isFile();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Resolve a command the way `where.exe` (and cmd.exe) does, without spawning it:
+ * the current directory first, then each PATH entry in order (surrounding quotes
+ * stripped, empty entries skipped). In each directory a name that already has an
+ * extension is tried as written, then the name with each PATHEXT extension in
+ * PATHEXT order (entries differing only in case are tried once; file-name case is
+ * left to the filesystem, which is case-insensitive on Windows). A name containing
+ * a path separator is resolved against `cwd` only. Returns the first match, or
+ * undefined.
+ *
+ * Pure path logic over `isFile`, so it runs (and is unit-tested) on every OS.
+ */
+export function resolveWindowsCommand(cmd: string, env: WindowsLookupEnv): string | undefined {
+	if (!cmd) return undefined;
+	const isFile = env.isFile ?? statIsFile;
+	const exts: string[] = [];
+	for (const raw of (env.pathext ?? DEFAULT_PATHEXT).split(";")) {
+		const ext = raw.trim();
+		if (ext && !exts.some((e) => e.toLowerCase() === ext.toLowerCase())) exts.push(ext);
+	}
+	const base = cmd.split(/[\\/]/).at(-1) ?? cmd;
+	const hasExt = base.lastIndexOf(".") > 0;
+	const names = [...(hasExt ? [cmd] : []), ...exts.map((ext) => `${cmd}${ext}`)];
+
+	const dirs: string[] = [env.cwd];
+	if (!/[\\/:]/.test(cmd)) {
+		for (const raw of env.path.split(";")) {
+			const dir = raw.replace(/^"(.*)"$/, "$1");
+			if (dir) dirs.push(dir);
+		}
+	}
+	for (const dir of dirs) {
+		for (const name of names) {
+			const candidate = isAbsolute(name) ? name : join(dir, name);
+			if (isFile(candidate)) return candidate;
+		}
+	}
+	return undefined;
 }
 
 /** Check if a command exists on PATH. */

@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { HostInterface } from "../../src/lib/types.ts";
@@ -32,6 +32,7 @@ import {
 	isCrossArchEmulation,
 	accelDoctorCheck,
 	proxyDoctorCheck,
+	resolveWindowsCommand,
 } from "../../src/lib/platform.ts";
 
 const originalSpawnSync = Bun.spawnSync;
@@ -138,14 +139,126 @@ describe("findCommandOnPath", () => {
 		expect(findCommandOnPath("qemu-img")).toBe("/toolchain/bin/qemu-img");
 	});
 
-	test("uses where.exe on Windows and returns undefined on lookup failure", () => {
+	test("on Windows looks the command up in process, without spawning where.exe (#269)", () => {
 		setPlatform("win32");
-		mockSpawnSync((cmd) => {
-			expect(cmd).toEqual(["where.exe", "qemu-img"]);
-			return { exitCode: 1, stderr: "INFO: Could not find files" };
-		});
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-win-lookup-"));
+		const savedPath = process.env.PATH;
+		const savedPathext = process.env.PATHEXT;
+		try {
+			writeFileSync(join(dir, "qemu-img.CMD"), "");
+			process.env.PATH = `;${dir};`;
+			process.env.PATHEXT = ".EXE;.CMD";
+			const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "/wrong\n" }));
+			expect(findCommandOnPath("qemu-img")).toBe(join(dir, "qemu-img.CMD"));
+			expect(findCommandOnPath("__no_such_command_quickchr__")).toBeUndefined();
+			expect(spawn).not.toHaveBeenCalled();
+		} finally {
+			process.env.PATH = savedPath;
+			if (savedPathext === undefined) delete process.env.PATHEXT;
+			else process.env.PATHEXT = savedPathext;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
 
-		expect(findCommandOnPath("qemu-img")).toBeUndefined();
+describe("resolveWindowsCommand (where.exe semantics, any host)", () => {
+	let root: string;
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "quickchr-where-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	/** Lay files out under root; returns the absolute path of each. */
+	function files(...rel: string[]): string[] {
+		return rel.map((r) => {
+			const p = join(root, r);
+			mkdirSync(dirname(p), { recursive: true });
+			writeFileSync(p, "");
+			return p;
+		});
+	}
+
+	/** Windows file names are case-insensitive; match them that way on any host. */
+	function caseInsensitiveIsFile(p: string): boolean {
+		try {
+			const want = p.split(/[\\/]/).at(-1)?.toLowerCase();
+			return readdirSync(dirname(p), { withFileTypes: true }).some((d) => d.isFile() && d.name.toLowerCase() === want);
+		} catch {
+			return false;
+		}
+	}
+
+	/** Compare paths the way Windows does: the casing of a match comes from the candidate. */
+	const lc = (p: string | undefined) => p?.toLowerCase();
+
+	function lookup(cmd: string, opts: { path: string[] | string; pathext?: string; cwd?: string }) {
+		return lc(resolveWindowsCommand(cmd, {
+			path: Array.isArray(opts.path) ? opts.path.join(";") : opts.path,
+			pathext: opts.pathext,
+			cwd: opts.cwd ?? join(root, "cwd"),
+			isFile: caseInsensitiveIsFile,
+		}));
+	}
+
+	test("tries PATH entries in order and PATHEXT extensions in PATHEXT order within each", () => {
+		const [aBat, , bExe] = files("a/tool.bat", "a/tool.cmd", "b/tool.exe");
+		// a comes first on PATH, so its .bat wins over b's .exe even though .EXE leads PATHEXT.
+		expect(lookup("tool", { path: [join(root, "a"), join(root, "b")], pathext: ".EXE;.BAT;.CMD" })).toBe(lc(aBat));
+		// Within a, PATHEXT order decides: .CMD before .BAT.
+		expect(lookup("tool", { path: [join(root, "a"), join(root, "b")], pathext: ".CMD;.BAT" })).toBe(lc(join(root, "a", "tool.CMD")));
+		expect(lookup("tool", { path: [join(root, "b"), join(root, "a")], pathext: ".BAT;.EXE" })).toBe(lc(bExe));
+	});
+
+	test(".COM is not deferred: it wins when PATHEXT lists it first", () => {
+		files("d/tool.exe", "d/tool.com");
+		expect(lookup("tool", { path: [join(root, "d")], pathext: ".COM;.EXE" })).toBe(lc(join(root, "d", "tool.com")));
+	});
+
+	test("a custom PATHEXT extension is honoured", () => {
+		const [ps1] = files("p/tool.ps1");
+		expect(lookup("tool", { path: [join(root, "p")], pathext: ".COM;.EXE;.PS1" })).toBe(lc(ps1));
+		expect(lookup("tool", { path: [join(root, "p")], pathext: ".COM;.EXE" })).toBeUndefined();
+	});
+
+	test("the current directory is searched before PATH", () => {
+		const [here] = files("cwd/tool.exe", "a/tool.exe");
+		expect(lookup("tool", { path: [join(root, "a")], pathext: ".EXE" })).toBe(lc(here));
+	});
+
+	test("quoted PATH entries (with spaces) are unquoted and empty entries skipped", () => {
+		const [spaced] = files("Program Files/QEMU/qemu-system-x86_64.exe");
+		const path = `;;"${join(root, "Program Files", "QEMU")}";;`;
+		expect(lookup("qemu-system-x86_64", { path, pathext: ".EXE" })).toBe(lc(spaced));
+	});
+
+	test("names and extensions match case-insensitively", () => {
+		const [mixed] = files("m/Tool.Exe");
+		expect(lookup("TOOL", { path: [join(root, "m")], pathext: ".com;.exe" })).toBe(lc(mixed));
+		// Duplicate PATHEXT entries that differ only by case are tried once.
+		expect(lookup("tool", { path: [join(root, "m")], pathext: ".EXE;.exe" })).toBe(lc(mixed));
+	});
+
+	test("a name that already has an extension is tried as written first", () => {
+		const [exact] = files("e/tool.exe", "e/tool.exe.cmd");
+		expect(lookup("tool.exe", { path: [join(root, "e")], pathext: ".CMD;.EXE" })).toBe(lc(exact));
+		// …and still gets PATHEXT appended when the exact name is absent.
+		files("e/py3.11.exe");
+		expect(lookup("py3.11", { path: [join(root, "e")], pathext: ".EXE" })).toBe(lc(join(root, "e", "py3.11.exe")));
+	});
+
+	test("directories are not matches, and an unset PATHEXT falls back to cmd.exe's", () => {
+		mkdirSync(join(root, "x", "tool.exe"), { recursive: true });
+		const [bat] = files("y/tool.bat");
+		expect(lookup("tool", { path: [join(root, "x"), join(root, "y")] })).toBe(lc(bat));
+		files("y/other.ps1");
+		expect(lookup("other", { path: [join(root, "y")] })).toBeUndefined();
+	});
+
+	test("returns undefined when nothing matches, including an empty name", () => {
+		expect(lookup("nothing", { path: [join(root, "a")], pathext: ".EXE" })).toBeUndefined();
+		expect(lookup("", { path: [join(root, "a")], pathext: ".EXE" })).toBeUndefined();
 	});
 });
 

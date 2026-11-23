@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlink
 import { join, dirname } from "node:path";
 import { listMachineNames, getMachinesDir } from "./state.ts";
 import { userHomeDir } from "./paths.ts";
+import { findCommandOnPath } from "./platform.ts";
 
 export type SupportedShell = "bash" | "zsh" | "fish";
 const SUPPORTED_SHELLS: SupportedShell[] = ["bash", "zsh", "fish"];
@@ -51,7 +52,7 @@ export function detectCurrentShell(): ShellInfo {
 	// Resolve full path for the detected binary (or fall back to $SHELL).
 	let shell: string;
 	if (detectedBinary) {
-		shell = Bun.which(detectedBinary) ?? detectedBinary;
+		shell = findCommandOnPath(detectedBinary) ?? detectedBinary;
 	} else {
 		const shellEnv = process.env.SHELL ?? "";
 		shell = shellEnv || "unknown";
@@ -72,7 +73,7 @@ export function detectCurrentShell(): ShellInfo {
 	}
 
 	// Handle both POSIX (/) and Windows (\) separators — on windows-latest
-	// `Bun.which("bash")` returns paths like "C:\Program Files\Git\bin\bash.exe".
+	// `findCommandOnPath("bash")` returns paths like "C:\Program Files\Git\bin\bash.exe".
 	const binary = (shell.split(/[\\/]/).at(-1) ?? shell).replace(/\.exe$/i, "");
 	const supported = (SUPPORTED_SHELLS as string[]).includes(binary);
 
