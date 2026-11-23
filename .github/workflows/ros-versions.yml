@@ -70,15 +70,47 @@ jobs:
           printf 'unique=%s\n' "$(printf '%s' "${!seen[*]}")" >> "$GITHUB_OUTPUT"
           printf '%b' "$rows"
 
+      # Only "the ci-data branch exists but has no tested-versions.json yet" (the
+      # bootstrap case) reads as an empty record. Any other failure (a 5xx after
+      # retries, a token or permission problem, a missing ci-data branch, a file
+      # that isn't a JSON object) fails this job, so nothing is dispatched: an
+      # unreadable record would make every version look untested and re-dispatch
+      # the ones that already failed (#284).
       - name: Fetch tested-versions.json from ci-data
         id: tested
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          set -eo pipefail
-          gh api "repos/${{ github.repository }}/contents/tested-versions.json?ref=ci-data" \
-            -H "Accept: application/vnd.github.raw" > tested-versions.json \
-            || echo '{}' > tested-versions.json
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if gh api "repos/$REPO/contents/tested-versions.json?ref=ci-data" \
+              -H "Accept: application/vnd.github.raw" > tested-versions.json 2> gh-err.txt; then
+              break
+            fi
+            cat gh-err.txt
+            if grep -q "HTTP 404" gh-err.txt; then
+              # A missing ref is also a 404; only a missing file on a live branch is bootstrap.
+              if gh api "repos/$REPO/branches/ci-data" --silent; then
+                echo "::notice::ci-data has no tested-versions.json yet; treating every version as untested"
+                echo '{}' > tested-versions.json
+                break
+              fi
+              echo "::error::tested-versions.json: the ci-data branch is missing or unreadable; dispatching nothing"
+              exit 1
+            fi
+            if grep -qE "HTTP 5[0-9][0-9]" gh-err.txt && [ "$attempt" -lt 3 ]; then
+              echo "::warning::tested-versions.json: GitHub 5xx, retrying ($attempt/3)"
+              sleep "$((attempt * 15))"
+              continue
+            fi
+            echo "::error::could not read tested-versions.json from ci-data; dispatching nothing"
+            exit 1
+          done
+          if ! jq -e 'type == "object"' tested-versions.json > /dev/null; then
+            echo "::error::tested-versions.json on ci-data is not a JSON object; dispatching nothing"
+            exit 1
+          fi
           cat tested-versions.json
 
       - name: Diff — versions with no linux-x86 record

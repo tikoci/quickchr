@@ -624,6 +624,12 @@ single run, `collect-metrics: true`).
   tested-versions.json and the red run stays visible. After investigating/fixing, re-run
   manually: `gh workflow run integration.yml -f platforms=linux-x86 -f routeros-targets=<version> -f collect-metrics=true`
 - Known-broken betas: `-f skip-versions=7.24beta3,...` on a manual dispatch.
+- **A record the check can't read fails the check** (#284). Only a 404 for the file on an
+  existing `ci-data` branch (the bootstrap case) reads as `{}`. A 5xx is retried twice;
+  after that, or on any other error (token or permission, a missing `ci-data` branch, a
+  file that isn't a JSON object), the `check` job fails with `gh`'s output in the log and
+  nothing is dispatched. Reading an unreadable record as empty would re-dispatch every
+  version, including the ones that already failed.
 - Successful dispatched runs fold into tested-versions.json via the normal aggregate
   path, so the next day's check is a no-op for that version.
 
