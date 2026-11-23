@@ -20,7 +20,8 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
   ("Device 'pflash1' is writable but does not support snapshots"), which silently
   broke all arm64 snapshots (#31, `test/lab/arm64-rollback/REPORT.md`). Legacy raw
   `efi-vars.fd` is migrated in place at next launch (NVRAM preserved).
-- Disk: `-drive file=...,format=raw,if=none,id=drive0 -device virtio-blk-pci,drive=drive0`
+- Disk: `-drive file=...,format=raw,if=none,id=drive0 -device virtio-blk-pci,drive=drive0,addr=0x10`
+  (fixed slots on both arches; see "Disk PCI slots" below)
 - **NEVER use `if=virtio`** on virt — it maps to MMIO, causing silent boot failures
 - CPU: `-cpu host` when using HVF, `-cpu cortex-a710` for TCG
 - pflash virtual sizes must match the code ROM (pad/truncate the raw stage before converting)
@@ -29,13 +30,35 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 
 - Machine: `-M pc`
 - No firmware needed (SeaBIOS built in)
-- Disk: `-drive file=...,format=raw,if=virtio` (fine on q35/pc — maps to PCI)
+- Disk: same `virtio-blk-pci` at a fixed slot as arm64. Not `if=virtio`: on `pc` it maps to
+  PCI, but QEMU places it after every explicit `-device`, so NICs move it (#257).
 - QGA available via `virtio-serial-pci` + `virtserialport`
 - **Duplicate `-M` merges, last-wins** (measured on QEMU 11.1.2 — do not
   re-derive): `-M pc -M pc,pcspk-audiodev=cap` is accepted, qtree shows
   `audiodev = "cap"` on `isa-pcspk`, and conflicting machine props resolve to
   the last occurrence. This is what lets `--qemu-arg` passthrough (#213) go
   last with no machine-prop merging code — quickchr keeps emitting `-M pc`.
+
+## Disk PCI slots (#257)
+
+`diskDeviceArgs()` (`src/lib/qemu.ts`) pins the boot disk to slot `0x10` and extra disk N
+to `0x10 + N`, emitted before the NICs, which take the low slots automatically. At most
+15 extra disks (`MAX_EXTRA_DISKS`, checked in `normalizeDiskOptions()`).
+
+Why, measured on CHR 7.25.1 (x86 KVM, QEMU 11.1.2; arm64 TCG), one persistent boot disk
+booted under successive layouts:
+
+- **RouterOS names a disk by its PCI address.** The first address it sees becomes `pcie1`,
+  each new address gets the next index, and old entries stay in `/disk` with no size. Moving
+  a disk therefore always renames it, and never back to an index it had before.
+- **With `-drive if=virtio` (x86 before #257)**, adding a NIC moved the data disk from slot
+  6 to 7, and RouterOS named it `pcie2` instead of `pcie1`.
+- **With fixed slots**, adding or removing NICs leaves disk names alone, and adding a disk
+  leaves ether names and MACs alone (NIC slots don't move).
+- **Existing machines** get one rename on their first start with fixed slots: each extra disk
+  moves to `0x11`+ and takes the next unused `pcieN` (for example `pcie3`), not `pcie1`.
+  A setting or path that names the old slot must be pointed at the new slot once (`/disk/set … slot=`,
+  then `/app/settings/set disk=`). A machine with no extra disk sees no change in `/disk`.
 
 ## Acceleration
 
