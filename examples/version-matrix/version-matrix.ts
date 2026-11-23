@@ -15,15 +15,16 @@
  */
 import { join } from "node:path";
 import type { Channel } from "../../src/index.ts";
-import { QuickCHR } from "../../src/index.ts";
+import { hostChrArch, QuickCHR } from "../../src/index.ts";
 import { check, runExample } from "../lib.ts";
 
 const LITE = !!process.env.VERSION_MATRIX_LITE;
 const CHANNELS: Channel[] = LITE
 	? ["long-term", "stable"]
 	: ["long-term", "stable", "testing", "development"];
-// container is on both arches; zerotier is arm64-only (added when host is arm64).
-const PACKAGES = process.arch === "arm64" ? ["zerotier", "container"] : ["container"];
+// container is on both arches; zerotier is arm64-only (added when the default guest
+// is arm64). hostChrArch(), not process.arch: under Rosetta the guest is arm64 (#293).
+const PACKAGES = hostChrArch() === "arm64" ? ["zerotier", "container"] : ["container"];
 
 if (import.meta.main) {
 	await runExample(async (track) => {

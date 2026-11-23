@@ -29,12 +29,14 @@
 import { defaultBootTimeout } from "../../src/lib/quickchr.ts";
 import { transferBudgetMs } from "../../src/lib/download.ts";
 import { BOOT_FORENSICS_BUDGET_MS } from "../../src/lib/diagnostics.ts";
-import { detectAccel } from "../../src/lib/platform.ts";
+import { detectAccel, hostChrArch } from "../../src/lib/platform.ts";
 import type { Arch } from "../../src/lib/types.ts";
 
-/** Arch integration tests boot by default — the process-native one, matching
- *  what `QuickCHR.start()` picks when the caller passes no `arch`. */
-export const TEST_ARCH: Arch = process.arch === "arm64" ? "arm64" : "x86";
+/** Arch integration tests boot by default — the physical host's, matching what
+ *  `QuickCHR.start()` picks when the caller passes no `arch` (arm64 under
+ *  Rosetta, #293). Tests that pass an explicit host arch pass this, so the arch
+ *  they boot and the arch {@link bootTestTimeout} budgets are the same. */
+export const TEST_ARCH: Arch = hostChrArch();
 
 /** Resolved once at module load, because a test timeout has to be a plain number
  *  at `test()` definition time and `detectAccel()` is async.

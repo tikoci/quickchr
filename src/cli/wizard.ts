@@ -4,6 +4,7 @@
 
 import type { Arch, Channel, DeviceModeOptions, LicenseLevel, LicenseOptions, NetworkSpecifier, StartOptions } from "../lib/types.ts";
 import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
+import { hostChrArch } from "../lib/platform.ts";
 
 export type WizardUserChoice = "custom" | "managed" | "admin";
 
@@ -97,7 +98,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	}
 
 	// 2. Architecture
-	const hostArch = process.arch === "arm64" ? "arm64" : "x86";
+	const hostArch = hostChrArch();
 	const settingArch = resolveSetting("default-arch").value as Arch | "auto";
 	const archInitial: Arch = settingArch === "auto" ? hostArch : settingArch;
 	const arch = await clack.select({

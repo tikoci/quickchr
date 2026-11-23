@@ -243,7 +243,7 @@ See MANUAL.md's CLI reference and environment-variables sections for the full su
 
 **Acceleration detection** (`detectAccel`):
 - An explicit override (`--accel` flag > `QUICKCHR_ACCEL` env > `accel` in `quickchr.env`) short-circuits detection entirely; `auto` (the default) runs the checks below.
-- macOS: checks `kern.hv_support` via sysctl. Intel x86 guests get HVF; **all guests on Apple Silicon get TCG** — x86 because HVF cannot virtualize across architectures, arm64 because the CHR image needs AArch32 (Design Decisions #10). A Rosetta process is identified via `sysctl.proc_translated`.
+- macOS: checks `kern.hv_support` via sysctl. Intel x86 guests get HVF; **all guests on Apple Silicon get TCG** — x86 because HVF cannot virtualize across architectures, arm64 because the CHR image needs AArch32 (Design Decisions #10). An x64 (Rosetta) process identifies the physical Apple Silicon host via `/usr/sbin/sysctl -n hw.optional.arm64`, which is 1 on Apple Silicon even under translation. Not `sysctl.proc_translated`: that describes the `sysctl` child, which macOS may launch natively (#293).
 - Linux: checks `/dev/kvm` writability.
 - Falling back to TCG is safe but can be significantly slower; measure with the
   target host, guest architecture, and RouterOS version.

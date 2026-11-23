@@ -71,6 +71,18 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   and says to delete `qemu.pid` if the process is not this machine's QEMU. With no
   usable `qemu.pid` (an older release wrote it late), Linux and macOS look for a
   `qemu-system-*` process with a file in the directory and refuse the same way. (#294)
+- **The default guest arch is arm64 on Apple Silicon, even for an x64 Bun under
+  Rosetta.** With no `arch` (or `"auto"`), `add()`/`start()`, `cacheKey()`/`cacheAdd()`
+  and the setup wizard read `process.arch`, which is `x64` under Rosetta. They picked an
+  x86 guest, which then ran under cross-arch TCG with the 15× budget, and the cache
+  helpers keyed the x86 image. They now use the physical host's arch, read from
+  `hw.optional.arm64`. The new `hostChrArch()` export tells a consumer which arch the
+  default will be. Precedence: the CLI uses the `default-arch` setting when `--arch`
+  is omitted; an explicit `--arch auto`, or an omitted `arch` in the library API,
+  selects the physical host's arch. `quickchr doctor` now treats a missing QEMU (or
+  UEFI firmware) as an error only for that default arch, and `QuickCHR.doctor(arch?)`
+  takes it. (#293)
+
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a

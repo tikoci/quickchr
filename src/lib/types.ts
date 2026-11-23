@@ -430,7 +430,8 @@ export interface StartOptions {
 	version?: string | undefined;
 	/** Release channel to resolve latest version from. Default: "stable". */
 	channel?: Channel | undefined;
-	/** Guest architecture. Default: matches host (arm64 on Apple Silicon, x86 on Intel/AMD).
+	/** Guest architecture. Default: the physical host's, from `hostChrArch()` (arm64 on
+	 *  Apple Silicon, including an x64 Bun under Rosetta; x86 on Intel/AMD).
 	 *  Pass `"auto"` as an explicit synonym for the default — useful when an agent or
 	 *  caller wants to state the intent rather than omit the field. */
 	arch?: Arch | "auto" | undefined;
