@@ -29,8 +29,6 @@ What we observed:
 - **Same reliability in our sample.** Across our runs (one location plus GitHub's
   Linux, macOS and Windows runners) we saw no errors or stalled transfers on either
   host, and no consistent throughput difference between them.
-- `cdn.mikrotik.com/routeros/NEWESTa7.<channel>` also answers, with the same content
-  as `upgrade.mikrotik.com`.
 
 We could not find `cdn.mikrotik.com` in the documentation or on the download pages,
 apart from the F-Droid repository link. Our questions:

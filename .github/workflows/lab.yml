@@ -178,7 +178,7 @@ jobs:
           BUDGET_MB: ${{ inputs.download-origin-budget-mb }}
           ROUNDS: ${{ inputs.download-origin-rounds }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           bun test/lab/download-origin/probe.ts run \
             "--full-budget-mb=$BUDGET_MB" "--rounds=$ROUNDS" --range-mib=8 \
             --out=download-origin-results 2>&1 | tee probe.log

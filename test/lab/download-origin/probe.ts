@@ -24,8 +24,13 @@
  *        [--expect=7.26beta6,7.25.2] [--out=...]
  *
  * `watch` is the release-boundary freshness observer: it polls the channel files
- * and the expected versions' x86 CHR image + `.sha256` on both hosts and records
- * the first time each host serves each of them. See REPORT.md "Freshness".
+ * and the expected versions' x86 CHR image + `.sha256` on both hosts and records,
+ * per host, the first poll at which each item was served successfully (a validated
+ * 1-byte 206 for the image, a parsed 64-hex SHA-256 for `.sha256`). Timestamps are
+ * only as precise as `--interval-s`. See REPORT.md "Freshness".
+ *
+ * Every flag is validated against fixed limits before the first request; a
+ * malformed or out-of-range value exits 2.
  */
 
 import { mkdirSync, appendFileSync, writeFileSync } from "node:fs";
@@ -44,27 +49,70 @@ const MIB = 1024 * 1024;
 
 // ── args ──────────────────────────────────────────────────────────────────────
 
+// Every argument is validated before the first request: a malformed or
+// out-of-range value exits 2 instead of silently falling back to a default
+// (a typo in --rounds or --full-budget-mb must not turn into gigabytes).
+
+function usageError(message: string): never {
+	console.error(`[probe] ${message}`);
+	process.exit(2);
+}
+
+const KNOWN_FLAGS: Record<string, readonly string[]> = {
+	run: ["label", "out", "stall-ms", "idle-abort-ms", "full-budget-mb", "rounds", "range-mib", "arches", "versions"],
+	watch: ["label", "out", "stall-ms", "idle-abort-ms", "interval-s", "duration-min", "expect"],
+};
+
 const [mode = "run", ...rest] = process.argv.slice(2);
+const known = KNOWN_FLAGS[mode];
+if (!known) usageError(`unknown mode "${mode}" (expected run | watch)`);
 const args = new Map<string, string>();
 for (const a of rest) {
-	const m = a.match(/^--([^=]+)=(.*)$/);
-	if (m?.[1] !== undefined && m[2] !== undefined) args.set(m[1], m[2]);
+	const m = a.match(/^--([a-z0-9-]+)=(.*)$/);
+	if (m?.[1] === undefined || m[2] === undefined) usageError(`malformed argument "${a}" (expected --name=value)`);
+	if (!known.includes(m[1])) usageError(`unknown flag --${m[1]} for mode "${mode}"`);
+	if (args.has(m[1])) usageError(`--${m[1]} given twice`);
+	args.set(m[1], m[2]);
 }
 const arg = (k: string, d: string) => args.get(k) ?? d;
-const num = (k: string, d: number) => {
-	const v = Number(args.get(k));
-	return Number.isFinite(v) && args.has(k) ? v : d;
+/** Integer flag in [min, max]. Absent → default; present but malformed or out of range → exit 2. */
+const int = (k: string, d: number, min: number, max: number): number => {
+	const raw = args.get(k);
+	if (raw === undefined) return d;
+	if (!/^\d+$/.test(raw)) usageError(`--${k}=${raw}: expected a whole number in ${min}..${max}`);
+	const v = Number(raw);
+	if (!Number.isSafeInteger(v) || v < min || v > max) usageError(`--${k}=${raw}: out of range ${min}..${max}`);
+	return v;
 };
-const list = (k: string, d: string) =>
-	arg(k, d)
+const list = (k: string, d: string, valid: RegExp) => {
+	const items = arg(k, d)
 		.split(",")
 		.map((s) => s.trim())
 		.filter(Boolean);
+	for (const s of items) if (!valid.test(s)) usageError(`--${k}: invalid item "${s}"`);
+	return items;
+};
+const VERSION_RE = /^\d+\.\d+(\.\d+)?((alpha|beta|rc)\d+)?$/;
 
 const LABEL = arg("label", process.env.PROBE_LABEL ?? "local");
+if (!/^[A-Za-z0-9._-]{1,64}$/.test(LABEL)) usageError(`label "${LABEL}": use 1-64 of [A-Za-z0-9._-]`);
 const OUT_DIR = arg("out", join(import.meta.dir, "results"));
-const STALL_MS = num("stall-ms", 5000);
-const IDLE_ABORT_MS = num("idle-abort-ms", 60_000);
+const STALL_MS = int("stall-ms", 5000, 100, 600_000);
+const IDLE_ABORT_MS = int("idle-abort-ms", 60_000, 1000, 600_000);
+
+// Mode-specific limits, also parsed here so nothing is requested before they pass.
+const RUN = {
+	fullBudgetBytes: int("full-budget-mb", 1200, 0, 20_000) * 1e6,
+	rounds: int("rounds", 8, 0, 200),
+	rangeBytes: int("range-mib", 8, 1, 256) * MIB,
+	arches: list("arches", "x86,arm64", /^(x86|arm64)$/) as Arch[],
+	extraVersions: list("versions", "", VERSION_RE),
+};
+const WATCH = {
+	intervalMs: int("interval-s", 60, 10, 3600) * 1000,
+	durationMs: int("duration-min", 720, 1, 20_160) * 60_000,
+	expect: list("expect", "", VERSION_RE),
+};
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -76,12 +124,13 @@ function hostUrl(officialUrl: string, host: Host): string {
 	return u.toString();
 }
 
-type ErrorClass = "dns" | "connect" | "tls" | "timeout" | "idle-abort" | "reset" | "http" | "other";
+type ErrorClass = "dns" | "connect" | "tls" | "timeout" | "idle-abort" | "reset" | "http" | "protocol" | "other";
 
 function classify(err: unknown): { class: ErrorClass; message: string } {
 	const e = err as { code?: string; name?: string; message?: string };
 	const message = `${e?.name ?? "Error"}${e?.code ? `(${e.code})` : ""}: ${e?.message ?? String(err)}`;
 	const s = `${e?.code ?? ""} ${e?.name ?? ""} ${e?.message ?? ""}`;
+	if (/PROTOCOL:/.test(s)) return { class: "protocol", message };
 	if (/IDLE_ABORT/.test(s)) return { class: "idle-abort", message };
 	if (/Timeout|TimeoutError|ETIMEDOUT/i.test(s)) return { class: "timeout", message };
 	if (/ENOTFOUND|EAI_AGAIN|DNS|getaddrinfo/i.test(s)) return { class: "dns", message };
@@ -134,6 +183,52 @@ async function request(
 	});
 }
 
+/** A byte range plus the full size it is cut from, so `Content-Range` can be checked exactly. */
+interface ByteRange {
+	start: number;
+	end: number; // inclusive
+	total: number;
+}
+const rangeHeader = (r: ByteRange) => `bytes=${r.start}-${r.end}`;
+const contentRange = (r: ByteRange) => `bytes ${r.start}-${r.end}/${r.total}`;
+
+/**
+ * Checks a ranged response before any body byte is read: it must be 206 with exactly
+ * the requested `Content-Range`. A server that ignores `Range` answers 200 with the
+ * whole artifact, which must be cancelled, not buffered. Returns an error or undefined.
+ */
+function checkRanged(res: Response, r: ByteRange): string | undefined {
+	if (res.status !== 206) return `PROTOCOL: expected 206 for ${rangeHeader(r)}, got ${res.status}`;
+	const cr = res.headers.get("content-range");
+	if (cr !== contentRange(r)) return `PROTOCOL: Content-Range "${cr}" != "${contentRange(r)}"`;
+	const cl = res.headers.get("content-length");
+	if (cl !== null && Number(cl) !== r.end - r.start + 1)
+		return `PROTOCOL: Content-Length ${cl} != ${r.end - r.start + 1}`;
+	return undefined;
+}
+
+/** Reads a small body, cancelling the stream as soon as it exceeds `max` bytes. */
+async function readCapped(res: Response, max: number): Promise<Uint8Array> {
+	if (!res.body) return new Uint8Array();
+	const reader = res.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let n = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		n += value.byteLength;
+		if (n > max) {
+			await reader.cancel();
+			throw new Error(`PROTOCOL: body exceeds ${max} bytes`);
+		}
+		chunks.push(value);
+	}
+	return Buffer.concat(chunks);
+}
+
+/** First 64-hex SHA-256 in a `.sha256` body, lowercased; undefined when there is none. */
+const parseSha256 = (text: string) => text.trim().match(/^[0-9a-f]{64}(?=\s|$)/i)?.[0]?.toLowerCase();
+
 interface Transfer {
 	host: Host;
 	url: string;
@@ -159,17 +254,18 @@ async function transfer(
 	url: string,
 	kind: Transfer["kind"],
 	position: number,
-	opts: { range?: string; expectedBytes?: number; timeoutMs: number },
+	opts: { range?: ByteRange; expectedBytes: number; timeoutMs: number },
 ): Promise<Transfer> {
+	const expectedBytes = opts.range ? opts.range.end - opts.range.start + 1 : opts.expectedBytes;
 	const t: Transfer = {
 		host,
 		url,
 		kind,
-		range: opts.range,
+		range: opts.range ? rangeHeader(opts.range) : undefined,
 		position,
 		startedAt: nowIso(),
 		bytes: 0,
-		expectedBytes: opts.expectedBytes,
+		expectedBytes,
 		maxGapMs: 0,
 		stalls: 0,
 	};
@@ -183,14 +279,27 @@ async function transfer(
 	};
 	try {
 		const headers: Record<string, string> = { "User-Agent": USER_AGENT, "Accept-Encoding": "identity" };
-		if (opts.range) headers.Range = opts.range;
+		if (opts.range) headers.Range = rangeHeader(opts.range);
 		armIdle();
 		const res = await fetch(url, { headers, keepalive: false, signal: controller.signal });
 		t.ttfbMs = performance.now() - t0;
 		t.status = res.status;
-		if (!(res.status === 200 || res.status === 206) || !res.body) {
+		if (!res.ok || !res.body) {
 			t.error = { class: "http", message: `HTTP ${res.status}` };
 			await res.body?.cancel();
+			return t;
+		}
+		const cl = res.headers.get("content-length");
+		const bad = opts.range
+			? checkRanged(res, opts.range)
+			: res.status !== 200
+				? `PROTOCOL: expected 200, got ${res.status}`
+				: cl !== null && Number(cl) !== expectedBytes
+					? `PROTOCOL: Content-Length ${cl} != ${expectedBytes}`
+					: undefined;
+		if (bad) {
+			t.error = { class: "protocol", message: bad };
+			await res.body.cancel();
 			return t;
 		}
 		const hasher = new Bun.CryptoHasher("sha256");
@@ -207,6 +316,12 @@ async function transfer(
 			if (gap > STALL_MS) t.stalls++;
 			last = now;
 			t.bytes += value.byteLength;
+			if (t.bytes > expectedBytes) {
+				await reader.cancel();
+				t.error = { class: "protocol", message: `PROTOCOL: body exceeds ${expectedBytes} bytes` };
+				t.totalMs = performance.now() - t0;
+				return t;
+			}
 			hasher.update(value);
 			armIdle();
 		}
@@ -214,8 +329,8 @@ async function transfer(
 		const bodyMs = performance.now() - firstByteAt;
 		t.mbps = bodyMs > 0 ? t.bytes / 1e6 / (bodyMs / 1000) : undefined;
 		t.sha256 = hasher.digest("hex");
-		if (opts.expectedBytes !== undefined && t.bytes !== opts.expectedBytes) {
-			t.error = { class: "reset", message: `short body: ${t.bytes}/${opts.expectedBytes}` };
+		if (t.bytes !== expectedBytes) {
+			t.error = { class: "reset", message: `short body: ${t.bytes}/${expectedBytes}` };
 		}
 	} catch (err) {
 		const reason = controller.signal.aborted ? controller.signal.reason : err;
@@ -312,9 +427,34 @@ interface Artifact {
 interface HostMeta {
 	host: Host;
 	head?: { status: number; headers: Record<string, string> } | undefined;
-	range?: { status: number; contentRange?: string | undefined; bytes: number } | undefined;
+	range?:
+		| { status: number; contentRange?: string | undefined; bytes: number; valid: boolean; error?: string | undefined }
+		| undefined;
 	sha256File?: { status: number; text?: string | undefined; hash?: string | undefined } | undefined;
 	error?: { class: ErrorClass; message: string } | undefined;
+}
+
+/**
+ * A validated 1-byte `Range` GET: 206 with `Content-Range: bytes 0-0/<size>`, body read
+ * capped at 1 byte. `size` is the HEAD `Content-Length` when known; otherwise any
+ * numeric total is accepted. Anything else is cancelled unread.
+ */
+async function oneByteRange(url: string, size: number | undefined): Promise<NonNullable<HostMeta["range"]>> {
+	const r = await request(url, { range: "bytes=0-0" });
+	const cr = r.headers.get("content-range") ?? undefined;
+	const total = Number(cr?.match(/^bytes 0-0\/(\d+)$/)?.[1] ?? Number.NaN);
+	const bad =
+		size !== undefined
+			? checkRanged(r, { start: 0, end: 0, total: size })
+			: r.status !== 206 || !Number.isSafeInteger(total)
+				? `PROTOCOL: expected 206 with Content-Range bytes 0-0/<n>, got ${r.status} "${cr}"`
+				: undefined;
+	if (bad) {
+		await r.body?.cancel();
+		return { status: r.status, contentRange: cr, bytes: 0, valid: false, error: bad };
+	}
+	const body = await readCapped(r, 1);
+	return { status: r.status, contentRange: cr, bytes: body.byteLength, valid: body.byteLength === 1 };
 }
 
 async function hostMeta(a: Artifact, host: Host): Promise<HostMeta> {
@@ -323,13 +463,12 @@ async function hostMeta(a: Artifact, host: Host): Promise<HostMeta> {
 	try {
 		const h = await request(url, { method: "HEAD" });
 		m.head = { status: h.status, headers: pickHeaders(h.headers) };
-		const r = await request(url, { range: "bytes=0-0" });
-		const body = new Uint8Array(await r.arrayBuffer());
-		m.range = { status: r.status, contentRange: r.headers.get("content-range") ?? undefined, bytes: body.byteLength };
+		const len = Number(m.head.headers["content-length"] ?? Number.NaN);
+		m.range = await oneByteRange(url, h.status === 200 && Number.isSafeInteger(len) ? len : undefined);
 		const s = await request(`${url}.sha256`);
-		const text = s.ok ? (await s.text()).trim() : undefined;
+		const text = s.ok ? new TextDecoder().decode(await readCapped(s, 4096)).trim() : undefined;
 		if (!s.ok) await s.body?.cancel();
-		m.sha256File = { status: s.status, text, hash: text?.match(/^[0-9a-f]{64}/i)?.[0]?.toLowerCase() };
+		m.sha256File = { status: s.status, text, hash: text === undefined ? undefined : parseSha256(text) };
 	} catch (e) {
 		m.error = classify(e);
 	}
@@ -358,11 +497,7 @@ const f = (x: number | undefined, d = 2) => (x === undefined ? "—" : x.toFixed
 // ── run ───────────────────────────────────────────────────────────────────────
 
 async function run() {
-	const fullBudget = num("full-budget-mb", 1200) * 1e6;
-	const rounds = num("rounds", 8);
-	const rangeBytes = num("range-mib", 8) * MIB;
-	const arches = list("arches", "x86,arm64") as Arch[];
-	const extraVersions = list("versions", "");
+	const { fullBudgetBytes: fullBudget, rounds, rangeBytes, arches, extraVersions } = RUN;
 	const startedAt = nowIso();
 	console.error(`[probe] ${LABEL} started ${startedAt}`);
 
@@ -405,7 +540,10 @@ async function run() {
 	}
 
 	// 5. Integrity: full downloads from both hosts inside the budget, else windows.
-	let spent = 0;
+	//    Only full-download bytes count against --full-budget-mb; window bytes are
+	//    tracked on their own so they never crowd out a full download.
+	let fullBytes = 0;
+	let windowBytes = 0;
 	const integrity: {
 		file: string;
 		version: string;
@@ -426,7 +564,7 @@ async function run() {
 		let mode: "full" | "windows" | "skipped";
 		if (!Number.isFinite(size) || hosts.some((m) => m.head?.status !== 200)) {
 			mode = "skipped";
-		} else if (spent + 2 * size <= fullBudget) {
+		} else if (fullBytes + 2 * size <= fullBudget) {
 			mode = "full";
 			for (const [pos, h] of order.entries()) {
 				console.error(`[probe] full ${a.file} from ${h} (${(size / 1e6).toFixed(1)} MB)`);
@@ -434,7 +572,7 @@ async function run() {
 					expectedBytes: size,
 					timeoutMs: 20 * 60_000,
 				});
-				spent += t.bytes;
+				fullBytes += t.bytes;
 				transfers.push(t);
 				fullTransfers.push(t);
 				console.error(`[probe]   -> ${t.status} ${f(t.mbps)} MB/s ttfb=${f(t.ttfbMs, 0)}ms ${t.error?.class ?? "ok"}`);
@@ -443,14 +581,14 @@ async function run() {
 			mode = "windows";
 			const starts = [0, Math.floor(size / 2 / MIB) * MIB, Math.max(0, size - MIB)];
 			for (const s of starts) {
-				const range = `bytes=${s}-${Math.min(size, s + MIB) - 1}`;
+				const range: ByteRange = { start: s, end: Math.min(size, s + MIB) - 1, total: size };
 				for (const [pos, h] of order.entries()) {
 					const t = await transfer(h, hostUrl(a.officialUrl, h), "window", pos, {
 						range,
-						expectedBytes: Math.min(size, s + MIB) - s,
+						expectedBytes: range.end - range.start + 1,
 						timeoutMs: 120_000,
 					});
-					spent += t.bytes;
+					windowBytes += t.bytes;
 					transfers.push(t);
 				}
 			}
@@ -482,7 +620,11 @@ async function run() {
 
 	// 6. Paired range trials for timing: same artifact + offset for both hosts in a
 	//    round, order flipped each round, offsets spread across the file.
-	const trialArtifacts = meta.filter((m) => m.hosts.every((h) => h.head?.status === 200));
+	const trialArtifacts = meta.filter(
+		(m) =>
+			m.hosts.every((h) => h.head?.status === 200) &&
+			Number.isSafeInteger(Number(m.hosts[0]?.head?.headers["content-length"] ?? Number.NaN)),
+	);
 	const rangeTrials: { round: number; file: string; range: string; transfers: Transfer[] }[] = [];
 	for (let r = 0; r < rounds && trialArtifacts.length > 0; r++) {
 		const m = trialArtifacts[r % trialArtifacts.length];
@@ -491,13 +633,14 @@ async function run() {
 		const span = Math.max(0, size - rangeBytes);
 		const start = Math.floor((Math.random() * span) / MIB) * MIB;
 		const end = Math.min(size, start + rangeBytes) - 1;
-		const range = `bytes=${start}-${end}`;
+		const byteRange: ByteRange = { start, end, total: size };
+		const range = rangeHeader(byteRange);
 		const order = r % 2 === 0 ? [...HOSTS] : [...HOSTS].reverse();
 		const transfers: Transfer[] = [];
 		for (const [pos, h] of order.entries()) {
 			transfers.push(
 				await transfer(h, hostUrl(m.artifact.officialUrl, h), "range", pos, {
-					range,
+					range: byteRange,
 					expectedBytes: end - start + 1,
 					timeoutMs: 180_000,
 				}),
@@ -536,10 +679,14 @@ async function run() {
 		};
 	});
 	// Paired view: cdn/download throughput ratio per pair, and first-vs-second position.
-	const pairs = [
+	// A pair only counts when both hosts returned the same bytes: timing two
+	// different bodies against each other is not a host comparison.
+	const completePairs = [
 		...rangeTrials.map((r) => r.transfers),
 		...integrity.filter((i) => i.mode === "full").map((i) => i.transfers),
 	].filter((p) => p.length === 2 && p.every((t) => !t.error && t.mbps));
+	const pairs = completePairs.filter((p) => p[0]?.sha256 !== undefined && p[0].sha256 === p[1]?.sha256);
+	const hashMismatchPairs = completePairs.length - pairs.length;
 	const ratios = pairs.map((p) => {
 		const d = p.find((t) => t.host === "download.mikrotik.com")?.mbps ?? 1;
 		const c = p.find((t) => t.host === "cdn.mikrotik.com")?.mbps ?? 1;
@@ -551,6 +698,7 @@ async function run() {
 	};
 	const paired = {
 		pairs: pairs.length,
+		hashMismatchPairs,
 		cdnFaster: ratios.filter((r) => r > 1).length,
 		ratioCdnOverDownload: stats(ratios),
 		positionEffect,
@@ -562,7 +710,11 @@ async function run() {
 		finishedAt: nowIso(),
 		runtime: { bun: Bun.version, platform: process.platform, arch: process.arch },
 		params: { fullBudgetMb: fullBudget / 1e6, rounds, rangeMiB: rangeBytes / MIB, arches, stallMs: STALL_MS },
-		bytesSpentOnBodies: spent + rangeTrials.flatMap((r) => r.transfers).reduce((s, t) => s + t.bytes, 0),
+		bodyBytes: {
+			full: fullBytes,
+			windows: windowBytes,
+			ranges: rangeTrials.flatMap((r) => r.transfers).reduce((s, t) => s + t.bytes, 0),
+		},
 		channels,
 		identities,
 		meta,
@@ -586,7 +738,12 @@ function summaryMarkdown(r: any): string {
 	const L: string[] = [];
 	L.push(`# download-origin probe: ${r.label}`, "");
 	L.push(`${r.startedAt} → ${r.finishedAt} · Bun ${r.runtime.bun} · ${r.runtime.platform}/${r.runtime.arch}`);
-	L.push(`Body bytes fetched: ${(r.bytesSpentOnBodies / 1e6).toFixed(0)} MB (budget for full artifacts: ${r.params.fullBudgetMb} MB)`, "");
+	const b = r.bodyBytes;
+	const mb = (n: number) => (n / 1e6).toFixed(0);
+	L.push(
+		`Body bytes fetched: ${mb(b.full + b.windows + b.ranges)} MB — full artifacts ${mb(b.full)} MB (budget ${r.params.fullBudgetMb} MB), integrity windows ${mb(b.windows)} MB, timing ranges ${mb(b.ranges)} MB`,
+		"",
+	);
 	L.push(`Channels: ${Object.entries(r.channels).map(([k, v]) => `${k} ${v}`).join(", ")}`, "");
 	L.push("## Host identity", "", "| host | CNAME | A | AAAA | TLS peer | cert subject | issuer | SAN | valid to |", "|---|---|---|---|---|---|---|---|---|");
 	for (const i of r.identities as HostIdentity[]) {
@@ -600,18 +757,32 @@ function summaryMarkdown(r: any): string {
 		const pub = Object.values(i.publishedSha256 as Record<string, string | undefined>)[0];
 		L.push(`| ${i.file} | ${ch} | ${i.mode} | \`${pub?.slice(0, 12) ?? "—"}…\` | ${i.verdict} |`);
 	}
-	L.push("", "## Headers (compared across hosts)", "", "| file | status | content-length | etag | last-modified | 1-byte range | .sha256 | differs |", "|---|---|---|---|---|---|---|---|");
+	L.push(
+		"",
+		"## Headers (compared across hosts)",
+		"",
+		"`differs` compares only: HEAD status, content-length, etag, last-modified; the 1-byte range's status, Content-Range and validity; the parsed .sha256 hash.",
+		"",
+		"| file | status | content-length | etag | last-modified | 1-byte range | .sha256 | differs |",
+		"|---|---|---|---|---|---|---|---|",
+	);
 	for (const m of r.meta as { artifact: Artifact; hosts: HostMeta[] }[]) {
 		const [d, c] = m.hosts;
 		const h = d?.head?.headers ?? {};
 		const fields = (x: HostMeta | undefined) =>
-			[x?.head?.status, x?.head?.headers["content-length"], x?.head?.headers.etag, x?.head?.headers["last-modified"], x?.range?.status, x?.range?.contentRange, x?.sha256File?.hash].join("|");
+			[x?.head?.status, x?.head?.headers["content-length"], x?.head?.headers.etag, x?.head?.headers["last-modified"], x?.range?.status, x?.range?.contentRange, x?.range?.valid, x?.sha256File?.hash].join("|");
 		const differs = fields(d) === fields(c) ? "no" : "**YES**";
 		L.push(
 			`| ${m.artifact.file} | ${d?.head?.status}/${c?.head?.status} | ${h["content-length"]} | \`${h.etag ?? ""}\` | ${h["last-modified"] ?? ""} | ${d?.range?.status}/${c?.range?.status} | ${d?.sha256File?.status}/${c?.sha256File?.status} | ${differs} |`,
 		);
 	}
-	L.push("", "## Timing", "", `Stall = gap > ${r.params.stallMs} ms between body chunks. Fresh connection per request (keepalive off). Throughput is body MB/s (1e6) after the first byte.`, "");
+	L.push(
+		"",
+		"## Timing",
+		"",
+		`TTFB = request start until response headers arrive (includes whatever DNS, connect and TLS that request needed; not split out). Throughput = body MB/s (1e6) over the body-read loop after headers. Stall = gap > ${r.params.stallMs} ms between body chunks. keepalive off.`,
+		"",
+	);
 	L.push("| host | kind | trials | errors | stalls | max gap ms | MB/s min / p50 / max | TTFB ms min / p50 / max |", "|---|---|---|---|---|---|---|---|");
 	for (const h of r.perHost) {
 		for (const k of ["full", "range"] as const) {
@@ -624,7 +795,7 @@ function summaryMarkdown(r: any): string {
 	const p = r.paired;
 	L.push(
 		"",
-		`Paired (same bytes, both hosts, order alternated): ${p.pairs} pairs; cdn faster in ${p.cdnFaster}; cdn/download throughput ratio min ${f(p.ratioCdnOverDownload.min)} / p50 ${f(p.ratioCdnOverDownload.p50)} / max ${f(p.ratioCdnOverDownload.max)}.`,
+		`Paired (same bytes, both hosts, order alternated): ${p.pairs} pairs with equal hashes (${p.hashMismatchPairs} pairs excluded for unequal hashes); cdn faster in ${p.cdnFaster}; cdn/download throughput ratio min ${f(p.ratioCdnOverDownload.min)} / p50 ${f(p.ratioCdnOverDownload.p50)} / max ${f(p.ratioCdnOverDownload.max)}.`,
 		`Position effect: first-in-pair p50 ${f(p.positionEffect.firstMbps.p50)} MB/s vs second-in-pair p50 ${f(p.positionEffect.secondMbps.p50)} MB/s.`,
 	);
 	return `${L.join("\n")}\n`;
@@ -633,9 +804,9 @@ function summaryMarkdown(r: any): string {
 // ── watch (release-boundary freshness) ────────────────────────────────────────
 
 async function watch() {
-	const intervalMs = num("interval-s", 60) * 1000;
-	const deadline = Date.now() + num("duration-min", 720) * 60_000;
-	const expect = new Set(list("expect", ""));
+	const { intervalMs } = WATCH;
+	const deadline = Date.now() + WATCH.durationMs;
+	const expect = new Set(WATCH.expect);
 	mkdirSync(OUT_DIR, { recursive: true });
 	const logPath = join(OUT_DIR, `watch-${LABEL}.jsonl`);
 	const log = (o: object) => {
@@ -661,8 +832,13 @@ async function watch() {
 			for (const h of HOSTS) {
 				try {
 					const res = await request(`https://${h}/routeros/NEWESTa7.${ch}`);
-					const v = (await res.text()).trim().split(/\s+/)[0] ?? "";
-					if (res.ok && v && v !== baseline[ch]) {
+					if (!res.ok) {
+						await res.body?.cancel();
+						continue;
+					}
+					const body = new TextDecoder().decode(await readCapped(res, 4096));
+					const v = body.trim().split(/\s+/)[0] ?? "";
+					if (VERSION_RE.test(v) && v !== baseline[ch]) {
 						mark(`${h} NEWESTa7.${ch}=${v}`, { host: h, channel: ch, version: v });
 						watched.add(v);
 					}
@@ -675,15 +851,17 @@ async function watch() {
 			const img = chrDownloadUrl(v, "x86");
 			for (const h of HOSTS) {
 				try {
-					const head = await request(hostUrl(img, h), { method: "HEAD" });
-					if (head.status === 200)
-						mark(`${h} ${v} image`, { host: h, version: v, headers: pickHeaders(head.headers) });
+					// "Seen" means the host served real bytes: a validated 1-byte 206, not
+					// just a 200 HEAD (which a placeholder or error page could also give).
+					const probe = await oneByteRange(hostUrl(img, h), undefined);
+					if (probe.valid) mark(`${h} ${v} image`, { host: h, version: v, contentRange: probe.contentRange });
 					const s = await request(`${hostUrl(img, h)}.sha256`);
-					const text = s.ok ? (await s.text()).trim() : undefined;
+					const text = s.ok ? new TextDecoder().decode(await readCapped(s, 4096)) : undefined;
 					if (!s.ok) await s.body?.cancel();
-					if (text) {
-						shaByHost.set(`${h} ${v}`, text.slice(0, 64));
-						mark(`${h} ${v} sha256`, { host: h, version: v, sha256: text.slice(0, 64) });
+					const sha = text === undefined ? undefined : parseSha256(text);
+					if (sha) {
+						shaByHost.set(`${h} ${v}`, sha);
+						mark(`${h} ${v} sha256`, { host: h, version: v, sha256: sha });
 					}
 				} catch (e) {
 					log({ event: "error", host: h, what: `${v} image`, ...classify(e) });
@@ -702,8 +880,4 @@ async function watch() {
 }
 
 if (mode === "run") await run();
-else if (mode === "watch") await watch();
-else {
-	console.error(`unknown mode "${mode}" (expected run | watch)`);
-	process.exit(2);
-}
+else await watch();

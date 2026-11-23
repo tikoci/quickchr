@@ -1233,11 +1233,13 @@ and no fallback from one host to another. Another origin is only ever a value th
 user sets for the configurable download base URL (#243).
 
 `cdn.mikrotik.com` is such a value. `test/lab/download-origin/REPORT.md` (2026-11-21)
-found it serves byte-identical artifacts, the same `.sha256` files and headers, and
-the same `NEWESTa7.<channel>` files. Its reliability and throughput matched
-`download.mikrotik.com` locally and on GitHub's Linux, macOS and Windows runners. It
-resolves to the same MikroTik network in Riga, so it is not shown to be a geographic
-CDN. It is undocumented for RouterOS artifacts, and its freshness at a release
+found it serves byte-identical artifacts for the 12 paths sampled (CHR image and
+all-packages, x86 and arm64, three versions), with the same `.sha256` files and the
+same compared headers (status, size, ETag, Last-Modified, range). Channel files were
+not compared across hosts. Errors, stalls and paired throughput showed no consistent
+difference from `download.mikrotik.com` locally or on GitHub's Linux, macOS and
+Windows runners. Both names resolve to the same MikroTik /24 in Riga, so it is not
+shown to be a geographic CDN. It is undocumented for RouterOS artifacts, and its freshness at a release
 boundary was not observed. The maintainer is asking MikroTik whether it is a
 supported origin.
 

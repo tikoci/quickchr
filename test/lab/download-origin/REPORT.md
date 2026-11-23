@@ -5,7 +5,7 @@
 MikroTik whether it is a supported origin?
 
 **Verdict: the CDN host looks equivalent.** It served the same bytes and the same
-headers, with no errors and no stalls, from one local vantage point and from GitHub's
+compared headers, with no errors and no stalls, from one local vantage point and from GitHub's
 Linux, macOS and Windows runners. Its throughput was not consistently better or
 worse. That makes the ticket worth sending ([TICKET-DRAFT.md](TICKET-DRAFT.md)), and
 makes #243 useful: once a download base URL is configurable, `cdn.mikrotik.com` is a
@@ -45,11 +45,13 @@ of #146's repro plan). The only role in question is "a value a user may set".
   budget get three 1 MiB windows (start, middle, end) hashed on both hosts.
 - **Timing:** every full download, plus `--rounds` paired byte ranges (same artifact
   and offset for both hosts in a round, offset random per round). Host order
-  alternates by artifact and by round (A,B then B,A). `keepalive: false`, so every
-  request pays DNS, TCP and TLS, like a one-shot `quickchr` download. TTFB is the time
-  to response headers. Throughput is body MB/s (10⁶ B) after the first byte. A
-  **stall** is a gap over 5 s between body chunks. An idle gap of 60 s aborts the
-  request and counts as an error.
+  alternates by artifact and by round (A,B then B,A). Every `fetch` sets
+  `keepalive: false`. The probe times two intervals per request: **TTFB**, from request
+  start until the response headers arrive, and the **body-read loop** after that.
+  Throughput is body MB/s (10⁶ B) over the body-read loop. DNS, connect, TLS and server
+  time are not measured separately; they all fall inside TTFB. A **stall** is a gap
+  over 5 s between body chunks. An idle gap of 60 s aborts the request and counts as
+  an error.
 - **Identity:** DNS (CNAME, A, AAAA) via `node:dns`, plus a TLS handshake that records
   the peer address, certificate subject, issuer, SAN and validity.
 - **User-Agent:** `routeros-download-origin-probe/1`. No account or project details.
@@ -67,9 +69,18 @@ development **7.26beta5**. Three distinct versions, so 12 artifacts.
 | [44945494198](https://github.com/tikoci/quickchr/actions/runs/44945494198) | same three runners | same | same | 629 MB per runner | 2026-11-21 20:17 |
 
 About 5.5 GB in total. Per-run summaries are in [`results/`](results/). The probe also
-writes full per-request JSON next to each summary; it is not committed, since this
-report cites nothing that is only in it. The CI JSON is in each run's
-`download-origin-<os>` artifact while GitHub keeps it.
+writes full per-request JSON next to each summary; it is not committed. The tables
+here come from the summaries; the few header observations taken only from the JSON
+are marked as such. The CI JSON is in each run's `download-origin-<os>` artifact
+while GitHub keeps it.
+
+**The probe was hardened after these runs**, following review: flags are validated
+against fixed limits before any request; a ranged body is read only after a 206 with
+the exact `Content-Range`; bodies over the expected size are cancelled; full-download
+bytes are budgeted apart from integrity-window bytes; paired throughput excludes (and
+counts) pairs with unequal hashes; and `watch` needs a validated 1-byte 206 and a
+parsed SHA-256 before marking an item seen. The committed summaries in `results/`
+come from the earlier version.
 
 ## Integrity
 
@@ -99,8 +110,10 @@ downloads per host, 100 in total, 0 mismatches**.
 
 ## Headers
 
-Identical on both hosts for all 12 artifacts, in every run (the probe flags any field
-that differs, and none did):
+The summary's `differs` column compares a fixed set of fields: HEAD status,
+`content-length`, `etag` and `last-modified`; the 1-byte range's status and
+`Content-Range`; and the parsed `.sha256` hash. Those fields were identical on both
+hosts for all 12 artifacts, in every run:
 
 | artifact | status | content-length | etag | last-modified | `Range: bytes=0-0` | `.sha256` |
 |---|---|---|---|---|---|---|
@@ -117,10 +130,12 @@ that differs, and none did):
 | `all_packages-arm64-7.24.6.zip` | 200 | 50611610 | `"41b2a0572e2cceb7de50a59f5b9f5036"` | Mon, 02 Nov 2026 11:45:00 GMT | 206 | 200 |
 | `all_packages-arm64-7.26beta5.zip` | 200 | 53999411 | `"cdf7f4af5dfe0ec54bcc72692c227b66"` | Mon, 02 Nov 2026 12:24:34 GMT | 206 | 200 |
 
-Both hosts send `accept-ranges: bytes`, `content-type: application/zip`, HSTS and the
-same `x-ratelimit-limit` / `x-ratelimit-remaining` headers. Those, `date`, `etag` and
-`last-modified` are the only other headers observed. Neither sends `server`,
-`via`, `age`, `x-cache` or `cache-control`, the headers a caching CDN usually adds.
+From the uncommitted JSON, not compared by `differs`: both hosts sent
+`accept-ranges: bytes`, `content-type: application/zip` and `x-ratelimit-limit` /
+`x-ratelimit-remaining`. The probe records only a fixed header list, which does not
+include `strict-transport-security`, so this report makes no HSTS claim. Of the
+recorded headers, neither host sent `server`, `via`, `age`, `x-cache` or
+`cache-control`, the headers a caching CDN usually adds.
 
 ### Host identity
 
@@ -131,22 +146,28 @@ The same from the local machine and from all three runner OSes in both CI runs:
 | `download.mikrotik.com` | CNAME `global-balancer-e.mikrotik.com` → 159.148.147.251, 2a02:610:7501:3000::251 | `…::251` locally, 159.148.147.251 on runners | `CN=mikrotik.com` | `*.mikrotik.com`, `mikrotik.com` | Let's Encrypt YE2 | 2027-01-22 |
 | `cdn.mikrotik.com` | A 159.148.147.244, AAAA 2a02:610:7501:3000::244 (no CNAME) | `…::244` locally, 159.148.147.244 on runners | `CN=*.cdn.mikrotik.com` | `*.cdn.mikrotik.com`, `cdn.mikrotik.com` | Let's Encrypt YE2 | 2027-01-14 |
 
-`upgrade.mikrotik.com` shares `global-balancer-e` with `download.mikrotik.com`.
+The probe does not resolve `upgrade.mikrotik.com`, so no committed result shows
+which address it uses.
 
 ### Observations that bear on #243
 
-- **Both hosts serve the whole `routeros/` tree, channel files included.**
-  `cdn.mikrotik.com/routeros/NEWESTa7.<channel>` and
-  `download.mikrotik.com/routeros/NEWESTa7.<channel>` return the same bytes as
-  `upgrade.mikrotik.com` (checked for all four channels; `CHANGELOG` also matches).
-  So for these MikroTik hosts, one base URL could cover both downloads and channel
-  lookup. A third-party mirror may not, so #243's second override is still needed.
-- **Both names look like the same backend pool.** `x-ratelimit-limit` rotates through
+- **Paths sampled on both hosts:** the 12 artifacts above under
+  `routeros/<version>/` (`chr-<version>[-arm64].img.zip` and
+  `all_packages-<arch>-<version>.zip`) and their `.sha256` files. Nothing else under
+  `routeros/` was compared.
+- **Channel files and `CHANGELOG` were not compared across hosts.** `run` resolves
+  channels through `upgrade.mikrotik.com` (quickchr's `resolveVersion()`), and no
+  committed result holds a `NEWESTa7.<channel>` or `CHANGELOG` body from
+  `download.mikrotik.com` or `cdn.mikrotik.com`. Whether one base URL could also cover
+  channel lookup is unmeasured, so #243's second override is still needed.
+- **Both names look like the same backend pool** (from the uncommitted JSON).
+  `x-ratelimit-limit` rotates through
   a small set of values (5707, 5726, 5727, 5737 in 12 + 12 sequential requests), and
   the same set shows up behind both hostnames. This is an inference from headers, not
   a fact about MikroTik's infrastructure.
 - **`Last-Modified` is later than the channel timestamp** for all three versions, by
-  the same amount on both hosts. Example: `NEWESTa7.stable` says 7.25.1 at 1793623193
+  the same amount on both hosts. Example: `NEWESTa7.stable` (from
+  `upgrade.mikrotik.com`) says 7.25.1 at 1793623193
   (2026-11-02 12:39 UTC), while its files show `Last-Modified` 2026-11-03 10:23 UTC.
   The files appear to have been rewritten after release. The hashes still match the
   `.sha256`. For #243 this means `Last-Modified` is not a reliable release timestamp.
@@ -154,7 +175,9 @@ The same from the local machine and from all three runner OSes in both CI runs:
 ## Timing and reliability
 
 **0 errors and 0 stalls** (gaps over 5 s) on either host, in any run: 150 timed
-transfers per host (full + range; the 1 MiB integrity windows are not counted). The longest gap between body chunks was 666 ms (Windows, cdn).
+transfers per host (full + range; the 1 MiB integrity windows are not counted). The
+longest gap between body chunks was 667 ms (Windows run 2, cdn, as rounded in its
+summary).
 
 Per host, per run. "full" is a whole artifact. "range" is a paired byte range.
 
@@ -194,20 +217,22 @@ ratio is cdn MB/s ÷ download MB/s per pair.
 
 How to read this:
 
-- **No host difference.** The median paired ratio is 0.99–1.04 in every run.
-  CDN-faster counts range from 8 of 24 to 13 of 18. Single-run medians differ, but
-  the direction flips between runs. Windows run 1 had cdn full p50 4.90 vs download
-  9.98 MB/s, and run 2 had cdn 12.50 vs download 7.31. That is runner variance
-  (Windows full transfers ranged from 5.3 to 27.2 MB/s on download and 3.3 to
-  28.4 MB/s on cdn), not host behavior.
-- **TTFB depends on distance, not host.** About 795 ms locally and about 480–600 ms
-  on US runners, the same on both hosts in every run. With a fresh TLS 1.3 connection
-  per request, that fits both names terminating in Riga. Nothing suggests an edge
-  closer to the US runners.
-- **Byte ranges are slow-start bound.** 8 MiB ranges plateau at 4.3 MB/s locally and
-  7–8 MB/s on runners. Full artifacts reach 10–29 MB/s. So the range rows compare the
-  hosts' connection setup and early window, and the full rows compare sustained
-  throughput.
+- **No consistent host difference in these runs.** The median paired ratio was
+  0.99–1.04 in every run. CDN-faster counts ranged from 8 of 24 to 13 of 18.
+  Single-run medians differ, and the direction flips between runs: Windows run 1 had
+  cdn full p50 4.90 vs download 9.98 MB/s, and run 2 had cdn 12.50 vs download
+  7.31. Windows full transfers ranged from 5.3 to 27.2 MB/s on download and 3.3 to
+  28.4 MB/s on cdn. The probe does not identify the cause of these swings.
+- **TTFB was the same on both hosts.** Its p50 was about 795 ms locally and about
+  480–620 ms on the runners, within a few tens of ms between hosts in every run. TTFB
+  here is request start to response headers, so it includes DNS, connect, TLS and
+  server time without separating them; the probe does not attribute the gap between
+  vantage points to any one of them. Nothing measured points to an edge closer to the
+  US runners.
+- **Range rows and full rows measured different things.** 8 MiB ranges had p50 about
+  4.3 MB/s locally and 5.8–7.8 MB/s on runners; full artifacts reached up to 29 MB/s.
+  The probe does not measure why, so compare hosts within a row kind, not across
+  kinds.
 - **The glacial transfers from #146's evidence did not reproduce.** In the
   2026-09-16 session a 43 MB image took 236 s at 0.18 MB/s. Here the slowest full
   artifact was 2.5 MB/s, and nothing stalled. A sample with no bad hours cannot show
@@ -220,9 +245,10 @@ How to read this:
 polled both hosts every 120 s for 7.26beta6, 7.26rc1, 7.25.2 and 7.24.7 and saw none
 of them. No claim about release-time freshness is made.
 
-What this run does show: the current files and channel pointers are identical on both
-hosts, including `Last-Modified` and `ETag`. The latest release is about 19 days old,
-so this does not measure propagation lag.
+What this run does show: the current artifacts' compared fields, including
+`Last-Modified` and `ETag`, are identical on both hosts. Channel pointers were not
+compared across hosts. The latest release is about 19 days old, so this does not
+measure propagation lag.
 
 **To close it, when a release ships** (betas usually arrive every one to two weeks;
 the last one, 7.26beta5, is from 2026-10-30), start the watcher **before** the
@@ -230,8 +256,9 @@ expected release and leave it running:
 
 ```sh
 # Poll channel pointers on both hosts, plus the expected next versions' x86 CHR
-# image and .sha256, every 60 s for up to 7 days. Records the first time each host
-# serves each item.
+# image and .sha256, every 60 s for up to 7 days. Records, per host, the first
+# successful observation of each item at the polling cadence: a validated 1-byte
+# 206 for the image, a parsed 64-hex SHA-256 for .sha256.
 bun test/lab/download-origin/probe.ts watch \
   --label=release-boundary --interval-s=60 --duration-min=10080 \
   --expect=7.26beta6,7.26rc1,7.25.2,7.24.7
@@ -241,13 +268,13 @@ bun test/lab/download-origin/probe.ts watch \
 ```
 
 Then run `probe.ts run --label=post-release` once to re-hash the new version on both
-hosts. Record in this report: the first-seen times per host, the lag between hosts,
-and whether `.sha256` agreed. If the version appears on one host only for a while,
+hosts. Record in this report: the first-seen times per host, the lag between hosts
+(only as precise as `--interval-s`), and whether `.sha256` agreed. If the version appears on one host only for a while,
 that goes into the ticket.
 
 The watcher uses `NEWESTa7.*` on both hosts plus `--expect` because a release can
 appear as files before the channel pointer moves. Each poll costs 8 small GETs plus
-4 per expected version per host. Adjust `--expect` to the versions actually due.
+2 small GETs per expected version per host. Adjust `--expect` to the versions actually due.
 
 ## Support status: **no authoritative MikroTik source found**
 
@@ -273,16 +300,18 @@ as a deployment risk until MikroTik answers. Answering it is the purpose of
 **CDN looks equivalent → worth a ticket, and it makes #243 useful.**
 
 - Same bytes: 100 full downloads, 0 mismatches, all matching MikroTik's `.sha256`.
-- Same headers, same channel files.
+- Same compared headers (status, size, ETag, Last-Modified, range, `.sha256`).
+  Channel files were not compared.
 - Same reliability: 0 errors and 0 stalls in 150 timed transfers per host.
-- Same speed: median paired ratio 0.99–1.04, cdn faster in 83 of 150 pairs.
+- No consistent throughput difference: median paired ratio 0.99–1.04 per run, cdn
+  faster in 83 of 150 pairs.
 
 It is **not** shown to be faster, geographically distributed, or as fresh at release
 time. The ticket should say exactly that (the draft does).
 
 For #243: a configurable base URL set to `https://cdn.mikrotik.com/routeros` would
-work today with no other change. Because the CDN host also serves `NEWESTa7.*`, it can
-answer channel lookups too. quickchr's default and documented path stays
+work today for the artifact paths sampled here. Channel lookup through it was not
+measured. quickchr's default and documented path stays
 `download.mikrotik.com`, with no fallback between hosts.
 
 ## Re-running
