@@ -42,6 +42,7 @@ import {
 	isRouterOs6,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
+import { applyIdentity } from "./identity.ts";
 import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport, assertSocketVmnetReachable, probeSocketVmnetSockets, describeSocketVmnetProbe } from "./network.ts";
 import {
 	getUsedPortBases,
@@ -2729,6 +2730,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				identity: opts.identity,
 				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
@@ -2942,7 +2944,10 @@ export class QuickCHR {
 					disableAdmin: opts.disableAdmin,
 					license: opts.license,
 					secureLogin: opts.secureLogin,
+					identity: opts.identity,
 				});
+				// `identity` is left out on purpose: it rides along with provisioning and
+				// never makes a first boot provision on its own (#265).
 				const hasPending = !!(
 					pendingOpts.installAllPackages ||
 					(pendingOpts.packages?.length ?? 0) > 0 ||
@@ -3001,6 +3006,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				identity: opts.identity,
 				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
@@ -3088,6 +3094,7 @@ export class QuickCHR {
 			user: opts.user,
 			disableAdmin: opts.disableAdmin,
 			secureLogin: opts.secureLogin,
+			identity: opts.identity,
 			license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
@@ -3257,6 +3264,7 @@ export class QuickCHR {
 					disableAdmin: opts.disableAdmin,
 					license: opts.license,
 					secureLogin: opts.secureLogin,
+					identity: opts.identity,
 				}, launchConfig, logger);
 			} catch (err) {
 				// This call created the machine, so a failed run takes it away again.
@@ -3314,6 +3322,7 @@ export class QuickCHR {
 			disableAdmin?: boolean | undefined;
 			license?: LicenseInput | undefined;
 			secureLogin?: boolean | undefined;
+			identity?: boolean | undefined;
 		},
 		launchConfig: QemuLaunchConfig,
 		logger?: ProgressLogger,
@@ -3342,6 +3351,15 @@ export class QuickCHR {
 
 		// Give SSH a moment to start after HTTP comes up
 		await Bun.sleep(2000);
+
+		// First, before anything is installed: factory `admin:` is valid only here, and a
+		// failure costs a factory reset of an untouched disk (#265). Only an explicit
+		// `false` skips it.
+		if (opts.identity !== false) {
+			log.status(`Setting identity to "${machineState.name}"...`);
+			await applyIdentity(chrPorts.http, machineState.name, FACTORY_AUTH_HEADER);
+			applied.push("identity");
+		}
 
 		if (opts.installAllPackages) {
 			const installed = await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
@@ -3467,6 +3485,7 @@ export class QuickCHR {
 			disableAdmin?: boolean | undefined;
 			license?: LicenseInput | undefined;
 			secureLogin?: boolean | undefined;
+			identity?: boolean | undefined;
 		},
 		logger?: ProgressLogger,
 		wait = true,

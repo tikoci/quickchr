@@ -13,6 +13,16 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Added
 
+- **Provisioned machines are named after themselves.** When quickchr provisions a
+  machine (packages, device-mode, license, `--add-user`, `--disable-admin` or
+  `--secure-login`, including the `secure-login` setting), it now also sets
+  `/system/identity` to the machine name, so machines are told apart in WinBox, MNDP
+  neighbor lists, the console prompt and `/app` container host names. A boot with no
+  provisioning keeps the factory identity, and `set` never renames. Opt out with
+  `--no-identity` on `add`/`start` (`StartOptions.identity: false`). **Library callers
+  that provision get this by default too.** The step is recorded as `identity` in
+  `machine.json`'s `provisioning.steps`. (#265)
+
 - **Receive ports for traffic the guest sends** (TZSP, syslog, NetFlow).
   `quickchr add lab --receive tzsp` reserves a named port: the guest sends to
   `10.0.2.2:37008` and a host listener binds `127.0.0.1:37008`, unconnected. SLIRP

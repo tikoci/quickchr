@@ -163,6 +163,22 @@ describe("unknown flags on machine-creating commands (#156)", () => {
 		expect(dataDirContents()).toEqual([]);
 	});
 
+	test("--identity <x> and bare --identity are refused by name and create nothing (#265)", async () => {
+		for (const args of [["add", "--identity", "lab1"], ["add", "--identity"], ["start", "--identity", "lab1", "--dry-run"]]) {
+			const result = await runQuickchr(args);
+			expect({ args, exitCode: result.exitCode }).toEqual({ args, exitCode: 1 });
+			expect(result.stderr).toContain("--identity takes no value");
+			expect(result.stderr).toContain("--no-identity");
+		}
+		expect(dataDirContents()).toEqual([]);
+	});
+
+	test("--no-identity is accepted by start and add (#265)", async () => {
+		const result = await runQuickchr(["start", "--dry-run", "--version", "7.24.3", "--no-identity"]);
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("Dry run");
+	});
+
 	test("--no-x negation is not mistaken for a missing value", async () => {
 		const result = await runQuickchr(["start", "--dry-run", "--version", "7.24.3", "--no-device-mode", "--no-winbox"]);
 		expect(result.exitCode).toBe(0);

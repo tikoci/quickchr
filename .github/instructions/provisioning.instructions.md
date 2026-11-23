@@ -89,6 +89,7 @@ is the thing that drifts.
 | `user` | **no** | additive in principle, but it collides with a user of the same name created since, and a login is exactly the config a post-boot path must not rewrite | `clean()` + replay |
 | `disableAdmin` | **no** | depends on another usable login existing — precisely the state that drifts | `clean()` + replay |
 | `secureLogin` | **no** | same class as `user`: it creates a login | `clean()` + replay |
+| `identity` | **no** | working config, and a passenger: it runs first in `_provisionInstance()` (factory `admin:` auth) only when another step runs, never triggers provisioning, and `--no-identity` on a closed window is a no-op, not a refusal (#265). RouterOS caps an identity at 64 bytes (`failure: could not change identity: too long`, 7.25.2) | none: `set` never renames; a one-off change is `exec`/`centrs` |
 
 `license` is the precedent, not a proposal — it has shipped as a post-boot CLI verb for
 some time. `deviceMode` is the second, and the list is meant to stay short: `set` is

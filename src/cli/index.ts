@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { hasUserModeNetwork, parseNetworkSpecifier } from "../lib/network.ts";
 import { expandForwardSpec } from "../lib/forward-spec.ts";
 import { parseReceiveSpec } from "../lib/receive-spec.ts";
-import { ADD_FLAGS, REMOVED_FLAGS, SET_FLAGS, START_FLAGS, VALUE_FLAGS, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
+import { ADD_FLAGS, REMOVED_FLAGS, SET_FLAGS, START_FLAGS, VALUE_FLAGS, identityFlagError, unknownFlags, unknownFlagMessage, valuelessFlags, valuelessFlagMessage } from "./flags.ts";
 import { QuickCHRError } from "../lib/types.ts";
 import { CENTRS_EXEC_TIP, CENTRS_SEE_ALSO, tip, tipsForError } from "./tips.ts";
 import {
@@ -257,6 +257,12 @@ function rejectUnknownFlags(
 	const unknown = unknownFlags(flags, known);
 	if (unknown.length > 0) {
 		console.error(unknownFlagMessage(unknown, command));
+		process.exit(1);
+	}
+	// Before the valueless check, which would ask a bare `--identity` for a value (#265).
+	const identityError = known.includes("identity") ? identityFlagError(flags) : undefined;
+	if (identityError) {
+		console.error(identityError);
 		process.exit(1);
 	}
 	// A known flag given without its value is the same hazard wearing a valid name:
@@ -809,6 +815,7 @@ async function cmdAdd(argv: string[]) {
 	// A RouterOS 6 machine takes no provisioning at all, so the setting — a default, not
 	// a request — stays out of it; only an explicit --secure-login is refused.
 	opts.secureLogin = await resolveSecureLoginFlag(flags, !isRouterOs6(opts.version ?? ""));
+	opts.identity = flags.identity === false ? false : undefined;
 
 	const state = await QuickCHR.add(opts);
 
@@ -1477,11 +1484,12 @@ export async function cmdStart(argv: string[]) {
 	if (flagBool(flags, "all")) {
 		// Batch starts only accept options this branch actually forwards. In particular,
 		// a provisioning flag must never disappear on a --no-wait start.
-		const batchFlags = new Set(["all", "wait", "bg", "background", "accel", "timeout-extra", "secure-login"]);
+		const batchFlags = new Set(["all", "wait", "bg", "background", "accel", "timeout-extra", "secure-login", "identity"]);
 		const unsupported = Object.keys(flags).filter((key) => !batchFlags.has(key));
 		if (unsupported.length > 0 || flags.bg === false || flags.background === false) {
-			throw new QuickCHRError("INVALID_ARGUMENT", "start --all runs in background and accepts only --no-wait, --bg, --background, --accel, --timeout-extra, --secure-login and --no-secure-login. Start an individual machine to use other options.");
+			throw new QuickCHRError("INVALID_ARGUMENT", "start --all runs in background and accepts only --no-wait, --bg, --background, --accel, --timeout-extra, --secure-login, --no-secure-login and --no-identity. Start an individual machine to use other options.");
 		}
+		const identity = flags.identity === false ? false : undefined;
 		const { QuickCHR } = await import("../lib/quickchr.ts");
 		const { statusIcon, link, bold, resolveDisplayCredentials, formatRestUrl, formatSshCommand } = await import("./format.ts");
 		const timeoutExtra = await resolveTimeoutExtraMs(flags);
@@ -1496,7 +1504,7 @@ export async function cmdStart(argv: string[]) {
 			// Per machine, not per invocation: a never-started machine in this batch is
 			// still entitled to the secure-login setting on its first boot.
 			const secureLogin = await resolveSecureLoginFlag(flags, secureLoginSettingApplies(flags, isProvisioningWindowOpen(m), m.version));
-			const instance = await QuickCHR.start({ name: m.name, background: true, wait, timeoutExtra, secureLogin });
+			const instance = await QuickCHR.start({ name: m.name, background: true, wait, timeoutExtra, secureLogin, identity });
 			const creds = await resolveDisplayCredentials(instance.state);
 			const endpoint = isRouterOs6(instance.state.version)
 				? `API: 127.0.0.1:${instance.ports.api}`
@@ -1580,6 +1588,7 @@ export async function cmdStart(argv: string[]) {
 			target?.state.version ?? opts.version,
 		));
 	}
+	opts.identity = flags.identity === false ? false : undefined;
 	opts.wait = wait;
 	opts.frozen = flagBool(flags, "frozen") || undefined;
 
@@ -3882,6 +3891,9 @@ Options:
   --disable-admin       Disable the default admin account on first boot
   --secure-login        Create a managed login; use --disable-admin to disable admin
   --no-secure-login     Keep admin with no password (skip managed account)
+  --no-identity         Keep the factory /system/identity. By default, when quickchr
+                        provisions (packages, device-mode, license, users or
+                        secure-login), it also sets the identity to the machine name
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping
@@ -3974,7 +3986,8 @@ guest.
 
 Options:
   --all                 Start all stopped machines, in background. Accepts only
-                        --no-wait, --accel, --timeout-extra and --[no-]secure-login
+                        --no-wait, --accel, --timeout-extra, --[no-]secure-login and
+                        --no-identity
                         (plus the deprecated no-op --bg / --background); any other
                         option is refused rather than ignored
   --no-wait             Return once QEMU is running; do not wait for RouterOS (not with --fg)
@@ -4007,6 +4020,9 @@ Options:
   --disable-admin       Disable the default admin account
   --secure-login        Create a managed login; use --disable-admin to disable admin
   --no-secure-login     Keep admin with no password (skip managed account)
+  --no-identity         Keep the factory /system/identity. By default, when quickchr
+                        provisions (packages, device-mode, license, users or
+                        secure-login), it also sets the identity to the machine name
   --port-base <port>    Starting port number (default: auto-allocated from 9100)
   --no-winbox           Exclude WinBox port mapping
   --no-api-ssl          Exclude API-SSL port mapping

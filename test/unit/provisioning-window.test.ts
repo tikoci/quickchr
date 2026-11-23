@@ -460,3 +460,24 @@ describe("pendingProvisioningFor — first boot of an add()-created machine (#18
 		});
 	});
 });
+
+describe("identity is a passenger, never a request (#265)", () => {
+	test("add's recorded --no-identity reaches the first boot; an explicit value wins", () => {
+		const added = machine({ secureLogin: true, identity: false });
+		expect(pendingProvisioningFor(added, {}).identity).toBe(false);
+		expect(pendingProvisioningFor(added, { identity: true }).identity).toBe(true);
+		expect(pendingProvisioningFor(machine({ secureLogin: true }), {}).identity).toBeUndefined();
+	});
+
+	test("identity alone requests nothing, either way", () => {
+		expect(hasProvisioningRequest({ identity: false })).toBe(false);
+		expect(hasProvisioningRequest({ identity: true })).toBe(false);
+	});
+
+	test("--no-identity on a machine past its first boot is a no-op, not a refusal", () => {
+		const booted = machine({ lastStartedAt: "2026-11-01T00:00:00.000Z", provisioning: { steps: ["identity"], at: "2026-11-01T00:01:00.000Z" } });
+		expect(isProvisioningWindowOpen(booted)).toBe(false);
+		expect(classifyProvisioningRequest(booted, { identity: false })).toEqual([]);
+		expect(() => assertProvisioningWindow(booted, { identity: false })).not.toThrow();
+	});
+});

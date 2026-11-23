@@ -43,6 +43,9 @@ export interface ProvisioningRequest {
 	disableAdmin?: boolean | undefined;
 	license?: LicenseInput | undefined;
 	secureLogin?: boolean | undefined;
+	/** Only `false` means anything (skip the identity step, #265). It is never a
+	 *  request on its own, so no check in this module counts it as one. */
+	identity?: boolean | undefined;
 }
 
 /**
@@ -256,6 +259,7 @@ export function pendingProvisioningFor(
 		disableAdmin: request.disableAdmin ?? existing.disableAdmin,
 		license: pendingLicense(request.license, existing.license),
 		secureLogin: request.secureLogin ?? existing.secureLogin,
+		identity: request.identity ?? existing.identity,
 	};
 }
 

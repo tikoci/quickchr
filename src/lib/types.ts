@@ -305,6 +305,9 @@ export interface MachineConfig {
 	/** Managed-login intent, recorded at `add()`/`start()`. Same rule as
 	 *  {@link StartOptions.secureLogin}: only an explicit `true` creates the account. */
 	secureLogin?: boolean | undefined;
+	/** Identity intent, recorded at `add()`/`start()` (#265). Same rule as
+	 *  {@link StartOptions.identity}: only an explicit `false` has an effect. */
+	identity?: boolean | undefined;
 	portBase: number;
 	excludePorts: ServiceName[];
 	extraPorts: PortMapping[];
@@ -341,7 +344,10 @@ export type ProvisioningStep =
 	| "license"
 	| "user"
 	| "disableAdmin"
-	| "secureLogin";
+	| "secureLogin"
+	/** `/system/identity` set to the machine name. A passenger (#265): it runs only
+	 *  when another step makes quickchr provision, and never on its own. */
+	| "identity";
 
 /**
  * What provisioning actually landed on the *current* guest disk (#176).
@@ -479,6 +485,14 @@ export interface StartOptions {
 	 *  Enabling the managed login path is quickchr provisioning, so it is validated/tested
 	 *  on RouterOS 7.20.8+ only. */
 	secureLogin?: boolean | undefined;
+	/** Set the RouterOS `/system/identity` to the machine name when quickchr provisions
+	 *  this machine (#265). **Only an explicit `false` has an effect**: it skips the
+	 *  rename. Unset and `true` are the same default. The identity never makes quickchr
+	 *  provision on its own: a start with no other provisioning step (no packages,
+	 *  device-mode, license, user, `disableAdmin` or `secureLogin: true`) leaves the
+	 *  factory identity alone, and so does `set`. On a machine whose first boot has
+	 *  passed, `false` asks for nothing and is accepted. CLI: `--no-identity`. */
+	identity?: boolean | undefined;
 	/** Convenience alias: `noAuth: true` is equivalent to `secureLogin: false` —
 	 *  skip the managed `quickchr` user provisioning, leave admin password-less.
 	 *  Self-documenting alternative for callers who find `secureLogin: false` cryptic.
