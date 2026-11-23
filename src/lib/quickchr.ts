@@ -106,6 +106,7 @@ import {
 	isProvisioningWindowOpen,
 	firstBootProvisioning,
 	withRecordedLicenseLevel,
+	withStoredIdentity,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
 import type { ReceivePort } from "./types.ts";
@@ -2967,6 +2968,10 @@ export class QuickCHR {
 					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertProvisioningReachable(existing.networks, existing.name);
 					pendingOpts.license = await resolveLicenseForBoot(pendingOpts.license);
+					// Only what the caller said: an omitted identity is read from the state
+					// _launchExisting() re-reads under the machine lock, so an opt-out stored
+					// by another run in between is honored and kept (#265).
+					pendingOpts.identity = opts.identity;
 					requireHostFor(existing.arch);
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger, opts.wait ?? true, sessionLaunch(opts));
 				}
@@ -3518,6 +3523,9 @@ export class QuickCHR {
 			provisioningOpts = undefined;
 			hasProvisioning = false;
 		}
+		// An omitted identity means the stored intent as it is now, under the lock;
+		// start() leaves it unresolved for that reason (#265).
+		if (provisioningOpts) provisioningOpts = withStoredIdentity(provisioningOpts, state);
 
 		// Checks the disk this machine boots from — a qcow2 machine needs only boot.qcow2
 		// (#200) — and refuses, rather than rebuilds, a booted machine's missing disk.

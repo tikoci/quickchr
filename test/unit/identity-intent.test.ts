@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { QuickCHR } from "../../src/lib/quickchr.ts";
 import { loadMachine, saveMachine } from "../../src/lib/state.ts";
-import { firstBootProvisioning } from "../../src/lib/provisioning-window.ts";
+import { firstBootProvisioning, withStoredIdentity } from "../../src/lib/provisioning-window.ts";
 import type { ChrInstance, MachineState } from "../../src/lib/types.ts";
 
 /**
@@ -120,4 +120,23 @@ describe("identity intent survives clean() (#265)", () => {
 		// An explicit `identity: true` overrides the stored opt-out; omission inherits it.
 		expect(firstBootProvisioning(cleaned, { identity: true })?.identity).toBe(true);
 	}, 30_000);
+});
+
+describe("an omitted identity is resolved under the machine lock (#265)", () => {
+	// start() hands _launchExisting() only what the caller said; the stored intent is
+	// read from the state re-read under the lock, so an opt-out another run stored
+	// between start()'s snapshot and the lock is honored, not overwritten.
+	test("omitted takes the state's current intent", () => {
+		const relocked = { identity: false } as MachineState;
+		const request: { license?: string; identity?: boolean } = { license: "p1" };
+		const resolved = withStoredIdentity(request, relocked);
+		expect(resolved.identity).toBe(false);
+		expect(resolved.license).toBe("p1");
+		expect(withStoredIdentity({ identity: undefined }, {} as MachineState).identity).toBeUndefined();
+	});
+
+	test("an explicit value is kept as passed", () => {
+		expect(withStoredIdentity({ identity: true }, { identity: false } as MachineState).identity).toBe(true);
+		expect(withStoredIdentity({ identity: false }, {} as MachineState).identity).toBe(false);
+	});
 });

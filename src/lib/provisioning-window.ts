@@ -283,6 +283,16 @@ export function firstBootProvisioning(
 	return hasProvisioningRequest(pending) ? pending : undefined;
 }
 
+/**
+ * `request` with an omitted `identity` filled from `state`'s stored intent. Called by
+ * `_launchExisting()` on the state it re-reads under the machine lock: `start()`
+ * passes only what the caller said, so an opt-out another run stored in between is
+ * honored here rather than overwritten by a stale snapshot (#265).
+ */
+export function withStoredIdentity<T extends { identity?: boolean | undefined }>(request: T, state: MachineState): T {
+	return request.identity === undefined ? { ...request, identity: state.identity } : request;
+}
+
 function pendingLicense(requested: LicenseInput | undefined, recorded: MachineState["license"]): LicenseInput | undefined {
 	return withRecordedLicenseLevel(requested, recorded) ?? recorded;
 }
