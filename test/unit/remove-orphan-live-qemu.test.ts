@@ -23,7 +23,20 @@ const children: Array<ReturnType<typeof Bun.spawn>> = [];
 function spawnIdle(...args: string[]) {
 	const child = Bun.spawn([process.execPath, "-e", "await Bun.sleep(60_000)", ...args], { stdout: "ignore", stderr: "ignore" });
 	children.push(child);
+	waitForArgv(child.pid);
 	return child;
+}
+
+/** Until the child has exec'd, its command line is empty (Linux) or the parent's, and
+ *  liveQemuFor() rightly calls the pid unverified. A CI runner caught that window 1 ms
+ *  after spawn, so wait for the child's own argv before any test reads it. */
+function waitForArgv(pid: number): void {
+	if (isWindows) return;
+	const read = () => process.platform === "linux"
+		? (() => { try { return readFileSync(`/proc/${pid}/cmdline`, "utf8"); } catch { return ""; } })()
+		: Bun.spawnSync(["/bin/ps", "-ww", "-o", "command=", "-p", String(pid)], { stdout: "pipe" }).stdout.toString();
+	const deadline = Date.now() + 5000;
+	while (!read().includes("Bun.sleep(60_000)") && Date.now() < deadline) Bun.sleepSync(10);
 }
 
 /** A QEMU-shaped disk argument for a file in `dir`. */
