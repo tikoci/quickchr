@@ -8,7 +8,7 @@ import { createNamedSocket, getNamedSocket, removeNamedSocket } from "../../src/
 import type { ChrInstance } from "../../src/lib/types.ts";
 import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout, TEST_ACCEL, TEST_ARCH } from "./timeouts.ts";
+import { bootTestTimeout, TEST_ACCEL } from "./timeouts.ts";
 
 function alive(pid: number): boolean {
 	try { process.kill(pid, 0); return true; } catch { return false; }
@@ -35,7 +35,7 @@ describe.skipIf(!process.env.QUICKCHR_INTEGRATION)("guest shutdown (#143)", () =
 			expect(getNamedSocket(socket)?.members).toContain(name);
 			const start = performance.now();
 			const result = await instance.shutdown();
-			console.log(JSON.stringify({ arch: TEST_ARCH, accel: TEST_ACCEL, version: instance.state.version, elapsedMs: performance.now() - start, ...result }));
+			console.log(JSON.stringify({ arch: instance.state.arch, accel: TEST_ACCEL, version: instance.state.version, elapsedMs: performance.now() - start, ...result }));
 			expect(result.outcome).toBe("guest-exited");
 			expect(alive(pid)).toBe(false);
 			expect(instance.state.status).toBe("stopped");
@@ -76,7 +76,7 @@ describe.skipIf(!process.env.QUICKCHR_INTEGRATION)("guest shutdown (#143)", () =
 			const start = performance.now();
 			const result = await instance.shutdown({ timeoutMs: 1000 });
 			const elapsedMs = performance.now() - start;
-			console.log(JSON.stringify({ arch: TEST_ARCH, accel: TEST_ACCEL, version: instance.state.version, elapsedMs, ...result }));
+			console.log(JSON.stringify({ arch: instance.state.arch, accel: TEST_ACCEL, version: instance.state.version, elapsedMs, ...result }));
 			expect(result.outcome).toBe("forced");
 			expect(result.requestError).toContain("401");
 			expect(elapsedMs).toBeGreaterThanOrEqual(990);

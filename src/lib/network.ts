@@ -414,7 +414,9 @@ export function resolveStartNetworks(
 	networks?: NetworkSpecifier[],
 	legacyNetwork?: NetworkMode,
 ): NetworkConfig[] {
-	if (networks && networks.length > 0) {
+	// An explicit empty array means no NICs (`--no-network`); only `undefined` takes
+	// the default (#287).
+	if (networks) {
 		return networks.map((specifier, i) => ({
 			specifier,
 			id: `net${i}`,

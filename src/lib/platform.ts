@@ -239,8 +239,19 @@ export function qgaKvmWarning(): string | null {
 /** Whether guestArch differs from the physical host CPU architecture.
  *  Cross-arch TCG is significantly slower and needs more memory/timeout. */
 export function isCrossArchEmulation(guestArch: "x86" | "arm64"): boolean {
-	const hostIsArm64 = isAppleSiliconHost() || (process.platform !== "darwin" && process.arch === "arm64");
-	return (guestArch === "arm64") !== hostIsArm64;
+	return guestArch !== hostChrArch();
+}
+
+/**
+ * The CHR architecture of the physical host: the guest arch quickchr picks when
+ * `arch` is omitted or `"auto"` (`add()`, `start()`, `cacheKey()`, `cacheAdd()`).
+ * An x64 Bun under Rosetta on Apple Silicon reports `process.arch === "x64"`, but
+ * the host is arm64, so this answers `"arm64"` there (#293): an arm64 guest is
+ * same-arch TCG, an x86 one cross-arch TCG (#97). The CLI's `default-arch` setting
+ * wins over this when it names an arch.
+ */
+export function hostChrArch(): "x86" | "arm64" {
+	return process.arch === "arm64" || isAppleSiliconHost() ? "arm64" : "x86";
 }
 
 /**
@@ -264,6 +275,12 @@ export function accelTimeoutFactor(accel: string, crossArch: boolean): number {
  * Whether the physical host is Apple Silicon, including when quickchr itself
  * runs as an x64 process under Rosetta.
  *
+ * For an x64 process on macOS this asks the hardware, not the process:
+ * `hw.optional.arm64` is 1 on Apple Silicon even under Rosetta and absent on
+ * Intel Macs.  (`sysctl.proc_translated` would describe the `sysctl` child,
+ * which macOS may launch natively, #293.)  `sysctl` is run by absolute path so
+ * a PATH without /usr/sbin cannot turn the answer into "Intel".
+ *
  * Apple Silicon implements **no AArch32 at any exception level**: its
  * `ID_AA64PFR0_EL1` reports AArch64-only for EL0 and EL1, and HVF passes that
  * hardware register straight through to the guest (the `-cpu` model is inert
@@ -286,7 +303,7 @@ export function isAppleSiliconHost(): boolean {
 	if (process.arch !== "x64") return false;
 	if (appleSiliconHostMemo !== undefined) return appleSiliconHostMemo;
 	try {
-		const result = Bun.spawnSync(["sysctl", "-n", "sysctl.proc_translated"], {
+		const result = Bun.spawnSync(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"], {
 			stdout: "pipe",
 			stderr: "pipe",
 		});
@@ -299,7 +316,7 @@ export function isAppleSiliconHost(): boolean {
 	return appleSiliconHostMemo;
 }
 
-/** @internal Test-only: clear the memoized Rosetta probe between mocked runs. */
+/** @internal Test-only: clear the memoized Apple Silicon probe between mocked runs. */
 export function resetAppleSiliconHostCache(): void {
 	appleSiliconHostMemo = undefined;
 }

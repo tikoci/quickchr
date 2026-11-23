@@ -3,6 +3,7 @@ import {
 	appliedDeviceModeRecord,
 	assertProvisioningWindow,
 	classifyProvisioningRequest,
+	firstBootProvisioning,
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
 	pendingProvisioningFor,
@@ -458,5 +459,38 @@ describe("pendingProvisioningFor — first boot of an add()-created machine (#18
 			expect(pendingProvisioningFor(withLicense, { license: { account: "a@example.com", password: "pw", level: "p1" } }).license)
 				.toEqual({ account: "a@example.com", password: "pw", level: "p1" });
 		});
+	});
+});
+
+describe("identity is a passenger, never a request (#265)", () => {
+	test("add's recorded --no-identity reaches the first boot; an explicit value wins", () => {
+		const added = machine({ secureLogin: true, identity: false });
+		expect(pendingProvisioningFor(added, {}).identity).toBe(false);
+		expect(pendingProvisioningFor(added, { identity: true }).identity).toBe(true);
+		expect(pendingProvisioningFor(machine({ secureLogin: true }), {}).identity).toBeUndefined();
+	});
+
+	test("identity alone requests nothing, either way", () => {
+		expect(hasProvisioningRequest({ identity: false })).toBe(false);
+		expect(hasProvisioningRequest({ identity: true })).toBe(false);
+	});
+
+	test("cancelling the sole stored provisioning option does not leave identity to run alone", () => {
+		// `add lab --device-mode-enable container`, then `start lab --no-device-mode
+		// --no-secure-login`: the merged device-mode is a truthy `{ mode: "skip" }`.
+		const added = machine({ deviceMode: { enable: ["container"] } });
+		expect(firstBootProvisioning(added, { deviceMode: { mode: "skip" }, secureLogin: false })).toBeUndefined();
+		// The same machine started plainly still provisions, identity included.
+		expect(firstBootProvisioning(added, {})?.deviceMode).toEqual({ enable: ["container"] });
+		// And so does any other stored step left standing beside the skipped one.
+		const withLicense = machine({ deviceMode: { enable: ["container"] }, license: "p1" });
+		expect(firstBootProvisioning(withLicense, { deviceMode: { mode: "skip" } })?.license).toBe("p1");
+	});
+
+	test("--no-identity on a machine past its first boot is a no-op, not a refusal", () => {
+		const booted = machine({ lastStartedAt: "2026-11-01T00:00:00.000Z", provisioning: { steps: ["identity"], at: "2026-11-01T00:01:00.000Z" } });
+		expect(isProvisioningWindowOpen(booted)).toBe(false);
+		expect(classifyProvisioningRequest(booted, { identity: false })).toEqual([]);
+		expect(() => assertProvisioningWindow(booted, { identity: false })).not.toThrow();
 	});
 });

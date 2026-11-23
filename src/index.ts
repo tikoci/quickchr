@@ -26,7 +26,7 @@
 export { QuickCHR } from "./lib/quickchr.ts";
 // Boot budget, for callers that derive their own timeouts from quickchr's (#285)
 export { defaultBootTimeout } from "./lib/quickchr.ts";
-export { accelTimeoutFactor, detectAccel } from "./lib/platform.ts";
+export { accelTimeoutFactor, detectAccel, hostChrArch } from "./lib/platform.ts";
 
 // Types
 export type {

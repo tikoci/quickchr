@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout } from "./timeouts.ts";
+import { bootTestTimeout, TEST_ARCH } from "./timeouts.ts";
 import { basicAuth, chrGet } from "./chr-rest.ts";
 import { createUser } from "../../src/lib/provision.ts";
 import { restGet, restPost } from "../../src/lib/rest.ts";
@@ -53,7 +53,7 @@ describe.skipIf(SKIP)("credential propagation", () => {
 		try {
 			instance = await QuickCHR.start({
 				...imageTarget(),
-				arch: process.arch === "arm64" ? "arm64" : "x86",
+				arch: TEST_ARCH,
 				background: true,
 				name,
 				secureLogin: false,

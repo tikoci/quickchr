@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout, bootTestTimeoutFor } from "./timeouts.ts";
+import { bootTestTimeout, bootTestTimeoutFor, TEST_ARCH } from "./timeouts.ts";
 import { detectAccel } from "../../src/lib/platform.ts";
 import { isMachineRunning } from "../../src/lib/state.ts";
 import { QuickCHRError, type ChrInstance } from "../../src/lib/types.ts";
@@ -112,7 +112,7 @@ function assertWavHeaderOnly(path: string): void {
 
 describe.skipIf(SKIP)("qemu-arg mechanism (native arch)", () => {
 	const name = "qemu-arg-mechanism";
-	const arch = process.arch === "arm64" ? "arm64" : "x86";
+	const arch = TEST_ARCH;
 
 	beforeAll(async () => {
 		await cleanupMachine(name);

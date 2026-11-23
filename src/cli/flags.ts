@@ -19,7 +19,7 @@ const CREATE_FLAGS = [
 	"add-network", "network",
 	"boot-disk-format", "boot-size", "add-disk",
 	"device-mode", "device-mode-enable", "device-mode-disable",
-	"add-user", "disable-admin", "secure-login",
+	"add-user", "disable-admin", "secure-login", "identity",
 	"license-level",
 	"qemu-arg",
 ] as const;
@@ -82,6 +82,9 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
 	"boot-disk-format", "boot-size", "add-disk",
 	"device-mode", "device-mode-enable", "device-mode-disable",
 	"add-user", "timeout-extra",
+	// `--no-identity` only; declared value-taking so `--identity lab1` cannot fall
+	// through to the positional machine name (#164/#265), and rejected by name.
+	"identity",
 	"license-level", "license-account", "license-password",
 	"qemu-arg",
 	// exec / qga / console
@@ -114,10 +117,27 @@ export const REMOVED_FLAGS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /** Value-taking flags with a documented `--no-` spelling, where `false` is a real
- *  instruction rather than a value that went missing. `--no-device-mode` is the only
- *  one today; it is listed in `start --help`. Exported for the arity audit, which would
+ *  instruction rather than a value that went missing: `--no-device-mode` and
+ *  `--no-identity`, both listed in `start --help`. Exported for the arity audit, which would
  *  otherwise read `flags["device-mode"] === false` as proof that it is a boolean. */
-export const NEGATABLE_VALUE_FLAGS: ReadonlySet<string> = new Set(["device-mode"]);
+export const NEGATABLE_VALUE_FLAGS: ReadonlySet<string> = new Set(["device-mode", "identity"]);
+
+/** `--no-identity` is the only spelling (#265). The identity is the machine name, so a
+ *  value, or a bare `--identity`, is refused by name rather than read as a second name.
+ *
+ *  Reads the raw arguments, not parsed flags: parsing keeps the last spelling, so
+ *  `--identity lab1 --no-identity` would reach a flag check as a plain `false` and the
+ *  refused value would be erased. Stops at `--`, after which nothing is a flag.
+ *  Returns the message, or undefined when no positive spelling was given. */
+export function identityFlagError(argv: readonly string[]): string | undefined {
+	for (const arg of argv) {
+		if (arg === "--") break;
+		if (arg === "--identity" || arg.startsWith("--identity=")) {
+			return "--identity takes no value: quickchr sets the RouterOS identity to the machine name. Use --name to choose it, or --no-identity to leave the identity as it is.";
+		}
+	}
+	return undefined;
+}
 
 /** Flags given without the value they require.
  *

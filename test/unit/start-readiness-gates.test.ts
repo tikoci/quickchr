@@ -158,6 +158,16 @@ describe("RouterOS 6 refusals happen before download (#182)", () => {
 		});
 	}
 
+	// #287 made `networks: []` mean no NICs. add() saves the topology that later starts
+	// boot, so provisioning it can never reach is refused before anything is created.
+	test("add() refuses provisioning on a machine with no user-mode NIC", async () => {
+		for (const networks of [[], ["shared"]] as const) {
+			const result = await codeOf(QuickCHR.add({ version: "7.25.1", arch: "x86", networks: [...networks], packages: ["container"] }));
+			expect(result.code).toBe("NETWORK_UNAVAILABLE");
+		}
+		expect(nothingCreated()).toBe(true);
+	});
+
 	test("start() and add() refuse arm64 on 6.x", async () => {
 		expect((await codeOf(QuickCHR.start({ ...v6, arch: "arm64" }))).code).toBe("INVALID_ARCH");
 		expect((await codeOf(QuickCHR.add({ ...v6, arch: "arm64" }))).code).toBe("INVALID_ARCH");

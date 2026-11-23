@@ -96,6 +96,8 @@ describe("QuickCHR._provisionInstance — license failures", () => {
 						password: "bad-password",
 						level: "p1",
 					},
+					// The identity step runs first and has its own tests (identity.test.ts).
+					identity: false,
 				},
 				{} as never,
 			),
@@ -124,7 +126,7 @@ describe("QuickCHR._provisionInstance — license failures", () => {
 		await QuickCHR._provisionInstance(
 			{} as ChrInstance,
 			state,
-			{ license: { account: "user@example.com", password: "pw", level: "p10" } },
+			{ license: { account: "user@example.com", password: "pw", level: "p10" }, identity: false },
 			{} as never,
 		);
 		expect(state.license).toBe("p10");

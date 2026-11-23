@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { basicAuth, chrGet } from "./chr-rest.ts";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout } from "./timeouts.ts";
+import { bootTestTimeout, TEST_ARCH } from "./timeouts.ts";
 
 /**
  * Integration test — start and stop a CHR.
@@ -107,7 +107,7 @@ describe.skipIf(SKIP)("package installation", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
 		// Use arm64 when the process is native arm64, x86 otherwise.
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -156,7 +156,7 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { existsSync } = await import("node:fs");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 		let machineDir: string | undefined;
 
@@ -190,7 +190,7 @@ describe.skipIf(SKIP)("instance lifecycle — remove and clean", () => {
 	test("clean() resets disk to factory defaults — custom users disappear on next boot", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -327,7 +327,7 @@ describe.skipIf(SKIP)("instance channels — serial console", () => {
 	test("serial() readable stream delivers bytes from RouterOS console", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -376,7 +376,7 @@ describe.skipIf(SKIP)("instance-level package methods", () => {
 
 	test("availablePackages() lists packages, installPackage(first+last) activates them", async () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {

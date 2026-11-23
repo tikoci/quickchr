@@ -30,6 +30,7 @@ import {
 	managedSocketSpecifier,
 	isWiredPortName,
 	isCrossArchEmulation,
+	hostChrArch,
 	accelDoctorCheck,
 	proxyDoctorCheck,
 	resolveWindowsCommand,
@@ -597,6 +598,41 @@ describe("isCrossArchEmulation", () => {
 	});
 });
 
+describe("hostChrArch (#293)", () => {
+	test("arm64 for an x64 Bun under Rosetta, so the default guest is same-arch", () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"]);
+			return { exitCode: 0, stdout: "1\n" };
+		});
+		expect(hostChrArch()).toBe("arm64");
+		expect(isCrossArchEmulation(hostChrArch())).toBe(false);
+	});
+
+	test("x86 on an Intel Mac, where the probe says not translated", () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
+		expect(hostChrArch()).toBe("x86");
+	});
+
+	test("follows process.arch elsewhere, without probing", () => {
+		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
+		for (const [platform, arch, want] of [
+			["darwin", "arm64", "arm64"],
+			["linux", "arm64", "arm64"],
+			["linux", "x64", "x86"],
+			["win32", "x64", "x86"],
+		] as const) {
+			setPlatform(platform);
+			setArch(arch);
+			expect(hostChrArch()).toBe(want);
+		}
+		expect(spawn).not.toHaveBeenCalled();
+	});
+});
+
 describe("detectAccel", () => {
 	test("returns kvm on Linux only when host and guest architecture match and /dev/kvm is writable", async () => {
 		setPlatform("linux");
@@ -625,7 +661,7 @@ describe("detectAccel", () => {
 		setPlatform("darwin");
 		setArch("x64");
 		mockSpawnSync((cmd) => {
-			if (cmd.at(-1) === "sysctl.proc_translated") return { exitCode: 1 };
+			if (cmd.at(-1) === "hw.optional.arm64") return { exitCode: 1 };
 			expect(cmd).toEqual(["sysctl", "-n", "kern.hv_support"]);
 			return { exitCode: 0, stdout: "1\n" };
 		});
@@ -651,7 +687,7 @@ describe("detectAccel", () => {
 		setPlatform("darwin");
 		setArch("x64");
 		mockSpawnSync((cmd) => {
-			if (cmd.at(-1) === "sysctl.proc_translated") {
+			if (cmd.at(-1) === "hw.optional.arm64") {
 				return { exitCode: 0, stdout: "1\n" };
 			}
 			expect(cmd).toEqual(["sysctl", "-n", "kern.hv_support"]);
@@ -682,7 +718,7 @@ describe("isAppleSiliconHost", () => {
 		setPlatform("darwin");
 		setArch("x64");
 		mockSpawnSync((cmd) => {
-			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			expect(cmd).toEqual(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"]);
 			return { exitCode: 0, stdout: "1\n" };
 		});
 		expect(isAppleSiliconHost()).toBe(true);
@@ -763,7 +799,7 @@ describe("accelNote", () => {
 		setArch("x64");
 		resetAppleSiliconHostCache();
 		mockSpawnSync((cmd) => {
-			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			expect(cmd).toEqual(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"]);
 			return { exitCode: 1 };
 		});
 		expect(accelNote("arm64", "tcg")).toBeNull();

@@ -31,7 +31,7 @@ import type {
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION, HOST_GATEWAY_IP, PORTS_PER_BLOCK } from "./types.ts";
 import { assertValidResourceName, assertPathSafeName, shellQuote } from "./names.ts";
 import packageJson from "../../package.json";
-import { bunRuntimeCheck, detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, findCommandOnPath, accelDoctorCheck, proxyDoctorCheck } from "./platform.ts";
+import { bunRuntimeCheck, detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, hostChrArch, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, findCommandOnPath, accelDoctorCheck, proxyDoctorCheck } from "./platform.ts";
 import {
 	resolveVersion,
 	isValidVersion,
@@ -42,6 +42,7 @@ import {
 	isRouterOs6,
 	PROVISIONING_FEATURE_LABEL,
 } from "./versions.ts";
+import { applyIdentity } from "./identity.ts";
 import { buildPortMappings, findAvailablePortBlock, resolveStartNetworks, resolveAllNetworks, assignMacs, buildHostfwdString, hasUserModeNetwork, validateExplicitExtraPorts, describeSocketTransport, assertSocketVmnetReachable, probeSocketVmnetSockets, describeSocketVmnetProbe } from "./network.ts";
 import {
 	getUsedPortBases,
@@ -69,7 +70,7 @@ import { ensureCachedImage, listCachedImages } from "./images.ts";
 import { autoPruneIfOverCap } from "./cache.ts";
 import { resolveSetting } from "./settings.ts";
 import { pidLiveness } from "./pid.ts";
-import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
+import { buildQemuArgs, spawnQemu, stopQemu, foreignQemuError, liveQemuFor, clearStalePidfile, cleanupQemuSockets, waitForBoot, waitForApiReady, readinessProbeFor, type QemuLaunchConfig } from "./qemu.ts";
 import { bootDiskFormatOf, bootDiskPath, cleanDiskFiles, ensureConfiguredDisks, normalizeDiskOptions, writeBootDisk, parseSnapshotList, listSnapshots, mergeSnapshotMetadata, formatDiskSize } from "./disk.ts";
 import { monitorCommand, serialStreams, qgaCommand, channelEndpoint, channelFileExists, channelPath, MONITOR_SAVEVM_TIMEOUT_MS, MONITOR_LOADVM_TIMEOUT_MS, MONITOR_DELVM_TIMEOUT_MS } from "./channels.ts";
 import { captureBootFailure, newBootProbeStats, preserveOnFailure, type BootFailureReport, type BootProbeStats, type FailureTrigger } from "./diagnostics.ts";
@@ -103,8 +104,9 @@ import {
 	assertProvisioningWindow,
 	hasProvisioningRequest,
 	isProvisioningWindowOpen,
-	pendingProvisioningFor,
+	firstBootProvisioning,
 	withRecordedLicenseLevel,
+	withStoredIdentity,
 } from "./provisioning-window.ts";
 import type { LicenseOptions } from "./types.ts";
 import type { ReceivePort } from "./types.ts";
@@ -625,6 +627,9 @@ async function stopUnderLock(state: MachineState): Promise<void> {
 /** Persist stopped state and release endpoints. Caller holds the lifecycle lock. */
 function finalizeStoppedState(state: MachineState): void {
 	unregisterSocketMembers(state);
+	// A background QEMU leaves qemu.pid behind; once it has exited, a stale pid there
+	// could later be reused by an unrelated process (#294).
+	clearStalePidfile(state.machineDir);
 	// A frozen marker belongs to a live QEMU held at reset — a stopped machine
 	// holds nothing, so the flag goes with the pid (#214).
 	const current = loadMachine(state.name);
@@ -858,6 +863,12 @@ function createInstance(state: MachineState): ChrInstance {
 		// of disableAdmin.
 		const sentinelUnresolvable = state.user?.password === STORED_IN_SECRETS_PASSWORD && !storedCreds;
 		const credentialsAvailable = !disableAdminLockout && !sentinelUnresolvable;
+		// Port forwards ride on QEMU user-mode hostfwd. A machine with no user-mode NIC
+		// (`networks: []`, or only shared/bridged/socket NICs) still has `state.ports`
+		// allocated, but nothing listens on them, so none of them is advertised.
+		const hostfwd = hasUserModeNetwork(state.networks);
+		const noForwardReason = (label: string) =>
+			`no forwarded port for ${label}: the machine has no user-mode network`;
 
 		const buildHttpService = (
 			securePM: PortMapping | undefined,
@@ -874,6 +885,7 @@ function createInstance(state: MachineState): ChrInstance {
 			// so excluded plain ports still resolve when a secure forward is available
 			// (with `tls: true`). Secure preference can return once boot provisioning
 			// installs a certificate and enables www-ssl.
+			if (!hostfwd) return { available: false, unavailableReason: noForwardReason(serviceLabel) };
 			const chosen = plainPM ?? securePM;
 			if (!chosen) {
 				return { available: false, unavailableReason: `no forwarded port for ${serviceLabel}` };
@@ -925,7 +937,9 @@ function createInstance(state: MachineState): ChrInstance {
 		sshModes.push("agent-or-config");
 		if (credentialsAvailable) sshModes.push("password");
 
-		const sshService: SshServiceEndpoint = !sshPM
+		const sshService: SshServiceEndpoint = !hostfwd
+			? { available: false, unavailableReason: noForwardReason("ssh") }
+			: !sshPM
 			? { available: false, unavailableReason: "no forwarded port for ssh" }
 			: {
 					available: true,
@@ -950,7 +964,7 @@ function createInstance(state: MachineState): ChrInstance {
 					},
 				};
 
-		const customForwards: CustomForward[] = Object.entries(state.ports)
+		const customForwards: CustomForward[] = Object.entries(hostfwd ? state.ports : {})
 			.filter(([name]) => !CANONICAL_PORT_NAMES.has(name))
 			.map(([name, pm]) => ({
 				name,
@@ -1571,16 +1585,9 @@ function createInstance(state: MachineState): ChrInstance {
 	};
 }
 
-/** Resolve the host architecture to a CHR architecture. */
-function hostArchToChr(): Arch {
-	const arch = process.arch;
-	if (arch === "arm64") return "arm64";
-	return "x86";
-}
-
 /** Resolve user-supplied arch (including the "auto" synonym) to a concrete Arch. */
 function resolveArch(input: Arch | "auto" | undefined): Arch {
-	if (input === undefined || input === "auto") return hostArchToChr();
+	if (input === undefined || input === "auto") return hostChrArch();
 	return input;
 }
 
@@ -1971,14 +1978,19 @@ async function buildLaunchConfigFromState(state: MachineState): Promise<QemuLaun
 /** Persist what provisioning landed on the current disk, in state and on disk.
  *  A run with nothing to do still records — an empty `steps` says "provisioning ran
  *  and had nothing to apply", which is a different fact from never having run. */
-function recordProvisioning(state: MachineState, steps: ProvisioningStep[]): void {
+function recordProvisioning(state: MachineState, steps: ProvisioningStep[], identity: boolean | undefined): void {
 	const record = { at: new Date().toISOString(), steps };
 	const current = loadMachine(state.name);
 	if (current) {
 		current.provisioning = record;
+		// The merged identity intent this run honored, kept as intent (#265): a
+		// `start --no-identity` that provisions a machine `add` created must still
+		// skip the rename when `clean()` reopens the window and stored intent replays.
+		current.identity = identity;
 		saveMachine(current);
 	}
 	state.provisioning = record;
+	state.identity = identity;
 }
 
 /** Re-read `machine.json` into an existing state object, in place.
@@ -2629,7 +2641,10 @@ export class QuickCHR {
 		// add() always creates, so the full name rules apply before any I/O.
 		if (opts.name !== undefined) assertValidResourceName(opts.name, "machine");
 
-		warnVersionWithChannel(opts, createLogger(opts.onProgress));
+		// One logger for the whole call: a caller that passes onProgress gets every line
+		// there and nothing on stdout (#290).
+		const logger = createLogger(opts.onProgress);
+		warnVersionWithChannel(opts, logger);
 		let version: string;
 		if (opts.version) {
 			if (!isValidVersion(opts.version)) {
@@ -2658,11 +2673,15 @@ export class QuickCHR {
 		// say why, not first ask for QEMU to be installed.
 		if (hasProvisioningMutations(mutations)) {
 			assertProvisioningSupportedVersion(version, describeProvisioningOperation(mutations));
+			// Provisioning runs at first boot over the user NIC's forwards. A machine saved
+			// without one could never apply it, and a later start cannot add the NIC: it
+			// boots the stored topology. Refuse now, as a fresh start() does.
+			assertProvisioningReachable(resolveStartNetworks(opts.networks, opts.network), opts.name);
 		}
 		requireQemu(arch);
 		if (arch === "arm64") requireFirmware();
 		const diskOpts = normalizeDiskOptions(opts.bootSize, opts.extraDisks, opts.bootDiskFormat);
-		if (opts.license !== undefined) warnLicenseIntent(opts.license, createLogger(opts.onProgress));
+		if (opts.license !== undefined) warnLicenseIntent(opts.license, logger);
 
 		const existingNames = listMachineNames();
 		const name = opts.name ?? generateMachineName(version, arch, existingNames);
@@ -2694,7 +2713,7 @@ export class QuickCHR {
 		}
 		const { lock, portBase, ports, networks, receivePorts } = claimed;
 		try {
-			const cachedImg = await ensureCachedImage(version, arch);
+			const cachedImg = await ensureCachedImage(version, arch, undefined, logger);
 			const diskArtifacts = await ensureConfiguredDisks(
 				machineDir,
 				diskOpts.bootSize,
@@ -2717,6 +2736,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				identity: opts.identity,
 				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
@@ -2922,7 +2942,7 @@ export class QuickCHR {
 			}
 			// First boot of add()-created machine: apply pending provisioning from stored state
 			if (isProvisioningWindowOpen(existing)) {
-				const pendingOpts = pendingProvisioningFor(existing, {
+				const pendingOpts = firstBootProvisioning(existing, {
 					installAllPackages: opts.installAllPackages,
 					packages: opts.packages,
 					deviceMode: opts.deviceMode,
@@ -2930,29 +2950,28 @@ export class QuickCHR {
 					disableAdmin: opts.disableAdmin,
 					license: opts.license,
 					secureLogin: opts.secureLogin,
+					identity: opts.identity,
 				});
-				const hasPending = !!(
-					pendingOpts.installAllPackages ||
-					(pendingOpts.packages?.length ?? 0) > 0 ||
-					pendingOpts.deviceMode ||
-					pendingOpts.user ||
-					pendingOpts.disableAdmin ||
-					pendingOpts.license ||
-					pendingOpts.secureLogin === true
-				);
-				if (hasPending) {
-					// Before the boot, not after it: `_provisionInstance()` re-checks the
-					// version, but only once the guest is up — on RouterOS 6 that is a
-					// download-free boot spent on a refusal known in advance.
+				// Undefined unless a step changes something: identity rides along and
+				// never makes a first boot provision on its own, and a `{ mode: "skip" }`
+				// left by `--no-device-mode` asks for nothing (#265).
+				if (pendingOpts) {
 					const pendingMutations = {
 						...pendingOpts,
 						hasDeviceModeProvisioning: shouldApplyDeviceMode(resolveDeviceModeOptions(pendingOpts.deviceMode)),
 					};
+					// Before the boot, not after it: `_provisionInstance()` re-checks the
+					// version, but only once the guest is up — on RouterOS 6 that is a
+					// download-free boot spent on a refusal known in advance.
 					assertProvisioningSupportedVersion(existing.version, describeProvisioningOperation(pendingMutations));
 					assertWaitAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertFrozenAllowsProvisioning(opts, describeProvisioningOperation(pendingMutations), existing.name);
 					assertProvisioningReachable(existing.networks, existing.name);
 					pendingOpts.license = await resolveLicenseForBoot(pendingOpts.license);
+					// Only what the caller said: an omitted identity is read from the state
+					// _launchExisting() re-reads under the machine lock, so an opt-out stored
+					// by another run in between is honored and kept (#265).
+					pendingOpts.identity = opts.identity;
 					requireHostFor(existing.arch);
 					return QuickCHR._launchExisting(existing, opts.background ?? true, pendingOpts, logger, opts.wait ?? true, sessionLaunch(opts));
 				}
@@ -2989,6 +3008,7 @@ export class QuickCHR {
 				user: opts.user,
 				disableAdmin: opts.disableAdmin,
 				secureLogin: opts.secureLogin,
+				identity: opts.identity,
 				license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 				portBase,
 				excludePorts: opts.excludePorts ?? [],
@@ -3076,6 +3096,7 @@ export class QuickCHR {
 			user: opts.user,
 			disableAdmin: opts.disableAdmin,
 			secureLogin: opts.secureLogin,
+			identity: opts.identity,
 			license: opts.license === undefined ? undefined : licenseLevelOf(opts.license),
 			portBase,
 			excludePorts: opts.excludePorts ?? [],
@@ -3245,6 +3266,7 @@ export class QuickCHR {
 					disableAdmin: opts.disableAdmin,
 					license: opts.license,
 					secureLogin: opts.secureLogin,
+					identity: opts.identity,
 				}, launchConfig, logger);
 			} catch (err) {
 				// This call created the machine, so a failed run takes it away again.
@@ -3302,6 +3324,7 @@ export class QuickCHR {
 			disableAdmin?: boolean | undefined;
 			license?: LicenseInput | undefined;
 			secureLogin?: boolean | undefined;
+			identity?: boolean | undefined;
 		},
 		launchConfig: QemuLaunchConfig,
 		logger?: ProgressLogger,
@@ -3330,6 +3353,15 @@ export class QuickCHR {
 
 		// Give SSH a moment to start after HTTP comes up
 		await Bun.sleep(2000);
+
+		// First, before anything is installed: factory `admin:` is valid only here, and a
+		// failure costs a factory reset of an untouched disk (#265). Only an explicit
+		// `false` skips it.
+		if (opts.identity !== false) {
+			log.status(`Setting identity to "${machineState.name}"...`);
+			await applyIdentity(chrPorts.http, machineState.name, FACTORY_AUTH_HEADER);
+			applied.push("identity");
+		}
 
 		if (opts.installAllPackages) {
 			const installed = await installAllPackages(machineState.version, machineState.arch, chrPorts.ssh, chrPorts.http, log);
@@ -3435,7 +3467,7 @@ export class QuickCHR {
 		// Stamped only here, after every requested step returned. A run that throws
 		// leaves the record absent, and the caller rolls the whole run back
 		// (`rollbackFailedProvisioning()`), so the retry starts from a factory disk.
-		recordProvisioning(machineState, applied);
+		recordProvisioning(machineState, applied, opts.identity);
 	}
 
 	/** Re-launch an existing stopped machine.
@@ -3455,22 +3487,15 @@ export class QuickCHR {
 			disableAdmin?: boolean | undefined;
 			license?: LicenseInput | undefined;
 			secureLogin?: boolean | undefined;
+			identity?: boolean | undefined;
 		},
 		logger?: ProgressLogger,
 		wait = true,
 		launch?: SessionLaunch,
 	): Promise<ChrInstance> {
-		const wantsProvisioning = (opts: typeof provisioningOpts) => !!(
-			opts && (
-				opts.installAllPackages ||
-				(opts.packages?.length ?? 0) > 0 ||
-				opts.deviceMode ||
-				opts.user ||
-				opts.disableAdmin ||
-				opts.license ||
-				opts.secureLogin === true
-			)
-		);
+		// Resolved device-mode, as in start(): a `{ mode: "skip" }` asks for nothing, and
+		// counting it would run `_provisionInstance()` with identity as its only step (#265).
+		const wantsProvisioning = (opts: typeof provisioningOpts) => !!opts && hasProvisioningRequest(opts);
 		let hasProvisioning = wantsProvisioning(provisioningOpts);
 		const lock = acquireLockNow(
 			machineLockPath(state.machineDir),
@@ -3498,6 +3523,9 @@ export class QuickCHR {
 			provisioningOpts = undefined;
 			hasProvisioning = false;
 		}
+		// An omitted identity means the stored intent as it is now, under the lock;
+		// start() leaves it unresolved for that reason (#265).
+		if (provisioningOpts) provisioningOpts = withStoredIdentity(provisioningOpts, state);
 
 		// Checks the disk this machine boots from — a qcow2 machine needs only boot.qcow2
 		// (#200) — and refuses, rather than rebuilds, a booted machine's missing disk.
@@ -3699,7 +3727,9 @@ export class QuickCHR {
 	}
 
 	/** Delete a half-created machine directory. Returns false when `name` is a real
-	 *  machine (use `get(name)?.remove()`) or does not exist at all.
+	 *  machine (use `get(name)?.remove()`) or does not exist at all. Throws
+	 *  `MACHINE_RUNNING`, deleting nothing, when a QEMU for that directory is still
+	 *  running (#294).
 	 *
 	 *  A crash or SIGKILL can strand a directory even with add()'s cleanup in place, and
 	 *  a stranded directory blocks re-add while being invisible to `list` — so clearing
@@ -3721,6 +3751,28 @@ export class QuickCHR {
 		try {
 			// The creator may have finished between the check above and the lock.
 			if (!isOrphanMachineDir(name)) return false;
+			// A start killed after spawning QEMU but before saving machine.json leaves a
+			// running VM here, and nothing else records it. Deleting the directory would
+			// strand that VM untracked, so refuse and name it (#294).
+			const live = liveQemuFor(getMachineDir(name));
+			if (live?.verified) {
+				throw new QuickCHRError(
+					"MACHINE_RUNNING",
+					`Machine directory "${name}" has no readable machine.json, but its QEMU is still running (PID ${live.pid}). Nothing was deleted.`,
+					`Stop that process (${process.platform === "win32" ? `taskkill /PID ${live.pid} /F` : `kill ${live.pid}`}), then run 'quickchr remove ${shellQuote(name)}' again.`,
+				);
+			}
+			if (live) {
+				// Identity unknown (Windows, another user's process, or an unresolvable
+				// path): refuse, but don't hand out a kill command for a pid that may
+				// belong to something else.
+				const pidfile = join(getMachineDir(name), "qemu.pid");
+				throw new QuickCHRError(
+					"MACHINE_RUNNING",
+					`Machine directory "${name}" has no readable machine.json, and process ${live.pid} from its qemu.pid is still running; quickchr could not confirm whether it is this machine's QEMU. Nothing was deleted.`,
+					`If PID ${live.pid} is this machine's QEMU, stop it; if it is not, delete ${shellQuote(pidfile)}. Then run 'quickchr remove ${shellQuote(name)}' again.`,
+				);
+			}
 			removeState(name);
 			return true;
 		} finally {
@@ -3729,17 +3781,26 @@ export class QuickCHR {
 		}
 	}
 
-	/** Run doctor checks for prerequisites. */
-	static async doctor(): Promise<DoctorResult> {
+	/**
+	 * Run doctor checks for prerequisites.
+	 *
+	 * `arch` is the guest arch the caller will start by default; it decides which
+	 * missing QEMU binary or firmware is an `error` and which only a `warn`.
+	 * Omitted (or `"auto"`), it is the physical host's ({@link hostChrArch}). The CLI
+	 * passes its `default-arch` setting, so a host configured for x86 guests is not
+	 * failed over a missing arm64 QEMU (#293).
+	 */
+	static async doctor(arch?: Arch | "auto"): Promise<DoctorResult> {
 		const checks: DoctorResult["checks"] = [];
+		const defaultArch = resolveArch(arch);
 
 		checks.push(await bunRuntimeCheck());
 
 		// QEMU for each arch
-		for (const arch of ARCHES) {
-			const qemuName = arch === "arm64" ? "qemu-system-aarch64" : "qemu-system-x86_64";
+		for (const qemuArch of ARCHES) {
+			const qemuName = qemuArch === "arm64" ? "qemu-system-aarch64" : "qemu-system-x86_64";
 			try {
-				const qemuBin = requireQemu(arch);
+				const qemuBin = requireQemu(qemuArch);
 				const ver = getQemuVersion(qemuBin);
 				checks.push({
 					label: qemuName,
@@ -3750,7 +3811,7 @@ export class QuickCHR {
 				const hint = getQemuInstallHint();
 				checks.push({
 					label: qemuName,
-					status: arch === hostArchToChr() ? "error" : "warn",
+					status: qemuArch === defaultArch ? "error" : "warn",
 					detail: `not found — ${hint}`,
 				});
 			}
@@ -3767,7 +3828,7 @@ export class QuickCHR {
 		} catch {
 			checks.push({
 				label: "UEFI firmware",
-				status: hostArchToChr() === "arm64" ? "error" : "warn",
+				status: defaultArch === "arm64" ? "error" : "warn",
 				detail: "not found (needed for arm64 CHR)",
 			});
 		}

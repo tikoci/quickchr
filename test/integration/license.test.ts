@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { imageTarget } from "./image-target.ts";
-import { bootTestTimeout, coldDownloadTestTimeout, PACKAGES_ZIP_BYTES } from "./timeouts.ts";
+import { bootTestTimeout, coldDownloadTestTimeout, PACKAGES_ZIP_BYTES, TEST_ARCH } from "./timeouts.ts";
 
 /**
  * Integration tests for license and package install functionality.
@@ -39,7 +39,7 @@ describe.skipIf(SKIP)("license — getLicenseInfo on fresh CHR", () => {
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { getLicenseInfo } = await import("../../src/lib/license.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -78,7 +78,7 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { getLicenseInfo } = await import("../../src/lib/license.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		const account = process.env.MIKROTIK_WEB_ACCOUNT ?? "";
 			const password = process.env.MIKROTIK_WEB_PASSWORD ?? "";
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
@@ -124,7 +124,7 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		const name = "integration-license-add";
 		await cleanupMachine(name);
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;
 
 		try {
@@ -155,7 +155,7 @@ describe.skipIf(SKIP || !HAS_CREDS)("license — renewLicense with real credenti
 		const { QuickCHR } = await import("../../src/lib/quickchr.ts");
 		const { getLicenseInfo } = await import("../../src/lib/license.ts");
 
-		const arch = process.arch === "arm64" ? "arm64" : "x86";
+		const arch = TEST_ARCH;
 		const account = process.env.MIKROTIK_WEB_ACCOUNT ?? "";
 			const password = process.env.MIKROTIK_WEB_PASSWORD ?? "";
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | undefined;

@@ -3,6 +3,7 @@
 import { join } from "node:path";
 import { ensureCachedImage, isUsableCachedImage } from "./images.ts";
 import type { ProgressLogger } from "./log.ts";
+import { hostChrArch } from "./platform.ts";
 import { PROXY_ALLOWLIST_HINT, PROXY_CREDENTIALS_HINT } from "./net.ts";
 import { getCacheDir } from "./state.ts";
 import { ARCHES, CHANNELS, QuickCHRError, type Arch, type Channel } from "./types.ts";
@@ -18,7 +19,7 @@ export interface CacheTargetOptions {
 	version?: string | undefined;
 	/** Override the cache directory. Defaults to quickchr's platform-correct cache. */
 	cacheDir?: string;
-	/** CHR architecture. `auto` and omission select the Bun process architecture. */
+	/** CHR architecture. `auto` and omission select the physical host's ({@link hostChrArch}). */
 	arch?: Arch | "auto";
 }
 
@@ -74,7 +75,7 @@ async function concreteVersion(
 }
 
 function concreteArch(arch: Arch | "auto" | undefined): Arch {
-	if (arch === undefined || arch === "auto") return process.arch === "arm64" ? "arm64" : "x86";
+	if (arch === undefined || arch === "auto") return hostChrArch();
 	if (!(ARCHES as readonly string[]).includes(arch)) {
 		throw new QuickCHRError("INVALID_ARCH", `Invalid architecture "${arch}" — expected one of ${ARCHES.join(", ")}, auto`);
 	}

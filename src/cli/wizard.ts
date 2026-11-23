@@ -4,6 +4,7 @@
 
 import type { Arch, Channel, DeviceModeOptions, LicenseLevel, LicenseOptions, NetworkSpecifier, StartOptions } from "../lib/types.ts";
 import { CHANNELS, ARCHES, knownPackagesForArch } from "../lib/types.ts";
+import { hostChrArch } from "../lib/platform.ts";
 
 export type WizardUserChoice = "custom" | "managed" | "admin";
 
@@ -97,7 +98,7 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 	}
 
 	// 2. Architecture
-	const hostArch = process.arch === "arm64" ? "arm64" : "x86";
+	const hostArch = hostChrArch();
 	const settingArch = resolveSetting("default-arch").value as Arch | "auto";
 	const archInitial: Arch = settingArch === "auto" ? hostArch : settingArch;
 	const arch = await clack.select({
@@ -221,8 +222,9 @@ export async function runWizard(wizardOpts?: { firstRun?: boolean }): Promise<vo
 
 	// ── 5. Networking ────────────────────────────────────────────────────
 	// User/SLiRP is always included (localhost port forwarding for REST, SSH, etc.).
-	// The wizard only asks about *additional* networks. To remove the user-mode
-	// interface, use `quickchr start --no-network --add-network <spec>`.
+	// The wizard only asks about *additional* networks. To leave the user-mode
+	// interface out, use `quickchr start --add-network <spec>`: an explicit
+	// --add-network list replaces the default, and --no-network means no NICs at all.
 	const networks: NetworkSpecifier[] = ["user"];
 	const { detectPlatform, detectPhysicalInterfaces } = await import("../lib/platform.ts");
 	const { parseNetworkSpecifier, probeSocketVmnet, describeSocketVmnetProbe } = await import("../lib/network.ts");

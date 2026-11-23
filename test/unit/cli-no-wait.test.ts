@@ -114,3 +114,12 @@ describe("RouterOS 6 on the CLI (#182)", () => {
 		expect(result.stderr).toContain("x86 only");
 	});
 });
+
+describe("--no-network (#287)", () => {
+	test("--no-network with --add-network is refused rather than dropping the NIC", async () => {
+		const result = await runQuickchr(["start", "--name", "lab", "--version", "7.25.1", "--arch", "x86", "--no-network", "--add-network", "user", "--no-wait", "--dry-run"]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("Error [INVALID_NETWORK]");
+		expect(result.stderr).toContain("cannot be combined with --add-network");
+	});
+});

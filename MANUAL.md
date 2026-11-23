@@ -105,7 +105,10 @@ Reports prerequisite status, accelerator availability, image cache
 size, machine count, free disk space, and shell-completion install
 state. The disk check measures the data dir's filesystem and warns when free
 space is under `storage-reserve` + 2 GiB. Exit code is `0` when no checks return
-`error` (warnings are OK).
+`error` (warnings are OK). A missing QEMU binary (or UEFI firmware) is an `error`
+only for the default guest arch, the `default-arch` setting or else the physical
+host's; for the other arch it is a warning. The library's `QuickCHR.doctor(arch)`
+takes that arch, and defaults to the physical host's.
 
 ```bash
 quickchr doctor              # human-readable
@@ -234,6 +237,7 @@ directory, downloads the RouterOS image (cached), and writes
 | `--add-user <user:pass>` | — | Provisioning, ≥ 7.20.8 |
 | `--disable-admin` | false | Provisioning, ≥ 7.20.8 |
 | `--secure-login` / `--no-secure-login` | unset | Provisioning, ≥ 7.20.8. The only way to get the managed SSH key that centrs and other descriptor consumers need for SSH/SFTP: it creates the `quickchr` account with a batch-verified key. Without it, or when combined with `--add-user`, no key is created. First boot only; an already-booted machine cannot add the key later, so pass it at `add`/`start` (#253) |
+| `--no-identity` | — | Leave `/system/identity` as it is. By default, when quickchr provisions (any option above or below marked Provisioning), it also sets the identity to the machine name (#265). `--identity <x>` is refused: the identity is the machine name |
 | `--license-level <l>` | — | `p1`, `p10`, `p-unlimited` (`unlimited` is accepted as `p-unlimited`), ≥ 7.20.8. On `add` only the level is recorded; credentials are resolved at the first `start` |
 | `--license-account <a>` | — | `start` only. MikroTik.com email. Without it: env `MIKROTIK_WEB_ACCOUNT`, then the secret store |
 | `--license-password <p>` | — | `start` only. Pairs with `--license-account`; if you give one of the two, the other comes from its env var (never from the secret store). Without either, `start` refuses before booting when no credential is found |
@@ -269,7 +273,7 @@ Additional flags:
 
 | Flag | Notes |
 |---|---|
-| `--all` | Start every stopped machine in background; accepts readiness, acceleration, timeout and secure-login options only. Other options are refused rather than ignored. `--secure-login` is resolved per machine: one that has never booted creates the managed login; one that already booted accepts it as a no-op only if it already has one, and is refused otherwise. With `--no-wait`, a never-booted machine refuses it (provisioning needs the wait). Machines start one at a time, so a refusal stops the batch after the earlier machines have started |
+| `--all` | Start every stopped machine in background; accepts readiness, acceleration, timeout, secure-login and `--no-identity` options only. Other options are refused rather than ignored. `--secure-login` is resolved per machine: one that has never booted creates the managed login; one that already booted accepts it as a no-op only if it already has one, and is refused otherwise. With `--no-wait`, a never-booted machine refuses it (provisioning needs the wait). Machines start one at a time, so a refusal stops the batch after the earlier machines have started |
 | `--no-wait` | Return as soon as QEMU is running (past the 1.5 s early-exit check), with state and ports persisted; do not wait for RouterOS. Refused with any provisioning flag, including first-boot options `add` recorded, and with `--fg` |
 | `--fg` / `--foreground` (alias `--no-bg`, `--no-background`) | Serial console on stdio |
 | `--bg` / `--background` | **Deprecated, does nothing.** Background is the default, and the flag never made `start` return early — it only ever chose where the serial console went. Prints a warning; use `--no-wait` |
@@ -673,6 +677,7 @@ guest read-back that skips redundant installs is follow-up work.
 **Not available here:** `--add-user`, `--disable-admin`, `--secure-login`. Those
 rewrite working config rather than unlock a capability, and they are the steps that
 drift; their route stays `quickchr clean <name>` followed by the original command.
+`set` also never changes `/system/identity` (#265).
 
 #### `snapshot <name> <list | save [snapname] | load <snapname> | delete <snapname>>` (alias `snap`)
 
@@ -862,7 +867,7 @@ Precedence per key (highest wins): CLI flag > `QUICKCHR_<KEY>` env var >
 | Key | Consumed by | Type | Built-in default |
 |---|---|---|---|
 | `default-channel` | `add`/`start`'s `--channel`, wizard's channel prompt | `stable`\|`long-term`\|`testing`\|`development` | `stable` |
-| `default-arch` | `add`/`start`'s `--arch`, wizard's arch prompt | `arm64`\|`x86`\|`auto` | `auto` (host native) |
+| `default-arch` | `add`/`start`'s `--arch`, wizard's arch prompt, `doctor`'s QEMU checks | `arm64`\|`x86`\|`auto` | `auto` (host native) |
 | `accel` | `add`/`start`'s `--accel`; every `detectAccel()` call in the run | `auto`\|`tcg`\|`hvf`\|`kvm` | `auto` (detect) |
 | `cache-max-size` | Auto-prune cap applied after each successful `start` | size string (e.g. `2G`, `512M`) | `2G` |
 | `storage-reserve` | Free space creating a machine or filling the cache must leave, beyond what it writes | size string | `2G` |
@@ -953,7 +958,7 @@ QuickCHR.get(name: string): ChrInstance | null
 QuickCHR.listUnreadable(): Array<{ name: string; error: string }>
 QuickCHR.listOrphans(): string[]
 QuickCHR.removeOrphan(name: string): boolean
-QuickCHR.doctor(): Promise<DoctorResult>
+QuickCHR.doctor(arch?: Arch | "auto"): Promise<DoctorResult>
 QuickCHR.resolveVersion(channel: Channel): Promise<string>
 ```
 
@@ -1015,7 +1020,12 @@ and `listOrphans()` covers it.
 `listOrphans()` and `removeOrphan()` treat both the same — unreadable is unreadable —
 so `quickchr remove <name>` clears either. `removeOrphan()` returns `false` for a real
 machine (use `get(name)?.remove()` for those) and for a name that does not exist, and
-throws `INVALID_NAME` for a name that is not a usable path segment.
+throws `INVALID_NAME` for a name that is not a usable path segment. It throws
+`MACHINE_RUNNING` and deletes nothing when the directory's QEMU may still be running:
+its `qemu.pid` names a live process whose command line names a file in that directory
+(by canonical path). Where the command line cannot be read (Windows, another user's
+process on macOS), any live pid there counts, and the error says so instead of
+suggesting a kill (#294).
 
 ### `ChrInstance`
 
@@ -1131,6 +1141,7 @@ redact before logging or attaching to bug reports.
 | `user` | `{ name, password }` | — | Provisioning |
 | `disableAdmin` | boolean | `false` | Provisioning |
 | `secureLogin` | boolean | `false` | **`true` is the explicit trigger** for managed-account creation, including the batch-verified SSH key that `descriptor()` advertises (first boot only, #253) |
+| `identity` | boolean | default on | When provisioning runs, set `/system/identity` to the machine name. **Only `false` has an effect** (skip it); it never triggers provisioning by itself. Recorded as intent, and an explicit `true` overrides a recorded `false` (#265) |
 | `license` | `LicenseInput` | — | `"p1"` / `"p10"` / `"p-unlimited"` (`"unlimited"` is normalized to `"p-unlimited"`) or `LicenseOptions`. Only the level is recorded in `machine.json` (`license`); credentials are resolved from env vars / the secret store, and `start()` refuses before booting when none are found |
 | `deviceMode` | `DeviceModeOptions` | — | `{mode?, enable?[], disable?[]}` |
 | `installDeps` | boolean | — | **Deprecated, ignored.** Never installed anything; run `quickchr doctor` for install hints |
@@ -1280,13 +1291,13 @@ afterAll(async () => { await chr?.remove(); });
   same name), removes the machine again if its first boot times out, and returns the
   handle. Its `state.createdAt` tells this machine apart from a later one of the same
   name. `add()` is for a machine you configure now and boot later or from another
-  process. It prints its image line to stdout even with `onProgress` (#290).
+  process.
 - **A random name is enough ownership** when the run shares the developer's data
   directory. A test never needs to start or remove a machine it did not create. In CI,
   point `QUICKCHR_DATA_DIR` at the runner's temp directory and cache
   `<data dir>/cache` between runs.
-- **Keep stdout yours.** With `onProgress` on `start()` and a logger on `cacheAdd()`,
-  quickchr prints nothing to stdout.
+- **Keep stdout yours.** With `onProgress` on `add()` and `start()` and a logger on
+  `cacheAdd()`, quickchr prints nothing to stdout (#290).
 - **Make the hook's timeout outlive quickchr's own waits**, so a slow boot fails
   inside quickchr with its `BOOT_TIMEOUT` report rather than being cut off by the test
   runner. With the image already cached, `start()` can wait for: the port allocation
@@ -1299,8 +1310,9 @@ afterAll(async () => { await chr?.remove(); });
   the report and the stop.
   `remove()` waits up to the boot budget for an operation already in progress, then
   stops QEMU.
-- **Pass `arch`** when your timeouts depend on it. The default is the Bun process's
-  architecture, which is `x86` for an x64 Bun under Rosetta on Apple Silicon (#293).
+- **Pass `arch`, or ask `hostChrArch()`,** when your timeouts depend on it. The default
+  is the physical host's architecture, so `arm64` on Apple Silicon even for an x64 Bun
+  under Rosetta (#293).
 - **Print the name before calling `start()`** (to stderr), so a run that is killed
   before teardown says what it left behind. Once the boot has begun, the machine has a
   readable `machine.json` and a detached QEMU: `quickchr list <name>` shows it and
@@ -1308,10 +1320,13 @@ afterAll(async () => { await chr?.remove(); });
   A run killed earlier, while the machine was still being created, can leave a
   directory with no readable `machine.json` instead, which `QuickCHR.listOrphans()`
   names. `start()` writes `machine.json` only after spawning QEMU, so that QEMU may
-  still be running. **Stop it before `QuickCHR.removeOrphan(name)`**: its command line
-  names the machine directory (`pgrep -fl "machines/<name>/"` on Linux and macOS), and
-  `removeOrphan()` does not check for a live QEMU yet (#294). On a throwaway CI runner
-  with its own `QUICKCHR_DATA_DIR`, both kinds go away with the runner.
+  still be running. `QuickCHR.removeOrphan(name)` then refuses with `MACHINE_RUNNING`,
+  naming the pid from `qemu.pid`, and deletes nothing (#294). If its message says the
+  process is this machine's QEMU, stop it and call again. If it says quickchr could not
+  confirm that, check the pid first: stop it only if it is this machine's QEMU, and
+  otherwise delete the stale `qemu.pid` before calling again. On a
+  throwaway CI runner with its own `QUICKCHR_DATA_DIR`, both kinds go away with the
+  runner.
 
 ---
 
@@ -1328,6 +1343,25 @@ port mappings work on any 7.x.
 
 **Order of operations** (`_provisionInstance` in `src/lib/quickchr.ts`):
 
+0. **Identity** — sets `/system/identity` to the machine name, so machines are
+   told apart in WinBox, MNDP neighbor lists, the console prompt and `/app`
+   container host names (#265). It runs first, with the factory `admin` login, and
+   only when another step below runs: a boot-only start leaves the current identity
+   in place (on a fresh disk, `CHR` on current images, `MikroTik` on older ones).
+   `identity: false` (`--no-identity`) skips it. `set` never renames. Recorded as the
+   `identity` step. A `set` the guest answers with another menu's data (the post-boot
+   REST race) is sent again; a RouterOS refusal (4xx) on the set or the read-back
+   fails the step at once.
+
+   **Intent.** `add --no-identity` is recorded in `machine.json`, and so is the
+   identity choice of the first-boot `start` that provisions, so `clean()` followed
+   by a plain `start` replays it with the rest of the stored intent. An explicit
+   `identity: true` overrides a stored `false`; omitting it inherits the stored value.
+
+   **Length.** RouterOS takes identities up to 64 bytes (`failure: could not change
+   identity: too long` above that). Every name quickchr creates now fits; a machine
+   named by an older release can be longer. If RouterOS refuses such a name, the
+   step fails and the first boot rolls back: start it with `--no-identity`.
 1. **Packages** — `installAllPackages` or `packages[]` triggers SCP
    upload of `.npk` files to the SSH port, then `/system/reboot`.
    quickchr waits 2× the normal boot timeout (package init takes
@@ -1363,7 +1397,7 @@ for inspection — `quickchr clean <name>` then resets it.
 On the first `start` of a machine created by `add`, a provisioning option you
 leave out keeps what `add` recorded, and an explicit negation
 (`--no-install-all-packages`, `--no-disable-admin`, `--no-secure-login`,
-`--no-device-mode`) overrides it.
+`--no-device-mode`, `--no-identity`) overrides it.
 
 **The provisioning window closes at the machine's first boot** — not at
 `add`. A machine created with no provisioning options can still take them
@@ -1743,22 +1777,36 @@ arch:
 
 | Host | Guest | Accel |
 |---|---|---|
-| macOS x86_64 | x86 | HVF |
+| macOS x86_64 | x86 (default) | HVF |
 | macOS x86_64 | arm64 | TCG |
-| macOS arm64 (native bun) | arm64 | TCG |
+| macOS arm64 (native bun) | arm64 (default) | TCG |
 | macOS arm64 (native bun) | x86 | TCG |
-| macOS arm64 (Rosetta bun) | arm64 | TCG |
+| macOS arm64 (Rosetta bun) | arm64 (default) | TCG |
 | macOS arm64 (Rosetta bun) | x86 | TCG |
 | Linux x86_64 + `/dev/kvm` writable | x86 | KVM |
 | Linux aarch64 + `/dev/kvm` writable | arm64 | KVM |
 | any other combo | any | TCG |
 
+`(default)` marks the guest arch quickchr picks when none is given (see below).
 `Bun` running under Rosetta on Apple Silicon reports `process.arch ===
-"x64"`, so quickchr checks `sysctl.proc_translated` to identify the physical
-arm64 host. Auto-selection uses TCG for both guest architectures there: HVF
+"x64"`, so quickchr reads `hw.optional.arm64` (1 on Apple Silicon, even under
+Rosetta) to identify the physical arm64 host. Auto-selection uses TCG for both guest architectures there: HVF
 cannot virtualize x86 across architectures, and current arm64 CHR images need
 AArch32 userspace support that Apple Silicon does not provide. Use `--accel`
 (or `QUICKCHR_ACCEL` / the `accel` setting) only to override this deliberately.
+
+The same check sets the **default guest arch**, the physical host's, which
+`hostChrArch()` returns. Under Rosetta that is `arm64`, so the default guest is
+same-arch TCG rather than x86 under cross-arch TCG (#293). Precedence:
+
+- **CLI:** `--arch` when given. Without it, the `default-arch` setting; its built-in
+  value `auto` means the physical host's arch. An explicit `--arch auto` always
+  selects the physical host's arch, whatever `default-arch` says.
+- **Library:** `arch` when given; omitting it, or passing `"auto"`, selects the
+  physical host's arch. The library does not read the `default-arch` setting.
+
+Machine creation, `cacheKey()`/`cacheAdd()`, the setup wizard and `doctor` all
+follow this.
 
 ### Boot timeout
 
