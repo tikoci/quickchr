@@ -161,18 +161,52 @@ fresh-connection trials each across two runs, with latency the same as TCP.
 
 If quickchr adopted this, the open points are:
 
-- **The `sun_path` limit is 108 bytes.** Seen locally on Linux while building
-  this lab: QEMU refused a long scratch path with `UNIX socket path '…' is too
-  long`. That the same limit applies on Windows is inferred (Winsock's
-  `sockaddr_un` is also 108 bytes); it wasn't tested there. A
-  Windows machine dir like `C:\Users\<user>\AppData\Local\…\machines\<name>\`
-  has to fit. Inferred: a short per-machine directory, or a check at create
-  time as the inter-VM `dgram` code already does, would be needed.
+- **The usable `sun_path` limit on Windows is 107 bytes**, measured in run
+  [45220066588](https://github.com/tikoci/quickchr/actions/runs/45220066588) (see
+  "sun_path on Windows" below). A realistic quickchr path fits only with a short
+  name. The longest allowed name does not fit.
 - **Evidence is one runner image and one Bun version.** AF_UNIX needs Windows 10
   1803 or later. Behaviour on older Bun, and on Node consumers of the library,
   is untested.
 - `channelPath()` / `channelEndpoint()` would change on Windows. That is a
   production change and out of scope for this lab.
+
+## sun_path on Windows (#57 follow-up)
+
+Run [45220066588](https://github.com/tikoci/quickchr/actions/runs/45220066588): windows-latest,
+QEMU 11.1.0 (choco), Bun 1.4.4, `unix` arm with `--work` set to the real data-dir layout
+(`C:\Users\runneradmin\AppData\Local\quickchr\machines`). It first starts a bare QEMU per
+path length, with only a monitor socket at a path of exactly that many ASCII bytes, then
+runs the full arm with the machine named so that its monitor socket sits at the longest
+length that worked.
+
+| path bytes | QEMU | socket file | `node:net` connect | monitor `info version` |
+|---|---|---|---|---|
+| 100, 104, 106, 107 | starts | created | ok | answers |
+| 108 | starts | created | **`EINVAL`** | — |
+| 109, 110, 130 | exits 1: `UNIX socket path '…' is too long` | — | `ENOENT` | — |
+
+- **107 bytes is the most a client can use.** QEMU accepts 108 (it fills all 108 bytes of
+  `sun_path` without a terminating NUL) but Bun's connect rejects that path with `EINVAL`.
+  On Linux both QEMU and the client accept 108 (local run, QEMU 11.1.2), so Windows is one
+  byte shorter. Inferred, not tested: Winsock's `connect` requires the NUL inside
+  `sun_path`.
+- **At 107 bytes the channels behave as on short paths.** Monitor 50/50 (p50 53 ms) and
+  serial 50/50 (p50 78 ms) fresh-connection trials, a second client while the first was
+  connected, and REST through hostfwd at the end. QGA refused as in every other Windows
+  run (see the next section).
+- **What fits.** quickchr's channel path is
+  `C:\Users\<user>\AppData\Local\quickchr\machines\<name>\monitor.sock`: 55 bytes plus the
+  user and machine names, so `len(user) + len(name)` must be at most 52 bytes. On the
+  runner (`runneradmin`, 11) a name can have 41 bytes. Machine names may have 64, and
+  profile folders such as `firstname.lastname.DOMAIN` are common, so the default layout
+  fails for long names on many real machines. Non-ASCII user names take more than one
+  byte per character (inferred; tested with ASCII only).
+- **So AF_UNIX on Windows needs its own socket location** to drop the IPC ports. Two
+  possible options: a short per-machine directory (for example a hash of the machine
+  dir under `%LOCALAPPDATA%\qc\`), or a refusal at create time for a path over 107
+  bytes, as `socket-registry.ts` already does for inter-VM sockets. That choice belongs to
+  #57, not this lab.
 
 ## QGA on Windows (all arms)
 
@@ -206,6 +240,10 @@ Windows can see `ECONNREFUSED` as well as a silent connection.
 ```bash
 # Windows, QEMU on PATH
 bun run test/lab/windows-pipe-chardev/probe.ts --arm pipe --trials 50
+# sun_path check (Windows, as the CI unix leg runs it)
+bun run test/lab/windows-pipe-chardev/probe.ts --arm unix --trials 50 \
+  --work "$LOCALAPPDATA\quickchr\machines" \
+  --sun-path-sweep 100,104,106,107,108,109,110,130 --monitor-path-bytes max
 # tcp / unix also run on Linux/macOS (keep --work short for unix: sun_path limit)
 bun run test/lab/windows-pipe-chardev/probe.ts --arm tcp --trials 5 --accel kvm
 ```

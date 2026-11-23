@@ -204,6 +204,7 @@ jobs:
             work="$LOCALAPPDATA\quickchr\machines"
             extra=(--sun-path-sweep "100,104,106,107,108,109,110,130" --monitor-path-bytes max)
           fi
+          echo "PROBE_WORK=$work" >> "$GITHUB_ENV"
           bun run test/lab/windows-pipe-chardev/probe.ts --arm "$ARM" --trials 50 \
             --work "$work" "${extra[@]}" --hard-cap-ms 3300000 2>&1 | tee probe.log
 
@@ -212,15 +213,24 @@ jobs:
         shell: bash
         run: taskkill //F //IM qemu-system-x86_64.exe || true
 
+      # upload-artifact needs every file under one root, and the unix leg's work
+      # dir is on C: while the workspace is on D:, so gather the outputs first.
+      - name: Gather probe outputs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p lab-out
+          cp probe.log lab-out/ 2>/dev/null || true
+          cp "$PROBE_WORK"/results-*.json lab-out/ 2>/dev/null || true
+          for log in "$PROBE_WORK"/*/qemu.log; do
+            [ -f "$log" ] && cp "$log" "lab-out/$(basename "$(dirname "$log")")-qemu.log"
+          done
+          ls -l lab-out
+
       - name: Upload probe artifacts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-pipe-chardev-${{ matrix.arm }}
-          path: |
-            probe.log
-            ${{ runner.temp }}/lp/results-*.json
-            ${{ runner.temp }}/lp/*/qemu.log
-            ~/AppData/Local/quickchr/machines/results-*.json
-            ~/AppData/Local/quickchr/machines/*/qemu.log
+          path: lab-out/
           if-no-files-found: warn
