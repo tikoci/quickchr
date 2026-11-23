@@ -1985,9 +1985,12 @@ also needs `qemu-img` for its writable UEFI firmware disk.
 them as additional virtio-blk-pci devices. RouterOS lists them in `/disk` as
 slots `pcie1`, `pcie2`, … (serial `vdb`, `vdc`, …; grounded on 7.25.1 x86).
 They arrive unformatted (`fs=-`): run `/disk format pcie1 file-system=ext4`
-first, after which the disk is mounted at `pcie1/`. The slot number follows
-PCI order, and on x86 adding a NIC to a machine that has extra disks currently
-renumbers them (`pcie1` becomes `pcie2`; tracked in #257).
+first, after which the disk is mounted at `pcie1/`. RouterOS ties each name to
+the disk's PCI address, so quickchr puts every disk at a fixed slot: adding or
+removing a NIC, or adding a disk, keeps the existing names (#257). A machine can
+have at most 15 extra disks. A machine created by quickchr 0.6.0 or earlier sees its
+extra disks renamed once, to the next unused `pcieN`, on its first start after
+upgrading (CHANGELOG has the guest-side fix).
 `quickchr disk <name>` shows the layout; with `qemu-img` it also reports
 virtual + actual sizes.
 
