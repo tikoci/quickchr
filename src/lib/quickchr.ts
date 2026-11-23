@@ -31,7 +31,7 @@ import type {
 import { QuickCHRError, ARCHES, CHANNELS, SERVICE_IDS, QUICKCHR_DESCRIPTOR_VERSION, HOST_GATEWAY_IP, PORTS_PER_BLOCK } from "./types.ts";
 import { assertValidResourceName, assertPathSafeName, shellQuote } from "./names.ts";
 import packageJson from "../../package.json";
-import { bunRuntimeCheck, detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, findCommandOnPath, accelDoctorCheck, proxyDoctorCheck } from "./platform.ts";
+import { bunRuntimeCheck, detectPlatform, requireQemu, requireFirmware, getQemuVersion, getQemuInstallHint, isCrossArchEmulation, hostChrArch, accelTimeoutFactor, detectAccel, accelNote, resolveAccelOverrideWithSource, accelSourceLabel, findQemuImg, qgaKvmWarning, detectSocketVmnet, findCommandOnPath, accelDoctorCheck, proxyDoctorCheck } from "./platform.ts";
 import {
 	resolveVersion,
 	isValidVersion,
@@ -1583,16 +1583,9 @@ function createInstance(state: MachineState): ChrInstance {
 	};
 }
 
-/** Resolve the host architecture to a CHR architecture. */
-function hostArchToChr(): Arch {
-	const arch = process.arch;
-	if (arch === "arm64") return "arm64";
-	return "x86";
-}
-
 /** Resolve user-supplied arch (including the "auto" synonym) to a concrete Arch. */
 function resolveArch(input: Arch | "auto" | undefined): Arch {
-	if (input === undefined || input === "auto") return hostArchToChr();
+	if (input === undefined || input === "auto") return hostChrArch();
 	return input;
 }
 
@@ -3793,7 +3786,7 @@ export class QuickCHR {
 				const hint = getQemuInstallHint();
 				checks.push({
 					label: qemuName,
-					status: arch === hostArchToChr() ? "error" : "warn",
+					status: arch === hostChrArch() ? "error" : "warn",
 					detail: `not found — ${hint}`,
 				});
 			}
@@ -3810,7 +3803,7 @@ export class QuickCHR {
 		} catch {
 			checks.push({
 				label: "UEFI firmware",
-				status: hostArchToChr() === "arm64" ? "error" : "warn",
+				status: hostChrArch() === "arm64" ? "error" : "warn",
 				detail: "not found (needed for arm64 CHR)",
 			});
 		}

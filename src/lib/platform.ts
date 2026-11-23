@@ -185,8 +185,19 @@ export function qgaKvmWarning(): string | null {
 /** Whether guestArch differs from the physical host CPU architecture.
  *  Cross-arch TCG is significantly slower and needs more memory/timeout. */
 export function isCrossArchEmulation(guestArch: "x86" | "arm64"): boolean {
-	const hostIsArm64 = isAppleSiliconHost() || (process.platform !== "darwin" && process.arch === "arm64");
-	return (guestArch === "arm64") !== hostIsArm64;
+	return guestArch !== hostChrArch();
+}
+
+/**
+ * The CHR architecture of the physical host: the guest arch quickchr picks when
+ * `arch` is omitted or `"auto"` (`add()`, `start()`, `cacheKey()`, `cacheAdd()`).
+ * An x64 Bun under Rosetta on Apple Silicon reports `process.arch === "x64"`, but
+ * the host is arm64, so this answers `"arm64"` there (#293): an arm64 guest is
+ * same-arch TCG, an x86 one cross-arch TCG (#97). The CLI's `default-arch` setting
+ * wins over this when it names an arch.
+ */
+export function hostChrArch(): "x86" | "arm64" {
+	return process.arch === "arm64" || isAppleSiliconHost() ? "arm64" : "x86";
 }
 
 /**

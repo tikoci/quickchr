@@ -196,10 +196,10 @@ describe("ChrInstance API surface (dryRun)", () => {
 	});
 
 	test("arch: 'auto' resolves to host arch (not silently arm64)", async () => {
-		// Bug: donny lab 2026-04-22 — passing arch:"auto" bypassed hostArchToChr()
+		// Bug: donny lab 2026-04-22 — passing arch:"auto" bypassed the host-arch default
 		// and qemu-bin selection ("x86?bin-x86:bin-aarch64") silently picked arm64,
 		// leading to TCG emulation + ~480s boot timeout on Intel hosts.
-		// Fix: resolveArch() normalizes "auto" and undefined to hostArchToChr().
+		// Fix: resolveArch() normalizes "auto" and undefined to hostChrArch().
 		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | null = null;
 		try {
 			instance = await QuickCHR.start({ name: "auto-arch-test", version: "7.22.1", arch: "auto", dryRun: true });

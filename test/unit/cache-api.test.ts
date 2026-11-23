@@ -9,6 +9,7 @@ import {
 } from "../../src/lib/cache-api.ts";
 import * as publicApi from "../../src/index.ts";
 import { PROXY_ALLOWLIST_HINT, PROXY_CREDENTIALS_HINT } from "../../src/lib/net.ts";
+import { resetAppleSiliconHostCache } from "../../src/lib/platform.ts";
 import { QuickCHRError } from "../../src/lib/types.ts";
 
 const TMP = join(import.meta.dir, ".tmp-cache-api-test");
@@ -161,5 +162,32 @@ describe("cacheAdd", () => {
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
+	});
+});
+
+describe("cacheKey default arch (#293)", () => {
+	const platform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+	const arch = Object.getOwnPropertyDescriptor(process, "arch") as PropertyDescriptor;
+	const realSpawnSync = Bun.spawnSync;
+
+	afterEach(() => {
+		Object.defineProperty(process, "platform", platform);
+		Object.defineProperty(process, "arch", arch);
+		(Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = realSpawnSync;
+		resetAppleSiliconHostCache();
+	});
+
+	test("an x64 Bun under Rosetta keys the arm64 image", async () => {
+		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+		Object.defineProperty(process, "arch", { value: "x64", configurable: true });
+		resetAppleSiliconHostCache();
+		(Bun as unknown as { spawnSync: unknown }).spawnSync = () => ({
+			exitCode: 0,
+			stdout: new TextEncoder().encode("1\n"),
+			stderr: new Uint8Array(),
+		});
+		expect((await cacheKey({ version: "7.25.1", cacheDir: TMP })).arch).toBe("arm64");
+		expect((await cacheKey({ version: "7.25.1", cacheDir: TMP, arch: "auto" })).arch).toBe("arm64");
+		expect((await cacheKey({ version: "7.25.1", cacheDir: TMP, arch: "x86" })).arch).toBe("x86");
 	});
 });

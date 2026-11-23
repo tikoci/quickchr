@@ -30,6 +30,7 @@ import {
 	managedSocketSpecifier,
 	isWiredPortName,
 	isCrossArchEmulation,
+	hostChrArch,
 	accelDoctorCheck,
 	proxyDoctorCheck,
 } from "../../src/lib/platform.ts";
@@ -461,6 +462,41 @@ describe("isCrossArchEmulation", () => {
 		setArch("x64");
 		expect(isCrossArchEmulation("arm64")).toBe(true);
 		expect(isCrossArchEmulation("x86")).toBe(false);
+	});
+});
+
+describe("hostChrArch (#293)", () => {
+	test("arm64 for an x64 Bun under Rosetta, so the default guest is same-arch", () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			return { exitCode: 0, stdout: "1\n" };
+		});
+		expect(hostChrArch()).toBe("arm64");
+		expect(isCrossArchEmulation(hostChrArch())).toBe(false);
+	});
+
+	test("x86 on an Intel Mac, where the probe says not translated", () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
+		expect(hostChrArch()).toBe("x86");
+	});
+
+	test("follows process.arch elsewhere, without probing", () => {
+		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
+		for (const [platform, arch, want] of [
+			["darwin", "arm64", "arm64"],
+			["linux", "arm64", "arm64"],
+			["linux", "x64", "x86"],
+			["win32", "x64", "x86"],
+		] as const) {
+			setPlatform(platform);
+			setArch(arch);
+			expect(hostChrArch()).toBe(want);
+		}
+		expect(spawn).not.toHaveBeenCalled();
 	});
 });
 

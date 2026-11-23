@@ -1304,8 +1304,9 @@ afterAll(async () => { await chr?.remove(); });
   the report and the stop.
   `remove()` waits up to the boot budget for an operation already in progress, then
   stops QEMU.
-- **Pass `arch`** when your timeouts depend on it. The default is the Bun process's
-  architecture, which is `x86` for an x64 Bun under Rosetta on Apple Silicon (#293).
+- **Pass `arch`, or ask `hostChrArch()`,** when your timeouts depend on it. The default
+  is the physical host's architecture, so `arm64` on Apple Silicon even for an x64 Bun
+  under Rosetta (#293).
 - **Print the name before calling `start()`** (to stderr), so a run that is killed
   before teardown says what it left behind. Once the boot has begun, the machine has a
   readable `machine.json` and a detached QEMU: `quickchr list <name>` shows it and
@@ -1767,6 +1768,12 @@ arm64 host. Auto-selection uses TCG for both guest architectures there: HVF
 cannot virtualize x86 across architectures, and current arm64 CHR images need
 AArch32 userspace support that Apple Silicon does not provide. Use `--accel`
 (or `QUICKCHR_ACCEL` / the `accel` setting) only to override this deliberately.
+
+The same check sets the **default guest arch**: with no `--arch` (or `auto`), quickchr
+picks the physical host's arch, which `hostChrArch()` returns. Under Rosetta that is
+`arm64`, so the default guest is same-arch TCG rather than x86 under cross-arch TCG
+(#293). Machine creation, `cacheKey()`/`cacheAdd()` and the setup wizard all use it,
+and the `default-arch` setting still wins when it names an arch.
 
 ### Boot timeout
 
