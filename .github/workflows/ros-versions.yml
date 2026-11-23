@@ -86,7 +86,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          set -uo pipefail
+          set -eo pipefail
+          set -u
           fail() { echo "::error::tested-versions.json: $1; dispatching nothing"; exit 1; }
           # GET one API path into a file. Only a 5xx is retried (twice); anything
           # else, including a 404, is fatal.
@@ -104,26 +105,37 @@ jobs:
             done
           }
           api branch.json "repos/$REPO/branches/ci-data"
-          tree_sha=$(jq -er '.commit.commit.tree.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' branch.json) \
+          tree_sha=$(jq -ers '
+            select(length == 1) | .[0].commit.commit.tree.sha
+            | select(type == "string" and test("^[0-9a-f]{40}$"))
+          ' branch.json) \
             || fail "the ci-data branch response names no root tree"
           api tree.json "repos/$REPO/git/trees/$tree_sha"
-          jq -e --arg s "$tree_sha" '.sha == $s and .truncated == false and (.tree | type == "array")' tree.json > /dev/null \
+          entries=$(jq -c -es --arg sha "$tree_sha" '
+            select(length == 1) | .[0]
+            | select(.sha == $sha and .truncated == false and (.tree | type == "array"
+                and all(.[]; type == "object" and (.path | type == "string" and length > 0))))
+            | [.tree[] | select(.path == "tested-versions.json")]
+          ' tree.json) \
             || fail "the ci-data root tree $tree_sha came back truncated or malformed"
-          entries=$(jq -c '[.tree[] | select(.path == "tested-versions.json")]' tree.json)
           case "$(jq length <<< "$entries")" in
             0)
               echo "::notice::ci-data has no tested-versions.json yet; treating every version as untested"
               echo '{}' > tested-versions.json
               ;;
             1)
-              blob_sha=$(jq -er '.[0] | select(.type == "blob" and (.mode == "100644" or .mode == "100755")) | .sha | select(test("^[0-9a-f]{40}$"))' <<< "$entries") \
+              blob_sha=$(jq -er '
+                .[0] | select(.type == "blob" and (.mode == "100644" or .mode == "100755"))
+                | .sha | select(type == "string" and test("^[0-9a-f]{40}$"))
+              ' <<< "$entries") \
                 || fail "the ci-data entry is not a regular file"
               api blob.json "repos/$REPO/git/blobs/$blob_sha"
-              jq -e --arg s "$blob_sha" '.sha == $s and .encoding == "base64"' blob.json > /dev/null \
-                || fail "unexpected blob response for $blob_sha"
-              jq -r '.content' blob.json | base64 -d > tested-versions.json \
-                || fail "blob $blob_sha is not valid base64"
-              [ "$(git hash-object tested-versions.json)" = "$blob_sha" ] \
+              jq -ers --arg sha "$blob_sha" '
+                select(length == 1) | .[0] | select(.sha == $sha and .encoding == "base64")
+                | .content | select(type == "string")
+              ' blob.json | base64 -d > tested-versions.json \
+                || fail "unexpected blob response or invalid base64 for $blob_sha"
+              [ "$(git hash-object --no-filters tested-versions.json)" = "$blob_sha" ] \
                 || fail "content does not hash to blob $blob_sha"
               ;;
             *) fail "the ci-data root tree lists it more than once" ;;
@@ -132,14 +144,16 @@ jobs:
           # version → platform id → { run_id, date, conclusion: pass|fail }.
           # `{}` is valid (nothing tested yet).
           jq -es '
+            def record:
+              type == "object"
+              and (.conclusion == "pass" or .conclusion == "fail")
+              and (.run_id | type == "string" and length > 0)
+              and (.date | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"));
+            def platforms:
+              type == "object" and length > 0
+              and all(to_entries[]; (.key | test("^[a-z0-9]+(-[a-z0-9]+)*$")) and (.value | record));
             length == 1 and (.[0] | type == "object" and all(to_entries[];
-              (.key | test("^[0-9]+\\.[0-9]+(\\.[0-9]+)?((beta|rc)[0-9]+)?$"))
-              and (.value | type == "object" and all(to_entries[];
-                (.key | test("^[a-z0-9]+(-[a-z0-9]+)*$"))
-                and (.value | type == "object"
-                  and (.conclusion == "pass" or .conclusion == "fail")
-                  and (.run_id | type == "string" and length > 0)
-                  and (.date | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")))))))
+              (.key | test("^[0-9]+\\.[0-9]+(\\.[0-9]+)?((beta|rc)[0-9]+)?$")) and (.value | platforms)))
           ' tested-versions.json > /dev/null \
             || fail "the record on ci-data does not match the schema scripts/ci-metrics.ts writes"
           cat tested-versions.json

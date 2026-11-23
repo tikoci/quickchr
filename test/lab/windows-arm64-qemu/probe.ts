@@ -20,15 +20,15 @@ const A64 = join(DIR, "qemu-system-aarch64.exe");
 const X64 = join(DIR, "qemu-system-x86_64.exe");
 const CODE = join(DIR, "share", "edk2-aarch64-code.fd");
 const HELPER = join(import.meta.dir, "run-case.ps1");
-/** QEMU -drive option values escape a literal comma by doubling it. */
-const qemuOpt = (value: string) => value.replace(/,/g, ",,");
+// QEMU -drive option values escape a literal comma by doubling it.
+const codeOption = CODE.replaceAll(",", ",,");
 
 const cases: { name: string; argv: string[] }[] = [
 	{ name: "aarch64 --version", argv: [A64, "--version"] },
 	{ name: "aarch64 -M none", argv: [A64, "-M", "none", "-display", "none", "-nodefaults"] },
 	{ name: "aarch64 -M virt tcg, no firmware", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg", "-m", "256", "-display", "none", "-nodefaults"] },
 	{ name: "aarch64 -M virt tcg tb-size=256", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg,tb-size=256", "-m", "512", "-display", "none", "-nodefaults"] },
-	{ name: "aarch64 -M virt tcg + edk2 code", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg,tb-size=256", "-m", "512", "-display", "none", "-nodefaults", "-drive", `if=pflash,format=raw,readonly=on,unit=0,file=${qemuOpt(CODE)}`] },
+	{ name: "aarch64 -M virt tcg + edk2 code", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg,tb-size=256", "-m", "512", "-display", "none", "-nodefaults", "-drive", `if=pflash,format=raw,readonly=on,unit=0,file=${codeOption}`] },
 	{ name: "aarch64 -M virt tcg -cpu max", argv: [A64, "-M", "virt", "-cpu", "max", "-accel", "tcg", "-m", "256", "-display", "none", "-nodefaults"] },
 	{ name: "aarch64 -M virt tcg thread=single", argv: [A64, "-M", "virt", "-cpu", "cortex-a710", "-accel", "tcg,thread=single", "-m", "256", "-display", "none", "-nodefaults"] },
 	{ name: "x86_64 -M pc tcg", argv: [X64, "-M", "pc", "-accel", "tcg", "-m", "256", "-display", "none", "-nodefaults"] },
@@ -38,7 +38,6 @@ const cases: { name: string; argv: string[] }[] = [
 interface CaseResult {
 	killedAtDeadline: boolean;
 	exitCode: number;
-	exitCodeHex: string;
 	ms: number;
 	output: string;
 }
@@ -46,28 +45,34 @@ interface CaseResult {
 const rows: string[] = [];
 for (const c of cases) {
 	const quick = c.argv.includes("--version");
+	const timeoutMs = quick ? 15_000 : 8_000;
 	const [file, ...args] = c.argv;
 	const proc = Bun.spawn(["pwsh", "-NoProfile", "-NonInteractive", "-File", HELPER], {
-		env: { ...process.env, PROBE_CASE: JSON.stringify({ file, args, timeoutMs: quick ? 15_000 : 8_000 }) },
+		env: { ...process.env, PROBE_CASE: JSON.stringify({ file, args, timeoutMs }) },
 		stdout: "pipe",
 		stderr: "pipe",
 	});
 	const [out, err, helperExit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
 	let r: CaseResult;
 	try {
-		r = JSON.parse(out.trim().split(/\r?\n/).at(-1) ?? "") as CaseResult;
+		if (helperExit !== 0) throw new Error("PowerShell helper failed");
+		r = JSON.parse(out) as CaseResult;
+		if (!r || typeof r.killedAtDeadline !== "boolean" || !Number.isInteger(r.exitCode)
+			|| !Number.isFinite(r.ms) || typeof r.output !== "string") {
+			throw new Error("PowerShell helper returned an invalid result");
+		}
 	} catch {
 		const why = `${out}${err}`.replace(/\s+/g, " ").trim().slice(0, 200);
 		rows.push(`| ${c.name} | helper failed (exit ${helperExit}) | ${why.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")} |`);
 		console.log(`${c.name}: helper failed (exit ${helperExit}) ${why}`);
+		process.exitCode = 1;
 		continue;
 	}
 	const text = r.output.replace(/\s+/g, " ").replace(/\\/g, "\\\\").replace(/\|/g, "\\|").trim().slice(0, 200);
+	const statusHex = (r.exitCode >>> 0).toString(16).toUpperCase().padStart(8, "0");
 	const verdict = r.killedAtDeadline
-		? `still running at ${quick ? 15 : 8} s, killed (ok)`
-		: quick && r.exitCode === 0
-			? "ok"
-			: `exited after ${r.ms} ms, status ${r.exitCodeHex} (${r.exitCode})`;
+		? `still running at ${timeoutMs / 1000} s, killed`
+		: `exited after ${r.ms} ms, status 0x${statusHex} (${r.exitCode})`;
 	rows.push(`| ${c.name} | ${verdict} | ${text} |`);
 	console.log(`${c.name}: ${verdict} ${text}`);
 }

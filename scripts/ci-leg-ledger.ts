@@ -22,7 +22,7 @@
  *   if [ "$state" = "untested" ]; then   # …otherwise: already has a record
  *
  * Writing `incomplete` into `conclusion` would make an aborted run look tested
- * and silently stop rescheduling that version — forever, with no error. Today's
+ * and silently stop rescheduling that version — forever, with no error. The 2026-07-31
  * `macos-x86` case would not trip it (the scheduler only reads `linux-x86`), but
  * the contract is one platform away from breaking. So this ledger is a separate
  * file, `attempted-legs.json`, and `tested-versions.json` plus that jq are

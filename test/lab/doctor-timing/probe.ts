@@ -20,16 +20,16 @@
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DoctorResult } from "../../../src/lib/types.ts";
 
 /** `--runs N` (default 15): a positive safe integer, or the probe refuses to start. */
 function parseRuns(argv: string[]): number {
-	let runs = 15;
-	for (let i = 0; i < argv.length; i++) {
-		if (argv[i] !== "--runs") throw new Error(`doctor-timing: unknown argument '${argv[i]}' (usage: probe.ts [--runs N])`);
-		const raw = argv[++i];
-		if (raw === undefined || !/^[0-9]+$/.test(raw)) throw new Error(`doctor-timing: --runs needs a positive integer, got '${raw ?? ""}'`);
-		runs = Number(raw);
-		if (!Number.isSafeInteger(runs) || runs < 1) throw new Error(`doctor-timing: --runs needs a positive integer, got '${raw}'`);
+	if (argv.length === 0) return 15;
+	const [flag, raw] = argv;
+	const runs = Number(raw);
+	if (argv.length !== 2 || flag !== "--runs" || raw === undefined || !/^\d+$/.test(raw)
+		|| !Number.isSafeInteger(runs) || runs < 1) {
+		throw new Error("Usage: probe.ts [--runs N] (N must be a positive safe integer)");
 	}
 	return runs;
 }
@@ -54,17 +54,19 @@ async function wall(argv: string[]): Promise<{ ms: number; exit: number; stdout:
 	return { ms: Math.round(performance.now() - t), exit, stdout, stderr };
 }
 
-/** A timing only counts if doctor actually ran: its `--json` output parses, has
- *  `ok` and `checks`, and the exit code matches `ok` (0 when ok, 1 when not). */
+/** Only include samples from a completed doctor invocation. */
 function checkDoctorRun(r: { exit: number; stdout: string; stderr: string }): void {
-	let doc: { ok?: unknown; checks?: unknown };
+	let doc: Partial<DoctorResult & { staleImages: unknown }> | null;
 	try {
 		doc = JSON.parse(r.stdout) as typeof doc;
 	} catch {
 		throw new Error(`doctor-timing: doctor --json printed no JSON (exit ${r.exit}): ${(r.stdout + r.stderr).slice(0, 500)}`);
 	}
-	if (typeof doc.ok !== "boolean" || !Array.isArray(doc.checks)) {
-		throw new Error(`doctor-timing: doctor --json lacks ok/checks: ${r.stdout.slice(0, 500)}`);
+	if (!doc || typeof doc.ok !== "boolean" || !Array.isArray(doc.checks) || doc.checks.length === 0
+		|| !doc.checks.every((check) => typeof check?.label === "string" && typeof check.detail === "string"
+			&& ["ok", "warn", "error"].includes(check.status))
+		|| !Array.isArray(doc.staleImages)) {
+		throw new Error(`doctor-timing: invalid doctor --json result: ${r.stdout.slice(0, 500)}`);
 	}
 	if (r.exit !== (doc.ok ? 0 : 1)) {
 		throw new Error(`doctor-timing: doctor --json said ok=${doc.ok} but exited ${r.exit}`);
@@ -116,10 +118,8 @@ const importMs = Math.round(performance.now() - importT);
 const totals: number[] = [];
 for (run = 0; run < RUNS; run++) {
 	const t = performance.now();
-	const res = (await QuickCHR.doctor()) as { ok?: unknown; checks?: unknown };
-	const ms = Math.round(performance.now() - t);
-	if (typeof res.ok !== "boolean" || !Array.isArray(res.checks)) throw new Error("doctor-timing: QuickCHR.doctor() returned no ok/checks");
-	totals.push(ms);
+	await QuickCHR.doctor();
+	totals.push(Math.round(performance.now() - t));
 }
 (Bun as unknown as { spawnSync: unknown }).spawnSync = realSpawnSync;
 

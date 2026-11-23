@@ -62,7 +62,7 @@ The repo has several workflows, each with a distinct purpose:
 |----------|------|---------|---------|
 | **CI** | `ci.yml` | push/PR to `main`, `workflow_dispatch` | Fast quality gate (~3-5 min, no QEMU): lint, unit, Windows unit, PR freshness gate |
 | **Main Integration** | `main.yml` | push to `main` (except docs-only — `paths-ignore`), `workflow_dispatch` | The continuous integration-test signal: full suite on linux/x86_64 + linux/aarch64 |
-| **Weekly Sweep** | `sweep.yml` | schedule (Mon 05:37 UTC), `workflow_dispatch` | Sweep of the `all` platforms (linux-x86, linux-arm64, macos-arm64, windows-x86; macos-x86 is explicit-dispatch only, #305) + examples smoke (separate file so a red TCG leg never blocks PRs) |
+| **Weekly Sweep** | `sweep.yml` | schedule (Mon 05:37 UTC), `workflow_dispatch` | `all` platforms (linux-x86, linux-arm64, macos-arm64, windows-x86) + examples smoke. Windows runs the integration smoke subset. macos-x86 runs by explicit integration dispatch (#305). |
 | **Integration** | `integration.yml` | `workflow_dispatch`, `workflow_call` | THE reusable integration unit — any platform × RouterOS target × test filter |
 | **PowerShell Lint** | `lint-powershell.yml` | push/PR touching `examples/**/*.ps1` or `PSScriptAnalyzerSettings.psd1`, `workflow_call` | PSScriptAnalyzer over the `.ps1` example mirrors |
 | **Release** | `release.yml` | `workflow_dispatch` only | One-click gate → tag/GitHub Release → npm publish from committed `package.json` |
@@ -633,10 +633,10 @@ single run, `collect-metrics: true`).
   (the bootstrap case). Otherwise the entry must be a regular-file blob, fetched by SHA and
   checked against `git hash-object`, and the content must be exactly one JSON object in
   the shape `scripts/ci-metrics.ts` writes: version → platform id → `{ run_id, date,
-  conclusion }`, conclusion `pass` or `fail` (`jq -es`, so two concatenated objects or an
-  empty `{}` record fail). A 5xx is retried twice per request; after that, or on any
-  other error (a 404 anywhere, token or permission, a missing `ci-data` branch), the
-  `check` job fails with `gh`'s output in the log and nothing is dispatched. Reading an
+  conclusion }`, with conclusion `pass` or `fail`. The empty object `{}` is valid.
+  A 5xx is retried twice per request. Exhausted retries and other errors (such as a
+  404 or permission failure) fail the `check` job with `gh`'s output in the log.
+  The scheduler dispatches only after a successful check. Reading an
   unreadable record as empty would re-dispatch every version, including the ones that
   already failed. Changing the record's shape in `ci-metrics.ts` means changing that jq
   filter too.
@@ -730,14 +730,14 @@ step's own cap is deliberately left unchanged.
 45220931492) and the `windows-arm64-qemu` lab probe (run 45225288560) found: Bun 1.4.4 runs
 natively (`process.arch=arm64`), but choco's QEMU 11.1.0 is an x64 build
 (`PE32+ … x86-64`) running under Windows' x64 emulation. `qemu-system-aarch64 --version`
-and `-M none` work; every TCG machine (`-M virt`, and `qemu-system-x86_64 -M pc`) exits
-within a second and prints nothing. Bun reported status 255, but Bun keeps only the low
-byte of a Windows exit status; the probe now runs QEMU through a .NET helper, and lab run
-45269622496 recorded the full status: **`0xC00000FF`** for all seven TCG cases
-(`STATUS_BAD_FUNCTION_TABLE` in ntstatus.h). Both choco binaries are x64 PE files.
-Every boot therefore fails as "QEMU exited immediately". Mechanism unknown. Inferred: TCG's runtime-generated code under x64 emulation (the status names a malformed
-unwind table). The id comes
-back when a native arm64 QEMU for Windows is available to install. Re-run the probe
+and `-M none` worked. Every TCG machine (`-M virt` and `qemu-system-x86_64 -M pc`)
+exited within a second without output. Bun reported 255, the low byte of the Windows
+exit status. The .NET helper captured the full status, **`0xC00000FF`**
+(`STATUS_BAD_FUNCTION_TABLE`), for all seven TCG cases. Both Chocolatey binaries
+were x64 PE files. A possible cause is the unwind information for TCG's
+runtime-generated code under x64 emulation. [Lab run 45269622496](https://github.com/tikoci/quickchr/actions/runs/45269622496).
+The id comes back when a native arm64 QEMU for Windows is available to install.
+Re-run the probe
 (`gh workflow run lab.yml -f lab=windows-arm64-qemu`) before adding it.
 
 **`linux-arm64` is a TCG leg.** It read "KVM if available" until 2026-10-22, but every

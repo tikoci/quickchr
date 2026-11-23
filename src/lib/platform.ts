@@ -3,7 +3,7 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import type { AccelMode, EfiFirmwarePaths, HostInterface, PackageManager, PlatformInfo, SocketVmnetInfo, DoctorCheck } from "./types.ts";
 import { QuickCHRError as QError, parseAccelMode } from "./types.ts";
 // settings-file.ts, not settings.ts: the latter's graph (cache → state → network
@@ -70,14 +70,8 @@ export function detectPackageManager(): PackageManager {
 	return "unknown";
 }
 
-/** Find a command on PATH. `which` on Linux and macOS; on Windows an in-process
- *  lookup that follows `where.exe` ({@link resolveWindowsCommand}).
- *  Windows used to spawn `where.exe` too, and on a windows-latest runner each spawn
- *  took ~75 ms; `doctor()` makes nine lookups, which was most of its ~0.7 s there
- *  (#269, `test/lab/doctor-timing`). `Bun.which` is not a drop-in for either: it
- *  skips the current directory and empty PATH entries on Windows and orders
- *  extensions its own way, and on POSIX it ignores the empty-entry-means-cwd rule
- *  `which` keeps. */
+/** Find a command with `which` on POSIX or an in-process lookup on Windows.
+ *  Each `where.exe` spawn cost ~75 ms in the Windows doctor probe (#269). */
 export function findCommandOnPath(cmd: string): string | undefined {
 	try {
 		if (process.platform === "win32") {
@@ -100,7 +94,7 @@ export function findCommandOnPath(cmd: string): string | undefined {
 /** cmd.exe's PATHEXT when the variable is unset. */
 const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
 
-export interface WindowsLookupEnv {
+interface WindowsLookupEnv {
 	/** `PATH`, `;`-separated. Entries may be quoted; empty entries are skipped. */
 	path: string;
 	/** `PATHEXT`; unset falls back to cmd.exe's `.COM;.EXE;.BAT;.CMD`. */
@@ -114,7 +108,7 @@ export interface WindowsLookupEnv {
 
 function statIsFile(p: string): boolean {
 	try {
-		return statSync(p).isFile();
+		return statSync(p, { throwIfNoEntry: false })?.isFile() ?? false;
 	} catch {
 		return false;
 	}
@@ -123,37 +117,21 @@ function statIsFile(p: string): boolean {
 /**
  * Resolve a command the way `where.exe` (and cmd.exe) does, without spawning it:
  * the current directory first, then each PATH entry in order (surrounding quotes
- * stripped, empty entries skipped). In each directory a name that already has an
- * extension is tried as written, then the name with each PATHEXT extension in
- * PATHEXT order (entries differing only in case are tried once; file-name case is
- * left to the filesystem, which is case-insensitive on Windows). A name containing
- * a path separator is resolved against `cwd` only. Returns the first match, or
- * undefined.
- *
- * Pure path logic over `isFile`, so it runs (and is unit-tested) on every OS.
+ * stripped, empty entries skipped). A name with an extension is tried as written.
+ * For other names, try PATHEXT in order, ignoring duplicate extensions by case.
+ * A command with a directory component is resolved against `cwd` alone.
  */
 export function resolveWindowsCommand(cmd: string, env: WindowsLookupEnv): string | undefined {
 	if (!cmd) return undefined;
 	const isFile = env.isFile ?? statIsFile;
-	const exts: string[] = [];
-	for (const raw of (env.pathext ?? DEFAULT_PATHEXT).split(";")) {
-		const ext = raw.trim();
-		if (ext && !exts.some((e) => e.toLowerCase() === ext.toLowerCase())) exts.push(ext);
-	}
-	const base = cmd.split(/[\\/]/).at(-1) ?? cmd;
-	const hasExt = base.lastIndexOf(".") > 0;
-	const names = [...(hasExt ? [cmd] : []), ...exts.map((ext) => `${cmd}${ext}`)];
-
-	const dirs: string[] = [env.cwd];
-	if (!/[\\/:]/.test(cmd)) {
-		for (const raw of env.path.split(";")) {
-			const dir = raw.replace(/^"(.*)"$/, "$1");
-			if (dir) dirs.push(dir);
-		}
-	}
+	const extensions = new Set((env.pathext ?? DEFAULT_PATHEXT).split(";").map((ext) => ext.trim().toLowerCase()).filter(Boolean));
+	const names = win32.extname(cmd) ? [cmd] : Array.from(extensions, (ext) => `${cmd}${ext}`);
+	const dirs = /[\\/:]/.test(cmd)
+		? [env.cwd]
+		: [env.cwd, ...env.path.split(";").map((dir) => dir.replace(/^"(.*)"$/, "$1")).filter(Boolean)];
 	for (const dir of dirs) {
 		for (const name of names) {
-			const candidate = isAbsolute(name) ? name : join(dir, name);
+			const candidate = resolve(env.cwd, dir, name);
 			if (isFile(candidate)) return candidate;
 		}
 	}

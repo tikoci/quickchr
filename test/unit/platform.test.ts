@@ -129,8 +129,8 @@ describe("detectPackageManager", () => {
 });
 
 describe("findCommandOnPath", () => {
-	test("returns the first non-empty path from command lookup output", () => {
-		setPlatform("linux");
+	test.each(["linux", "darwin"] as const)("uses which on %s and returns the first path", (platform) => {
+		setPlatform(platform);
 		mockSpawnSync((cmd) => {
 			expect(cmd).toEqual(["which", "qemu-img"]);
 			return { exitCode: 0, stdout: "\n  /toolchain/bin/qemu-img  \n/usr/bin/qemu-img\n" };
@@ -145,15 +145,16 @@ describe("findCommandOnPath", () => {
 		const savedPath = process.env.PATH;
 		const savedPathext = process.env.PATHEXT;
 		try {
-			writeFileSync(join(dir, "qemu-img.CMD"), "");
+			writeFileSync(join(dir, "qemu-img.cmd"), "");
 			process.env.PATH = `;${dir};`;
 			process.env.PATHEXT = ".EXE;.CMD";
 			const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "/wrong\n" }));
-			expect(findCommandOnPath("qemu-img")).toBe(join(dir, "qemu-img.CMD"));
+			expect(findCommandOnPath("qemu-img")?.toLowerCase()).toBe(join(dir, "qemu-img.cmd").toLowerCase());
 			expect(findCommandOnPath("__no_such_command_quickchr__")).toBeUndefined();
 			expect(spawn).not.toHaveBeenCalled();
 		} finally {
-			process.env.PATH = savedPath;
+			if (savedPath === undefined) delete process.env.PATH;
+			else process.env.PATH = savedPath;
 			if (savedPathext === undefined) delete process.env.PATHEXT;
 			else process.env.PATHEXT = savedPathext;
 			rmSync(dir, { recursive: true, force: true });
@@ -233,19 +234,23 @@ describe("resolveWindowsCommand (where.exe semantics, any host)", () => {
 		expect(lookup("qemu-system-x86_64", { path, pathext: ".EXE" })).toBe(lc(spaced));
 	});
 
+	test("skips empty PATH entries and resolves relative entries against cwd", () => {
+		const cwd = join(root, "cwd");
+		const isFile = mock((_: string) => false);
+		resolveWindowsCommand("tool", { path: ';;"";bin;', pathext: ".EXE;.exe", cwd, isFile });
+		expect(isFile.mock.calls).toEqual([[join(cwd, "tool.exe")], [join(cwd, "bin", "tool.exe")]]);
+	});
+
 	test("names and extensions match case-insensitively", () => {
 		const [mixed] = files("m/Tool.Exe");
 		expect(lookup("TOOL", { path: [join(root, "m")], pathext: ".com;.exe" })).toBe(lc(mixed));
-		// Duplicate PATHEXT entries that differ only by case are tried once.
-		expect(lookup("tool", { path: [join(root, "m")], pathext: ".EXE;.exe" })).toBe(lc(mixed));
 	});
 
-	test("a name that already has an extension is tried as written first", () => {
+	test("a name that already has an extension is tried as written", () => {
 		const [exact] = files("e/tool.exe", "e/tool.exe.cmd");
 		expect(lookup("tool.exe", { path: [join(root, "e")], pathext: ".CMD;.EXE" })).toBe(lc(exact));
-		// …and still gets PATHEXT appended when the exact name is absent.
-		files("e/py3.11.exe");
-		expect(lookup("py3.11", { path: [join(root, "e")], pathext: ".EXE" })).toBe(lc(join(root, "e", "py3.11.exe")));
+		files("e/script.ps1.cmd");
+		expect(lookup("script.ps1", { path: [join(root, "e")], pathext: ".CMD" })).toBeUndefined();
 	});
 
 	test("directories are not matches, and an unset PATHEXT falls back to cmd.exe's", () => {

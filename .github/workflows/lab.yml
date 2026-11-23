@@ -192,35 +192,26 @@ jobs:
       - name: Install QEMU (choco, as integration.yml does)
         shell: bash
         run: |
+          set -eo pipefail
           # choco can exit 0 having installed nothing ("installed 0/0 packages")
           # or part of the package, so check for both binaries the probe runs.
           qemu_dir="/c/Program Files/qemu"
-          bins="qemu-system-x86_64.exe qemu-system-aarch64.exe"
-          missing=""
+          bins=("$qemu_dir/qemu-system-x86_64.exe" "$qemu_dir/qemu-system-aarch64.exe")
           for attempt in 1 2 3; do
             choco install qemu -y --no-progress || true
-            missing=""
-            for bin in $bins; do
-              [ -f "$qemu_dir/$bin" ] || missing="$missing $bin"
+            missing=()
+            for bin in "${bins[@]}"; do
+              [ -f "$bin" ] || missing+=("${bin##*/}")
             done
-            [ -z "$missing" ] && break
-            echo "::warning::choco install qemu left out:$missing (attempt $attempt/3)"
-            [ "$attempt" -lt 3 ] && sleep "$((20 * attempt))"
+            if [ "${#missing[@]}" -eq 0 ]; then break; fi
+            echo "::warning::choco install qemu left out: ${missing[*]} (attempt $attempt/3)"
+            if [ "$attempt" -lt 3 ]; then sleep "$((20 * attempt))"; fi
           done
-          if [ -n "$missing" ]; then
-            echo "::error::QEMU install failed: missing$missing in C:\\Program Files\\qemu after 3 attempts"
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::QEMU install failed: missing ${missing[*]} in $qemu_dir after 3 attempts"
             exit 1
           fi
-          # Each binary's architecture, from the PE header's Machine field.
-          for bin in $bins; do
-            f="$qemu_dir/$bin"
-            pe=$(od -An -t u4 -j 60 -N 4 "$f" | tr -d ' ')
-            machine=$(od -An -t x2 -j "$((pe + 4))" -N 2 "$f" | tr -d ' ')
-            case "$machine" in
-              8664) arch=x64 ;; aa64) arch=arm64 ;; 014c) arch=x86 ;; *) arch="unknown (0x$machine)" ;;
-            esac
-            echo "$bin: $arch" | tee -a "$GITHUB_STEP_SUMMARY"
-          done
+          file -- "${bins[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
           pwsh --version
       - name: Probe
         shell: bash
