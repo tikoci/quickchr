@@ -1,0 +1,172 @@
+{
+  "env": {
+    "platform": "linux",
+    "arch": "x64",
+    "bun": "1.4.4",
+    "image": "?"
+  },
+  "cli": {
+    "doctor": {
+      "runs": [
+        121,
+        117
+      ],
+      "n": 2,
+      "min": 117,
+      "p50": 121,
+      "p90": 121,
+      "max": 121
+    },
+    "bunStartup": {
+      "runs": [
+        5,
+        5
+      ],
+      "n": 2,
+      "min": 5,
+      "p50": 5,
+      "p90": 5,
+      "max": 5
+    },
+    "help": {
+      "runs": [
+        26,
+        26
+      ],
+      "n": 2,
+      "min": 26,
+      "p50": 26,
+      "p90": 26,
+      "max": 26
+    }
+  },
+  "inproc": {
+    "importMs": 40,
+    "doctor": {
+      "runs": [
+        60,
+        55
+      ],
+      "n": 2,
+      "min": 55,
+      "p50": 60,
+      "p90": 60,
+      "max": 60
+    },
+    "spawnMsPerRun": [
+      54,
+      55
+    ],
+    "spawnsPerRun": 15,
+    "byCommand": [
+      {
+        "cmd": "/usr/bin/qemu-system-aarch64 --version",
+        "n": 2,
+        "min": 21,
+        "p50": 21,
+        "p90": 21,
+        "max": 21,
+        "first": 21
+      },
+      {
+        "cmd": "/usr/bin/qemu-system-x86_64 --version",
+        "n": 2,
+        "min": 20,
+        "p50": 21,
+        "p90": 21,
+        "max": 21,
+        "first": 20
+      },
+      {
+        "cmd": "which qemu-system-aarch64",
+        "n": 4,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "which qemu-system-x86_64",
+        "n": 4,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "which apt",
+        "n": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "which dnf",
+        "n": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "which pacman",
+        "n": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "which qemu-img",
+        "n": 4,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "test -w /dev/kvm",
+        "n": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "df -kP /tmp/doctor-timing-3534539",
+        "n": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "which socat",
+        "n": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      },
+      {
+        "cmd": "/usr/bin/bash --version",
+        "n": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "max": 1,
+        "first": 1
+      }
+    ]
+  }
+}

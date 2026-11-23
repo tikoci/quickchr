@@ -32,6 +32,7 @@ on:
         options:
           - all
           - ssh-os-baseline
+          - doctor-timing
   push:
     paths:
       - ".github/workflows/lab.yml"
@@ -142,4 +143,34 @@ jobs:
           path: |
             probe.txt
             summary.json
+          if-no-files-found: warn
+
+  # test/lab/doctor-timing — where does `quickchr doctor --json` spend its time?
+  # (issue #269). The unit test that spawns it runs under bun:test's 5 s default
+  # and Windows runners have reached 4–5 s. Same setup as ci.yml's unit-test jobs
+  # (no QEMU installed), Linux as the contrast. Times the CLI spawn as the test
+  # does, Bun startup, and each child process doctor() starts.
+  doctor-timing:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lab == 'all' || inputs.lab == 'doctor-timing' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: Probe doctor timing
+        shell: bash
+        run: bun run test/lab/doctor-timing/probe.ts --runs 20
+      - name: Upload probe results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: doctor-timing-${{ matrix.os }}
+          path: doctor-timing.json
           if-no-files-found: warn
