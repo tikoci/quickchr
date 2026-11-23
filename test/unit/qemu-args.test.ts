@@ -13,6 +13,7 @@ import {
 } from "../../src/lib/qemu.ts";
 import type { MachineState, PortMapping } from "../../src/lib/types.ts";
 import { requireQemu } from "../../src/lib/platform.ts";
+import { MAX_EXTRA_DISKS, normalizeDiskOptions } from "../../src/lib/disk.ts";
 
 // These tests verify QEMU arg generation without spawning QEMU.
 // They depend on QEMU being installed (for binary path resolution).
@@ -103,7 +104,7 @@ describe("buildQemuArgs", () => {
 				expect(d).not.toContain("if=virtio");
 			}
 			// Must have virtio-blk-pci device
-			expect(args).toContain("virtio-blk-pci,drive=drive0");
+			expect(args).toContain("virtio-blk-pci,drive=drive0,addr=0x10");
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e && (e as { code: string }).code === "MISSING_QEMU") {
 				console.log("Skipping: QEMU not installed");
@@ -390,12 +391,12 @@ describe("buildQemuArgs — extra disks", () => {
 			expect(drive1Arg).toBeDefined();
 			expect(drive1Arg).toContain("id=drive1");
 			expect(drive1Arg).toContain("if=none");
-			expect(args).toContain("virtio-blk-pci,drive=drive1");
+			expect(args).toContain("virtio-blk-pci,drive=drive1,addr=0x11");
 
 			const drive2Arg = args.find((a) => a.includes("extra-1.qcow2"));
 			expect(drive2Arg).toBeDefined();
 			expect(drive2Arg).toContain("id=drive2");
-			expect(args).toContain("virtio-blk-pci,drive=drive2");
+			expect(args).toContain("virtio-blk-pci,drive=drive2,addr=0x12");
 		} catch (e: unknown) {
 			if (e && typeof e === "object" && "code" in e &&
 				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
@@ -406,28 +407,45 @@ describe("buildQemuArgs — extra disks", () => {
 		}
 	});
 
-	test("x86 extra disks use if=virtio", async () => {
-		try {
-			const args = await buildQemuArgs(makeConfig({
-				arch: "x86",
-				extraDisks: [
-					{ path: "/tmp/quickchr-test-machine/extra-0.qcow2", format: "qcow2" },
-				],
-			}));
-			const driveArg = args.find((a) => a.includes("extra-0.qcow2"));
-			expect(driveArg).toBeDefined();
-			expect(driveArg).toContain("if=virtio");
-			expect(driveArg).toContain("format=qcow2");
-			// x86 should NOT have virtio-blk-pci for extra disks
-			expect(args).not.toContain("virtio-blk-pci,drive=drive1");
-		} catch (e: unknown) {
-			if (e && typeof e === "object" && "code" in e &&
-				((e as { code: string }).code === "MISSING_QEMU" || (e as { code: string }).code === "MISSING_FIRMWARE")) {
-				console.log("Skipping: QEMU/firmware not installed");
-				return;
-			}
-			throw e;
-		}
+	test("x86 disks are virtio-blk-pci at fixed slots, never if=virtio (#257)", async () => {
+		const args = await buildQemuArgs(makeConfig({
+			arch: "x86",
+			extraDisks: [
+				{ path: "/tmp/quickchr-test-machine/extra-0.qcow2", format: "qcow2" },
+			],
+		}));
+		const driveArg = args.find((a) => a.includes("extra-0.qcow2"));
+		expect(driveArg).toBe("file=/tmp/quickchr-test-machine/extra-0.qcow2,format=qcow2,if=none,id=drive1");
+		expect(args).toContain("virtio-blk-pci,drive=drive0,addr=0x10");
+		expect(args).toContain("virtio-blk-pci,drive=drive1,addr=0x11");
+		expect(args.some((a) => a.includes("if=virtio"))).toBe(false);
+	});
+
+	test("disk slots don't depend on the NIC count, and disks precede the NICs (#257)", async () => {
+		const disks = [
+			{ path: "/tmp/quickchr-test-machine/extra-0.qcow2", format: "qcow2" as const },
+			{ path: "/tmp/quickchr-test-machine/extra-1.qcow2", format: "qcow2" as const },
+		];
+		const diskDevices = (args: string[]) => args.filter((a) => a.startsWith("virtio-blk-pci"));
+		const one = await buildQemuArgs(makeConfig({ arch: "x86", extraDisks: disks }));
+		const three = await buildQemuArgs(makeConfig({
+			arch: "x86",
+			extraDisks: disks,
+			networks: [
+				{ specifier: "user", id: "net0" },
+				{ specifier: { type: "socket-listen", port: 4100 }, id: "net1" },
+				{ specifier: { type: "socket-listen", port: 4101 }, id: "net2" },
+			],
+		}));
+		expect(diskDevices(three)).toEqual(diskDevices(one));
+		expect(diskDevices(one)).toEqual([
+			"virtio-blk-pci,drive=drive0,addr=0x10",
+			"virtio-blk-pci,drive=drive1,addr=0x11",
+			"virtio-blk-pci,drive=drive2,addr=0x12",
+		]);
+		const lastDisk = Math.max(...diskDevices(three).map((d) => three.indexOf(d)));
+		const firstNic = three.findIndex((a) => a.startsWith("virtio-net-pci"));
+		expect(firstNic).toBeGreaterThan(lastDisk);
 	});
 
 	test("no extra disk args when extraDisks is undefined", async () => {
@@ -887,5 +905,12 @@ describe("cleanupQemuSockets", () => {
 
 	test("is a no-op when sockets are absent (does not throw)", () => {
 		expect(() => cleanupQemuSockets(dir)).not.toThrow();
+	});
+});
+
+describe("normalizeDiskOptions — extra disk limit (#257)", () => {
+	test("refuses more extra disks than the fixed PCI slot range holds", () => {
+		const sizes = Array.from({ length: MAX_EXTRA_DISKS + 1 }, () => "64M");
+		expect(() => normalizeDiskOptions(undefined, sizes)).toThrow(`at most ${MAX_EXTRA_DISKS} extra disks`);
 	});
 });

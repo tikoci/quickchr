@@ -45,6 +45,20 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- **Adding a NIC no longer renames a machine's extra disks.** RouterOS names a disk by its
+  PCI address, and on x86 quickchr's `-drive if=virtio` disks landed after every NIC, so
+  each added NIC moved them and RouterOS gave the data disk a new `pcieN` name. That broke
+  `/app` and container settings that named the disk. Disks are now `virtio-blk-pci` at
+  fixed slots (boot disk `0x10`, extra disk N at `0x10 + N`) on x86 and arm64, so adding
+  or removing a NIC leaves disk names alone, and adding a disk leaves interface names and
+  MACs alone. A machine can have at most 15 extra disks.
+  **One-time rename:** on its first start after upgrading, a machine with extra disks sees
+  each one at a new address, so RouterOS gives it the next unused name (for example
+  `pcie3`) and keeps the old entry, empty. A setting or path that names the old slot needs
+  to point at the new one once: `/disk/set [find slot=<new>] slot=<old>` after removing the
+  empty entry, or `/app/settings/set disk=<new>`. A machine with no extra disk is
+  unaffected. (#257)
+
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a

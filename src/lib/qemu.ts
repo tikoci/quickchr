@@ -15,6 +15,7 @@ import { ensureDir, getDataDir } from "./state.ts";
 import { pidLiveness } from "./pid.ts";
 import { shellQuote } from "./names.ts";
 import { restGet } from "./rest.ts";
+import { DISK_PCI_SLOT_BASE } from "./disk.ts";
 import { apiLogin } from "./api-login.ts";
 import { isRouterOs6 } from "./versions.ts";
 import { classifyProbeError, recordBootProbe, serialLogEnabled, type BootProbeStats } from "./diagnostics.ts";
@@ -108,33 +109,11 @@ export async function buildQemuArgs(config: QemuLaunchConfig): Promise<string[]>
 		);
 	}
 
-	// Boot disk drive
-	if (arch === "arm64") {
-		// ARM64: MUST use explicit virtio-blk-pci (not if=virtio which maps to MMIO)
-		args.push(
-			"-drive", `file=${bootDisk.path},format=${bootDisk.format},if=none,id=drive0`,
-			"-device", "virtio-blk-pci,drive=drive0",
-		);
-	} else {
-		// x86: if=virtio is fine (maps to PCI on q35/pc)
-		args.push("-drive", `file=${bootDisk.path},format=${bootDisk.format},if=virtio`);
-	}
-
-	// Extra disks
-	if (extraDisks && extraDisks.length > 0) {
-		for (let i = 0; i < extraDisks.length; i++) {
-			const disk = extraDisks[i] as { path: string; format: "qcow2" };
-			const driveId = `drive${i + 1}`;
-			if (arch === "arm64") {
-				args.push(
-					"-drive", `file=${disk.path},format=${disk.format},if=none,id=${driveId}`,
-					"-device", `virtio-blk-pci,drive=${driveId}`,
-				);
-			} else {
-				args.push("-drive", `file=${disk.path},format=${disk.format},if=virtio`);
-			}
-		}
-	}
+	// Disks: boot disk, then extra disks, each at a fixed PCI slot (#257).
+	args.push(...diskDeviceArgs(bootDisk, 0));
+	(extraDisks ?? []).forEach((disk, i) => {
+		args.push(...diskDeviceArgs(disk, i + 1));
+	});
 
 	// Networking
 	buildNetworkArgs(args, ports, networks);
@@ -285,6 +264,26 @@ function buildChannelArgs(
 			"-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0,id=qga-port0",
 		);
 	}
+}
+
+/**
+ * `-drive` + `-device` for one disk, pinned to a fixed PCI slot (#257).
+ *
+ * RouterOS names a disk by its PCI address: each address it hasn't seen before
+ * gets the next `pcieN` entry, and the old entry stays behind, empty. x86 used
+ * `-drive if=virtio`, which QEMU places after every explicit `-device`, so each
+ * added NIC moved every disk one slot and renamed it. With the disks at
+ * `0x10`+ (emitted before the NICs, which take the low slots automatically),
+ * adding or removing a NIC leaves disk names alone, and adding a disk leaves the
+ * NICs' slots, names and MACs alone. Verified on CHR 7.25.1 (x86 KVM, arm64 TCG).
+ * `virtio-blk-pci` also keeps arm64 off `if=virtio`, which maps to MMIO on `virt`.
+ */
+export function diskDeviceArgs(disk: { path: string; format: string }, index: number): string[] {
+	const id = `drive${index}`;
+	return [
+		"-drive", `file=${disk.path},format=${disk.format},if=none,id=${id}`,
+		"-device", `virtio-blk-pci,drive=${id},addr=0x${(DISK_PCI_SLOT_BASE + index).toString(16)}`,
+	];
 }
 
 /** Build the per-machine qcow2 EFI vars pflash: start from the legacy raw

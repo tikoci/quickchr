@@ -19,6 +19,12 @@ import { QuickCHRError } from "./types.ts";
 import { requireQemuImg } from "./platform.ts";
 import { renameWithRetry } from "./rename.ts";
 
+/** First PCI slot of the disk range: the boot disk sits here, extra disk N at
+ *  `DISK_PCI_SLOT_BASE + N` (see `diskDeviceArgs()` in qemu.ts, #257). */
+export const DISK_PCI_SLOT_BASE = 0x10;
+/** Slots `0x11`..`0x1f` hold extra disks, so a machine can have at most 15. */
+export const MAX_EXTRA_DISKS = 0x1f - DISK_PCI_SLOT_BASE;
+
 const DISK_SIZE_RE = /^\d+[KMGT]?$/i;
 
 export interface DiskInfo {
@@ -54,6 +60,13 @@ export function normalizeDiskOptions(
  	bootDiskFormat?: BootDiskFormat,
 ): { bootSize?: string | undefined; extraDisks?: string[] | undefined; bootDiskFormat: BootDiskFormat } {
  	const format: BootDiskFormat = bootDiskFormat ?? (bootSize ? "qcow2" : "raw");
+
+	if (extraDisks && extraDisks.length > MAX_EXTRA_DISKS) {
+		throw new QuickCHRError(
+			"INVALID_ARGUMENT",
+			`A machine can have at most ${MAX_EXTRA_DISKS} extra disks (got ${extraDisks.length}): each one takes a fixed PCI slot.`,
+		);
+	}
 
 	if (format === "raw" && bootSize) {
 		throw new QuickCHRError(

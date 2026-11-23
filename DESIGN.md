@@ -32,7 +32,7 @@ Modules (src/lib/)      ← qemu, images, versions, network, state, ...
 
 4. **Optional qcow2** — Default boot disk uses raw `.img` (MikroTik provides them). Users can opt into `qcow2` format for boot resize and QEMU snapshot/restore support. Requires `qemu-img` when enabled.
 
-5. **ARM64 VirtIO rule** — Never use `if=virtio` on aarch64 `virt` machine. Always explicit `-device virtio-blk-pci,drive=drive0`.
+5. **Disks are `virtio-blk-pci` at fixed PCI slots** — never `if=virtio`. On aarch64 `virt` it maps to MMIO (silent boot failure). On x86 `pc` QEMU places it after every explicit `-device`, and RouterOS names disks by PCI address, so adding a NIC renamed the data disk (#257). The boot disk is at slot `0x10`, extra disk N at `0x10 + N`, emitted before the NICs; details in `qemu.instructions.md` "Disk PCI slots".
 
 6. **Class-based API** — `QuickCHR` is a class with static methods for clean namespacing. `ChrInstance` is an interface implemented as a plain object with closures.
 
