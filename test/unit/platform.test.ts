@@ -35,13 +35,11 @@ import {
 } from "../../src/lib/platform.ts";
 
 const originalSpawnSync = Bun.spawnSync;
-const originalWhich = Bun.which;
 const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
 const originalArchDescriptor = Object.getOwnPropertyDescriptor(process, "arch");
 
 function restoreRuntimeDetection(): void {
 	(Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = originalSpawnSync;
-	(Bun as unknown as { which: typeof Bun.which }).which = originalWhich;
 	if (originalPlatformDescriptor) {
 		Object.defineProperty(process, "platform", originalPlatformDescriptor);
 	}
@@ -77,13 +75,6 @@ function mockSpawnSync(
 	return spawn;
 }
 
-/** PATH lookups go through Bun.which (#269); mock it like spawnSync. */
-function mockWhich(impl: (cmd: string) => string | null) {
-	const which = mock((cmd: string) => impl(cmd));
-	(Bun as unknown as { which: unknown }).which = which;
-	return which;
-}
-
 // Pin the accelerator override tier for every test: without this, resolveAccelOverride()
 // falls through to the real QUICKCHR_ACCEL env var and ~/.config/quickchr/quickchr.env,
 // so a developer who has forced an accelerator would see these tests fail.
@@ -115,9 +106,13 @@ describe("detectPackageManager", () => {
 	test("on Linux chooses the first available package manager in priority order", () => {
 		setPlatform("linux");
 		const calls: string[] = [];
-		mockWhich((cmd) => {
-			calls.push(cmd);
-			return cmd === "dnf" ? "/usr/bin/dnf" : null;
+		mockSpawnSync((cmd) => {
+			expect(cmd[0]).toBe("which");
+			calls.push(cmd[1] ?? "");
+			if (cmd[1] === "dnf") {
+				return { exitCode: 0, stdout: "/usr/bin/dnf\n" };
+			}
+			return { exitCode: 1 };
 		});
 
 		expect(detectPackageManager()).toBe("dnf");
@@ -126,26 +121,31 @@ describe("detectPackageManager", () => {
 
 	test("on Linux returns unknown when no known package manager is found", () => {
 		setPlatform("linux");
-		mockWhich(() => null);
+		mockSpawnSync(() => ({ exitCode: 1 }));
 
 		expect(detectPackageManager()).toBe("unknown");
 	});
 });
 
 describe("findCommandOnPath", () => {
-	test("looks the command up in process, without spawning (#269)", () => {
-		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "/wrong\n" }));
-		mockWhich((cmd) => (cmd === "qemu-img" ? "/toolchain/bin/qemu-img" : null));
+	test("returns the first non-empty path from command lookup output", () => {
+		setPlatform("linux");
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["which", "qemu-img"]);
+			return { exitCode: 0, stdout: "\n  /toolchain/bin/qemu-img  \n/usr/bin/qemu-img\n" };
+		});
 
 		expect(findCommandOnPath("qemu-img")).toBe("/toolchain/bin/qemu-img");
-		expect(findCommandOnPath("socat")).toBeUndefined();
-		expect(spawn).not.toHaveBeenCalled();
 	});
 
-	test("finds a real command on this host's PATH", () => {
-		const shell = process.platform === "win32" ? "cmd" : "sh";
-		expect(findCommandOnPath(shell)).toBeString();
-		expect(findCommandOnPath("__no_such_command_quickchr__")).toBeUndefined();
+	test("uses where.exe on Windows and returns undefined on lookup failure", () => {
+		setPlatform("win32");
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["where.exe", "qemu-img"]);
+			return { exitCode: 1, stderr: "INFO: Could not find files" };
+		});
+
+		expect(findCommandOnPath("qemu-img")).toBeUndefined();
 	});
 });
 
@@ -167,7 +167,12 @@ describe("findQemuBinary", () => {
 
 	test("resolves x86 binary from mocked PATH lookup without requiring host QEMU", () => {
 		setPlatform("linux");
-		mockWhich((cmd) => (cmd === "qemu-system-x86_64" ? "/mock/bin/qemu-system-x86_64" : null));
+		mockSpawnSync((cmd) => {
+			if (cmd[1] === "qemu-system-x86_64") {
+				return { exitCode: 0, stdout: "/mock/bin/qemu-system-x86_64\n" };
+			}
+			return { exitCode: 1 };
+		});
 
 		expect(findQemuBinary("x86")).toBe("/mock/bin/qemu-system-x86_64");
 		expect(findQemuBinary("arm64")).toBeUndefined();
@@ -184,7 +189,10 @@ describe("findQemuImg", () => {
 
 	test("resolves qemu-img from mocked PATH lookup", () => {
 		setPlatform("linux");
-		mockWhich((cmd) => (cmd === "qemu-img" ? "/mock/bin/qemu-img" : null));
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["which", "qemu-img"]);
+			return { exitCode: 0, stdout: "/mock/bin/qemu-img\n" };
+		});
 
 		expect(findQemuImg()).toBe("/mock/bin/qemu-img");
 	});
@@ -278,7 +286,6 @@ describe("requireQemu", () => {
 
 	test("throws MISSING_QEMU with the requested architecture in the message", () => {
 		setPlatform("linux");
-		mockWhich(() => null);
 		mockSpawnSync(() => ({ exitCode: 1 }));
 
 		expect(() => requireQemu("arm64")).toThrow(
@@ -400,16 +407,18 @@ describe("UEFI firmware beside a QEMU's own data dirs (#254)", () => {
 	test("findEfiFirmware falls back to the arm64 QEMU's data dirs when no standard path exists", () => {
 		// No standard paths, so the fallback runs whatever firmware this host has installed.
 		const none = { code: [], vars: [] };
-		mockWhich(() => null);
 		mockSpawnSync(() => ({ exitCode: 1 }));
 		expect(findEfiFirmware(none)).toBeUndefined();
 		const code = touch("root", "usr", "share", "AAVMF", "AAVMF_CODE.fd");
 		const vars = touch("root", "usr", "share", "AAVMF", "AAVMF_VARS.fd");
 		const qemu = join(tmp, "bin", "qemu-system-aarch64");
-		mockWhich((cmd) => (cmd === "qemu-system-aarch64" ? qemu : null));
 		mockSpawnSync((cmd) => {
-			expect(cmd).toEqual([qemu, "-L", "help"]);
-			return { exitCode: 0, stdout: `${join(tmp, "root", "usr", "share", "qemu")}\n/usr/share/qemu\n` };
+			if (cmd[0] === qemu) {
+				expect(cmd).toEqual([qemu, "-L", "help"]);
+				return { exitCode: 0, stdout: `${join(tmp, "root", "usr", "share", "qemu")}\n/usr/share/qemu\n` };
+			}
+			// `which` / `where.exe` resolving qemu-system-aarch64 on PATH.
+			return cmd[1] === "qemu-system-aarch64" ? { exitCode: 0, stdout: `${qemu}\n` } : { exitCode: 1 };
 		});
 		expect(findEfiFirmware(none)).toEqual({ code, vars });
 	});
