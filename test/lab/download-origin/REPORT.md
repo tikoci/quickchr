@@ -66,9 +66,10 @@ development **7.26beta5**. Three distinct versions, so 12 artifacts.
 | [44945141039](https://github.com/tikoci/quickchr/actions/runs/44945141039) | `ubuntu-latest`, `macos-latest`, `windows-latest` | 400 MB: all 6 CHR images, both hosts | 12 × 8 MiB | 629 MB per runner | 2026-11-21 20:13 |
 | [44945494198](https://github.com/tikoci/quickchr/actions/runs/44945494198) | same three runners | same | same | 629 MB per runner | 2026-11-21 20:17 |
 
-About 5.5 GB in total. Per-run summaries are in [`results/`](results/). The full JSON
-for the local runs is committed. The CI JSON is in each run's
-`download-origin-<os>` artifact.
+About 5.5 GB in total. Per-run summaries are in [`results/`](results/). The probe also
+writes full per-request JSON next to each summary; it is not committed, since this
+report cites nothing that is only in it. The CI JSON is in each run's
+`download-origin-<os>` artifact while GitHub keeps it.
 
 ## Integrity
 
