@@ -33,6 +33,7 @@ on:
           - all
           - ssh-os-baseline
           - doctor-timing
+          - windows-arm64-qemu
   push:
     paths:
       - ".github/workflows/lab.yml"
@@ -174,3 +175,25 @@ jobs:
           name: doctor-timing-${{ matrix.os }}
           path: doctor-timing.json
           if-no-files-found: warn
+
+  # test/lab/windows-arm64-qemu — does choco's QEMU run on a Windows ARM64 runner?
+  # (issue #305). The first windows-arm64 integration dispatch saw every boot exit
+  # immediately with no error text; this records full exit codes for growing argv.
+  windows-arm64-qemu:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.lab == 'all' || inputs.lab == 'windows-arm64-qemu' }}
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Install QEMU (choco, as integration.yml does)
+        shell: bash
+        run: |
+          choco install qemu -y --no-progress || true
+          ls "/c/Program Files/qemu" | head -40
+          file "/c/Program Files/qemu/qemu-system-aarch64.exe" 2>/dev/null || true
+      - name: Probe
+        shell: bash
+        run: bun run test/lab/windows-arm64-qemu/probe.ts
