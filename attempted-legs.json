@@ -1550,5 +1550,93 @@
 		"planned": 2,
 		"sha": "52bb00e8a5cdd7365e7d973bb07b075410c75cec",
 		"ts": "2026-11-21T20:41:27.106Z"
+	},
+	"45186910173": {
+		"attempt": "1",
+		"complete": 9,
+		"event": "workflow_dispatch",
+		"incomplete": {
+			"macos-arm64|7.24.7": {
+				"job_conclusion": "cancelled",
+				"job_elapsed_s": 1760,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.24.7",
+				"target": "long-term",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'cancelled' before the suite could instrument itself"
+			},
+			"macos-arm64|7.25.2": {
+				"job_conclusion": "cancelled",
+				"job_elapsed_s": 1884,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.25.2",
+				"target": "stable",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'cancelled' before the suite could instrument itself"
+			},
+			"macos-arm64|7.26beta7": {
+				"job_conclusion": "cancelled",
+				"job_elapsed_s": 1583,
+				"job_matched": true,
+				"platform": "macos-arm64",
+				"resolved": "7.26beta7",
+				"target": "development",
+				"terminal": "attempted-incomplete",
+				"why": "job ended 'cancelled' before the suite could instrument itself"
+			},
+			"macos-x86|7.24.7": {
+				"current_file": "disk.test.ts",
+				"files_planned": 26,
+				"files_reported": 3,
+				"job_conclusion": "failure",
+				"job_elapsed_s": 3361,
+				"job_matched": true,
+				"last_checkpoint_ts": "2026-11-23T14:01:22.131Z",
+				"last_file": "device-mode.test.ts",
+				"platform": "macos-x86",
+				"resolved": "7.24.7",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "long-term",
+				"terminal": "runner-lost",
+				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
+			},
+			"macos-x86|7.25.2": {
+				"current_file": "disk.test.ts",
+				"files_planned": 26,
+				"files_reported": 3,
+				"job_conclusion": "failure",
+				"job_elapsed_s": 3423,
+				"job_matched": true,
+				"last_checkpoint_ts": "2026-11-23T14:02:36.792Z",
+				"last_file": "device-mode.test.ts",
+				"platform": "macos-x86",
+				"resolved": "7.25.2",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "stable",
+				"terminal": "runner-lost",
+				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
+			},
+			"macos-x86|7.26beta7": {
+				"current_file": "disk.test.ts",
+				"files_planned": 26,
+				"files_reported": 3,
+				"job_conclusion": "failure",
+				"job_elapsed_s": 3482,
+				"job_matched": true,
+				"last_checkpoint_ts": "2026-11-23T14:02:57.669Z",
+				"last_file": "device-mode.test.ts",
+				"platform": "macos-x86",
+				"resolved": "7.26beta7",
+				"stalled_step": "Run integration tests (sequential per-file)",
+				"target": "development",
+				"terminal": "runner-lost",
+				"why": "job reached a terminal state with 'Run integration tests (sequential per-file)' still in progress — the runner stopped reporting"
+			}
+		},
+		"planned": 15,
+		"sha": "52bb00e8a5cdd7365e7d973bb07b075410c75cec",
+		"ts": "2026-11-23T14:49:40.129Z"
 	}
 }
