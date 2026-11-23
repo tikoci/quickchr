@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { QuickCHR, captureRunningFailure, credentialShareMs } from "../../src/lib/quickchr.ts";
@@ -6,6 +6,7 @@ import type { MachineState } from "../../src/lib/types.ts";
 import { CONSOLE_LOGIN_COST_MS } from "../../src/lib/console.ts";
 import { GUEST_LOGIN_ALLOWANCE_MS, GUEST_QUERY_TIMEOUT_MS } from "../../src/lib/guest-snapshot.ts";
 import { hostChrArch, resetAppleSiliconHostCache } from "../../src/lib/platform.ts";
+import { storageProbe } from "../../src/lib/storage.ts";
 
 function expectErrorCode(e: unknown, code: string) {
 	expect(e).toBeInstanceOf(Error);
@@ -104,9 +105,16 @@ describe("QuickCHR.doctor arch (#293)", () => {
 	const platform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
 	const arch = Object.getOwnPropertyDescriptor(process, "arch") as PropertyDescriptor;
 	const realSpawnSync = Bun.spawnSync;
+	let probeSpies: Array<{ mockRestore(): void }> = [];
 
 	beforeEach(() => {
 		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		// The faked "linux" platform would send the storage probe to `df`, which a
+		// Windows host may not have; these tests are about the QEMU rows only.
+		probeSpies = [
+			spyOn(storageProbe, "freeBytes").mockReturnValue(1024 ** 4),
+			spyOn(storageProbe, "filesystem").mockReturnValue({ dev: 1, statPath: TEST_DIR }),
+		];
 		Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 		Object.defineProperty(process, "arch", { value: "x64", configurable: true });
 		// No QEMU of either arch on PATH; everything else runs for real.
@@ -122,6 +130,7 @@ describe("QuickCHR.doctor arch (#293)", () => {
 		Object.defineProperty(process, "platform", platform);
 		Object.defineProperty(process, "arch", arch);
 		(Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = realSpawnSync;
+		for (const spy of probeSpies) spy.mockRestore();
 	});
 
 	async function qemuStatus(doctorArch?: "x86" | "arm64" | "auto") {
