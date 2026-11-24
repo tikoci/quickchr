@@ -7,6 +7,10 @@ applyTo: "test/**"
 ## Test Structure
 
 - `test/unit/` — Fast, pure tests. No network, no QEMU, no disk IO beyond temp dirs.
+  A CLI subprocess test whose command fetches channel versions spawns the CLI with
+  `--preload test/unit/helpers/upgrade-server-preload.ts`, which answers
+  upgrade.mikrotik.com locally (#316). A live fetch there can use up Bun's 5 s test
+  limit on a slow runner.
 - `test/integration/` — Requires QEMU. Gated by `QUICKCHR_INTEGRATION=1`.
 
 ## Framework

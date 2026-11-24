@@ -3,17 +3,19 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CHANNELS } from "../../src/lib/types.ts";
 import { isValidVersion } from "../../src/lib/versions.ts";
+import { STUB_CHANNEL_VERSIONS } from "./helpers/upgrade-server-stub-versions.ts";
 
 const TEST_DIR = join(import.meta.dir, ".tmp-cli-version-doctor-test");
 const CLI = join(import.meta.dir, "../../src/cli/index.ts");
+const UPGRADE_STUB = join(import.meta.dir, "helpers/upgrade-server-preload.ts");
 const originalHome = process.env.HOME;
 
-async function runQuickchr(args: string[], extraEnv: Record<string, string> = {}) {
+async function runQuickchr(args: string[], extraEnv: Record<string, string> = {}, preload: string[] = []) {
 	// Drop QUICKCHR_ACCEL from the inherited env: a developer who has an
 	// accelerator forced in their own shell would otherwise see the
 	// "no override configured" assertion fail for an unrelated reason.
 	const { QUICKCHR_ACCEL: _ignored, ...inherited } = process.env;
-	const proc = Bun.spawn(["bun", CLI, ...args], {
+	const proc = Bun.spawn(["bun", ...preload.flatMap((p) => ["--preload", p]), CLI, ...args], {
 		env: {
 			...inherited,
 			QUICKCHR_DATA_DIR: TEST_DIR,
@@ -49,21 +51,28 @@ afterEach(() => {
 });
 
 describe("CLI version --json", () => {
-	// Network-tolerant: offline emits {}, online emits a { channel: version } map.
-	// Either way the contract is "a plain object of channel→valid-version".
+	// Offline by construction (#316): the preload answers the upgrade-server fetches,
+	// so this measures a local CLI spawn, not a round trip to MikroTik. The live
+	// fetch is covered by resolveVersion's own tests and the integration suite.
 	test("emits a { channel: version } object with no human noise", async () => {
-		const result = await runQuickchr(["version", "--json"]);
+		const result = await runQuickchr(["version", "--json"], { QUICKCHR_TEST_UPGRADE_STUB: "answer" }, [UPGRADE_STUB]);
 
 		expect(result.exitCode).toBe(0);
 		const parsed = JSON.parse(result.stdout);
-		expect(typeof parsed).toBe("object");
-		expect(Array.isArray(parsed)).toBe(false);
 		// The quickchr-version banner line must not leak into --json output.
 		expect(result.stdout).not.toContain("quickchr ");
-		for (const [channel, version] of Object.entries(parsed)) {
-			expect(CHANNELS as readonly string[]).toContain(channel);
+		expect(parsed).toEqual(STUB_CHANNEL_VERSIONS);
+		expect(Object.keys(parsed).sort()).toEqual([...CHANNELS].sort());
+		for (const version of Object.values(parsed)) {
 			expect(isValidVersion(version as string)).toBe(true);
 		}
+	});
+
+	test("emits {} when the upgrade server cannot be reached", async () => {
+		const result = await runQuickchr(["version", "--json"], { QUICKCHR_TEST_UPGRADE_STUB: "offline" }, [UPGRADE_STUB]);
+
+		expect(result.exitCode).toBe(0);
+		expect(JSON.parse(result.stdout)).toEqual({});
 	});
 });
 
