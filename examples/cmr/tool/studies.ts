@@ -12,6 +12,7 @@
  * Add a study: write `async function <name>(context)` below, register it in STUDIES, and add
  * its question and result rows to FINDINGS.md.
  */
+import { request } from "node:http";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { type ChrInstance, stripAnsi } from "../../../src/index.ts";
@@ -510,7 +511,11 @@ async function beta7(context: StudyContext): Promise<void> {
 			const reached = await until(description, async () => {
 				last = await observe(controller, client, identity);
 				return predicate(last);
-			}, timeout).then(() => true, () => false);
+			}, timeout).then(() => true, (error: unknown) => {
+				// Only the deadline is a result; a failed REST read or Ctrl-C must fail the study.
+				if (error instanceof Error && error.message.startsWith("Timed out:")) return false;
+				throw error;
+			});
 			return { reached, seconds: Math.round((Date.now() - started) / 1000), ...last };
 		};
 		const connected = (o: Observation) => o.clientStatus?.endsWith(",connected") === true;
@@ -574,6 +579,31 @@ async function beta7(context: StudyContext): Promise<void> {
 			const text = typeof value === "object" && value !== null ? JSON.stringify("verdict" in value ? { verdict: (value as Observation).verdict, client: (value as Observation).clientStatus, state: (value as Observation).row?.state } : value) : String(value);
 			console.log(`  ${key}: ${text.replaceAll("\n", " ⏎ ").slice(0, 300)}`);
 		}
+	});
+}
+
+/**
+ * POST JSON over `node:http` with `agent: false`, so each request gets a fresh connection. Bun's
+ * `fetch()` pools sockets per host and port, and the controller restarts between requests. This is
+ * what quickchr's internal `restPost()` does; the examples import only the public entry point.
+ */
+function postUnpooled(url: string, authorization: string, body: Record<string, unknown>, timeoutMs: number): Promise<{ status: number; body: string }> {
+	return new Promise((resolve, reject) => {
+		const payload = Buffer.from(JSON.stringify(body));
+		const req = request(url, {
+			method: "POST",
+			agent: false,
+			headers: { authorization, "content-type": "application/json", "content-length": payload.length },
+			timeout: timeoutMs,
+		}, response => {
+			const chunks: Buffer[] = [];
+			response.on("data", (chunk: Buffer) => chunks.push(chunk));
+			response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
+			response.on("error", reject);
+		});
+		req.on("timeout", () => req.destroy(new Error(`POST timed out after ${timeoutMs} ms`)));
+		req.on("error", reject);
+		req.end(payload);
 	});
 }
 
@@ -709,7 +739,7 @@ async function isolated(context: StudyContext): Promise<void> {
  * Q (control): does the way the controller's `pair` is invoked change the half-pair? Every trial
  * runs the single credentialed `pair` from a fresh pending client, rotating the invocation:
  * - `execute`: REST `/rest/execute` with the CLI line as a script (what the lab and quickchr use);
- * - `rest`: REST `POST /rest/cmr/device/pair` with JSON arguments (a direct HTTP call; 120 s client timeout);
+ * - `rest`: REST `POST /rest/cmr/device/pair` with JSON arguments (a direct, unpooled HTTP call; 120 s timeout);
  * - `console`: typed on the controller's serial console (the interactive CLI), nothing typed ahead (`typed()`);
  * - `execute-30s`, `rest-30s`: the first two with `duration=30s`, so the command's progress view
  *   stays open 30 s instead of returning after its first refresh.
@@ -758,13 +788,8 @@ async function transport(context: StudyContext): Promise<void> {
 						output = `${result.output.split("\n").filter(l => !l.includes("] > ")).join("\n")}${result.timedOut ? "\ntimed out" : ""}`;
 					}
 					else {
-						const response = await fetch(`${base}/cmr/device/pair`, {
-							method: "POST",
-							headers: { authorization, "content-type": "application/json" },
-							body: JSON.stringify({ numbers: id, username: login.user, password: login.password, ...(duration ? { duration: "30s" } : {}) }),
-							signal: AbortSignal.timeout(120_000),
-						});
-						output = `HTTP ${response.status} ${await response.text()}`;
+						const response = await postUnpooled(`${base}/cmr/device/pair`, authorization, { numbers: id, username: login.user, password: login.password, ...(duration ? { duration: "30s" } : {}) }, 120_000);
+						output = `HTTP ${response.status} ${response.body}`;
 					}
 				} catch (error) { output = `error: ${error instanceof Error ? error.message : String(error)}`; }
 				const commandMs = Date.now() - started;
