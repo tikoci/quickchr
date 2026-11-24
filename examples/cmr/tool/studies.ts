@@ -587,7 +587,7 @@ async function beta7(context: StudyContext): Promise<void> {
  * `fetch()` pools sockets per host and port, and the controller restarts between requests. This is
  * what quickchr's internal `restPost()` does; the examples import only the public entry point.
  */
-function postUnpooled(url: string, authorization: string, body: Record<string, unknown>, timeoutMs: number): Promise<{ status: number; body: string }> {
+function postNoPool(url: string, authorization: string, body: Record<string, unknown>, timeoutMs: number): Promise<{ status: number; body: string }> {
 	return new Promise((resolve, reject) => {
 		const payload = Buffer.from(JSON.stringify(body));
 		const req = request(url, {
@@ -739,7 +739,7 @@ async function isolated(context: StudyContext): Promise<void> {
  * Q (control): does the way the controller's `pair` is invoked change the half-pair? Every trial
  * runs the single credentialed `pair` from a fresh pending client, rotating the invocation:
  * - `execute`: REST `/rest/execute` with the CLI line as a script (what the lab and quickchr use);
- * - `rest`: REST `POST /rest/cmr/device/pair` with JSON arguments (a direct, unpooled HTTP call; 120 s timeout);
+ * - `rest`: REST `POST /rest/cmr/device/pair` with JSON arguments (a direct HTTP call on a fresh connection; 120 s timeout);
  * - `console`: typed on the controller's serial console (the interactive CLI), nothing typed ahead (`typed()`);
  * - `execute-30s`, `rest-30s`: the first two with `duration=30s`, so the command's progress view
  *   stays open 30 s instead of returning after its first refresh.
@@ -788,7 +788,7 @@ async function transport(context: StudyContext): Promise<void> {
 						output = `${result.output.split("\n").filter(l => !l.includes("] > ")).join("\n")}${result.timedOut ? "\ntimed out" : ""}`;
 					}
 					else {
-						const response = await postUnpooled(`${base}/cmr/device/pair`, authorization, { numbers: id, username: login.user, password: login.password, ...(duration ? { duration: "30s" } : {}) }, 120_000);
+						const response = await postNoPool(`${base}/cmr/device/pair`, authorization, { numbers: id, username: login.user, password: login.password, ...(duration ? { duration: "30s" } : {}) }, 120_000);
 						output = `HTTP ${response.status} ${response.body}`;
 					}
 				} catch (error) { output = `error: ${error instanceof Error ? error.message : String(error)}`; }
