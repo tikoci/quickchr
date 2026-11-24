@@ -6,14 +6,14 @@ action. Current status of every item, per build, is in
 
 | # | Report | Status |
 |---|---|---|
-| 5 | [7.26beta5: one credentialed `pair` can leave the client half-paired](#5-726beta5-one-credentialed-pair-can-leave-the-client-half-paired) | Draft, candidate to send. Wire capture added 2026-11-14 |
-| 6 | [7.26beta5: a `run-script` line has more than the documented policies](#6-726beta5-a-run-script-line-has-more-than-the-documented-policies) | Draft, candidate to send |
+| 5 | [7.26beta5 and beta7: one credentialed `pair` can leave the client half-paired](#5-726beta5-and-beta7-one-credentialed-pair-can-leave-the-client-half-paired) | Draft, candidate to send. Wire capture added 2026-11-14. **Still on 7.26beta7** (7/9, 2026-11-24) |
+| 6 | [7.26beta5 and beta7: a `run-script` line has more than the documented policies](#6-726beta5-and-beta7-a-run-script-line-has-more-than-the-documented-policies) | Draft, candidate to send. **Still on 7.26beta7**, all 26 cases unchanged |
 | 1 | [Export omits the controller settings](#1-export-omits-the-controller-settings) | **Fixed** (beta3 changelog; beta5 lab: settings and labels exported). Do not send |
 | 2 | [Client `confirm` not accepted](#2-client-pairing-requirementconfirm-is-documented-but-not-accepted) | **Works on beta5**: client `confirm` is accepted. Do not send |
 | 3 | [First bridge does not fire `interface-change=added`](#3-the-first-bridge-added-to-a-device-does-not-fire-interface-changeadded) | beta3 changelog says fixed. beta5 lab: fired once the rule covered the client (2/2). An earlier miss came from a 5 s-old rule whose coverage was not confirmed. Do not send |
 | 4 | [Client disable/enable clears pairing](#4-question-client-disableenable-clears-its-pairing-but-a-reboot-does-not) | Vendor: intended; still true on beta5. Only a manual wording issue remains |
 
-## 5. 7.26beta5: one credentialed `pair` can leave the client half-paired
+## 5. 7.26beta5 and beta7: one credentialed `pair` can leave the client half-paired
 
 The manual's command for a server `confirm` / client `password` pairing (the
 7.26beta5 defaults) is one `/cmr/device/pair` with the client's credentials. On
@@ -37,7 +37,7 @@ both), with CMR settings at their defaults:
 
 In our lab, the client's first connect after a fresh boot took about 85 s. That
 delay comes from the lab's second NIC, and the half-pair happens without it (see
-[the note below](#also-seen-on-726beta5-not-a-report-yet)).
+[the note below](#also-seen-on-726beta5-and-beta7-not-a-report-yet)).
 
 When it fails, the command's last table reads `device:ok, cmr:ok`, not
 `paired`:
@@ -99,7 +99,27 @@ does not report success. Evidence:
 centrs measured the same state independently on beta3 to beta5
 ([centrs#527](https://github.com/tikoci/centrs/issues/527)).
 
-### Also seen on 7.26beta5 (not a report yet)
+**Still present on 7.26beta7** (re-run 2026-11-24, same lab and study). The single
+credentialed `pair` half-paired 7 of 9 times on three fresh boots (1/3, 0/3 and
+1/3 committed), the same count as on beta5. Every other sequence was committed
+27 of 27. The `pair` output, the state after a CMR restart and the one-command
+repair were the same as above. The beta7 changelog has no pairing line. A wire
+capture of 24 more single credentialed pairs on three boots gave 22 half-paired and 2
+committed, split by the client's fourth message exactly as above (one 108-byte
+message, or 71 then 66 bytes).
+Evidence: [FINDINGS.md → Pairing study (7.26beta7)](./FINDINGS.md#pairing-study-726beta7),
+[evidence/7.26beta7/pairing.json](./evidence/7.26beta7/pairing.json).
+
+**Not our harness** (7.26beta7 controls). The half-pair also happened with the
+controller's `pair` typed on the serial console and both routers' other NIC disabled,
+so with no REST call and no second path. The command ends by itself: two status rows,
+then `paired` or `device:ok, cmr:ok`. Over REST it returned in about 1 s with or
+without `duration=30s`. One thing changed the rate: with the **client's** other NIC
+(which holds its default route) disabled, 19 of 20 typed `pair` commands committed;
+with it up, 6 of 14. We have not captured what the client sends on that NIC during
+pairing. Evidence: [FINDINGS.md → controls](./FINDINGS.md#is-the-half-pair-the-labs-doing-726beta7-controls).
+
+### Also seen on 7.26beta5 and beta7 (not a report yet)
 
 On every fresh boot, the client's first CMR connect to `192.0.2.1` left the
 link interface `ether2` with the source address **10.0.2.15**. That address
@@ -112,7 +132,7 @@ that timing is the cause, so this is not a report. It resembles the withdrawn
 OSPF item below: a connect that picks the default route's address.
 Evidence: [FINDINGS.md → Wire](./FINDINGS.md#first-connect-the-85-s).
 
-## 6. 7.26beta5: a `run-script` line has more than the documented policies
+## 6. 7.26beta5 and beta7: a `run-script` line has more than the documented policies
 
 The manual says a CMR script runs on each client "with the `read`, `write`,
 `test`, and `reboot` policies", and lists `/user add`, `/user group add`,
@@ -145,6 +165,10 @@ documented four policies (or to the sender's), or the manual should describe
 what a CMR script may do. Evidence:
 [FINDINGS.md → run-script and policy](./FINDINGS.md#run-script-and-policy),
 [evidence/7.26beta5/policy.json](./evidence/7.26beta5/policy.json).
+
+**Still present on 7.26beta7** (2026-11-24): the same study gave the same result
+for all 26 client cases and all four controller logins
+([evidence/7.26beta7/policy.json](./evidence/7.26beta7/policy.json)).
 
 ## 7.26beta1 findings (reports 1–4)
 

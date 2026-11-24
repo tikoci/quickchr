@@ -5,7 +5,7 @@
  *
  * Vocabulary (FINDINGS.md → Pairing):
  * - The client and the controller each have a `pairing-requirement` (none | password | confirm).
- *   7.26beta5 defaults: client `password`, controller per-device `confirm`.
+ *   7.26beta5 and beta7 defaults: client `password`, controller per-device `confirm`.
  * - A row in `/cmr/device` is **paired** when `state` is empty and it is not pending. Only then
  *   does `run-script` select it.
  * - **half-paired**: the client says `paired,connected` but the row keeps

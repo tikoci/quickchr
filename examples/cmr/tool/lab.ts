@@ -8,13 +8,13 @@ import { wire } from "./wire.ts";
  * between betas, so the lab pins one. `--version <v>` or `QUICKCHR_CMR_VERSION` reruns an
  * older or newer build; FINDINGS.md records which build each claim was measured on.
  */
-export const DEFAULT_VERSION = "7.26beta5";
+export const DEFAULT_VERSION = "7.26beta7";
 export function labVersion(argv = process.argv): string {
 	return operand(argv, "version") ?? (process.env.QUICKCHR_CMR_VERSION?.trim() || DEFAULT_VERSION);
 }
 
 /** The runner's flags. An operand may not be one of them: `--report --probe` is a missing path. */
-export const FLAGS = new Set(["--cli", "--hold", "--probe", "--first-bridge", "--sniff", "--version", "--report", "--study", "--boots", "--trials", "--strategies", "--delays"]);
+export const FLAGS = new Set(["--cli", "--hold", "--probe", "--first-bridge", "--sniff", "--version", "--report", "--study", "--boots", "--trials", "--strategies", "--delays", "--transports", "--down"]);
 
 /**
  * The value after `--<name>`: undefined when the flag is absent, an error when it is present

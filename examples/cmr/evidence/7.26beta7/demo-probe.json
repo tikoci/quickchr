@@ -1,0 +1,767 @@
+{
+  "version": "7.26beta7",
+  "timestamp": "2026-11-24T18:31:43.418Z",
+  "pairing": [
+    {
+      "role": "transit",
+      "strategy": "confirm-first",
+      "pairStatus": "paired",
+      "settled": "paired",
+      "repaired": "false"
+    },
+    {
+      "role": "remote",
+      "strategy": "confirm-first",
+      "pairStatus": "paired",
+      "settled": "paired",
+      "repaired": "false"
+    },
+    {
+      "role": "local",
+      "strategy": "confirm-first",
+      "pairStatus": "paired",
+      "settled": "paired",
+      "repaired": "false"
+    }
+  ],
+  "service": {
+    ".id": "*C",
+    "disabled": "false",
+    "dynamic": "true",
+    "invalid": "false",
+    "name": "cmr",
+    "port": "54321",
+    "proto": "tcp"
+  },
+  "remoteRoute": [
+    {
+      ".id": "*2018B000",
+      "active": "true",
+      "afi": "ip",
+      "belongs-to": "lab",
+      "contribution": "active",
+      "debug.fwp-ptr": "0x20282300",
+      "distance": "110",
+      "dst-address": "10.255.0.1/32",
+      "gateway": "198.51.100.1%ether2",
+      "immediate-gw": "198.51.100.1%ether2",
+      "nexthop-id": "*20282300",
+      "ospf": "true",
+      "ospf.metric": "3",
+      "ospf.type": "intra",
+      "routing-table": "main",
+      "scope": "20",
+      "target-scope": "10"
+    }
+  ],
+  "discovery": [
+    {
+      "controller-address": "203.0.113.1",
+      "controller-identity": "cmr-controller",
+      "enabled": "yes",
+      "local-id": "4DC432446179FF26F15C2A7705BCD7DE5D6DEE0A96B290C7D35C5A8838888A6A404F7D2B996BFC184ECBEBDA314F3AD3096EEAE438B7911F96DD6A094E9465C9",
+      "saved-addresses": "203.0.113.1,fe80::98:e4ff:fe2d:ac12",
+      "status": "paired,connected"
+    }
+  ],
+  "upgradeRules": [
+    {
+      ".id": "*2",
+      "channel": "7.26beta7",
+      "fail-policy": "stop",
+      "labels": "lab",
+      "name": "lab-pinned",
+      "strategy": "sequential"
+    },
+    {
+      ".id": "*1",
+      "channel": "stable",
+      "dynamic": "true",
+      "fail-policy": "stop",
+      "labels": "all",
+      "name": "default",
+      "strategy": "parallel"
+    }
+  ],
+  "fanOut": "Columns: DEVICE, STATUS\r\nDEVICE                   STATUS \r\ncmr-controller           running\r\ncmr-transit@192.0.2.2    running\r\ncmr-remote@198.51.100.2  running\r\ncmr-local@203.0.113.2    running\r\n\r\nColumns: DEVICE, STATUS, OUTPUT\r\nDEVICE                   STATUS   OUTPUT      \r\ncmr-controller           success  cmr-37547d84\r\ncmr-transit@192.0.2.2    success  cmr-37547d84\r\ncmr-remote@198.51.100.2  success  cmr-37547d84\r\ncmr-local@203.0.113.2    success  cmr-37547d84",
+  "layout": {
+    "nodes": [
+      {
+        ".id": "*1",
+        "device": "cmr-controller",
+        "layout": "lab",
+        "name": "cmr-controller"
+      },
+      {
+        ".id": "*2",
+        "device": "cmr-transit@192.0.2.2",
+        "layout": "lab",
+        "name": "cmr-transit"
+      },
+      {
+        ".id": "*3",
+        "device": "cmr-remote@198.51.100.2",
+        "layout": "lab",
+        "name": "cmr-remote"
+      },
+      {
+        ".id": "*4",
+        "device": "cmr-local@203.0.113.2",
+        "layout": "lab",
+        "name": "cmr-local"
+      }
+    ],
+    "links": [
+      {
+        ".id": "*1",
+        "layout": "lab",
+        "node1": "cmr-controller",
+        "node2": "cmr-transit"
+      },
+      {
+        ".id": "*2",
+        "layout": "lab",
+        "node1": "cmr-controller",
+        "node2": "cmr-local"
+      },
+      {
+        ".id": "*3",
+        "layout": "lab",
+        "node1": "cmr-transit",
+        "node2": "cmr-remote"
+      }
+    ]
+  },
+  "deviceExport": "present",
+  "webhooks": [
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    },
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    },
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    },
+    {
+      "body": "DOWN cmr-remote unknown",
+      "contentType": "text/plain"
+    },
+    {
+      "body": "UP cmr-remote 198.51.100.2",
+      "contentType": "text/plain"
+    }
+  ],
+  "probes": {
+    "pairingMatrix": [
+      {
+        "clientRequirement": "none",
+        "serverRequirement": "none",
+        "how": "automatic",
+        "before": "",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "none",
+        "serverRequirement": "password",
+        "how": "client pair with controller login",
+        "before": "pair: device:ok, cmr:password required",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "none",
+        "serverRequirement": "confirm",
+        "how": "controller bare pair",
+        "before": "pair: device:ok, cmr:waiting confirmation",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "password",
+        "serverRequirement": "none",
+        "how": "controller credentialed pair",
+        "before": "pair: device:password required, cmr:ok",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "password",
+        "serverRequirement": "password",
+        "how": "client pair with controller login",
+        "before": "pair: device:password required, cmr:password required",
+        "settled": "paired",
+        "repaired": "false"
+      },
+      {
+        "clientRequirement": "password",
+        "serverRequirement": "confirm",
+        "how": "controller credentialed pair",
+        "before": "pair: device:password required, cmr:waiting confirmation",
+        "settled": "half-paired",
+        "repaired": "true"
+      }
+    ],
+    "clientConfirmCompletion": [
+      {
+        "completion": " ",
+        "offset": "36",
+        "preference": "-1",
+        "show": "false",
+        "style": "none",
+        "text": "whitespace",
+        "type": "completion"
+      },
+      {
+        "completion": " ",
+        "offset": "36",
+        "preference": "64",
+        "show": "false",
+        "style": "none",
+        "text": "",
+        "type": "completion"
+      },
+      {
+        "completion": "[",
+        "offset": "36",
+        "preference": "75",
+        "show": "false",
+        "style": "syntax-meta",
+        "text": "start of command substitution",
+        "type": "completion"
+      },
+      {
+        "completion": "(",
+        "offset": "36",
+        "preference": "75",
+        "show": "false",
+        "style": "syntax-meta",
+        "text": "start of expression",
+        "type": "completion"
+      },
+      {
+        "completion": "$",
+        "offset": "36",
+        "preference": "75",
+        "show": "false",
+        "style": "syntax-meta",
+        "text": "substitution",
+        "type": "completion"
+      },
+      {
+        "completion": "\"",
+        "offset": "36",
+        "preference": "75",
+        "show": "false",
+        "style": "syntax-meta",
+        "text": "start of quoted string",
+        "type": "completion"
+      },
+      {
+        "completion": "confirm",
+        "offset": "36",
+        "preference": "96",
+        "show": "true",
+        "style": "none",
+        "text": "",
+        "type": "completion"
+      },
+      {
+        "completion": "none",
+        "offset": "36",
+        "preference": "96",
+        "show": "true",
+        "style": "none",
+        "text": "",
+        "type": "completion"
+      },
+      {
+        "completion": "password",
+        "offset": "36",
+        "preference": "96",
+        "show": "true",
+        "style": "none",
+        "text": "",
+        "type": "completion"
+      },
+      {
+        "completion": "*",
+        "offset": "36",
+        "preference": "-1",
+        "show": "false",
+        "style": "none",
+        "text": "id prefix",
+        "type": "completion"
+      }
+    ],
+    "clientConfirm": "",
+    "afterClientConfirm": {
+      "clientStatus": "waiting-for-pairing,connected",
+      "pairingStatus": "203.0.113.1: cmr:ok, device:waiting confirmation",
+      "row": {
+        ".id": "*A",
+        "identity": "cmr-local",
+        "connected": "true",
+        "remote-pending": "true",
+        "state": "pair: device:waiting confirmation, cmr:ok",
+        "pairing-requirement": "none"
+      },
+      "verdict": "pending"
+    },
+    "defaultRuleEdit": "failure: can't edit default rule (/cmr/upgrade/set *0) (/cmr/upgrade/set; line 1)",
+    "directoryWithoutSlash": "input does not match any value of packages-directory (/cmr/set (packages-directory); line 1)",
+    "serverSettings": [
+      {
+        "auto-labels": "all",
+        "enabled": "yes",
+        "fetch-comments": "true",
+        "local-id": "11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185BA6F71843A692D038BD8CF5FAFBCCC36BCCF1C5C03D5C9B11399080633DEF74A",
+        "packages-directory": "cmr-lab-packages/",
+        "self-client-id": "32DCCCD04B40DF1554514295F10B1DB138968B4B0B18395B2259B2CEE21F9D1D88FC0B72CF45FB3CBE7FA61245A1E1912E5665C8051E6C5C550D79E9C2495A5F",
+        "track-topology": "true"
+      }
+    ],
+    "export": "# 2026-11-24 18:32:36 by RouterOS 7.26beta7\r\n# system id = dGCMCDsp3mN\r\n#\r\n/cmr alert\r\nadd action.log=\"CPU [identity] [cpu-usage]\" cpu-above=85 labels=lab name=\\\r\n    lab-cpu severity=high\r\nadd action.log=\"MEM [identity] [mem-usage]\" labels=lab mem-above=80 name=\\\r\n    lab-memory severity=high\r\nadd action.log=\"DISK [identity] [hdd-usage]\" hdd-above=80 labels=lab name=\\\r\n    lab-disk severity=high\r\nadd action.log=\"REBOOT [identity]\" labels=lab name=lab-reboot rebooted=yes\r\nadd action.log=\"IFACE [identity] [iface-name]\" interface-change=added \\\r\n    interface-type=bridge labels=remote name=lab-interface\r\nadd action.log=\"LOG [identity] [message]\" labels=remote log-regex=\\\r\n    CMR-LAB-PROBE log-topics=warning name=lab-log\r\nadd action.log=\"VERSION [identity] [available-version]\" labels=lab name=\\\r\n    lab-available upgrade-available=yes\r\nadd action.log=\"UPGRADE [identity] [upgrade-state]\" labels=lab name=\\\r\n    lab-upgrade-done upgrade-done=success\r\nadd action.http-body=\"DOWN [identity] [address]\" .http-headers=\\\r\n    \"Content-Type: text/plain\" .http-method=post .http-url=\\\r\n    http://10.0.2.2:38405/cmr .log=\"DOWN [identity] [address]\" \\\r\n    disconnected-more-than=10s labels=remote name=lab-down severity=high\r\nadd action.http-body=\"UP [identity] [address]\" .http-headers=\\\r\n    \"Content-Type: text/plain\" .http-method=post .http-url=\\\r\n    http://10.0.2.2:38405/cmr .log=\"UP [identity] [address]\" connected=yes \\\r\n    labels=remote name=lab-connected reset-on-disconnect=yes\r\n/cmr device\r\nadd identity=cmr-controller ids=\"32DCCCD04B40DF1554514295F10B1DB138968B4B0B183\\\r\n    95B2259B2CEE21F9D1D/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A0652\\\r\n    57C9389185\" labels=lab,controller pairing-requirement=none\r\nadd identity=cmr-transit ids=\"70C68503906614CB4207B7B1B74AFF6E963323CC8F3F2AD9\\\r\n    A4A8F2D80B0CA3D4/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C\\\r\n    9389185\" labels=lab,transit pairing-requirement=none\r\nadd identity=cmr-remote ids=\"90BCD4F642A2F4F44D0CDF3E39CC5C40F17C27D0E4381B79B\\\r\n    619849E8448D46B/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9\\\r\n    389185\" labels=lab,remote pairing-requirement=none\r\nadd identity=cmr-local ids=\"4DC432446179FF26F15C2A7705BCD7DE5D6DEE0A96B290C7D3\\\r\n    5C5A8838888A6A/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C93\\\r\n    89185\" labels=lab,local pairing-requirement=none\r\n/cmr layout\r\nadd name=lab\r\n/cmr layout node\r\nadd device=cmr-controller layout=lab name=cmr-controller\r\nadd device=cmr-transit@192.0.2.2 layout=lab name=cmr-transit\r\nadd device=cmr-remote@198.51.100.2 layout=lab name=cmr-remote\r\n/cmr layout link\r\nadd layout=lab node1=cmr-controller node2=cmr-transit\r\nadd layout=lab node1=cmr-transit node2=cmr-remote\r\n/cmr upgrade\r\nadd channel=7.26beta7 fail-policy=stop labels=lab name=lab-pinned strategy=\\\r\n    sequential\r\n/cmr\r\nset auto-labels=all enabled=yes fetch-comments=yes packages-directory=\\\r\n    cmr-lab-packages/ track-topology=yes\r\n/cmr layout node\r\nadd device=*4 layout=lab name=cmr-local\r\n/cmr layout link\r\nadd layout=lab node1=cmr-controller node2=cmr-local",
+    "verboseExport": "# 2026-11-24 18:32:36 by RouterOS 7.26beta7\r\n# system id = dGCMCDsp3mN\r\n#\r\n/cmr alert\r\nadd action.log=\"CPU [identity] [cpu-usage]\" cpu-above=85 labels=lab name=\\\r\n    lab-cpu severity=high\r\nadd action.log=\"MEM [identity] [mem-usage]\" labels=lab mem-above=80 name=\\\r\n    lab-memory severity=high\r\nadd action.log=\"DISK [identity] [hdd-usage]\" hdd-above=80 labels=lab name=\\\r\n    lab-disk severity=high\r\nadd action.log=\"REBOOT [identity]\" labels=lab name=lab-reboot rebooted=yes\r\nadd action.log=\"IFACE [identity] [iface-name]\" interface-change=added \\\r\n    interface-type=bridge labels=remote name=lab-interface\r\nadd action.log=\"LOG [identity] [message]\" labels=remote log-regex=\\\r\n    CMR-LAB-PROBE log-topics=warning name=lab-log\r\nadd action.log=\"VERSION [identity] [available-version]\" labels=lab name=\\\r\n    lab-available upgrade-available=yes\r\nadd action.log=\"UPGRADE [identity] [upgrade-state]\" labels=lab name=\\\r\n    lab-upgrade-done upgrade-done=success\r\nadd action.http-body=\"DOWN [identity] [address]\" .http-headers=\\\r\n    \"Content-Type: text/plain\" .http-method=post .http-url=\\\r\n    http://10.0.2.2:38405/cmr .log=\"DOWN [identity] [address]\" \\\r\n    disconnected-more-than=10s labels=remote name=lab-down severity=high\r\nadd action.http-body=\"UP [identity] [address]\" .http-headers=\\\r\n    \"Content-Type: text/plain\" .http-method=post .http-url=\\\r\n    http://10.0.2.2:38405/cmr .log=\"UP [identity] [address]\" connected=yes \\\r\n    labels=remote name=lab-connected reset-on-disconnect=yes\r\n/cmr client\r\n# settings ignored because used by local controller, peer 1124407.\r\nset enabled=no\r\n/cmr device\r\nadd identity=cmr-controller ids=\"32DCCCD04B40DF1554514295F10B1DB138968B4B0B183\\\r\n    95B2259B2CEE21F9D1D/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A0652\\\r\n    57C9389185\" labels=lab,controller pairing-requirement=none\r\nadd identity=cmr-transit ids=\"70C68503906614CB4207B7B1B74AFF6E963323CC8F3F2AD9\\\r\n    A4A8F2D80B0CA3D4/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C\\\r\n    9389185\" labels=lab,transit pairing-requirement=none\r\nadd identity=cmr-remote ids=\"90BCD4F642A2F4F44D0CDF3E39CC5C40F17C27D0E4381B79B\\\r\n    619849E8448D46B/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9\\\r\n    389185\" labels=lab,remote pairing-requirement=none\r\nadd identity=cmr-local ids=\"4DC432446179FF26F15C2A7705BCD7DE5D6DEE0A96B290C7D3\\\r\n    5C5A8838888A6A/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C93\\\r\n    89185\" labels=lab,local pairing-requirement=none\r\n/cmr layout\r\nadd name=lab\r\n/cmr layout node\r\nadd device=cmr-controller layout=lab name=cmr-controller\r\nadd device=cmr-transit@192.0.2.2 layout=lab name=cmr-transit\r\nadd device=cmr-remote@198.51.100.2 layout=lab name=cmr-remote\r\n/cmr layout link\r\nadd layout=lab node1=cmr-controller node2=cmr-transit\r\nadd layout=lab node1=cmr-transit node2=cmr-remote\r\n/cmr upgrade\r\nadd channel=7.26beta7 fail-policy=stop labels=lab name=lab-pinned strategy=\\\r\n    sequential\r\n/cmr\r\nset auto-labels=all enabled=yes fetch-comments=yes packages-directory=\\\r\n    cmr-lab-packages/ track-topology=yes\r\n/cmr layout node\r\nadd device=*4 layout=lab name=cmr-local\r\n/cmr layout link\r\nadd layout=lab node1=cmr-controller node2=cmr-local",
+    "fullVerboseExportHasServerSettings": true,
+    "binaryBackup": {
+      "before": {
+        "settings": [
+          {
+            "auto-labels": "all",
+            "enabled": "yes",
+            "fetch-comments": "true",
+            "local-id": "11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185BA6F71843A692D038BD8CF5FAFBCCC36BCCF1C5C03D5C9B11399080633DEF74A",
+            "packages-directory": "cmr-lab-packages/",
+            "self-client-id": "32DCCCD04B40DF1554514295F10B1DB138968B4B0B18395B2259B2CEE21F9D1D88FC0B72CF45FB3CBE7FA61245A1E1912E5665C8051E6C5C550D79E9C2495A5F",
+            "track-topology": "true"
+          }
+        ],
+        "devices": [
+          {
+            "identity": "cmr-controller",
+            "ids": "32DCCCD04B40DF1554514295F10B1DB138968B4B0B18395B2259B2CEE21F9D1D/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+            "labels": "lab,controller"
+          },
+          {
+            "identity": "cmr-transit",
+            "ids": "70C68503906614CB4207B7B1B74AFF6E963323CC8F3F2AD9A4A8F2D80B0CA3D4/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+            "labels": "lab,transit"
+          },
+          {
+            "identity": "cmr-remote",
+            "ids": "90BCD4F642A2F4F44D0CDF3E39CC5C40F17C27D0E4381B79B619849E8448D46B/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+            "labels": "lab,remote"
+          },
+          {
+            "identity": "cmr-local",
+            "ids": "4DC432446179FF26F15C2A7705BCD7DE5D6DEE0A96B290C7D35C5A8838888A6A/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+            "labels": "lab,local"
+          }
+        ]
+      },
+      "after": {
+        "settings": [
+          {
+            "auto-labels": "all",
+            "enabled": "yes",
+            "fetch-comments": "true",
+            "local-id": "11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185BA6F71843A692D038BD8CF5FAFBCCC36BCCF1C5C03D5C9B11399080633DEF74A",
+            "packages-directory": "cmr-lab-packages/",
+            "self-client-id": "32DCCCD04B40DF1554514295F10B1DB138968B4B0B18395B2259B2CEE21F9D1D88FC0B72CF45FB3CBE7FA61245A1E1912E5665C8051E6C5C550D79E9C2495A5F",
+            "track-topology": "true"
+          }
+        ],
+        "devices": [
+          {
+            "identity": "cmr-controller",
+            "ids": "32DCCCD04B40DF1554514295F10B1DB138968B4B0B18395B2259B2CEE21F9D1D/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+            "labels": "lab,controller"
+          },
+          {
+            "identity": "cmr-transit",
+            "ids": "70C68503906614CB4207B7B1B74AFF6E963323CC8F3F2AD9A4A8F2D80B0CA3D4/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+            "labels": "lab,transit"
+          },
+          {
+            "identity": "cmr-remote",
+            "ids": "90BCD4F642A2F4F44D0CDF3E39CC5C40F17C27D0E4381B79B619849E8448D46B/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+            "labels": "lab,remote"
+          },
+          {
+            "identity": "cmr-local",
+            "ids": "4DC432446179FF26F15C2A7705BCD7DE5D6DEE0A96B290C7D35C5A8838888A6A/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+            "labels": "lab,local"
+          }
+        ]
+      },
+      "restored": true
+    }
+  },
+  "automaticReconnect": true,
+  "devices": [
+    {
+      ".id": "*1",
+      "allowed-versions": "7186604..7ffffff,7.23.7+,6.49.22+",
+      "auto-labels": "7.26beta7,x86,CHR,cmr-controller",
+      "board": "CHR",
+      "channel": "7.26beta7",
+      "connected": "false",
+      "connected-time": "1m21s",
+      "controller": "true",
+      "identity": "cmr-controller",
+      "ids": "32DCCCD04B40DF1554514295F10B1DB138968B4B0B18395B2259B2CEE21F9D1D/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+      "labels": "lab,controller",
+      "minimum-version": "7.26beta1",
+      "packages": "cmr,routeros",
+      "pairing-requirement": "none",
+      "peer": "peer-32dc",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "lab-pinned",
+      "uptime": "1m23s",
+      "version": "7.26beta7"
+    },
+    {
+      ".id": "*2",
+      "address": "192.0.2.2",
+      "allowed-versions": "7186604..7ffffff,7.23.7+,6.49.22+",
+      "auto-labels": "7.26beta7,x86,CHR,cmr-transit,192.0.2.2",
+      "board": "CHR",
+      "channel": "7.26beta7",
+      "connected": "true",
+      "connected-time": "1m17s",
+      "identity": "cmr-transit",
+      "ids": "70C68503906614CB4207B7B1B74AFF6E963323CC8F3F2AD9A4A8F2D80B0CA3D4/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+      "labels": "lab,transit",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros",
+      "pairing-requirement": "none",
+      "peer": "peer-70c6",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "lab-pinned",
+      "uptime": "4m35s",
+      "version": "7.26beta7"
+    },
+    {
+      ".id": "*3",
+      "address": "198.51.100.2",
+      "allowed-versions": "7186604..7ffffff,7.23.7+,6.49.22+",
+      "auto-labels": "7.26beta7,x86,CHR,cmr-remote,198.51.100.2",
+      "board": "CHR",
+      "channel": "7.26beta7",
+      "connected": "true",
+      "connected-time": "1s",
+      "identity": "cmr-remote",
+      "ids": "90BCD4F642A2F4F44D0CDF3E39CC5C40F17C27D0E4381B79B619849E8448D46B/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+      "labels": "lab,remote",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros",
+      "pairing-requirement": "none",
+      "peer": "peer-90bc",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "lab-pinned",
+      "uptime": "23s",
+      "version": "7.26beta7"
+    },
+    {
+      ".id": "*A",
+      "address": "203.0.113.2",
+      "allowed-versions": "7186604..7ffffff,7.23.7+,6.49.22+",
+      "auto-labels": "7.26beta7,x86,CHR,cmr-local,203.0.113.2",
+      "board": "CHR",
+      "channel": "7.26beta7",
+      "connected": "true",
+      "connected-time": "1m17s",
+      "identity": "cmr-local",
+      "ids": "4DC432446179FF26F15C2A7705BCD7DE5D6DEE0A96B290C7D35C5A8838888A6A/11244078E6B88350BAEDFE3C41420744B0C8551A9C5BDD777A065257C9389185",
+      "labels": "lab,local",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros",
+      "pairing-requirement": "none",
+      "peer": "peer-4dc4",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "lab-pinned",
+      "uptime": "3m12s",
+      "version": "7.26beta7"
+    }
+  ],
+  "alerts": [
+    {
+      ".id": "*1",
+      "action-failures": "0",
+      "action.log": "[device] CPU usage is above 95% ([cpu-usage]%)",
+      "action.log-topics": "cmr,warning",
+      "category": "performance",
+      "comment": "example",
+      "cpu-above": "95",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "cpu>95%",
+      "severity": "high"
+    },
+    {
+      ".id": "*2",
+      "action-failures": "0",
+      "action.log": "[device] memory usage is above 80% ([mem-usage]%)",
+      "action.log-topics": "cmr,warning",
+      "category": "performance",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "mem-above": "80",
+      "name": "memory>80%",
+      "severity": "high"
+    },
+    {
+      ".id": "*3",
+      "action-failures": "0",
+      "action.log": "[device] failed to upgrade from [version] to [upgrade-version], error: [upgrade-error]",
+      "action.log-topics": "cmr,warning",
+      "category": "version",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "upgrade failed",
+      "severity": "high",
+      "upgrade-done": "fail"
+    },
+    {
+      ".id": "*4",
+      "action-failures": "0",
+      "action.log": "[device] disconnected for more than 1h",
+      "action.log-topics": "cmr,warning",
+      "category": "availability",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "disconnected-more-than": "1h",
+      "fired": "0",
+      "labels": "all",
+      "name": "disconnected for more than 1h",
+      "severity": "high"
+    },
+    {
+      ".id": "*5",
+      "action-failures": "0",
+      "action.log": "[device] has new version available [available-version]",
+      "category": "version",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "upgrade available",
+      "severity": "medium",
+      "upgrade-available": "true"
+    },
+    {
+      ".id": "*6",
+      "action-failures": "0",
+      "action.log": "[device] has successfully upgraded to version [version]",
+      "category": "version",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "upgrade successful",
+      "severity": "medium",
+      "upgrade-done": "success"
+    },
+    {
+      ".id": "*7",
+      "action-failures": "0",
+      "action.log": "[device] is ready to be paired",
+      "category": "availability",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "unpaired device connected",
+      "severity": "medium",
+      "unpaired-device-connected": "true"
+    },
+    {
+      ".id": "*8",
+      "action-failures": "0",
+      "action.log": "[device] rebooted",
+      "category": "availability",
+      "comment": "example",
+      "devices": "0",
+      "devices-on": "0",
+      "disabled": "true",
+      "fired": "0",
+      "labels": "all",
+      "name": "rebooted",
+      "rebooted": "true",
+      "severity": "medium"
+    },
+    {
+      ".id": "*9",
+      "action-failures": "0",
+      "action.log": "CPU [identity] [cpu-usage]",
+      "category": "performance",
+      "cpu-above": "85",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "lab",
+      "name": "lab-cpu",
+      "severity": "high"
+    },
+    {
+      ".id": "*A",
+      "action-failures": "0",
+      "action.log": "MEM [identity] [mem-usage]",
+      "category": "performance",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "lab",
+      "mem-above": "80",
+      "name": "lab-memory",
+      "severity": "high"
+    },
+    {
+      ".id": "*B",
+      "action-failures": "0",
+      "action.log": "DISK [identity] [hdd-usage]",
+      "category": "performance",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "hdd-above": "80",
+      "labels": "lab",
+      "name": "lab-disk",
+      "severity": "high"
+    },
+    {
+      ".id": "*C",
+      "action-failures": "0",
+      "action.log": "REBOOT [identity]",
+      "category": "availability",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "1",
+      "labels": "lab",
+      "name": "lab-reboot",
+      "rebooted": "true",
+      "severity": "medium"
+    },
+    {
+      ".id": "*D",
+      "action-failures": "0",
+      "action.log": "IFACE [identity] [iface-name]",
+      "category": "network",
+      "devices": "1",
+      "devices-on": "0",
+      "fired": "0",
+      "interface-change": "added",
+      "interface-type": "bridge",
+      "labels": "remote",
+      "name": "lab-interface",
+      "severity": "medium"
+    },
+    {
+      ".id": "*E",
+      "action-failures": "0",
+      "action.log": "LOG [identity] [message]",
+      "category": "logging",
+      "devices": "1",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "remote",
+      "log-regex": "CMR-LAB-PROBE",
+      "log-topics": "warning",
+      "name": "lab-log",
+      "severity": "medium"
+    },
+    {
+      ".id": "*F",
+      "action-failures": "0",
+      "action.log": "VERSION [identity] [available-version]",
+      "category": "version",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "lab",
+      "name": "lab-available",
+      "severity": "medium",
+      "upgrade-available": "true"
+    },
+    {
+      ".id": "*10",
+      "action-failures": "0",
+      "action.log": "UPGRADE [identity] [upgrade-state]",
+      "category": "version",
+      "devices": "4",
+      "devices-on": "0",
+      "fired": "0",
+      "labels": "lab",
+      "name": "lab-upgrade-done",
+      "severity": "medium",
+      "upgrade-done": "success"
+    },
+    {
+      ".id": "*11",
+      "action-failures": "0",
+      "action.http-body": "DOWN [identity] [address]",
+      "action.http-headers": "Content-Type: text/plain",
+      "action.http-method": "post",
+      "action.http-url": "http://10.0.2.2:38405/cmr",
+      "action.log": "DOWN [identity] [address]",
+      "category": "availability",
+      "devices": "1",
+      "devices-on": "0",
+      "disconnected-more-than": "10s",
+      "fired": "1",
+      "labels": "remote",
+      "name": "lab-down",
+      "severity": "high"
+    },
+    {
+      ".id": "*12",
+      "action-failures": "0",
+      "action.http-body": "UP [identity] [address]",
+      "action.http-headers": "Content-Type: text/plain",
+      "action.http-method": "post",
+      "action.http-url": "http://10.0.2.2:38405/cmr",
+      "action.log": "UP [identity] [address]",
+      "category": "availability",
+      "connected": "true",
+      "devices": "1",
+      "devices-on": "1",
+      "fired": "2",
+      "labels": "remote",
+      "name": "lab-connected",
+      "reset-on-disconnect": "yes",
+      "severity": "medium"
+    }
+  ]
+}

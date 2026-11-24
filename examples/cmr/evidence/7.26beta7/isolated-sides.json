@@ -1,0 +1,363 @@
+{
+  "study": "isolated",
+  "version": "7.26beta7",
+  "timestamp": "2026-11-24T19:15:14.488Z",
+  "arch": "x86",
+  "host": "linux/x64",
+  "question": "Does the single credentialed pair, typed on the serial console, still half-pair when ether1 (the user-mode management NIC) is down on both routers, one, or neither?",
+  "parameters": {
+    "boots": 2,
+    "trials": 8,
+    "transport": "console",
+    "ether1Down": [
+      "controller",
+      "client",
+      "none",
+      "both"
+    ]
+  },
+  "trials": [
+    {
+      "boot": "1",
+      "trial": "1",
+      "ether1Down": "controller",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "2",
+      "ether1Down": "client",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "3",
+      "ether1Down": "none",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "4",
+      "ether1Down": "both",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "5",
+      "ether1Down": "controller",
+      "pairStatus": "device:ok, cmr:ok",
+      "halfPairedAfterPair": "true",
+      "clientAfterPair": "paired,connected",
+      "selectable": "false",
+      "clientAfterRestart": "waiting-for-pairing,connected",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "6",
+      "ether1Down": "client",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "7",
+      "ether1Down": "none",
+      "pairStatus": "device:ok, cmr:ok",
+      "halfPairedAfterPair": "true",
+      "clientAfterPair": "paired,connected",
+      "selectable": "false",
+      "clientAfterRestart": "waiting-for-pairing,connected",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "8",
+      "ether1Down": "both",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "1",
+      "ether1Down": "controller",
+      "pairStatus": "device:ok, cmr:ok",
+      "halfPairedAfterPair": "true",
+      "clientAfterPair": "paired,connected",
+      "selectable": "false",
+      "clientAfterRestart": "waiting-for-pairing,connected",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "2",
+      "ether1Down": "client",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "3",
+      "ether1Down": "none",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "4",
+      "ether1Down": "both",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "5",
+      "ether1Down": "controller",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "6",
+      "ether1Down": "client",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "7",
+      "ether1Down": "none",
+      "pairStatus": "device:ok, cmr:ok",
+      "halfPairedAfterPair": "true",
+      "clientAfterPair": "paired,connected",
+      "selectable": "false",
+      "clientAfterRestart": "waiting-for-pairing,connected",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "8",
+      "ether1Down": "both",
+      "pairStatus": "paired",
+      "halfPairedAfterPair": "false",
+      "clientAfterPair": "paired,connected",
+      "selectable": "true",
+      "clientAfterRestart": "paired,connected",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    }
+  ],
+  "detail": [
+    {
+      "boot": 1,
+      "trial": 1,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n0 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=27s\n    uptime=2m29s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-8ebc8d\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n0 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=3m3s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 1,
+      "trial": 2,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n1 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=3m26s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-567008\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n1 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=3m49s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 1,
+      "trial": 3,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n2 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=4m13s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-e91b1a\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n2 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=7s\n    uptime=4m36s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 1,
+      "trial": 4,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n3 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=4m52s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-f261cc\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n3 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=5m15s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 1,
+      "trial": 5,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n4 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    address=192.0.2.2 pairing-requirement=none\n    auto-labels=x86,CHR,cmr-client,192.0.2.2 packages=routeros\n    state=\"pair: device:ok, cmr:ok\" connected-time=17s uptime=5m38s serial=\"\"\n    identity=\"cmr-client\"",
+      "runScript": "failure: no devices selected\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: P - PENDING; C - CONNECTED\n5  PC\n      ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/9744\n         93D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n      peer=peer-918d board=\"CHR\" version=\"7.26beta7\"\n      minimum-version=\"7.26beta1\" address=192.0.2.2 pairing-requirement=confirm\n      auto-labels=x86,CHR,cmr-client,192.0.2.2 packages=routeros\n      state=\"pair: device:ok, cmr:waiting confirmation\" connected-time=6s\n      uptime=6m serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 1,
+      "trial": 6,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n6 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=6m23s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-acfde9\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n6 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=6m46s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 1,
+      "trial": 7,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n7 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    address=192.0.2.2 pairing-requirement=none\n    auto-labels=x86,CHR,cmr-client,192.0.2.2 packages=routeros\n    state=\"pair: device:ok, cmr:ok\" connected-time=17s uptime=7m10s serial=\"\"\n    identity=\"cmr-client\"",
+      "runScript": "failure: no devices selected\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: P - PENDING; C - CONNECTED\n8  PC\n      ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/9744\n         93D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n      peer=peer-918d board=\"CHR\" version=\"7.26beta7\"\n      minimum-version=\"7.26beta1\" address=192.0.2.2 pairing-requirement=confirm\n      auto-labels=x86,CHR,cmr-client,192.0.2.2 packages=routeros\n      state=\"pair: device:ok, cmr:waiting confirmation\" connected-time=7s\n      uptime=7m32s serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 1,
+      "trial": 8,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n9 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=7m48s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-dba642\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n9 C\n    ids=918D277A95A798F887F815A41CFEB93E362C1191F8CED043171CB344507FE731/974493\n       D7F6ACB23CCC3790916D5A3D9DC3C904A3F9C35286593F3940D06E6980\n    peer=peer-918d board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=8m11s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 2,
+      "trial": 1,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n0 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    address=192.0.2.2 pairing-requirement=none\n    auto-labels=x86,CHR,cmr-client,192.0.2.2 packages=routeros\n    state=\"pair: device:ok, cmr:ok\" connected-time=28s uptime=2m33s serial=\"\"\n    identity=\"cmr-client\"",
+      "runScript": "failure: no devices selected\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: P - PENDING; C - CONNECTED\n1  PC\n      ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F7\n         71C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n      peer=peer-b347 board=\"CHR\" version=\"7.26beta7\"\n      minimum-version=\"7.26beta1\" address=192.0.2.2 pairing-requirement=confirm\n      auto-labels=x86,CHR,cmr-client,192.0.2.2 packages=routeros\n      state=\"pair: device:ok, cmr:waiting confirmation\" connected-time=6s\n      uptime=3m5s serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 2,
+      "trial": 2,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n2 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=3m28s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-63c80f\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n2 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=3m51s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 2,
+      "trial": 3,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n3 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=4m14s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-e60889\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n3 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=4m36s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 2,
+      "trial": 4,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n4 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=18s\n    uptime=4m55s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-39bcf7\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n4 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=5m17s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 2,
+      "trial": 5,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n5 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=5m40s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-c08fd6\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n5 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=6m3s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 2,
+      "trial": 6,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n6 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=6m26s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-d05650\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n6 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=6m49s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 2,
+      "trial": 7,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n7 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    address=192.0.2.2 pairing-requirement=none\n    auto-labels=x86,CHR,cmr-client,192.0.2.2 packages=routeros\n    state=\"pair: device:ok, cmr:ok\" connected-time=17s uptime=7m13s serial=\"\"\n    identity=\"cmr-client\"",
+      "runScript": "failure: no devices selected\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: P - PENDING; C - CONNECTED\n8  PC\n      ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F7\n         71C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n      peer=peer-b347 board=\"CHR\" version=\"7.26beta7\"\n      minimum-version=\"7.26beta1\" address=192.0.2.2 pairing-requirement=confirm\n      auto-labels=x86,CHR,cmr-client,192.0.2.2 packages=routeros\n      state=\"pair: device:ok, cmr:waiting confirmation\" connected-time=7s\n      uptime=7m35s serial=\"\" identity=\"cmr-client\""
+    },
+    {
+      "boot": 2,
+      "trial": 8,
+      "pairOutput": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "pairTimedOut": false,
+      "rowAfterPair": "Flags: C - CONNECTED\n9 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=17s\n    uptime=7m51s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\"",
+      "runScript": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT    \ncmr-client@192.0.2.2  success  iso-a0b700\n[quickchr@cmr-controller] >                                                    [quickchr@cmr-controller] > ",
+      "rowAfterRestart": "Flags: C - CONNECTED\n9 C\n    ids=B34739283A4F5077894B6B6B50B0BB4ED6956C7AB8D1516FE6A0B7E20ABABF65/66F771\n       C3DA206BE9E1670ADB6D1AB701BFA73326527C7B313A9406C83DC6581B\n    peer=peer-b347 board=\"CHR\" version=\"7.26beta7\" minimum-version=\"7.26beta1\"\n    allowed-versions=\"7186604..7ffffff,7.23.7+,6.49.22+\" address=192.0.2.2\n    pairing-requirement=none auto-labels=x86,CHR,cmr-client,192.0.2.2\n    packages=routeros upgrade-rule=default channel=stable connected-time=6s\n    uptime=8m14s alerts=0/0 0/0/0/0 serial=\"\" identity=\"cmr-client\""
+    }
+  ]
+}
