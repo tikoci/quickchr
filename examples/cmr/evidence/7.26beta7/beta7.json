@@ -1,7 +1,7 @@
 {
   "study": "beta7",
   "version": "7.26beta7",
-  "timestamp": "2026-11-24T18:33:36.790Z",
+  "timestamp": "2026-11-24T20:28:28.271Z",
   "arch": "x86",
   "host": "linux/x64",
   "question": "Do the 7.26beta7 CMR changelog lines (client VRF, upgrade to the running version, import after export) hold?",
@@ -11,7 +11,7 @@
       "controller-addresses": "192.0.2.1",
       "controller-identity": "cmr-controller",
       "enabled": "yes",
-      "local-id": "1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62EBF2AD366030368B9539F1D41A31DCAE84E285192D79AC3C079331FE135EC601A98BE6EFE1C41A0",
+      "local-id": "FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9B678FB6F853A4C54713DDC796C513E6B30D15F4000DD0C00BA8BBE17D2C7256B7F22C48ADE2DF66",
       "status": "paired,connected"
     },
     "vrfMainSet": "",
@@ -46,7 +46,7 @@
       "controller-addresses": "192.0.2.1",
       "controller-identity": "cmr-controller",
       "enabled": "yes",
-      "local-id": "1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62EBF2AD366030368B9539F1D41A31DCAE84E285192D79AC3C079331FE135EC601A98BE6EFE1C41A0",
+      "local-id": "FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9B678FB6F853A4C54713DDC796C513E6B30D15F4000DD0C00BA8BBE17D2C7256B7F22C48ADE2DF66",
       "status": "paired,disconnected",
       "vrf": "cmr-vrf"
     },
@@ -75,16 +75,16 @@
       "connected": "true",
       "connected-time": "2s",
       "identity": "cmr-client",
-      "ids": "1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62EBF2AD366030368/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+      "ids": "FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9B678FB6F853A4C5/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
       "minimum-version": "7.26beta1",
       "packages": "routeros",
       "pairing-requirement": "none",
-      "peer": "peer-1f05",
+      "peer": "peer-fefe",
       "serial": "",
       "stale": "false",
       "upgrade-available": "false",
       "upgrade-rule": "default",
-      "uptime": "3m",
+      "uptime": "2m58s",
       "version": "7.26beta7"
     },
     "backInMain": {
@@ -106,8 +106,8 @@
       {
         ".id": "*1",
         "channel": "7.26beta7",
-        "schedule-time": "2026-11-24 18:37:53",
-        "start-time": "2026-11-24 18:37:54",
+        "schedule-time": "2026-11-24 20:32:32",
+        "start-time": "2026-11-24 20:32:33",
         "state": "done",
         "success": "1/1"
       }
@@ -122,22 +122,22 @@
       "connected": "true",
       "connected-time": "32s",
       "identity": "cmr-client",
-      "ids": "1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62EBF2AD366030368/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+      "ids": "FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9B678FB6F853A4C5/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
       "minimum-version": "7.26beta1",
       "packages": "routeros",
       "pairing-requirement": "none",
-      "peer": "peer-1f05",
+      "peer": "peer-fefe",
       "serial": "",
       "stale": "false",
       "upgrade-available": "false",
       "upgrade-rule": "default",
-      "uptime": "3m42s",
+      "uptime": "3m40s",
       "version": "7.26beta7"
     },
     "clientVersionAfterUpgrade": "7.26beta7",
     "clientUptime": {
-      "before": "3m10s",
-      "after": "3m42s"
+      "before": "3m8s",
+      "after": "3m40s"
     },
     "afterUpgrade": {
       "clientStatus": "paired,connected",
@@ -151,17 +151,17 @@
       },
       "verdict": "paired"
     },
-    "export": "# 2026-11-24 18:38:25 by RouterOS 7.26beta7\n# system id = m1Tq7rhTiYO\n#\n/cmr device\nadd identity=cmr-controller ids=\"698F5125D70581CC341DB92A710FC51B0734BD9395D79\\\n    1052EE2BAFC367ECBB9/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F6\\\n    1CEA3B0613\" pairing-requirement=none\nadd identity=cmr-client ids=\"1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62\\\n    EBF2AD366030368/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA\\\n    3B0613\" labels=lab,import pairing-requirement=none\n/cmr\nset enabled=yes",
+    "export": "# 2026-11-24 20:33:04 by RouterOS 7.26beta7\n# system id = G8e4EbjrmlP\n#\n/cmr device\nadd identity=cmr-controller ids=\"6907ED4B448208E7881CF7E5FFD20EDA82B2FCCC4AEF2\\\n    7783F4E8FEB6B3A9289/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722F\\\n    BA5E2D708C\" pairing-requirement=none\nadd identity=cmr-client ids=\"FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9\\\n    B678FB6F853A4C5/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E\\\n    2D708C\" labels=lab,import pairing-requirement=none\n/cmr\nset enabled=yes",
     "rowsBeforeImport": [
       {
         "identity": "cmr-controller",
-        "ids": "698F5125D70581CC341DB92A710FC51B0734BD9395D791052EE2BAFC367ECBB9/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "6907ED4B448208E7881CF7E5FFD20EDA82B2FCCC4AEF27783F4E8FEB6B3A9289/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "pairing-requirement": "none",
         "connected": "false"
       },
       {
         "identity": "cmr-client",
-        "ids": "1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62EBF2AD366030368/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9B678FB6F853A4C5/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "labels": "lab,import",
         "pairing-requirement": "none",
         "connected": "true"
@@ -171,13 +171,13 @@
     "rowsAfterImportAsIs": [
       {
         "identity": "cmr-controller",
-        "ids": "698F5125D70581CC341DB92A710FC51B0734BD9395D791052EE2BAFC367ECBB9/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "6907ED4B448208E7881CF7E5FFD20EDA82B2FCCC4AEF27783F4E8FEB6B3A9289/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "pairing-requirement": "none",
         "connected": "false"
       },
       {
         "identity": "cmr-client",
-        "ids": "1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62EBF2AD366030368/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9B678FB6F853A4C5/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "labels": "lab,import",
         "pairing-requirement": "none",
         "connected": "true"
@@ -205,7 +205,7 @@
     "rowsAfterImportAfterRemove": [
       {
         "identity": "cmr-controller",
-        "ids": "698F5125D70581CC341DB92A710FC51B0734BD9395D791052EE2BAFC367ECBB9/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "6907ED4B448208E7881CF7E5FFD20EDA82B2FCCC4AEF27783F4E8FEB6B3A9289/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "pairing-requirement": "none",
         "connected": "false"
       }
@@ -230,12 +230,12 @@
     "rowsAfterRemoveAll": [
       {
         "identity": "cmr-controller",
-        "ids": "698F5125D70581CC341DB92A710FC51B0734BD9395D791052EE2BAFC367ECBB9/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "6907ED4B448208E7881CF7E5FFD20EDA82B2FCCC4AEF27783F4E8FEB6B3A9289/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "pairing-requirement": "none",
         "connected": "false"
       },
       {
-        "ids": "1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62EBF2AD366030368/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9B678FB6F853A4C5/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "pairing-requirement": "confirm",
         "connected": "true",
         "state": "pair: device:password required, cmr:waiting confirmation"
@@ -245,13 +245,13 @@
     "rowsAfterImportAfterRemoveAll": [
       {
         "identity": "cmr-controller",
-        "ids": "698F5125D70581CC341DB92A710FC51B0734BD9395D791052EE2BAFC367ECBB9/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "6907ED4B448208E7881CF7E5FFD20EDA82B2FCCC4AEF27783F4E8FEB6B3A9289/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "pairing-requirement": "none",
         "connected": "false"
       },
       {
         "identity": "cmr-client",
-        "ids": "1F05E71FDC5B91E768D654C0B3607FE71957EBE3C77B21D62EBF2AD366030368/3950AB84D7BAB363259E2381E14174241C48BC6B5DAA589237B8F61CEA3B0613",
+        "ids": "FEFE56493E954AEA6E6BCD7AB1DF302689505B9FAA958B6E9B678FB6F853A4C5/5E2C219D22A7BCB734809A3CB00D9B7EF550D837B2B0433D94722FBA5E2D708C",
         "pairing-requirement": "confirm",
         "connected": "true",
         "state": "pair: device:password required, cmr:waiting confirmation"
