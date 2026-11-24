@@ -49,3 +49,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Windows filesystem artifacts
 System Volume Information/
+
+# lab probe raw output (summaries are committed, raw JSON is not)
+test/lab/download-origin/results/*.json
+test/lab/download-origin/results/*.jsonl

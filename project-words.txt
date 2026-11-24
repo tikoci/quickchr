@@ -140,6 +140,7 @@ enbeep
 endgroup
 enoent
 enoexec
+enotfound
 env
 eperm
 errno
@@ -150,9 +151,11 @@ ethertype
 ethertypes
 etimeout
 euid
+euo
 execve
 failable
 failback
+fdroid
 fflate
 fguser
 figcaption
@@ -185,7 +188,9 @@ highmem
 homecache
 hostfs
 hostfwd
+hostnames
 hotspot
+hsts
 htest
 hvf
 hwaddr
@@ -219,6 +224,7 @@ iqr
 irm
 isa
 kbd
+keepalive
 keepalives
 kexec
 keygen
@@ -487,6 +493,7 @@ tpm
 tsc
 tshark
 Tsvg
+ttfb
 ttl
 tuntap
 tzsp

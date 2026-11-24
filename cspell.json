@@ -12,6 +12,7 @@
 		"dist",
 		".claude/**",
 		"**/*.svg",
+		"test/lab/download-origin/results/*.json",
 		"examples/*/evidence/**"
 	],
 	"useGitignore": true,

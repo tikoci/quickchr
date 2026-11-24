@@ -1226,6 +1226,24 @@ the non-reentrant stop lock. It confirms QEMU exit before clearing the PID or
 releasing named-network membership. Lock wait, hard-stop escalation and final
 exit verification are separate bounded phases outside the guest grace budget.
 
+## Download origin: one documented host (#146, #243)
+
+quickchr downloads RouterOS artifacts from `download.mikrotik.com`, the host MikroTik
+documents. It does not choose between origins at runtime: there is no CDN-first mode
+and no fallback from one host to another. Another origin is only ever a value the
+user sets for the configurable download base URL (#243).
+
+`cdn.mikrotik.com` is such a value. `test/lab/download-origin/REPORT.md` (2026-11-21)
+found it serves byte-identical artifacts for the 12 paths sampled (CHR image and
+all-packages, x86 and arm64, three versions), with the same `.sha256` files and the
+same compared headers (status, size, ETag, Last-Modified, range). Channel files were
+not compared across hosts. Errors, stalls and paired throughput showed no consistent
+difference from `download.mikrotik.com` locally or on GitHub's Linux, macOS and
+Windows runners. Both names resolve to the same MikroTik /24 in Riga, so it is not
+shown to be a geographic CDN. It is undocumented for RouterOS artifacts, and its freshness at a release
+boundary was not observed. The maintainer is asking MikroTik whether it is a
+supported origin.
+
 ## Frozen boot + continue (#214)
 
 Some lab workflows must touch the guest before RouterOS init runs. The driver:
