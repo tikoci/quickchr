@@ -551,6 +551,7 @@ vmm
 vmnet
 vms
 vnd
+vrf
 vrrp
 vxlan
 walltime

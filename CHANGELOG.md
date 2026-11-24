@@ -11,6 +11,22 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Changed
+
+- `examples/cmr/` now defaults to RouterOS 7.26beta7 (beta6 was never published).
+  Every study was re-run on it; `FINDINGS.md` has a beta7 column. The half-pair is
+  unchanged: one credentialed `/cmr/device/pair` half-paired 7 of 9 times, as on
+  beta5. Of the three beta7 changelog lines, client VRF and the same-version upgrade
+  work; importing an export back onto the same controller still fails with
+  `duplicate ids`.
+- `examples/cmr/` has three new studies. `--study beta7` checks those changelog lines
+  on any build. `--study isolated` and `--study transport` are controls for the
+  half-pair: it still happens with the controller's `pair` typed on the serial
+  console and `ether1` (user-mode networking) down on both routers, and over
+  `/rest/execute`, a direct `POST /rest/cmr/device/pair`, or with `duration=30s`, so
+  it is RouterOS behaviour, not the lab's. `exec(…, { via: "console" })` cannot run
+  that control: its typed-ahead sentinel quits interactive views (#321).
+
 ## [0.7.0] — 2026-11-24
 
 ### Breaking (0.7.0)

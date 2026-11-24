@@ -12,10 +12,12 @@
  * Add a study: write `async function <name>(context)` below, register it in STUDIES, and add
  * its question and result rows to FINDINGS.md.
  */
-import type { ChrInstance } from "../../../src/index.ts";
+import { connect } from "node:net";
+import { join } from "node:path";
+import { type ChrInstance, stripAnsi } from "../../../src/index.ts";
 import { check } from "../../lib.ts";
-import { attempt, command, createPairLab, identityOf, operand, quote, read, removeByPrefix, until, type PairLab, type Row } from "./lab.ts";
-import { type Observation, observe, pairClient, pairWith, rebootRouter, resetPairing, restartController, selectable, strategyNames, waitPending, waitStable, type Strategy } from "./pairing.ts";
+import { attempt, command, createPairLab, identityOf, loginOf, operand, quote, read, removeByPrefix, until, type PairLab, type Row } from "./lab.ts";
+import { lastPairStatus, type Observation, observe, pairClient, pairWith, rebootRouter, resetPairing, restartController, selectable, strategyNames, waitPending, waitStable, type Strategy } from "./pairing.ts";
 import { CMR_PORT, wire as wireCapture } from "./wire.ts";
 
 export interface StudyContext {
@@ -481,4 +483,328 @@ async function repair(context: StudyContext): Promise<void> {
 	console.log(JSON.stringify(summary, null, 2));
 }
 
-export const STUDIES: Record<string, (context: StudyContext) => Promise<void>> = { pairing, policy, recheck, wire, repair };
+/**
+ * Q: do the three CMR lines in the 7.26beta7 changelog hold, and what did the same steps do
+ * before? ("add VRF support for the CMR client"; "do not fail an upgrade when the device is
+ * already on the requested version"; "fix import failing with duplicate device ids after
+ * exporting CMR settings".) Runs on any build, so an older one is the baseline.
+ *
+ * 1. VRF: move the client's link (ether2) into a VRF. Without `vrf=` the client can only reach
+ *    the controller through `main`, where the lab resets tcp/54321 on ether1. Then set
+ *    `/cmr/client vrf=` and see whether it reconnects, still paired. Then undo both.
+ * 2. Upgrade to the running version: `/cmr/device/upgrade` with `channel=<running version>`.
+ * 3. Export, then import on the same controller: as-is, after removing the client's row, and
+ *    after removing every row; the last two ask whether an import restores a pairing.
+ */
+async function beta7(context: StudyContext): Promise<void> {
+	context.evidence.question = "Do the 7.26beta7 CMR changelog lines (client VRF, upgrade to the running version, import after export) hold?";
+	await withPairLab(context, async ({ controller, client }) => {
+		await pairClient(controller, client);
+		const identity = await identityOf(client);
+		const find = `[find identity=${quote(identity)}]`;
+		const results: Record<string, unknown> = {};
+		context.evidence.checks = results;
+		const settle = async (description: string, predicate: (o: Observation) => boolean, timeout = 90_000) => {
+			const started = Date.now();
+			let last = await observe(controller, client, identity);
+			const reached = await until(description, async () => {
+				last = await observe(controller, client, identity);
+				return predicate(last);
+			}, timeout).then(() => true, () => false);
+			return { reached, seconds: Math.round((Date.now() - started) / 1000), ...last };
+		};
+		const connected = (o: Observation) => o.clientStatus?.endsWith(",connected") === true;
+
+		// 1. VRF.
+		results.clientBefore = (await read(client, "/cmr/client"))[0];
+		results.vrfMainSet = (await attempt(client, "/cmr/client/set vrf=main")).trim();
+		await command(client, "/ip/vrf/add name=cmr-vrf interfaces=ether2");
+		results.inVrfWithoutSetting = await settle("client drops after its link moves into a VRF", o => !connected(o), 60_000);
+		await Bun.sleep(30_000); // Long enough for retries; it must still be down.
+		results.inVrfWithoutSetting30s = await observe(controller, client, identity);
+		results.vrfSet = (await attempt(client, "/cmr/client/set vrf=cmr-vrf")).trim();
+		results.clientWithVrf = (await read(client, "/cmr/client"))[0];
+		results.inVrfWithSetting = await settle("client reconnects through its VRF", o => o.verdict === "paired", 120_000);
+		results.inVrfSelectable = (await selectable(controller, identity)).selected;
+		results.controllerRowInVrf = (await read(controller, "/cmr/device")).find(r => r.identity === identity);
+		await attempt(client, "/cmr/client/set vrf=main");
+		await command(client, "/ip/vrf/remove [find name=cmr-vrf]");
+		results.backInMain = await settle("client back in main, paired", o => o.verdict === "paired", 120_000);
+
+		// 2. Upgrade to the version the client already runs. The client must not reboot.
+		const uptime = async () => (await read(client, "/system/resource"))[0]?.uptime;
+		const uptimeBefore = await uptime();
+		let upgradeOutput: string;
+		try {
+			upgradeOutput = (await controller.exec(`/cmr/device/upgrade ${find} channel=${context.version}`, { timeout: 120_000 })).output;
+		} catch (error) { upgradeOutput = `error: ${error instanceof Error ? error.message : String(error)}`; }
+		results.sameVersionUpgrade = upgradeOutput.replaceAll("\r", "").trim();
+		await Bun.sleep(30_000);
+		results.upgradeJobs = await read(controller, "/cmr/upgrade/job");
+		results.deviceAfterUpgrade = (await read(controller, "/cmr/device")).find(r => r.identity === identity);
+		results.clientVersionAfterUpgrade = (await read(client, "/system/resource"))[0]?.version;
+		results.clientUptime = { before: uptimeBefore, after: await uptime() };
+		results.afterUpgrade = await observe(controller, client, identity);
+
+		// 3. Export, then import on the same controller.
+		await command(controller, `/cmr/device/set ${find} labels=lab,import`);
+		await command(controller, "/cmr/export file=cmr-lab-export");
+		await until("export file", async () => (await read(controller, "/file")).some(r => r.name === "cmr-lab-export.rsc"), 20_000);
+		results.export = (await command(controller, "/cmr/export")).replaceAll("\r", "");
+		const rowsOf = async () => (await read(controller, "/cmr/device")).map(r => ({ identity: r.identity, ids: r.ids, labels: r.labels, "pairing-requirement": r["pairing-requirement"], connected: r.connected, state: r.state }));
+		results.rowsBeforeImport = await rowsOf();
+		results.importAsIs = (await attempt(controller, "/import file-name=cmr-lab-export.rsc")).replaceAll("\r", "").trim();
+		results.rowsAfterImportAsIs = await rowsOf();
+		results.afterImportAsIs = await observe(controller, client, identity);
+		await command(controller, `/cmr/device/remove ${find}`);
+		results.afterRemove = await settle("client row gone or pending again", o => o.verdict !== "paired", 60_000);
+		results.importAfterRemove = (await attempt(controller, "/import file-name=cmr-lab-export.rsc")).replaceAll("\r", "").trim();
+		results.rowsAfterImportAfterRemove = await rowsOf();
+		results.afterImportAfterRemove = await settle("client paired from the imported row", o => o.verdict === "paired", 60_000);
+		// The export's first `add` is the controller's own row, which always exists on the
+		// controller; an import aborts at the first failing line. Remove every row, then import.
+		results.removeAll = (await attempt(controller, "/cmr/device/remove [find]")).replaceAll("\r", "").trim();
+		results.rowsAfterRemoveAll = await rowsOf();
+		results.importAfterRemoveAll = (await attempt(controller, "/import file-name=cmr-lab-export.rsc")).replaceAll("\r", "").trim();
+		results.rowsAfterImportAfterRemoveAll = await rowsOf();
+		results.afterImportAfterRemoveAll = await settle("client paired from the imported row", o => o.verdict === "paired", 120_000);
+		results.selectableAfterImport = (await selectable(controller, identity)).selected;
+
+		for (const [key, value] of Object.entries(results)) {
+			const text = typeof value === "object" && value !== null ? JSON.stringify("verdict" in value ? { verdict: (value as Observation).verdict, client: (value as Observation).clientStatus, state: (value as Observation).row?.state } : value) : String(value);
+			console.log(`  ${key}: ${text.replaceAll("\n", " ⏎ ").slice(0, 300)}`);
+		}
+	});
+}
+
+/**
+ * Type one line on the serial console the way a person would, with nothing typed ahead, and
+ * return what the terminal showed until the prompt came back. `chr.exec(…, { via: "console" })`
+ * sends an end-of-reply sentinel line right behind the command; an interactive view such as
+ * `/cmr/device/pair` (`-- [Q quit|D dump|C-z pause]`) reads that sentinel as keys, and its `Q`
+ * quits the view. Logs in through `exec` first: the serial session stays logged in. Unix only.
+ */
+async function typed(chr: ChrInstance, line: string, timeout = 120_000): Promise<{ output: string; timedOut: boolean }> {
+	await chr.exec(":put ready", { via: "console", timeout: 30_000 });
+	const socket = connect({ path: join(chr.state.machineDir, "serial.sock") });
+	let buffer = "";
+	let lastData = Date.now();
+	socket.on("data", (data: Buffer) => { buffer += data.toString(); lastData = Date.now(); });
+	try {
+		await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+		// The prompt has returned when "] > " follows the echoed line and the terminal has been quiet for 2 s.
+		const settled = async (from: number, ms: number) => {
+			const deadline = Date.now() + ms;
+			while (Date.now() < deadline) {
+				const echoEnd = buffer.indexOf("\n", from);
+				if (echoEnd >= 0 && buffer.indexOf("] > ", echoEnd) >= 0 && Date.now() - lastData > 2000) return true;
+				await Bun.sleep(200);
+			}
+			return false;
+		};
+		socket.write("\r");
+		await settled(0, 15_000);
+		const start = buffer.length;
+		socket.write(`${line}\r`);
+		const done = await settled(start, timeout);
+		if (!done) {
+			socket.write("q");
+			await settled(start, 15_000);
+		}
+		// The first line is the terminal's echo of the typed line, redrawn as it wraps, so it can
+		// hold fragments of any password in it. Keep only what the command printed after it.
+		const text = stripAnsi(buffer.slice(start)).replaceAll("\r", "");
+		const firstNewline = text.indexOf("\n");
+		return { output: firstNewline >= 0 ? text.slice(firstNewline + 1) : "", timedOut: !done };
+	} finally {
+		socket.destroy();
+	}
+}
+
+/**
+ * Q (control): is the half-pair an artifact of the lab's harness? Every other study sends `pair`
+ * over REST `/rest/execute` (a non-interactive script) and reads state over REST, both through the
+ * user-mode (SLiRP) `ether1`. Here, for each trial, `ether1` is disabled on both routers (`--down`
+ * rotates `both`, `controller`, `client`, `none`; default `both`), the
+ * credentialed `pair` is typed on the controller's serial console (the interactive CLI, `typed()`), and the
+ * outcome and the commit test (a controller CMR restart) are read on the serial console too.
+ * `ether1` comes back only after that, to reset the next trial over REST.
+ */
+const DOWN = ["both", "controller", "client", "none"] as const;
+type Down = (typeof DOWN)[number];
+async function isolated(context: StudyContext): Promise<void> {
+	const boots = count(context, "boots", 1);
+	const trials = count(context, "trials", 6);
+	const downs = (operand(context.argv, "down")?.split(",") ?? ["both"]) as Down[];
+	for (const d of downs) check(DOWN.includes(d), `Unknown --down ${d}; known: ${DOWN.join(", ")}`);
+	const results: Row[] = [];
+	const detail: unknown[] = [];
+	context.evidence.question = "Does the single credentialed pair, typed on the serial console, still half-pair when ether1 (the user-mode management NIC) is down on both routers, one, or neither?";
+	context.evidence.parameters = { boots, trials, transport: "console", ether1Down: downs };
+	context.evidence.trials = results;
+	context.evidence.detail = detail;
+	const con = async (chr: ChrInstance, line: string, timeout = 60_000) => (await chr.exec(line, { via: "console", timeout })).output.replaceAll("\r", "");
+	for (let boot = 1; boot <= boots; boot++) {
+		await withPairLab(context, async ({ controller, client }) => {
+			const identity = await identityOf(client);
+			const login = await loginOf(client);
+			const find = `[find identity=${quote(identity)}]`;
+			await waitPending(controller, client, identity);
+			for (let trial = 1; trial <= trials; trial++) {
+				if (trial > 1) {
+					await resetPairing(controller, client, identity);
+					await waitPending(controller, client, identity);
+				}
+				const down = downs[(trial - 1) % downs.length] as Down;
+				const isolatedRouters = down === "both" ? [controller, client] : down === "controller" ? [controller] : down === "client" ? [client] : [];
+				for (const chr of isolatedRouters) await con(chr, "/interface/disable ether1");
+				const rowText = async () => con(controller, `/cmr/device/print detail without-paging where identity=${quote(identity)}`);
+				const pair = await typed(controller, `/cmr/device/pair ${find} username=${quote(login.user)} password=${quote(login.password)}`);
+				const pairOutput = pair.output;
+				await Bun.sleep(10_000);
+				const rowAfterPair = await rowText();
+				const clientAfterPair = await con(client, ":put [/cmr/client/get status]");
+				const nonce = `iso-${crypto.randomUUID().slice(0, 6)}`;
+				const runScript = (await typed(controller, `/cmr/device/run-script ${find} script=":put ${nonce}"`, 60_000)).output;
+				await con(controller, "/cmr/set enabled=no");
+				await con(controller, "/cmr/set enabled=yes");
+				let clientAfterRestart = "";
+				const deadline = Date.now() + 120_000;
+				while (Date.now() < deadline) {
+					await Bun.sleep(5000);
+					clientAfterRestart = (await con(client, ":put [/cmr/client/get status]")).trim();
+					if (clientAfterRestart.endsWith(",connected")) break;
+				}
+				await Bun.sleep(5000);
+				const rowAfterRestart = await rowText();
+				for (const chr of isolatedRouters) await con(chr, "/interface/enable ether1");
+				await until("REST back on both routers", async () => {
+					try { await read(controller, "/system/identity"); await read(client, "/system/identity"); return true; } catch { return false; }
+				}, 120_000);
+				const afterRestart = await observe(controller, client, identity);
+				const row: Row = {
+					boot: String(boot), trial: String(trial), ether1Down: down,
+					pairStatus: pair.timedOut ? "timed out" : lastPairStatus(pairOutput.split("\n").filter(l => !l.includes("] > ")).join("\n")),
+					halfPairedAfterPair: String(/device:ok, cmr:ok/.test(rowAfterPair)),
+					clientAfterPair: clientAfterPair.trim(),
+					selectable: String(new RegExp(`success\\s+${nonce}`).test(runScript)),
+					clientAfterRestart,
+					afterRestart: afterRestart.verdict,
+					afterRestartState: afterRestart.row?.state ?? "",
+				};
+				if (afterRestart.verdict !== "paired") {
+					await attempt(controller, `/cmr/device/pair ${find}`);
+					await until("repair settles", async () => (await observe(controller, client, identity)).verdict === "paired", 30_000).catch(() => undefined);
+					row.repaired = (await observe(controller, client, identity)).verdict;
+				}
+				results.push(row);
+				detail.push({ boot, trial, pairOutput: pairOutput.replaceAll(login.password, "…"), pairTimedOut: pair.timedOut, rowAfterPair, runScript, rowAfterRestart });
+				console.log(`  boot ${boot} trial ${trial} down=${down.padEnd(10)} pair→${(row.pairStatus ?? "").padEnd(18)} half-paired=${(row.halfPairedAfterPair ?? "").padEnd(5)} run-script=${(row.selectable ?? "").padEnd(5)} after restart=${row.afterRestart} ${row.afterRestartState}${row.repaired ? `, bare pair → ${row.repaired}` : ""}`);
+			}
+		});
+	}
+}
+
+/**
+ * Q (control): does the way the controller's `pair` is invoked change the half-pair? Every trial
+ * runs the single credentialed `pair` from a fresh pending client, rotating the invocation:
+ * - `execute`: REST `/rest/execute` with the CLI line as a script (what the lab and quickchr use);
+ * - `rest`: REST `POST /rest/cmr/device/pair` with JSON arguments (a direct HTTP call; 120 s client timeout);
+ * - `console`: typed on the controller's serial console (the interactive CLI), nothing typed ahead (`typed()`);
+ * - `execute-30s`, `rest-30s`: the first two with `duration=30s`, so the command's progress view
+ *   stays open 30 s instead of returning after its first refresh.
+ * `--transports` picks and orders them (default: all five, rotating).
+ * Then the usual checks: settled verdict, run-script selection, the commit test.
+ */
+const TRANSPORTS = ["execute", "rest", "console", "execute-30s", "rest-30s"] as const;
+type Transport = (typeof TRANSPORTS)[number];
+async function transport(context: StudyContext): Promise<void> {
+	const boots = count(context, "boots", 2);
+	const trials = count(context, "trials", 10);
+	const transports = (operand(context.argv, "transports")?.split(",") ?? [...TRANSPORTS]) as Transport[];
+	for (const t of transports) check(TRANSPORTS.includes(t), `Unknown transport ${t}; known: ${TRANSPORTS.join(", ")}`);
+	const results: Row[] = [];
+	const detail: unknown[] = [];
+	context.evidence.question = "Does invoking the credentialed pair via /rest/execute, a direct REST command, or the serial console, with or without duration=30s, change the half-pair?";
+	context.evidence.parameters = { boots, trials, transports };
+	context.evidence.trials = results;
+	context.evidence.detail = detail;
+	for (let boot = 1; boot <= boots; boot++) {
+		await withPairLab(context, async ({ controller, client }) => {
+			const identity = await identityOf(client);
+			const login = await loginOf(client);
+			const endpoint = (await controller.descriptor()).services["rest-api"];
+			check(endpoint.available && endpoint.auth?.password !== undefined, "Controller REST login missing");
+			// The descriptor's rest-api url already ends in /rest.
+			const base = endpoint.url ?? `http://${endpoint.host}:${endpoint.port}/rest`;
+			const authorization = `Basic ${btoa(`${endpoint.auth.username}:${endpoint.auth.password}`)}`;
+			await waitPending(controller, client, identity);
+			for (let trial = 1; trial <= trials; trial++) {
+				const via = transports[(trial - 1) % transports.length] as Transport;
+				if (trial > 1) {
+					await resetPairing(controller, client, identity);
+					await waitPending(controller, client, identity);
+				}
+				const id = (await read(controller, "/cmr/device")).find(r => r.identity === identity)?.[".id"];
+				check(id, `${identity}: no row to pair`);
+				const duration = via.endsWith("-30s") ? " duration=30s" : "";
+				const line = `/cmr/device/pair [find identity=${quote(identity)}] username=${quote(login.user)} password=${quote(login.password)}${duration}`;
+				let output: string;
+				const started = Date.now();
+				try {
+					if (via.startsWith("execute")) output = (await controller.exec(line, { via: "rest", timeout: 120_000 })).output;
+					else if (via === "console") {
+						const result = await typed(controller, line);
+						output = `${result.output.split("\n").filter(l => !l.includes("] > ")).join("\n")}${result.timedOut ? "\ntimed out" : ""}`;
+					}
+					else {
+						const response = await fetch(`${base}/cmr/device/pair`, {
+							method: "POST",
+							headers: { authorization, "content-type": "application/json" },
+							body: JSON.stringify({ numbers: id, username: login.user, password: login.password, ...(duration ? { duration: "30s" } : {}) }),
+							signal: AbortSignal.timeout(120_000),
+						});
+						output = `HTTP ${response.status} ${await response.text()}`;
+					}
+				} catch (error) { output = `error: ${error instanceof Error ? error.message : String(error)}`; }
+				const commandMs = Date.now() - started;
+				let settled = await observe(controller, client, identity);
+				const settleStart = Date.now();
+				while (settled.verdict !== "paired" && Date.now() - settleStart < 10_000) {
+					await Bun.sleep(1000);
+					settled = await observe(controller, client, identity);
+				}
+				const selection = await selectable(controller, identity);
+				const afterRestart = await restartController(controller, client, identity);
+				const row: Row = {
+					boot: String(boot), trial: String(trial), via,
+					commandMs: String(commandMs),
+					output: output.replaceAll("\r", "").trim().split("\n").filter(Boolean).at(-1)?.trim() ?? "",
+					settled: settled.verdict,
+					selectable: String(selection.selected),
+					afterRestart: afterRestart.verdict,
+					afterRestartState: afterRestart.row?.state ?? "",
+				};
+				if (afterRestart.verdict !== "paired") {
+					await attempt(controller, `/cmr/device/pair [find identity=${quote(identity)}]`);
+					await until("repair settles", async () => (await observe(controller, client, identity)).verdict === "paired", 30_000).catch(() => undefined);
+					row.repaired = (await observe(controller, client, identity)).verdict;
+				}
+				results.push(row);
+				detail.push({ boot, trial, via, output: output.replaceAll(login.password, "…"), settled, selection, afterRestart });
+				console.log(`  boot ${boot} trial ${trial} ${via.padEnd(11)} ${String(commandMs).padStart(6)} ms  last="${row.output}"  settled=${row.settled} run-script=${row.selectable} after restart=${row.afterRestart}`);
+			}
+		});
+	}
+	const summary: Record<string, Record<string, number>> = {};
+	for (const r of results) {
+		summary[r.via as string] ??= {};
+		const bucket = summary[r.via as string] as Record<string, number>;
+		const outcome = r.afterRestart === "paired" && r.selectable === "true" ? "committed" : r.settled as string;
+		bucket[outcome] = (bucket[outcome] ?? 0) + 1;
+	}
+	context.evidence.summary = summary;
+	console.table(summary);
+}
+
+export const STUDIES: Record<string, (context: StudyContext) => Promise<void>> = { pairing, policy, recheck, wire, repair, beta7, isolated, transport };

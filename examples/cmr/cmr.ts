@@ -146,7 +146,7 @@ export async function exercise(lab: Lab, keepWebhook?: (stop: () => Promise<void
 // Validate every operand before anything boots: `--report --probe` must fail now, not after a run.
 function operandsValid(): boolean {
 	try {
-		for (const name of ["report", "study", "version", "boots", "trials", "strategies", "delays"]) operand(process.argv, name);
+		for (const name of ["report", "study", "version", "boots", "trials", "strategies", "delays", "transports", "down"]) operand(process.argv, name);
 		return true;
 	} catch (error) {
 		console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);

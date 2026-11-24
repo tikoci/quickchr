@@ -1,0 +1,281 @@
+{
+  "study": "beta7",
+  "version": "7.26beta5",
+  "timestamp": "2026-11-24T18:35:13.858Z",
+  "arch": "x86",
+  "host": "linux/x64",
+  "question": "Do the 7.26beta7 CMR changelog lines (client VRF, upgrade to the running version, import after export) hold?",
+  "checks": {
+    "clientBefore": {
+      "controller-address": "192.0.2.1",
+      "controller-addresses": "192.0.2.1",
+      "controller-identity": "cmr-controller",
+      "enabled": "yes",
+      "local-id": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98A26A3CBD63BC73B616567E9C21EF6D730DFCEF29AF3EAF5CE5D173B001364E1B",
+      "status": "paired,connected"
+    },
+    "vrfMainSet": "bad parameter vrf (line 1 column 25)",
+    "inVrfWithoutSetting": {
+      "reached": true,
+      "seconds": 21,
+      "clientStatus": "paired,disconnected",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "false",
+        "pairing-requirement": "none",
+        "upgrade-rule": "default",
+        "channel": "stable"
+      },
+      "verdict": "other"
+    },
+    "inVrfWithoutSetting30s": {
+      "clientStatus": "paired,disconnected",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "false",
+        "pairing-requirement": "none",
+        "upgrade-rule": "default",
+        "channel": "stable"
+      },
+      "verdict": "other"
+    },
+    "vrfSet": "bad parameter vrf (line 1 column 28)",
+    "clientWithVrf": {
+      "controller-addresses": "192.0.2.1",
+      "controller-identity": "cmr-controller",
+      "enabled": "yes",
+      "local-id": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98A26A3CBD63BC73B616567E9C21EF6D730DFCEF29AF3EAF5CE5D173B001364E1B",
+      "status": "paired,disconnected"
+    },
+    "inVrfWithSetting": {
+      "reached": false,
+      "seconds": 120,
+      "clientStatus": "paired,disconnected",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "false",
+        "pairing-requirement": "none",
+        "upgrade-rule": "default",
+        "channel": "stable"
+      },
+      "verdict": "other"
+    },
+    "inVrfSelectable": false,
+    "controllerRowInVrf": {
+      ".id": "*2",
+      "allowed-versions": "7.13+,6.49.8+",
+      "auto-labels": "x86,CHR,cmr-client,192.0.2.2",
+      "board": "CHR",
+      "channel": "stable",
+      "connected": "false",
+      "disconnected-since": "2026-11-24 18:38:30",
+      "identity": "cmr-client",
+      "ids": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros",
+      "pairing-requirement": "none",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "default",
+      "version": "7.26beta5"
+    },
+    "backInMain": {
+      "reached": true,
+      "seconds": 9,
+      "clientStatus": "paired,connected",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "true",
+        "pairing-requirement": "none",
+        "upgrade-rule": "default",
+        "channel": "stable"
+      },
+      "verdict": "paired"
+    },
+    "sameVersionUpgrade": "Columns: DEVICE, CURRENT-VERSION, CHANNEL, STATE\nDEVICE                CURRENT-VERSION  CHANNEL    STATE  \ncmr-client@192.0.2.2  7.26beta5        7.26beta5  pending\n\nColumns: DEVICE, CURRENT-VERSION, CHANNEL, STATE\nDEVICE                CURRENT-VERSION  CHANNEL    STATE  \ncmr-client@192.0.2.2  7.26beta5        7.26beta5  pending\n\nColumns: DEVICE, CURRENT-VERSION, CHANNEL, STATE\nDEVICE                CURRENT-VERSION  CHANNEL    STATE  \ncmr-client@192.0.2.2  7.26beta5        7.26beta5  pending\n\nColumns: DEVICE, CURRENT-VERSION, CHANNEL, STATE\nDEVICE                CURRENT-VERSION  CHANNEL    STATE  \ncmr-client@192.0.2.2  7.26beta5        7.26beta5  pending\n\nColumns: DEVICE, CURRENT-VERSION, CHANNEL, STATE, ERROR\nDEVICE                CURRENT-V  CHANNEL    STATE    ERROR               \ncmr-client@192.0.2.2  7.26beta5  7.26beta5  pending  no upgrade available",
+    "upgradeJobs": [
+      {
+        ".id": "*1",
+        "channel": "7.26beta5",
+        "schedule-time": "2026-11-24 18:41:22",
+        "start-time": "2026-11-24 18:41:23",
+        "state": "done",
+        "success": "0/1"
+      }
+    ],
+    "deviceAfterUpgrade": {
+      ".id": "*2",
+      "address": "192.0.2.2",
+      "allowed-versions": "7.13+,6.49.8+",
+      "auto-labels": "x86,CHR,cmr-client,192.0.2.2",
+      "board": "CHR",
+      "channel": "stable",
+      "connected": "true",
+      "connected-time": "32s",
+      "identity": "cmr-client",
+      "ids": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+      "minimum-version": "7.26beta1",
+      "packages": "routeros",
+      "pairing-requirement": "none",
+      "peer": "peer-2a47",
+      "serial": "",
+      "stale": "false",
+      "upgrade-available": "false",
+      "upgrade-rule": "default",
+      "uptime": "5m39s",
+      "version": "7.26beta5"
+    },
+    "clientVersionAfterUpgrade": "7.26beta5",
+    "clientUptime": {
+      "before": "5m8s",
+      "after": "5m40s"
+    },
+    "afterUpgrade": {
+      "clientStatus": "paired,connected",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "true",
+        "pairing-requirement": "none",
+        "upgrade-rule": "default",
+        "channel": "stable"
+      },
+      "verdict": "paired"
+    },
+    "export": "# 2026-11-24 18:41:54 by RouterOS 7.26beta5\n# system id = A/upObYj9zD\n#\n/cmr\nset enabled=yes\n/cmr device\nadd identity=cmr-controller ids=\"57729171CB63B5EF1932CB21C10737DE83C8DFF2A2E3C\\\n    BD04D3DD03C43E08D13/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5\\\n    BD068DBFD0\" pairing-requirement=none\nadd identity=cmr-client ids=\"2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47\\\n    E27AA3C5FC4FD98/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD06\\\n    8DBFD0\" labels=lab,import pairing-requirement=none",
+    "rowsBeforeImport": [
+      {
+        "identity": "cmr-controller",
+        "ids": "57729171CB63B5EF1932CB21C10737DE83C8DFF2A2E3CBD04D3DD03C43E08D13/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "pairing-requirement": "none",
+        "connected": "false"
+      },
+      {
+        "identity": "cmr-client",
+        "ids": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "labels": "lab,import",
+        "pairing-requirement": "none",
+        "connected": "true"
+      }
+    ],
+    "importAsIs": "Script Error: failure: duplicate ids (/cmr/device/add; line 7) (:import; line 1)",
+    "rowsAfterImportAsIs": [
+      {
+        "identity": "cmr-controller",
+        "ids": "57729171CB63B5EF1932CB21C10737DE83C8DFF2A2E3CBD04D3DD03C43E08D13/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "pairing-requirement": "none",
+        "connected": "false"
+      },
+      {
+        "identity": "cmr-client",
+        "ids": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "labels": "lab,import",
+        "pairing-requirement": "none",
+        "connected": "true"
+      }
+    ],
+    "afterImportAsIs": {
+      "clientStatus": "paired,connected",
+      "row": {
+        ".id": "*2",
+        "identity": "cmr-client",
+        "connected": "true",
+        "pairing-requirement": "none",
+        "upgrade-rule": "default",
+        "channel": "stable"
+      },
+      "verdict": "paired"
+    },
+    "afterRemove": {
+      "reached": true,
+      "seconds": 0,
+      "clientStatus": "waiting-for-pairing,connected",
+      "pairingStatus": "192.0.2.1: cmr:code 1, device:password required",
+      "verdict": "absent"
+    },
+    "importAfterRemove": "Script Error: failure: duplicate ids (/cmr/device/add; line 7) (:import; line 1)",
+    "rowsAfterImportAfterRemove": [
+      {
+        "identity": "cmr-controller",
+        "ids": "57729171CB63B5EF1932CB21C10737DE83C8DFF2A2E3CBD04D3DD03C43E08D13/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "pairing-requirement": "none",
+        "connected": "false"
+      },
+      {
+        "ids": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "pairing-requirement": "confirm",
+        "connected": "true",
+        "state": "pair: device:password required, cmr:waiting confirmation"
+      }
+    ],
+    "afterImportAfterRemove": {
+      "reached": false,
+      "seconds": 60,
+      "clientStatus": "waiting-for-pairing,connected",
+      "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+      "row": {
+        ".id": "*4",
+        "identity": "cmr-client",
+        "connected": "true",
+        "pending": "true",
+        "remote-pending": "true",
+        "state": "pair: device:password required, cmr:waiting confirmation",
+        "pairing-requirement": "confirm"
+      },
+      "verdict": "pending"
+    },
+    "removeAll": "",
+    "rowsAfterRemoveAll": [
+      {
+        "identity": "cmr-controller",
+        "ids": "57729171CB63B5EF1932CB21C10737DE83C8DFF2A2E3CBD04D3DD03C43E08D13/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "pairing-requirement": "none",
+        "connected": "false"
+      },
+      {
+        "ids": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "pairing-requirement": "confirm",
+        "connected": "true",
+        "state": "pair: device:password required, cmr:waiting confirmation"
+      }
+    ],
+    "importAfterRemoveAll": "Script Error: failure: duplicate ids (/cmr/device/add; line 7) (:import; line 1)",
+    "rowsAfterImportAfterRemoveAll": [
+      {
+        "identity": "cmr-controller",
+        "ids": "57729171CB63B5EF1932CB21C10737DE83C8DFF2A2E3CBD04D3DD03C43E08D13/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "pairing-requirement": "none",
+        "connected": "false"
+      },
+      {
+        "identity": "cmr-client",
+        "ids": "2A47C9F1797FA9F34B962F25BDA82A535FA880E82D83AAA47E27AA3C5FC4FD98/39385C254FE783D7E2480F8874E7E4DB64BEEF585CEF3EF3830DE5BD068DBFD0",
+        "pairing-requirement": "confirm",
+        "connected": "true",
+        "state": "pair: device:password required, cmr:waiting confirmation"
+      }
+    ],
+    "afterImportAfterRemoveAll": {
+      "reached": false,
+      "seconds": 120,
+      "clientStatus": "waiting-for-pairing,connected",
+      "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:password required",
+      "row": {
+        ".id": "*7",
+        "identity": "cmr-client",
+        "connected": "true",
+        "pending": "true",
+        "remote-pending": "true",
+        "state": "pair: device:password required, cmr:waiting confirmation",
+        "pairing-requirement": "confirm"
+      },
+      "verdict": "pending"
+    },
+    "selectableAfterImport": false
+  }
+}

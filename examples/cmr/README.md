@@ -2,7 +2,7 @@
 
 **Status:** ⚠ Beta lab · manual only · not part of the routine CI smoke subset
 
-**Validated against:** RouterOS 7.26beta5 (default), x86 CHR. Earlier builds with
+**Validated against:** RouterOS 7.26beta7 (default) and 7.26beta5, x86 CHR. Earlier builds with
 `--version`; what changed per build is in [FINDINGS.md](./FINDINGS.md).
 
 This example is also quickchr's **CMR grounding lab**. CMR is still in beta, so
@@ -111,6 +111,9 @@ bun run cmr.ts --study policy --report /tmp/policy.json
 bun run cmr.ts --study recheck --report /tmp/recheck.json
 bun run cmr.ts --study wire --report /tmp/wire.json
 bun run cmr.ts --study repair --report /tmp/repair.json
+bun run cmr.ts --study beta7 --report /tmp/beta7.json
+bun run cmr.ts --study isolated --boots 2 --trials 6 --report /tmp/isolated.json
+bun run cmr.ts --study transport --boots 2 --trials 9 --report /tmp/transport.json
 ```
 
 | Study | Question |
@@ -119,6 +122,9 @@ bun run cmr.ts --study repair --report /tmp/repair.json
 | `policy` | What may a `run-script` line do on a client, compared with the manual's permission table, and which controller login groups may send one? |
 | `recheck` | Do the 7.26beta1 findings (export, client `confirm`, first-interface alert, identity sync, default upgrade rule, disable/enable) still hold? |
 | `wire` | What crosses the link while a client connects and pairs? Does MNDP carry CMR state? Do the discovery method (`controller-addresses` or MNDP) or the delay between enabling controller and client change the first connect or the half-pair? `--delays 0,5,30,75` (seconds) and `--trials` pick the grid; it always captures. |
+| `beta7` | Do the three 7.26beta7 changelog lines hold, and what did the same steps do before? Moves the client's link into a VRF with and without `/cmr/client vrf=`, runs `/cmr/device/upgrade` to the running version, and imports an export back onto the controller (as-is, without the client row, without every row). Runs on any build; on beta5 it is the baseline. |
+| `isolated` | Control: does the half-pair need the lab's harness? `ether1` (user-mode networking) is disabled during the trial (`--down` rotates `both`, `controller`, `client`, `none`), the credentialed `pair` is typed on the serial console, and every read uses the console. |
+| `transport` | Control: does the way `pair` is sent matter? Rotates `/rest/execute`, a direct `POST /rest/cmr/device/pair`, the typed serial console, and both REST paths with `duration=30s` (`--transports` picks). |
 | `repair` | What fixes a half-paired client, and does the fix hold? Each trial half-pairs a fresh client with the credentialed `pair`, applies one action (`bare-pair`, `cmr-restart`, `client-reboot` or `controller-reboot`, rotating), records the state it left, finishes with one bare `pair` if needed, then runs the commit test (a controller CMR restart). |
 
 In recheck reports, `firstBridgeFired` is `null` (inconclusive) when the rule
@@ -197,8 +203,9 @@ Notes for a shared TZSP package (quickchr, centrs or a new tikoci repo):
   as RouterOS's TZSP sensor tag, which these builds do not send.
 - **Always close the socket.** An open dgram socket keeps Bun running. The first
   ad hoc capture hung after teardown until a 20-minute limit killed it.
-- **Grounded so far:** x86 CHR on Linux/KVM, 7.26beta5, for the pair lab and the
-  four-router lab (two interfaces in one `filter-interface`). The gateway path is
+- **Grounded so far:** x86 CHR on Linux/KVM: 7.26beta5 for the pair lab and the
+  four-router lab (two interfaces in one `filter-interface`), and 7.26beta7 for the
+  pair lab (`wire` study). The gateway path is
   quickchr's documented guest→host UDP primitive (`hostGatewayIp`,
   `captureInterface`), also documented for macOS and Windows hosts but not run
   there with this code.

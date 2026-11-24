@@ -1,0 +1,859 @@
+{
+  "study": "transport",
+  "version": "7.26beta7",
+  "timestamp": "2026-11-24T19:02:42.414Z",
+  "arch": "x86",
+  "host": "linux/x64",
+  "question": "Does invoking the credentialed pair via /rest/execute, a direct REST command, or the serial console change the half-pair?",
+  "parameters": {
+    "boots": 2,
+    "trials": 9,
+    "transports": [
+      "execute",
+      "rest",
+      "console"
+    ]
+  },
+  "trials": [
+    {
+      "boot": "1",
+      "trial": "1",
+      "via": "execute",
+      "commandMs": "999",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "2",
+      "via": "rest",
+      "commandMs": "1008",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "3",
+      "via": "console",
+      "commandMs": "16725",
+      "output": "cmr-client@192.0.2.2  paired",
+      "settled": "paired",
+      "selectable": "true",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "1",
+      "trial": "4",
+      "via": "execute",
+      "commandMs": "997",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "5",
+      "via": "rest",
+      "commandMs": "996",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "6",
+      "via": "console",
+      "commandMs": "5709",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "7",
+      "via": "execute",
+      "commandMs": "1007",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "8",
+      "via": "rest",
+      "commandMs": "1006",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "1",
+      "trial": "9",
+      "via": "console",
+      "commandMs": "5709",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "1",
+      "via": "execute",
+      "commandMs": "998",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "2",
+      "via": "rest",
+      "commandMs": "1006",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "3",
+      "via": "console",
+      "commandMs": "16726",
+      "output": "cmr-client@192.0.2.2  paired",
+      "settled": "paired",
+      "selectable": "true",
+      "afterRestart": "paired",
+      "afterRestartState": ""
+    },
+    {
+      "boot": "2",
+      "trial": "4",
+      "via": "execute",
+      "commandMs": "1005",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "5",
+      "via": "rest",
+      "commandMs": "995",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "6",
+      "via": "console",
+      "commandMs": "5709",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "7",
+      "via": "execute",
+      "commandMs": "1007",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "8",
+      "via": "rest",
+      "commandMs": "1006",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    },
+    {
+      "boot": "2",
+      "trial": "9",
+      "via": "console",
+      "commandMs": "5708",
+      "output": "cmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": "half-paired",
+      "selectable": "false",
+      "afterRestart": "pending",
+      "afterRestartState": "pair: device:ok, cmr:waiting confirmation",
+      "repaired": "paired"
+    }
+  ],
+  "detail": [
+    {
+      "boot": 1,
+      "trial": 1,
+      "via": "execute",
+      "output": "Columns: DEVICE, STATUS\r\nDEVICE                STATUS                                            \r\ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\r\n\r\nColumns: DEVICE, STATUS\r\nDEVICE                STATUS           \r\ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 2,
+      "via": "rest",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*4",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 3,
+      "via": "console",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*6",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "selection": {
+        "selected": true,
+        "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT       \ncmr-client@192.0.2.2  success  select-5e86e9"
+      },
+      "afterRestart": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*6",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 4,
+      "via": "execute",
+      "output": "Columns: DEVICE, STATUS\r\nDEVICE                STATUS                                            \r\ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\r\n\r\nColumns: DEVICE, STATUS\r\nDEVICE                STATUS           \r\ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*8",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 5,
+      "via": "rest",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*9",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*A",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 6,
+      "via": "console",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*B",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*C",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 7,
+      "via": "execute",
+      "output": "Columns: DEVICE, STATUS\r\nDEVICE                STATUS                                            \r\ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\r\n\r\nColumns: DEVICE, STATUS\r\nDEVICE                STATUS           \r\ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*D",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*E",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 8,
+      "via": "rest",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*F",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*10",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 1,
+      "trial": 9,
+      "via": "console",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*11",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*12",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 1,
+      "via": "execute",
+      "output": "Columns: DEVICE, STATUS\r\nDEVICE                STATUS                                            \r\ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\r\n\r\nColumns: DEVICE, STATUS\r\nDEVICE                STATUS           \r\ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*2",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*3",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 2,
+      "via": "rest",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*4",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*5",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 3,
+      "via": "console",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS\ncmr-client@192.0.2.2  paired",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*6",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      },
+      "selection": {
+        "selected": true,
+        "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS \ncmr-client@192.0.2.2  running\n\nColumns: DEVICE, STATUS, OUTPUT\nDEVICE                STATUS   OUTPUT       \ncmr-client@192.0.2.2  success  select-4fc73f"
+      },
+      "afterRestart": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*6",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pairing-requirement": "none",
+          "upgrade-rule": "default",
+          "channel": "stable"
+        },
+        "verdict": "paired"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 4,
+      "via": "execute",
+      "output": "Columns: DEVICE, STATUS\r\nDEVICE                STATUS                                            \r\ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\r\n\r\nColumns: DEVICE, STATUS\r\nDEVICE                STATUS           \r\ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*7",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*8",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 5,
+      "via": "rest",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*9",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*A",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 6,
+      "via": "console",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*B",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*C",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 7,
+      "via": "execute",
+      "output": "Columns: DEVICE, STATUS\r\nDEVICE                STATUS                                            \r\ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\r\n\r\nColumns: DEVICE, STATUS\r\nDEVICE                STATUS           \r\ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*D",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*E",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 8,
+      "via": "rest",
+      "output": "HTTP 200 [{\".section\":\"0\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:password required, cmr:waiting confirmation\"},{\".section\":\"1\",\"device\":\"cmr-client@192.0.2.2\",\"status\":\"device:ok, cmr:ok\"}]",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*F",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*10",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    },
+    {
+      "boot": 2,
+      "trial": 9,
+      "via": "console",
+      "output": "Columns: DEVICE, STATUS\nDEVICE                STATUS                                            \ncmr-client@192.0.2.2  device:password required, cmr:waiting confirmation\n-- [Q quit|D dump|C-z pause]Columns: DEVICE, STATUS\nDEVICE                STATUS           \ncmr-client@192.0.2.2  device:ok, cmr:ok",
+      "settled": {
+        "clientStatus": "paired,connected",
+        "row": {
+          ".id": "*11",
+          "identity": "cmr-client",
+          "connected": "true",
+          "state": "pair: device:ok, cmr:ok",
+          "pairing-requirement": "none"
+        },
+        "verdict": "half-paired"
+      },
+      "selection": {
+        "selected": false,
+        "output": "failure: no devices selected (/cmr/device/run-script; line 1)"
+      },
+      "afterRestart": {
+        "clientStatus": "waiting-for-pairing,connected",
+        "pairingStatus": "192.0.2.1: cmr:waiting confirmation, device:ok",
+        "row": {
+          ".id": "*12",
+          "identity": "cmr-client",
+          "connected": "true",
+          "pending": "true",
+          "state": "pair: device:ok, cmr:waiting confirmation",
+          "pairing-requirement": "confirm"
+        },
+        "verdict": "pending"
+      }
+    }
+  ],
+  "summary": {
+    "execute": {
+      "half-paired": 6
+    },
+    "rest": {
+      "half-paired": 6
+    },
+    "console": {
+      "committed": 2,
+      "half-paired": 4
+    }
+  }
+}
