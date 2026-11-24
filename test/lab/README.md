@@ -23,6 +23,7 @@ Each subdirectory is a self-contained lab covering one subsystem:
 | `download-origin/` | `download.mikrotik.com` vs `cdn.mikrotik.com`: bytes, headers, timing, freshness (#146) | — | `DESIGN.md` |
 | `doctor-timing/` | Where `quickchr doctor --json` spends its time on Windows vs Linux (#269); `lab.yml` job | — | `REPORT.md` |
 | `windows-arm64-qemu/` | Does choco's QEMU run on a Windows ARM64 runner? (#305); `lab.yml` job | — | `ci.instructions.md` |
+| `windows-pipe-chardev/` | Can monitor/serial/QGA use Windows `-chardev pipe` across reconnects? (#57) — no | probe | `qemu.instructions.md` |
 
 Each directory contains:
 

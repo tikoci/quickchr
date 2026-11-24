@@ -37,7 +37,9 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
   three later orphan-dir tests that passed again once only the helper was fixed.
 - Unix socket tests: use `join(tmpdir(), "quickchr-tmp-<name>")` from `node:os` — FUSE mounts (e.g. Multipass) don't support Unix domain sockets
 - Always clean up CHR instances in a `finally` block so failures don't leak machines
-- Reach CHR's REST API only through `test/integration/chr-rest.ts` — see below
+- Reach CHR's REST API only through `test/integration/chr-rest.ts` — see below.
+  The one allowance, for an incidental check in a `test/lab/` probe whose subject
+  is not REST, is in `bun-http.instructions.md`
 
 ## Running
 

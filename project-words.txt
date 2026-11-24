@@ -66,6 +66,7 @@ catppuccin
 cdp
 centrs
 chardev
+chardevs
 checkpointed
 choco
 cidr
@@ -133,6 +134,7 @@ efault
 efi
 efibootmgr
 eintr
+einval
 eio
 elif
 emerg
@@ -241,6 +243,7 @@ libglib
 libpixman
 libsecret
 libslirp
+libuv
 lic
 limactl
 listallhardwareports
@@ -264,6 +267,7 @@ macvlan
 makefiles
 markdownlint
 matrica
+maxconnect
 mbps
 mbr
 mcast
@@ -412,6 +416,7 @@ rsc
 rst
 rta
 rtt
+runneradmin
 runspace
 runspaces
 sandboxed

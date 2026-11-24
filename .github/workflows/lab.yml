@@ -35,6 +35,7 @@ on:
           - download-origin
           - doctor-timing
           - windows-arm64-qemu
+          - windows-pipe-chardev
       download-origin-budget-mb:
         description: "download-origin only: MB of full artifacts to hash per runner (both hosts count)"
         type: string
@@ -43,6 +44,15 @@ on:
         description: "download-origin only: paired 8 MiB range rounds per runner"
         type: string
         default: "12"
+      chardev_arm:
+        description: "windows-pipe-chardev: which arm to run"
+        type: choice
+        default: all
+        options:
+          - all
+          - pipe
+          - tcp
+          - unix
   push:
     paths:
       - ".github/workflows/lab.yml"
@@ -264,3 +274,113 @@ jobs:
       - name: Probe
         shell: bash
         run: bun run test/lab/windows-arm64-qemu/probe.ts
+
+  # test/lab/windows-pipe-chardev — can monitor/serial/QGA run on QEMU's Win32
+  # `-chardev pipe` and survive repeated reconnects? (issue #57). If yes, Windows
+  # needs no IPC TCP ports at portBase+6..+8. One leg per arm: `pipe` is the
+  # question, `tcp` is today's production layout as the control, `unix` tries
+  # AF_UNIX sockets on Windows. Real CHR, x86 under TCG (no accel on the runner).
+  # The `unix` leg puts its machine under the real data-dir layout
+  # (%LOCALAPPDATA%\quickchr\machines), sweeps socket path lengths to find the
+  # sun_path limit, then runs at the longest length that worked.
+  # Up to 3 × 75 min of Windows runner time and the question is answered, so it
+  # is dispatch-only and must be picked by name: not on push, and not in `all`.
+  windows-pipe-chardev:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.lab == 'windows-pipe-chardev' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # A choice input, so the value is one of its options.
+        arm: ${{ fromJSON((!inputs.chardev_arm || inputs.chardev_arm == 'all') && '["pipe","tcp","unix"]' || format('["{0}"]', inputs.chardev_arm)) }}
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+
+      # Same install as integration.yml's windows-x86 leg, so the QEMU under
+      # test is the one quickchr's CI uses.
+      - name: Install QEMU (Windows)
+        shell: bash
+        run: |
+          qemu_dir="/c/Program Files/qemu"
+          for attempt in 1 2 3; do
+            choco install qemu -y --no-progress || true
+            [ -x "$qemu_dir/qemu-system-x86_64.exe" ] && break
+            echo "::warning::choco install qemu produced no binary (attempt $attempt/3)"
+            [ "$attempt" -lt 3 ] && sleep "$((20 * attempt))"
+          done
+          if [ ! -x "$qemu_dir/qemu-system-x86_64.exe" ]; then
+            echo "::error::QEMU install failed after 3 attempts"
+            exit 1
+          fi
+          echo 'C:\Program Files\qemu' >> "$GITHUB_PATH"
+          "$qemu_dir/qemu-system-x86_64.exe" --version
+
+      - name: Probe (${{ matrix.arm }})
+        id: probe
+        shell: bash
+        env:
+          ARM: ${{ matrix.arm }}
+        timeout-minutes: 60
+        run: |
+          set -o pipefail
+          work="$RUNNER_TEMP/lp"
+          extra=()
+          if [ "$ARM" = unix ]; then
+            work="$LOCALAPPDATA\quickchr\machines"
+            extra=(--sun-path-sweep "100,104,106,107,108,109,110,130" --monitor-path-bytes max)
+          fi
+          echo "PROBE_WORK=$work" >> "$GITHUB_ENV"
+          bun run test/lab/windows-pipe-chardev/probe.ts --arm "$ARM" --trials 50 \
+            --work "$work" "${extra[@]}" --hard-cap-ms 3300000 2>&1 | tee probe.log
+
+      # The probe stops and awaits its own QEMU children; this is the safety net,
+      # and a QEMU still running here is a probe cleanup bug worth a warning.
+      - name: Reap QEMU
+        if: always()
+        shell: bash
+        run: |
+          # taskkill exits non-zero when no such process exists.
+          if taskkill //F //IM qemu-system-x86_64.exe; then
+            echo "::warning::QEMU was still running after the probe exited; killed it"
+          fi
+
+      # upload-artifact needs every file under one root, and the unix leg's work
+      # dir is on C: while the workspace is on D:, so gather the outputs first.
+      # Best effort when the probe failed; a probe that succeeded must have
+      # written results-<arm>.json.
+      - name: Gather probe outputs
+        if: always()
+        shell: bash
+        env:
+          ARM: ${{ matrix.arm }}
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          mkdir -p lab-out
+          cp probe.log lab-out/ 2>/dev/null || true
+          work="${PROBE_WORK:-}"
+          if [ -z "$work" ]; then
+            echo "::warning::PROBE_WORK is unset (the probe step did not start); nothing to gather"
+          else
+            cp "$work/results-$ARM.json" lab-out/ 2>/dev/null || true
+            for log in "$work"/*/qemu.log; do
+              [ -f "$log" ] && cp "$log" "lab-out/$(basename "$(dirname "$log")")-qemu.log"
+            done
+          fi
+          ls -l lab-out
+          if [ "$PROBE_OUTCOME" = success ] && [ ! -f "lab-out/results-$ARM.json" ]; then
+            echo "::error::the probe succeeded but wrote no results-$ARM.json"
+            exit 1
+          fi
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-pipe-chardev-${{ matrix.arm }}
+          path: lab-out/
+          if-no-files-found: warn
