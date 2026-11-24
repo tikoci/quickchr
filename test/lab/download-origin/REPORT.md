@@ -46,7 +46,9 @@ of #146's repro plan). The only role in question is "a value a user may set".
 - **Timing:** every full download, plus `--rounds` paired byte ranges (same artifact
   and offset for both hosts in a round, offset random per round). Host order
   alternates by artifact and by round (A,B then B,A). Every `fetch` sets
-  `keepalive: false`. The probe times two intervals per request: **TTFB**, from request
+  `keepalive: false`, but Bun's `fetch()` pools connections by host and port anyway,
+  so a request may have reused a warm socket: TTFB is not a cold-connect time. Both
+  hosts were measured the same way. The probe times two intervals per request: **TTFB**, from request
   start until the response headers arrive, and the **body-read loop** after that.
   Throughput is body MB/s (10⁶ B) over the body-read loop. DNS, connect, TLS and server
   time are not measured separately; they all fall inside TTFB. A **stall** is a gap

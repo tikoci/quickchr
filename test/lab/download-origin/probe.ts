@@ -114,6 +114,7 @@ const RUN = {
 	arches: list("arches", "x86,arm64", /^(x86|arm64)$/, 2) as Arch[],
 	extraVersions: list("versions", "", VERSION_RE, 8),
 };
+if (mode === "run" && RUN.arches.length === 0) usageError("--arches: give at least one of x86, arm64");
 const WATCH = {
 	intervalMs: int("interval-s", 60, 10, 3600) * 1000,
 	durationMs: int("duration-min", 720, 1, 20_160) * 60_000,
@@ -186,8 +187,9 @@ async function request(
 	return fetch(url, {
 		method: init.method ?? "GET",
 		headers,
-		// Fresh connection per request: every trial pays DNS+TCP+TLS the way a
-		// one-shot `quickchr` download does, instead of riding a warm pool.
+		// `keepalive: false` asks for no connection reuse, but Bun's fetch() pools by
+		// host:port regardless (bun-http.instructions.md), so a request may ride a warm
+		// socket. Both hosts are measured the same way, in alternating order.
 		keepalive: false,
 		signal: AbortSignal.timeout(init.timeoutMs ?? 30_000),
 	});
@@ -791,7 +793,7 @@ function summaryMarkdown(r: any): string {
 		"",
 		"## Timing",
 		"",
-		`TTFB = request start until response headers arrive (includes whatever DNS, connect and TLS that request needed; not split out). Throughput = body MB/s (1e6) over the body-read loop after headers. Stall = gap > ${r.params.stallMs} ms between body chunks. keepalive off.`,
+		`TTFB = request start until response headers arrive (includes whatever DNS, connect and TLS that request needed; not split out). Throughput = body MB/s (1e6) over the body-read loop after headers. Stall = gap > ${r.params.stallMs} ms between body chunks. keepalive off (Bun may still reuse a pooled connection).`,
 		"",
 	);
 	L.push("| host | kind | trials | errors | stalls | max gap ms | MB/s min / p50 / max | TTFB ms min / p50 / max |", "|---|---|---|---|---|---|---|---|");
