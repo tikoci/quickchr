@@ -64,12 +64,12 @@ Each release is published to npm `next` first; the unqualified install above use
 ```bash
 bun install -g @tikoci/quickchr@next
 bun add @tikoci/quickchr@next
-bun add @tikoci/quickchr@0.6.0      # pin an exact candidate
+bun add @tikoci/quickchr@0.7.0      # pin an exact candidate
 quickchr --version
 ```
 
 See the [changelog](./CHANGELOG.md) for each release, and its **Breaking** section
-before upgrading across a minor version (for example 0.5.x to 0.6.0).
+before upgrading across a minor version (for example 0.6.x to 0.7.0).
 
 ### CLI Usage
 

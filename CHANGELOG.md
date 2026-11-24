@@ -11,6 +11,27 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-24
+
+### Breaking (0.7.0)
+
+0.7.0 goes to npm `next` first. Each item is described in full in its entry below;
+this list is what to check when upgrading from 0.6.x.
+
+- **Provisioning now sets `/system/identity` to the machine name**, for library
+  callers as well as the CLI. Pass `--no-identity` (`StartOptions.identity: false`) to
+  keep the current identity. A machine name over 64 bytes, possible only from an older
+  release, fails the step. (#265)
+- **`--no-network` / `networks: []` means no NICs at all.** It used to fall back to the
+  default user NIC. Such a machine can't be waited on or provisioned, so a waiting
+  `start` and `add()` with provisioning options are refused. `--no-network` with
+  `--add-network` is an error: drop `--no-network`. (#287)
+- **The default guest arch under Rosetta is arm64.** An x64 Bun on Apple Silicon used
+  to pick an x86 guest and image when no `arch` was given. Pass `--arch x86`
+  (`arch: "x86"`) to keep that. (#293)
+- **`remove` / `removeOrphan()` refuse with `MACHINE_RUNNING`** when the directory's
+  QEMU is still alive, where they used to delete the directory. (#294)
+
 ### Added
 
 - **Provisioned machines are named after themselves.** When quickchr provisions a
@@ -25,7 +46,6 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   `machine.json`'s `provisioning.steps`. RouterOS caps an identity at 64 bytes: every
   name quickchr creates now fits, but a longer name from an older release fails the
   step; start that machine with `--no-identity`. (#265)
-
 - **Receive ports for traffic the guest sends** (TZSP, syslog, NetFlow).
   `quickchr add lab --receive tzsp` reserves a named port: the guest sends to
   `10.0.2.2:37008` and a host listener binds `127.0.0.1:37008`, unconnected. SLIRP
@@ -95,20 +115,17 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
   selects the physical host's arch. `quickchr doctor` now treats a missing QEMU (or
   UEFI firmware) as an error only for that default arch, and `QuickCHR.doctor(arch?)`
   takes it. (#293)
-
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a
   Windows boot-failure report could miss forwards that were in fact bound. Found by the
   new #57 CI probe (#304).
-
 - **Windows: commands that look up a binary are faster.** quickchr resolved each command
   on PATH by spawning `where.exe`, about 75 ms per lookup on a GitHub windows-latest
   runner, and `quickchr doctor` made nine of them (~0.7 s). On Windows, lookups now happen
   in process and follow `where.exe`'s order: the current directory, then each PATH entry,
   trying `PATHEXT` extensions in order. `doctor --json` went from ~765 ms to ~170 ms
   there. Linux and macOS still use `which`. (#269)
-
 - A library `start({ dryRun: true })` naming an existing, stopped machine launched
   it. It now returns a preview handle without spawning QEMU. (#303 review)
 - Port allocation now sees stopped machines' explicit forwards and in-flight creations'
