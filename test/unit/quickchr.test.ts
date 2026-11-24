@@ -401,32 +401,29 @@ describe("ChrInstance API surface (dryRun)", () => {
 	});
 
 	test("channel name passed as version is accepted (lenient) and resolves", async () => {
-		// "long-term" in the version field should resolve to a real version,
-		// not throw INVALID_VERSION. A warning is logged but not asserted here
-		// (createLogger is internal). Network reachability is required to
-		// actually resolve, so swallow network-class failures.
+		// "long-term" in the version field resolves through the channel pointer
+		// instead of throwing INVALID_VERSION. The upgrade server is stubbed so the
+		// test stays off the network (#316); a live fetch could use up the 5 s limit.
+		// A warning is logged but not asserted here (createLogger is internal).
+		const requested: string[] = [];
+		const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (input: string | URL | Request) => {
+			requested.push(String(input instanceof Request ? input.url : input));
+			return new Response("7.20.8 1774276515\n");
+		}) as unknown as typeof fetch);
 		try {
 			const instance = await QuickCHR.start({
 				name: "test-channel-as-version",
 				version: "long-term",
 				dryRun: true,
 			});
-			expect(instance.state.version).toMatch(/^7\./);
+			expect(instance.state.version).toBe("7.20.8");
+			expect(requested).toEqual(["https://upgrade.mikrotik.com/routeros/NEWESTa7.long-term"]);
 		} catch (e: unknown) {
 			const code = (e as { code?: string }).code;
 			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
-			// resolveVersion needs network; allow that to skip. Match both the
-			// node-style codes and Bun's connection-failure messages/codes
-			// ("Unable to connect", ConnectionRefused, FailedToOpenSocket).
-			const msg = e instanceof Error ? e.message : String(e);
-			if (
-				/fetch|network|unable to connect|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ConnectionRefused|FailedToOpenSocket/i.test(
-					msg,
-				)
-			) {
-				return;
-			}
 			throw e;
+		} finally {
+			fetchSpy.mockRestore();
 		}
 	});
 });
