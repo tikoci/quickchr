@@ -84,12 +84,18 @@ const int = (k: string, d: number, min: number, max: number): number => {
 	if (!Number.isSafeInteger(v) || v < min || v > max) usageError(`--${k}=${raw}: out of range ${min}..${max}`);
 	return v;
 };
-const list = (k: string, d: string, valid: RegExp) => {
+/** Comma list flag: every item valid, no duplicates, at most `max` items. Each
+ *  version adds window transfers (run) or requests per poll (watch) outside the
+ *  full-download budget, so the list length is a bandwidth bound too. */
+const list = (k: string, d: string, valid: RegExp, max: number) => {
 	const items = arg(k, d)
 		.split(",")
 		.map((s) => s.trim())
 		.filter(Boolean);
 	for (const s of items) if (!valid.test(s)) usageError(`--${k}: invalid item "${s}"`);
+	const dup = items.find((s, i) => items.indexOf(s) !== i);
+	if (dup !== undefined) usageError(`--${k}: "${dup}" given twice`);
+	if (items.length > max) usageError(`--${k}: ${items.length} items, at most ${max}`);
 	return items;
 };
 const VERSION_RE = /^\d+\.\d+(\.\d+)?((alpha|beta|rc)\d+)?$/;
@@ -105,13 +111,13 @@ const RUN = {
 	fullBudgetBytes: int("full-budget-mb", 1200, 0, 20_000) * 1e6,
 	rounds: int("rounds", 8, 0, 200),
 	rangeBytes: int("range-mib", 8, 1, 256) * MIB,
-	arches: list("arches", "x86,arm64", /^(x86|arm64)$/) as Arch[],
-	extraVersions: list("versions", "", VERSION_RE),
+	arches: list("arches", "x86,arm64", /^(x86|arm64)$/, 2) as Arch[],
+	extraVersions: list("versions", "", VERSION_RE, 8),
 };
 const WATCH = {
 	intervalMs: int("interval-s", 60, 10, 3600) * 1000,
 	durationMs: int("duration-min", 720, 1, 20_160) * 60_000,
-	expect: list("expect", "", VERSION_RE),
+	expect: list("expect", "", VERSION_RE, 8),
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────

@@ -274,7 +274,7 @@ that goes into the ticket.
 
 The watcher uses `NEWESTa7.*` on both hosts plus `--expect` because a release can
 appear as files before the channel pointer moves. Each poll costs 8 small GETs plus
-2 small GETs per expected version per host. Adjust `--expect` to the versions actually due.
+2 small GETs per expected version per host. Adjust `--expect` to the versions actually due (at most 8, no repeats; `run --versions` has the same limit).
 
 ## Support status: **no authoritative MikroTik source found**
 
