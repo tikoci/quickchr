@@ -173,6 +173,10 @@ async function request(
 ): Promise<Response> {
 	const headers: Record<string, string> = { "User-Agent": USER_AGENT, "Accept-Encoding": "identity" };
 	if (init.range) headers.Range = init.range;
+	// Bare fetch(), not fetchResilient() (src/lib/net.ts), on purpose: the hosts'
+	// own DNS, connect and TLS behaviour is what this probe measures. The resilient
+	// wrapper retries a failed connect over a public-DNS IPv4 literal, which would
+	// turn exactly the failure being looked for into a silent success.
 	return fetch(url, {
 		method: init.method ?? "GET",
 		headers,
@@ -281,6 +285,7 @@ async function transfer(
 		const headers: Record<string, string> = { "User-Agent": USER_AGENT, "Accept-Encoding": "identity" };
 		if (opts.range) headers.Range = rangeHeader(opts.range);
 		armIdle();
+		// Bare fetch() for the same reason as request(): the host is the subject.
 		const res = await fetch(url, { headers, keepalive: false, signal: controller.signal });
 		t.ttfbMs = performance.now() - t0;
 		t.status = res.status;
