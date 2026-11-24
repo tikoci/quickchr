@@ -70,15 +70,92 @@ jobs:
           printf 'unique=%s\n' "$(printf '%s' "${!seen[*]}")" >> "$GITHUB_OUTPUT"
           printf '%b' "$rows"
 
+      # Only "the ci-data branch's root tree, read completely, has no
+      # tested-versions.json" (the bootstrap case) reads as an empty record. A
+      # contents-API 404 cannot be told apart from a transient one for a file that
+      # exists, so the step reads the tree instead: branch → root tree SHA → that
+      # tree (refused if truncated) → the record's blob by SHA, checked against its
+      # git hash. Any other failure (a 5xx after retries, a 404 anywhere, a token or
+      # permission problem, a missing ci-data branch, a record that does not match
+      # the schema ci-metrics.ts writes) fails this job, so nothing is dispatched:
+      # an unreadable record would make every version look untested and re-dispatch
+      # the ones that already failed (#284).
       - name: Fetch tested-versions.json from ci-data
         id: tested
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -eo pipefail
-          gh api "repos/${{ github.repository }}/contents/tested-versions.json?ref=ci-data" \
-            -H "Accept: application/vnd.github.raw" > tested-versions.json \
-            || echo '{}' > tested-versions.json
+          set -u
+          fail() { echo "::error::tested-versions.json: $1; dispatching nothing"; exit 1; }
+          # GET one API path into a file. Only a 5xx is retried (twice); anything
+          # else, including a 404, is fatal.
+          api() {
+            local out=$1 path=$2 attempt
+            for attempt in 1 2 3; do
+              if gh api "$path" > "$out" 2> gh-err.txt; then return 0; fi
+              cat gh-err.txt
+              if grep -qE "HTTP 5[0-9][0-9]" gh-err.txt && [ "$attempt" -lt 3 ]; then
+                echo "::warning::$path: GitHub 5xx, retrying ($attempt/3)"
+                sleep "$((attempt * 15))"
+                continue
+              fi
+              fail "could not read $path"
+            done
+          }
+          api branch.json "repos/$REPO/branches/ci-data"
+          tree_sha=$(jq -ers '
+            select(length == 1) | .[0].commit.commit.tree.sha
+            | select(type == "string" and test("\\A[0-9a-f]{40}\\z"))
+          ' branch.json) \
+            || fail "the ci-data branch response names no root tree"
+          api tree.json "repos/$REPO/git/trees/$tree_sha"
+          entries=$(jq -c -es --arg sha "$tree_sha" '
+            select(length == 1) | .[0]
+            | select(.sha == $sha and .truncated == false and (.tree | type == "array"
+                and all(.[]; type == "object" and (.path | type == "string" and length > 0))))
+            | [.tree[] | select(.path == "tested-versions.json")]
+          ' tree.json) \
+            || fail "the ci-data root tree $tree_sha came back truncated or malformed"
+          case "$(jq length <<< "$entries")" in
+            0)
+              echo "::notice::ci-data has no tested-versions.json yet; treating every version as untested"
+              echo '{}' > tested-versions.json
+              ;;
+            1)
+              blob_sha=$(jq -er '
+                .[0] | select(.type == "blob" and (.mode == "100644" or .mode == "100755"))
+                | .sha | select(type == "string" and test("\\A[0-9a-f]{40}\\z"))
+              ' <<< "$entries") \
+                || fail "the ci-data entry is not a regular file"
+              api blob.json "repos/$REPO/git/blobs/$blob_sha"
+              jq -ers --arg sha "$blob_sha" '
+                select(length == 1) | .[0] | select(.sha == $sha and .encoding == "base64")
+                | .content | select(type == "string")
+              ' blob.json | base64 -d > tested-versions.json \
+                || fail "unexpected blob response or invalid base64 for $blob_sha"
+              [ "$(git hash-object --no-filters tested-versions.json)" = "$blob_sha" ] \
+                || fail "content does not hash to blob $blob_sha"
+              ;;
+            *) fail "the ci-data root tree lists it more than once" ;;
+          esac
+          # Exactly one JSON object, shaped as scripts/ci-metrics.ts writes it:
+          # version → platform id → { run_id, date, conclusion: pass|fail }.
+          # `{}` is valid (nothing tested yet).
+          jq -es '
+            def record:
+              type == "object"
+              and (.conclusion == "pass" or .conclusion == "fail")
+              and (.run_id | type == "string" and length > 0)
+              and (.date | type == "string" and test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z\\z"));
+            def platforms:
+              type == "object" and length > 0
+              and all(to_entries[]; (.key | test("\\A[a-z0-9]+(-[a-z0-9]+)*\\z")) and (.value | record));
+            length == 1 and (.[0] | type == "object" and all(to_entries[];
+              (.key | test("\\A[0-9]+\\.[0-9]+(\\.[0-9]+)?((beta|rc)[0-9]+)?\\z")) and (.value | platforms)))
+          ' tested-versions.json > /dev/null \
+            || fail "the record on ci-data does not match the schema scripts/ci-metrics.ts writes"
           cat tested-versions.json
 
       - name: Diff — versions with no linux-x86 record

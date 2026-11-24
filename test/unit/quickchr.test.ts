@@ -1,10 +1,12 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { QuickCHR, captureRunningFailure, credentialShareMs } from "../../src/lib/quickchr.ts";
 import type { MachineState } from "../../src/lib/types.ts";
 import { CONSOLE_LOGIN_COST_MS } from "../../src/lib/console.ts";
 import { GUEST_LOGIN_ALLOWANCE_MS, GUEST_QUERY_TIMEOUT_MS } from "../../src/lib/guest-snapshot.ts";
+import { hostChrArch, resetAppleSiliconHostCache } from "../../src/lib/platform.ts";
+import { storageProbe } from "../../src/lib/storage.ts";
 
 function expectErrorCode(e: unknown, code: string) {
 	expect(e).toBeInstanceOf(Error);
@@ -96,6 +98,55 @@ describe("QuickCHR.start name validation", () => {
 			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
 			throw e;
 		}
+	});
+});
+
+describe("QuickCHR.doctor arch (#293)", () => {
+	const platform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+	const arch = Object.getOwnPropertyDescriptor(process, "arch") as PropertyDescriptor;
+	const realSpawnSync = Bun.spawnSync;
+	let probeSpies: Array<{ mockRestore(): void }> = [];
+
+	beforeEach(() => {
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		// The faked "linux" platform would send the storage probe to `df`, which a
+		// Windows host may not have; these tests are about the QEMU rows only.
+		probeSpies = [
+			spyOn(storageProbe, "freeBytes").mockReturnValue(1024 ** 4),
+			spyOn(storageProbe, "filesystem").mockReturnValue({ dev: 1, statPath: TEST_DIR }),
+		];
+		Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+		Object.defineProperty(process, "arch", { value: "x64", configurable: true });
+		// No QEMU of either arch on PATH; everything else runs for real.
+		(Bun as unknown as { spawnSync: unknown }).spawnSync = (cmd: unknown, ...rest: unknown[]) => {
+			if (Array.isArray(cmd) && cmd[0] === "which" && String(cmd[1]).startsWith("qemu-")) {
+				return { exitCode: 1, stdout: new Uint8Array(), stderr: new Uint8Array() };
+			}
+			return (realSpawnSync as (...a: unknown[]) => unknown)(cmd, ...rest);
+		};
+	});
+
+	afterEach(() => {
+		Object.defineProperty(process, "platform", platform);
+		Object.defineProperty(process, "arch", arch);
+		(Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = realSpawnSync;
+		for (const spy of probeSpies) spy.mockRestore();
+	});
+
+	async function qemuStatus(doctorArch?: "x86" | "arm64" | "auto") {
+		const { checks } = await QuickCHR.doctor(doctorArch);
+		const status = (label: string) => checks.find((c) => c.label === label)?.status;
+		return { x86: status("qemu-system-x86_64"), arm64: status("qemu-system-aarch64") };
+	}
+
+	test("a missing QEMU is an error only for the default guest arch", async () => {
+		expect(await qemuStatus("x86")).toEqual({ x86: "error", arm64: "warn" });
+		expect(await qemuStatus("arm64")).toEqual({ x86: "warn", arm64: "error" });
+	});
+
+	test("omitted or 'auto' judges against the physical host's arch", async () => {
+		expect(await qemuStatus()).toEqual({ x86: "error", arm64: "warn" });
+		expect(await qemuStatus("auto")).toEqual({ x86: "error", arm64: "warn" });
 	});
 });
 
@@ -196,20 +247,51 @@ describe("ChrInstance API surface (dryRun)", () => {
 	});
 
 	test("arch: 'auto' resolves to host arch (not silently arm64)", async () => {
-		// Bug: donny lab 2026-04-22 — passing arch:"auto" bypassed hostArchToChr()
+		// Bug: donny lab 2026-04-22 — passing arch:"auto" bypassed the host-arch default
 		// and qemu-bin selection ("x86?bin-x86:bin-aarch64") silently picked arm64,
 		// leading to TCG emulation + ~480s boot timeout on Intel hosts.
-		// Fix: resolveArch() normalizes "auto" and undefined to hostArchToChr().
-		let instance: Awaited<ReturnType<typeof QuickCHR.start>> | null = null;
-		try {
-			instance = await QuickCHR.start({ name: "auto-arch-test", version: "7.22.1", arch: "auto", dryRun: true });
-		} catch (e: unknown) {
-			const code = (e as { code?: string }).code;
-			if (code === "MISSING_QEMU" || code === "MISSING_FIRMWARE") return;
-			throw e;
-		}
-		const expected = process.arch === "arm64" ? "arm64" : "x86";
-		expect(instance.state.arch).toBe(expected);
+		// Fix: resolveArch() normalizes "auto" and undefined to hostChrArch().
+		// A new machine's dry run never asks for QEMU, so this needs no QEMU on the host.
+		process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+		const instance = await QuickCHR.start({ name: "auto-arch-test", version: "7.22.1", arch: "auto", dryRun: true });
+		expect(instance.state.arch).toBe(hostChrArch());
+	});
+
+	describe("x64 Bun under Rosetta on Apple Silicon (#293)", () => {
+		const platform = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+		const arch = Object.getOwnPropertyDescriptor(process, "arch") as PropertyDescriptor;
+		const realSpawnSync = Bun.spawnSync;
+
+		beforeEach(() => {
+			process.env.QUICKCHR_DATA_DIR = TEST_DIR;
+			Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+			Object.defineProperty(process, "arch", { value: "x64", configurable: true });
+			resetAppleSiliconHostCache();
+			// Answer only the hardware probe; anything else runs for real.
+			(Bun as unknown as { spawnSync: unknown }).spawnSync = (cmd: unknown, ...rest: unknown[]) => {
+				if (Array.isArray(cmd) && cmd.join(" ") === "/usr/sbin/sysctl -n hw.optional.arm64") {
+					return { exitCode: 0, stdout: new TextEncoder().encode("1\n"), stderr: new Uint8Array() };
+				}
+				return (realSpawnSync as (...a: unknown[]) => unknown)(cmd, ...rest);
+			};
+		});
+
+		afterEach(() => {
+			Object.defineProperty(process, "platform", platform);
+			Object.defineProperty(process, "arch", arch);
+			(Bun as unknown as { spawnSync: typeof Bun.spawnSync }).spawnSync = realSpawnSync;
+			resetAppleSiliconHostCache();
+		});
+
+		test("a dry run with arch omitted or 'auto' picks arm64", async () => {
+			expect(hostChrArch()).toBe("arm64");
+			const omitted = await QuickCHR.start({ name: "rosetta-omitted", version: "7.22.1", dryRun: true });
+			expect(omitted.state.arch).toBe("arm64");
+			const auto = await QuickCHR.start({ name: "rosetta-auto", version: "7.22.1", arch: "auto", dryRun: true });
+			expect(auto.state.arch).toBe("arm64");
+			const x86 = await QuickCHR.start({ name: "rosetta-x86", version: "7.22.1", arch: "x86", dryRun: true });
+			expect(x86.state.arch).toBe("x86");
+		});
 	});
 
 	test("dryRun instance exposes portBase as a top-level number property", async () => {

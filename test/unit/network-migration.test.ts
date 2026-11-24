@@ -103,10 +103,12 @@ describe("resolveStartNetworks", () => {
 		});
 	});
 
-	test("empty networks array → empty (intentional no-network)", () => {
-		// Empty array is treated as "no networks specified by user" → falls through to legacy/default
-		const result = resolveStartNetworks([], undefined);
-		expect(result).toEqual([{ specifier: "user", id: "net0" }]);
+	test("empty networks array → empty (intentional no-network, #287)", () => {
+		expect(resolveStartNetworks([], undefined)).toEqual([]);
+	});
+
+	test("empty networks array wins over a legacy network (#287)", () => {
+		expect(resolveStartNetworks([], "vmnet-shared")).toEqual([]);
 	});
 
 	test("single-element networks → net0", () => {

@@ -142,6 +142,7 @@ enbeep
 endgroup
 enoent
 enoexec
+enotfound
 env
 eperm
 errno
@@ -152,9 +153,11 @@ ethertype
 ethertypes
 etimeout
 euid
+euo
 execve
 failable
 failback
+fdroid
 fflate
 fguser
 figcaption
@@ -187,7 +190,9 @@ highmem
 homecache
 hostfs
 hostfwd
+hostnames
 hotspot
+hsts
 htest
 hvf
 hwaddr
@@ -221,6 +226,7 @@ iqr
 irm
 isa
 kbd
+keepalive
 keepalives
 kexec
 keygen
@@ -282,6 +288,7 @@ mmio
 mndp
 mountpoint
 mqtts
+msc
 mte
 mtree
 mxcl
@@ -310,6 +317,7 @@ notrunc
 npk
 nsec
 nsh
+ntstatus
 nul
 nvram
 oci
@@ -325,6 +333,7 @@ parange
 paravirt
 passwordless
 patchless
+pathext
 pauth
 payam
 pci
@@ -489,6 +498,7 @@ tpm
 tsc
 tshark
 Tsvg
+ttfb
 ttl
 tuntap
 tzsp

@@ -193,3 +193,18 @@ describe("NIC device emission", () => {
 		]);
 	});
 });
+
+describe("no NICs (#287)", () => {
+	test("an empty network list emits -nic none, so QEMU adds no default NIC", () => {
+		const args: string[] = [];
+		buildNetworkArgs(args, {}, resolveStartNetworks([]));
+		expect(args).toEqual(["-nic", "none"]);
+	});
+
+	test("a configured NIC does not emit -nic none", () => {
+		const args: string[] = [];
+		buildNetworkArgs(args, {}, assignMacs("one-nic", resolveStartNetworks(["user"])));
+		expect(args).not.toContain("none");
+		expect(args.some((a) => a.startsWith("virtio-net-pci"))).toBe(true);
+	});
+});

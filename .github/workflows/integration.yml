@@ -25,7 +25,12 @@ name: Integration
 #   macos-arm64  macos-15           arm64 CHR  TCG   long budget (see note below)
 #   macos-x86    macos-15-intel     x86 CHR    HVF   extended budget
 #   windows-x86  windows-latest     x86 CHR    TCG   extended budget (no hw accel — slow)
-#   gating  = linux-x86,linux-arm64,macos-arm64      all = every platform
+#   gating  = linux-x86,linux-arm64,macos-arm64
+#   all     = linux-x86,linux-arm64,macos-arm64,windows-x86
+# macos-x86 runs only when named: GitHub is retiring the Intel macOS runners
+# (#305). There is no windows-arm64 id: choco's QEMU on windows-11-arm is an
+# x64 build, and under Windows' x64 emulation every TCG machine exits at once
+# (test/lab/windows-arm64-qemu, #305).
 #
 # The accelerator column and the budget column are deliberately independent —
 # see the platform table in the plan job for the grounding behind each value.
@@ -93,7 +98,7 @@ on:
     inputs:
       platforms:
         type: string
-        description: "Comma-separated platform ids (linux-x86, linux-arm64, macos-arm64, macos-x86, windows-x86) or an alias: 'gating' (linux-x86,linux-arm64,macos-arm64) / 'all'"
+        description: "Comma-separated platform ids (linux-x86, linux-arm64, macos-arm64, macos-x86, windows-x86) or an alias: 'gating' (linux-x86,linux-arm64,macos-arm64) / 'all' (gating + windows-x86; macos-x86 only by name)"
         default: "linux-x86"
       run-integration:
         type: boolean
@@ -310,7 +315,7 @@ jobs:
           LIST="${PLATFORMS// /}"
           case "$LIST" in
             gating) LIST="linux-x86,linux-arm64,macos-arm64" ;;
-            all)    LIST="linux-x86,linux-arm64,macos-arm64,macos-x86,windows-x86" ;;
+            all)    LIST="linux-x86,linux-arm64,macos-arm64,windows-x86" ;;
           esac
           TARGET_LIST="${TARGETS// /}"
           [ -z "$TARGET_LIST" ] && TARGET_LIST="stable"

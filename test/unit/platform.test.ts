@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { HostInterface } from "../../src/lib/types.ts";
@@ -30,8 +30,10 @@ import {
 	managedSocketSpecifier,
 	isWiredPortName,
 	isCrossArchEmulation,
+	hostChrArch,
 	accelDoctorCheck,
 	proxyDoctorCheck,
+	resolveWindowsCommand,
 } from "../../src/lib/platform.ts";
 
 const originalSpawnSync = Bun.spawnSync;
@@ -128,8 +130,8 @@ describe("detectPackageManager", () => {
 });
 
 describe("findCommandOnPath", () => {
-	test("returns the first non-empty path from command lookup output", () => {
-		setPlatform("linux");
+	test.each(["linux", "darwin"] as const)("uses which on %s and returns the first path", (platform) => {
+		setPlatform(platform);
 		mockSpawnSync((cmd) => {
 			expect(cmd).toEqual(["which", "qemu-img"]);
 			return { exitCode: 0, stdout: "\n  /toolchain/bin/qemu-img  \n/usr/bin/qemu-img\n" };
@@ -138,14 +140,131 @@ describe("findCommandOnPath", () => {
 		expect(findCommandOnPath("qemu-img")).toBe("/toolchain/bin/qemu-img");
 	});
 
-	test("uses where.exe on Windows and returns undefined on lookup failure", () => {
+	test("on Windows looks the command up in process, without spawning where.exe (#269)", () => {
 		setPlatform("win32");
-		mockSpawnSync((cmd) => {
-			expect(cmd).toEqual(["where.exe", "qemu-img"]);
-			return { exitCode: 1, stderr: "INFO: Could not find files" };
-		});
+		const dir = mkdtempSync(join(tmpdir(), "quickchr-win-lookup-"));
+		const savedPath = process.env.PATH;
+		const savedPathext = process.env.PATHEXT;
+		try {
+			writeFileSync(join(dir, "qemu-img.cmd"), "");
+			process.env.PATH = `;${dir};`;
+			process.env.PATHEXT = ".EXE;.CMD";
+			const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "/wrong\n" }));
+			expect(findCommandOnPath("qemu-img")?.toLowerCase()).toBe(join(dir, "qemu-img.cmd").toLowerCase());
+			expect(findCommandOnPath("__no_such_command_quickchr__")).toBeUndefined();
+			expect(spawn).not.toHaveBeenCalled();
+		} finally {
+			if (savedPath === undefined) delete process.env.PATH;
+			else process.env.PATH = savedPath;
+			if (savedPathext === undefined) delete process.env.PATHEXT;
+			else process.env.PATHEXT = savedPathext;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
 
-		expect(findCommandOnPath("qemu-img")).toBeUndefined();
+describe("resolveWindowsCommand (where.exe semantics, any host)", () => {
+	let root: string;
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "quickchr-where-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	/** Lay files out under root; returns the absolute path of each. */
+	function files(...rel: string[]): string[] {
+		return rel.map((r) => {
+			const p = join(root, r);
+			mkdirSync(dirname(p), { recursive: true });
+			writeFileSync(p, "");
+			return p;
+		});
+	}
+
+	/** Windows file names are case-insensitive; match them that way on any host. */
+	function caseInsensitiveIsFile(p: string): boolean {
+		try {
+			const want = p.split(/[\\/]/).at(-1)?.toLowerCase();
+			return readdirSync(dirname(p), { withFileTypes: true }).some((d) => d.isFile() && d.name.toLowerCase() === want);
+		} catch {
+			return false;
+		}
+	}
+
+	/** Compare paths the way Windows does: the casing of a match comes from the candidate. */
+	const lc = (p: string | undefined) => p?.toLowerCase();
+
+	function lookup(cmd: string, opts: { path: string[] | string; pathext?: string; cwd?: string }) {
+		return lc(resolveWindowsCommand(cmd, {
+			path: Array.isArray(opts.path) ? opts.path.join(";") : opts.path,
+			pathext: opts.pathext,
+			cwd: opts.cwd ?? join(root, "cwd"),
+			isFile: caseInsensitiveIsFile,
+		}));
+	}
+
+	test("tries PATH entries in order and PATHEXT extensions in PATHEXT order within each", () => {
+		const [aBat, , bExe] = files("a/tool.bat", "a/tool.cmd", "b/tool.exe");
+		// a comes first on PATH, so its .bat wins over b's .exe even though .EXE leads PATHEXT.
+		expect(lookup("tool", { path: [join(root, "a"), join(root, "b")], pathext: ".EXE;.BAT;.CMD" })).toBe(lc(aBat));
+		// Within a, PATHEXT order decides: .CMD before .BAT.
+		expect(lookup("tool", { path: [join(root, "a"), join(root, "b")], pathext: ".CMD;.BAT" })).toBe(lc(join(root, "a", "tool.CMD")));
+		expect(lookup("tool", { path: [join(root, "b"), join(root, "a")], pathext: ".BAT;.EXE" })).toBe(lc(bExe));
+	});
+
+	test(".COM is not deferred: it wins when PATHEXT lists it first", () => {
+		files("d/tool.exe", "d/tool.com");
+		expect(lookup("tool", { path: [join(root, "d")], pathext: ".COM;.EXE" })).toBe(lc(join(root, "d", "tool.com")));
+	});
+
+	test("a custom PATHEXT extension is honoured", () => {
+		const [ps1] = files("p/tool.ps1");
+		expect(lookup("tool", { path: [join(root, "p")], pathext: ".COM;.EXE;.PS1" })).toBe(lc(ps1));
+		expect(lookup("tool", { path: [join(root, "p")], pathext: ".COM;.EXE" })).toBeUndefined();
+	});
+
+	test("the current directory is searched before PATH", () => {
+		const [here] = files("cwd/tool.exe", "a/tool.exe");
+		expect(lookup("tool", { path: [join(root, "a")], pathext: ".EXE" })).toBe(lc(here));
+	});
+
+	test("quoted PATH entries (with spaces) are unquoted and empty entries skipped", () => {
+		const [spaced] = files("Program Files/QEMU/qemu-system-x86_64.exe");
+		const path = `;;"${join(root, "Program Files", "QEMU")}";;`;
+		expect(lookup("qemu-system-x86_64", { path, pathext: ".EXE" })).toBe(lc(spaced));
+	});
+
+	test("skips empty PATH entries and resolves relative entries against cwd", () => {
+		const cwd = join(root, "cwd");
+		const isFile = mock((_: string) => false);
+		resolveWindowsCommand("tool", { path: ';;"";bin;', pathext: ".EXE;.exe", cwd, isFile });
+		expect(isFile.mock.calls).toEqual([[join(cwd, "tool.exe")], [join(cwd, "bin", "tool.exe")]]);
+	});
+
+	test("names and extensions match case-insensitively", () => {
+		const [mixed] = files("m/Tool.Exe");
+		expect(lookup("TOOL", { path: [join(root, "m")], pathext: ".com;.exe" })).toBe(lc(mixed));
+	});
+
+	test("a name that already has an extension is tried as written", () => {
+		const [exact] = files("e/tool.exe", "e/tool.exe.cmd");
+		expect(lookup("tool.exe", { path: [join(root, "e")], pathext: ".CMD;.EXE" })).toBe(lc(exact));
+		files("e/script.ps1.cmd");
+		expect(lookup("script.ps1", { path: [join(root, "e")], pathext: ".CMD" })).toBeUndefined();
+	});
+
+	test("directories are not matches, and an unset PATHEXT falls back to cmd.exe's", () => {
+		mkdirSync(join(root, "x", "tool.exe"), { recursive: true });
+		const [bat] = files("y/tool.bat");
+		expect(lookup("tool", { path: [join(root, "x"), join(root, "y")] })).toBe(lc(bat));
+		files("y/other.ps1");
+		expect(lookup("other", { path: [join(root, "y")] })).toBeUndefined();
+	});
+
+	test("returns undefined when nothing matches, including an empty name", () => {
+		expect(lookup("nothing", { path: [join(root, "a")], pathext: ".EXE" })).toBeUndefined();
+		expect(lookup("", { path: [join(root, "a")], pathext: ".EXE" })).toBeUndefined();
 	});
 });
 
@@ -411,16 +530,31 @@ describe("UEFI firmware beside a QEMU's own data dirs (#254)", () => {
 		expect(findEfiFirmware(none)).toBeUndefined();
 		const code = touch("root", "usr", "share", "AAVMF", "AAVMF_CODE.fd");
 		const vars = touch("root", "usr", "share", "AAVMF", "AAVMF_VARS.fd");
-		const qemu = join(tmp, "bin", "qemu-system-aarch64");
+		// Windows resolves PATH in process (#269), so it needs a real file on a real PATH;
+		// elsewhere the mocked `which` answers.
+		const win = process.platform === "win32";
+		const qemu = win ? touch("bin", "qemu-system-aarch64.exe") : join(tmp, "bin", "qemu-system-aarch64");
+		const savedPath = process.env.PATH;
+		const savedPathext = process.env.PATHEXT;
+		if (win) {
+			process.env.PATH = join(tmp, "bin");
+			process.env.PATHEXT = ".exe"; // the stub's own casing, so a simulated run on Linux finds it too
+		}
 		mockSpawnSync((cmd) => {
-			if (cmd[0] === qemu) {
-				expect(cmd).toEqual([qemu, "-L", "help"]);
+			if (cmd[0]?.toLowerCase() === qemu.toLowerCase()) {
+				expect(cmd.slice(1)).toEqual(["-L", "help"]);
 				return { exitCode: 0, stdout: `${join(tmp, "root", "usr", "share", "qemu")}\n/usr/share/qemu\n` };
 			}
-			// `which` / `where.exe` resolving qemu-system-aarch64 on PATH.
-			return cmd[1] === "qemu-system-aarch64" ? { exitCode: 0, stdout: `${qemu}\n` } : { exitCode: 1 };
+			// `which` resolving qemu-system-aarch64 on PATH.
+			return cmd[0] === "which" && cmd[1] === "qemu-system-aarch64" ? { exitCode: 0, stdout: `${qemu}\n` } : { exitCode: 1 };
 		});
-		expect(findEfiFirmware(none)).toEqual({ code, vars });
+		try {
+			expect(findEfiFirmware(none)).toEqual({ code, vars });
+		} finally {
+			process.env.PATH = savedPath;
+			if (savedPathext === undefined) delete process.env.PATHEXT;
+			else process.env.PATHEXT = savedPathext;
+		}
 	});
 
 	test("findEfiFirmware does not ask QEMU when a standard path matches", () => {
@@ -464,6 +598,41 @@ describe("isCrossArchEmulation", () => {
 	});
 });
 
+describe("hostChrArch (#293)", () => {
+	test("arm64 for an x64 Bun under Rosetta, so the default guest is same-arch", () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync((cmd) => {
+			expect(cmd).toEqual(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"]);
+			return { exitCode: 0, stdout: "1\n" };
+		});
+		expect(hostChrArch()).toBe("arm64");
+		expect(isCrossArchEmulation(hostChrArch())).toBe(false);
+	});
+
+	test("x86 on an Intel Mac, where the probe says not translated", () => {
+		setPlatform("darwin");
+		setArch("x64");
+		mockSpawnSync(() => ({ exitCode: 0, stdout: "0\n" }));
+		expect(hostChrArch()).toBe("x86");
+	});
+
+	test("follows process.arch elsewhere, without probing", () => {
+		const spawn = mockSpawnSync(() => ({ exitCode: 0, stdout: "1\n" }));
+		for (const [platform, arch, want] of [
+			["darwin", "arm64", "arm64"],
+			["linux", "arm64", "arm64"],
+			["linux", "x64", "x86"],
+			["win32", "x64", "x86"],
+		] as const) {
+			setPlatform(platform);
+			setArch(arch);
+			expect(hostChrArch()).toBe(want);
+		}
+		expect(spawn).not.toHaveBeenCalled();
+	});
+});
+
 describe("detectAccel", () => {
 	test("returns kvm on Linux only when host and guest architecture match and /dev/kvm is writable", async () => {
 		setPlatform("linux");
@@ -492,7 +661,7 @@ describe("detectAccel", () => {
 		setPlatform("darwin");
 		setArch("x64");
 		mockSpawnSync((cmd) => {
-			if (cmd.at(-1) === "sysctl.proc_translated") return { exitCode: 1 };
+			if (cmd.at(-1) === "hw.optional.arm64") return { exitCode: 1 };
 			expect(cmd).toEqual(["sysctl", "-n", "kern.hv_support"]);
 			return { exitCode: 0, stdout: "1\n" };
 		});
@@ -518,7 +687,7 @@ describe("detectAccel", () => {
 		setPlatform("darwin");
 		setArch("x64");
 		mockSpawnSync((cmd) => {
-			if (cmd.at(-1) === "sysctl.proc_translated") {
+			if (cmd.at(-1) === "hw.optional.arm64") {
 				return { exitCode: 0, stdout: "1\n" };
 			}
 			expect(cmd).toEqual(["sysctl", "-n", "kern.hv_support"]);
@@ -549,7 +718,7 @@ describe("isAppleSiliconHost", () => {
 		setPlatform("darwin");
 		setArch("x64");
 		mockSpawnSync((cmd) => {
-			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			expect(cmd).toEqual(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"]);
 			return { exitCode: 0, stdout: "1\n" };
 		});
 		expect(isAppleSiliconHost()).toBe(true);
@@ -630,7 +799,7 @@ describe("accelNote", () => {
 		setArch("x64");
 		resetAppleSiliconHostCache();
 		mockSpawnSync((cmd) => {
-			expect(cmd).toEqual(["sysctl", "-n", "sysctl.proc_translated"]);
+			expect(cmd).toEqual(["/usr/sbin/sysctl", "-n", "hw.optional.arm64"]);
 			return { exitCode: 1 };
 		});
 		expect(accelNote("arm64", "tcg")).toBeNull();

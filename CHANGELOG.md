@@ -13,6 +13,19 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Added
 
+- **Provisioned machines are named after themselves.** When quickchr provisions a
+  machine (packages, device-mode, license, `--add-user`, `--disable-admin` or
+  `--secure-login`, including the `secure-login` setting), it now also sets
+  `/system/identity` to the machine name, so machines are told apart in WinBox, MNDP
+  neighbor lists, the console prompt and `/app` container host names. A boot-only
+  start leaves the current identity in place, and `set` never renames. Opt out with
+  `--no-identity` on `add`/`start` (`StartOptions.identity: false`); the opt-out is
+  kept as intent, so `clean()` and a plain `start` replay it. **Library callers that
+  provision get this by default too.** The step is recorded as `identity` in
+  `machine.json`'s `provisioning.steps`. RouterOS caps an identity at 64 bytes: every
+  name quickchr creates now fits, but a longer name from an older release fails the
+  step; start that machine with `--no-identity`. (#265)
+
 - **Receive ports for traffic the guest sends** (TZSP, syslog, NetFlow).
   `quickchr add lab --receive tzsp` reserves a named port: the guest sends to
   `10.0.2.2:37008` and a host listener binds `127.0.0.1:37008`, unconnected. SLIRP
@@ -45,11 +58,56 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ### Fixed
 
+- **`--no-network` / `networks: []` now gives a machine no NICs, as documented.**
+  An empty list used to fall through to the default user NIC, and even with no
+  network options QEMU adds its own default NIC; quickchr now passes `-nic none`.
+  Such a start is refused unless it doesn't wait for boot (`--no-wait`, `--fg`),
+  since quickchr reaches the guest through the user NIC, and `add()` refuses
+  provisioning options on a machine with no user NIC (it could never apply them).
+  `--no-network` together with `--add-network` is now an error; to use only the
+  networks you list, pass `--add-network` alone. If you relied on the old behaviour,
+  drop `--no-network`. `descriptor()` on a machine with no user NIC now reports
+  `rest-api`, `native-api` and `ssh` as unavailable and lists no `customForwards`,
+  since QEMU forwards host ports only through the user NIC. (#287)
+- **`QuickCHR.add({ onProgress })` no longer prints image lines to stdout.** `add()`
+  dropped its logger on the way to the image cache, so `Using cached image…` and the
+  download lines went to `console.log` even with a progress callback. (#290)
+- **`quickchr remove` / `removeOrphan()` no longer deletes a directory whose QEMU is
+  still running.** A start killed after spawning QEMU but before saving `machine.json`
+  leaves a live VM behind an unreadable directory; removing it used to strand that VM
+  untracked. quickchr now writes `qemu.pid` immediately after spawning (it used to wait
+  out a 1.5 s startup check) and removes it once a stopped QEMU has exited. A removal
+  refuses with `MACHINE_RUNNING` and deletes nothing when that pid is alive and its
+  command line names a file in the directory (compared by canonical path, so a
+  symlinked data dir matches), with a `kill` hint. When the identity cannot be checked
+  (Windows, another user's process on macOS), it still refuses, without a kill hint,
+  and says to delete `qemu.pid` if the process is not this machine's QEMU. With no
+  usable `qemu.pid` (an older release wrote it late), Linux and macOS look for a
+  `qemu-system-*` process with a file in the directory and refuse the same way. (#294)
+- **The default guest arch is arm64 on Apple Silicon, even for an x64 Bun under
+  Rosetta.** With no `arch` (or `"auto"`), `add()`/`start()`, `cacheKey()`/`cacheAdd()`
+  and the setup wizard read `process.arch`, which is `x64` under Rosetta. They picked an
+  x86 guest, which then ran under cross-arch TCG with the 15× budget, and the cache
+  helpers keyed the x86 image. They now use the physical host's arch, read from
+  `hw.optional.arm64`. The new `hostChrArch()` export tells a consumer which arch the
+  default will be. Precedence: the CLI uses the `default-arch` setting when `--arch`
+  is omitted; an explicit `--arch auto`, or an omitted `arch` in the library API,
+  selects the physical host's arch. `quickchr doctor` now treats a missing QEMU (or
+  UEFI firmware) as an error only for that default arch, and `QuickCHR.doctor(arch?)`
+  takes it. (#293)
+
 - **Windows: boot-failure reports listed no forwards with a hex socket handle.** QEMU on
   Windows prints `info usernet`'s FD column as a hex socket handle (`41c`), and the
   parser accepted digits only, so it dropped those rows — the forward outcomes in a
   Windows boot-failure report could miss forwards that were in fact bound. Found by the
   new #57 CI probe (#304).
+
+- **Windows: commands that look up a binary are faster.** quickchr resolved each command
+  on PATH by spawning `where.exe`, about 75 ms per lookup on a GitHub windows-latest
+  runner, and `quickchr doctor` made nine of them (~0.7 s). On Windows, lookups now happen
+  in process and follow `where.exe`'s order: the current directory, then each PATH entry,
+  trying `PATHEXT` extensions in order. `doctor --json` went from ~765 ms to ~170 ms
+  there. Linux and macOS still use `which`. (#269)
 
 - A library `start({ dryRun: true })` naming an existing, stopped machine launched
   it. It now returns a preview handle without spawning QEMU. (#303 review)

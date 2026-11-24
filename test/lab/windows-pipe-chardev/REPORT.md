@@ -263,7 +263,7 @@ bun run test/lab/windows-pipe-chardev/probe.ts --arm unix --trials 50 \
 bun run test/lab/windows-pipe-chardev/probe.ts --arm tcp --trials 5 --accel kvm
 ```
 
-In CI: dispatch `lab.yml` with `lab=windows-pipe-chardev`, or push a change under
-`test/lab/`. Results go to the job summary and the
+In CI: dispatch `lab.yml` with `lab=windows-pipe-chardev` (`chardev_arm` picks one
+arm). The job is dispatch-only: a push or an `all` run skips it. Results go to the job summary and the
 `windows-pipe-chardev-<arm>` artifact (`results-<arm>.json`, `probe.log`,
 `qemu.log`).
