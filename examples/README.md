@@ -89,7 +89,7 @@ bun add @tikoci/quickchr@next       # QA candidate channel
 
 Channel policy (see `.github/workflows/release.yml`): a release publishes to npm tag
 `next` first and is promoted to `latest` after QA; `next` is never older than `latest`.
-Pin an exact version (`@tikoci/quickchr@0.5.1`) for reproducible runs.
+Pin an exact version (`@tikoci/quickchr@0.7.0`) for reproducible runs.
 
 ### 2. Local path (recommended for sibling experiment dirs)
 

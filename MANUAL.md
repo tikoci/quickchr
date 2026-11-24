@@ -80,13 +80,13 @@ bun add @tikoci/quickchr
 ```
 
 For prerelease QA, use `@next` for the current candidate, or pin an exact version
-(`@0.6.0`). A release is published to `next` first and promoted to `latest` once QA
+(`@0.7.0`). A release is published to `next` first and promoted to `latest` once QA
 passes; `next` is never older than `latest`. The quickchr package channel is
 independent of `--channel`, which selects a RouterOS firmware channel.
 
 ```bash
 bun install -g @tikoci/quickchr@next
-bun add @tikoci/quickchr@0.6.0
+bun add @tikoci/quickchr@0.7.0
 quickchr --version
 ```
 
