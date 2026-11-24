@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
 import { createServer } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import { resolveAuth } from "../../src/lib/auth.ts";
 import { restExecute } from "../../src/lib/exec.ts";
 import { restPost } from "../../src/lib/rest.ts";
@@ -363,6 +364,20 @@ describe.skipIf(SKIP)("exec — provisioned user credentials", () => {
 	}, bootTestTimeout());
 });
 
+/** A TCP port the OS considers free right now, from its ephemeral range: far
+ *  from quickchr's port blocks. */
+async function freeTcpPort(): Promise<number> {
+	const server = createTcpServer();
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "0.0.0.0", resolve);
+	});
+	const address = server.address();
+	await new Promise<void>((resolve) => server.close(() => resolve()));
+	if (!address || typeof address === "string") throw new Error("no TCP port from the OS");
+	return address.port;
+}
+
 // Own machine: these tests temporarily remove the host REST forward.
 describe.skipIf(SKIP)("exec — auto transport fallback", () => {
 	const MACHINE = "integration-exec-fallback";
@@ -375,7 +390,10 @@ describe.skipIf(SKIP)("exec — auto transport fallback", () => {
 			...imageTarget(),
 			background: true,
 			name: MACHINE,
-			extraPorts: [{ name: "exec-upstream", host: 0, guest: 80, proto: "tcp" }],
+			// An explicit host port, not an auto one: an auto extra lands at portBase+6,
+			// which on Windows is QEMU's monitor, so the "upstream" would reach the
+			// monitor instead of the router (#57).
+			extraPorts: [{ name: "exec-upstream", host: await freeTcpPort(), guest: 80, proto: "tcp" }],
 		});
 		expect(instance).toBeDefined();
 		if (!instance) {
