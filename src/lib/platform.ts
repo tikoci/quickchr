@@ -91,13 +91,17 @@ export function findCommandOnPath(cmd: string): string | undefined {
 	}
 }
 
-/** cmd.exe's PATHEXT when the variable is unset. */
+/** Extensions tried when `PATHEXT` is unset: the ones a quickchr spawn can run.
+ *  This is not what Windows tools do. Measured on windows-latest (Server 2025)
+ *  with PATHEXT removed: cmd.exe fills in `.COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC`,
+ *  and `where.exe` tries no extensions at all. A script type such as `.vbs` needs
+ *  its host to run, so a spawn could not use a match on it. */
 const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
 
 interface WindowsLookupEnv {
 	/** `PATH`, `;`-separated. Entries may be quoted; empty entries are skipped. */
 	path: string;
-	/** `PATHEXT`; unset falls back to cmd.exe's `.COM;.EXE;.BAT;.CMD`. */
+	/** `PATHEXT`; unset falls back to `.COM;.EXE;.BAT;.CMD` ({@link DEFAULT_PATHEXT}). */
 	pathext?: string | undefined;
 	/** Searched before any PATH entry, as cmd.exe and `where.exe` do. */
 	cwd: string;
@@ -118,7 +122,8 @@ function statIsFile(p: string): boolean {
  * Resolve a command the way `where.exe` (and cmd.exe) does, without spawning it:
  * the current directory first, then each PATH entry in order (surrounding quotes
  * stripped, empty entries skipped). A name with an extension is tried as written.
- * For other names, try PATHEXT in order, ignoring duplicate extensions by case.
+ * For other names, try PATHEXT in order, ignoring duplicate extensions by case
+ * (an unset PATHEXT uses {@link DEFAULT_PATHEXT}, where those tools differ).
  * A command with a directory component is resolved against `cwd` alone.
  */
 export function resolveWindowsCommand(cmd: string, env: WindowsLookupEnv): string | undefined {

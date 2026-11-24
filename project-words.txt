@@ -278,6 +278,7 @@ mmio
 mndp
 mountpoint
 mqtts
+msc
 mte
 mtree
 mxcl
