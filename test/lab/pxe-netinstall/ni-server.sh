@@ -58,7 +58,15 @@ if [ "$mode" = native ]; then
 		here=$1 share=$2 work=$3 link=$4
 		python3 -I "$here/tapbridge.py" ni0 "$work/$link-a.sock" "$work/$link-b.sock" &
 		bridge=$!
-		while ! ip link show ni0 >/dev/null 2>&1; do sleep 0.1; done
+		# tapbridge.py creates ni0; give up if it exits first (no /dev/net/tun,
+		# say) or ni0 is not there after 10 s.
+		n=0
+		while ! ip link show ni0 >/dev/null 2>&1; do
+			kill -0 $bridge 2>/dev/null || { echo "tapbridge.py exited before ni0 appeared" >&2; exit 1; }
+			n=$((n + 1))
+			[ $n -le 100 ] || { echo "ni0 not up after 10 s" >&2; kill $bridge 2>/dev/null; exit 1; }
+			sleep 0.1
+		done
 		ip link set lo up
 		ip link set ni0 address 02:00:00:00:00:01 up
 		tcpdump -q -i ni0 -U -w "$work/ni-$link.pcap" 2>/dev/null &

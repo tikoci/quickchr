@@ -32,7 +32,8 @@ What a netinstalled VM is: **x86 or arm64 RouterOS, not CHR.** It has a 24-hour 
 (`expires-in: 23h49m31s` at 30 s uptime, no `level`) and an `x86`/`arm64` board name. It also
 needs a non-virtio disk at runtime. On virtio-blk both die the same way: `Fatal error 0x853`,
 `died with signal 6`, then power-off. x86 prints this to VGA only, which is why the macOS run saw
-only a power-off.
+only a power-off. One exception: the **first** boot of a BIOS-installed x86 disk on virtio-blk
+reached REST (twice, see Experiment 1); every later boot of that disk on virtio-blk died.
 
 ## Linux re-run (KVM)
 
@@ -269,6 +270,15 @@ added a DHCP client:
   `Fatal error 0x853` / `died with signal 6` as arm64. The cause has not been proven. The
   netinstall kernel's Hardware-ID failure on virtio-blk suggests the same lookup, but that is a
   hypothesis.
+- **The first boot after install is the exception** (macOS, HVF, during the review fixes for
+  PR #331). `exp1 direct-bios` installed twice (52 s and 56 s, disk on ide-hd with
+  `serial=QCHRPXE0001`), and both times `boot-installed.sh ... bios` booted the fresh copy on
+  virtio-blk under SeaBIOS to REST (26 s and 31 s, `board-name: x86 QEMU Standard PC`). The
+  next boot of the same disk on virtio-blk failed each time (3 boots over the two installs):
+  `bootPart mount: Invalid argument`, then `Fatal error 0x853` / `died with signal 6`, and QEMU
+  stops (`VM status: paused (shutdown)` with `-no-shutdown`). The same disk then boots on ide-hd
+  with the install-time `serial=` to REST in about 6 s, so the disk is intact. The UEFI-installed
+  disk was not tried on its first boot.
 
 ## Experiment 2: a CHR with the `netinstall` package as the server
 

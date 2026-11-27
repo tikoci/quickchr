@@ -1,5 +1,5 @@
 #!/bin/sh
-# cspell:ignore pxeni QCHRPXE varstore
+# cspell:ignore pxeni QCHRPXE varstore netcat
 # shellcheck disable=SC2034  # OVMF_*, AAVMF_*, X86_ACCEL are used by the scripts that source this file
 # Shared settings for the PXE / netinstall lab (quickchr#329).
 # Source it: `. test/lab/pxe-netinstall/lib.sh`. Nothing here needs root.
@@ -11,8 +11,9 @@
 VER=${VER:-7.25.2}
 WORK=${WORK:-/tmp/pxeni}
 CACHE=${CACHE:-$HOME/.local/share/quickchr/cache}
-# Downloads (netinstk boot images, routeros-*.npk, netinstall-cli) live here.
-DL=${DL:-$WORK/dl}
+# Downloads (netinstk boot images, routeros-*.npk, netinstall-cli) live here,
+# one directory per VER so a run never mixes components from two versions.
+DL=${DL:-$WORK/dl/$VER}
 QEMU_SHARE=${QEMU_SHARE:-/usr/local/share/qemu}
 
 # Firmware: the first pair whose code and vars files both exist. QEMU's own
@@ -68,19 +69,24 @@ mkdir -p "$WORK" "$DL"
 ts() { date +%H:%M:%S; }
 log() { echo "[$(ts)] $*" >&2; }
 
+# `fetch <url> <file>`: download once. curl writes to <file>.part, which is
+# renamed only after a complete transfer, so a failed download never leaves a
+# file that a later run would take as cached.
+fetch() {
+	[ -s "$2" ] && return 0
+	if curl -sf -o "$2.part" "$1"; then mv "$2.part" "$2"; else rm -f "$2.part"; return 1; fi
+}
+
 # Public MikroTik downloads used by the lab. Idempotent.
 fetch_downloads() {
 	mkdir -p "$DL/netinstk" "$DL/npk" "$DL/cli"
 	for a in x86_64 arm64 arm64-uefi; do
-		[ -s "$DL/netinstk/linux.$a" ] ||
-			curl -sf -o "$DL/netinstk/linux.$a" "https://upgrade.mikrotik.com/routeros/$VER/netinstk/linux.$a"
+		fetch "https://upgrade.mikrotik.com/routeros/$VER/netinstk/linux.$a" "$DL/netinstk/linux.$a"
 	done
-	[ -s "$DL/npk/routeros-$VER.npk" ] ||
-		curl -sf -o "$DL/npk/routeros-$VER.npk" "https://download.mikrotik.com/routeros/$VER/routeros-$VER.npk"
-	[ -s "$DL/npk/routeros-$VER-arm64.npk" ] ||
-		curl -sf -o "$DL/npk/routeros-$VER-arm64.npk" "https://download.mikrotik.com/routeros/$VER/routeros-$VER-arm64.npk"
+	fetch "https://download.mikrotik.com/routeros/$VER/routeros-$VER.npk" "$DL/npk/routeros-$VER.npk"
+	fetch "https://download.mikrotik.com/routeros/$VER/routeros-$VER-arm64.npk" "$DL/npk/routeros-$VER-arm64.npk"
 	if [ ! -x "$DL/cli/netinstall-cli" ]; then
-		curl -sf -o "$DL/cli/netinstall-$VER.tar.gz" "https://download.mikrotik.com/routeros/$VER/netinstall-$VER.tar.gz"
+		fetch "https://download.mikrotik.com/routeros/$VER/netinstall-$VER.tar.gz" "$DL/cli/netinstall-$VER.tar.gz"
 		tar xzf "$DL/cli/netinstall-$VER.tar.gz" -C "$DL/cli"
 	fi
 }
@@ -105,19 +111,49 @@ uefi_vars() {
 	case $code in *aarch64* | *AAVMF* | *QEMU_EFI*) truncate -s "$(wc -c <"$code")" "$out" ;; esac
 }
 
-# Send one command to a QEMU HMP monitor socket (nc -U on macOS; socat or
-# python3 where nc is missing or lacks -U).
+# Send one command to a QEMU HMP monitor socket: socat, else an nc that
+# supports -U (macOS, OpenBSD nc; GNU netcat does not), else python3.
 hmp() {
 	if command -v socat >/dev/null; then
 		{ printf '%s\n' "$2"; sleep 1; } | socat - "UNIX-CONNECT:$1" >/dev/null 2>&1 || true
-	elif command -v nc >/dev/null; then
+	elif command -v nc >/dev/null && nc -h 2>&1 | grep -q -- '-U'; then
 		printf '%s\n' "$2" | nc -U -w 2 "$1" >/dev/null 2>&1 || true
 	else
 		python3 -I -c 'import socket,sys,time;s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.send(sys.argv[2].encode()+b"\n");time.sleep(1)' "$1" "$2" || true
 	fi
 }
 
+# Stop the process named in a pidfile. The process may already be gone (QEMU
+# with -no-reboot exits on its own), so a failed kill is expected, not an error.
 kill_pidfile() {
-	[ -f "$1" ] && kill "$(cat "$1")" 2>/dev/null
+	if [ -f "$1" ]; then kill "$(cat "$1")" 2>/dev/null || true; fi
 	rm -f "$1"
+}
+
+# Stop a background process and its direct children (a `sh script.sh &` whose
+# script runs QEMU or netinstall-cli in the foreground). Empty pid: no-op.
+kill_tree() {
+	[ -n "${1:-}" ] || return 0
+	pkill -TERM -P "$1" 2>/dev/null || true
+	kill "$1" 2>/dev/null || true
+}
+
+# `run_bounded <seconds> <command...>`: run a foreground command, but stop it
+# (and its children) after <seconds>. Returns the command's status, or 124 on
+# timeout, like coreutils timeout(1), which macOS does not ship.
+run_bounded() {
+	limit=$1; shift
+	"$@" &
+	rb_pid=$!
+	rb_end=$(( $(date +%s) + limit ))
+	while kill -0 "$rb_pid" 2>/dev/null; do
+		if [ "$(date +%s)" -ge "$rb_end" ]; then
+			log "timeout after ${limit}s: $*"
+			kill_tree "$rb_pid"
+			wait "$rb_pid" 2>/dev/null || true
+			return 124
+		fi
+		sleep 1
+	done
+	wait "$rb_pid"
 }

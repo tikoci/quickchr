@@ -13,6 +13,7 @@
 # e1000, arm64 nvme + igb; DISK_DEV/NIC_DEV override. The disk needs a serial.
 # -no-reboot makes QEMU exit when the installer reboots the target, which is
 # the "install finished" signal. Runs in the foreground; prints the time.
+# QEMU's pid is in $WORK/<run>.pid, so a caller can stop it with kill_pidfile.
 set -eu
 . "$(dirname "$0")/lib.sh"
 
@@ -49,5 +50,6 @@ t0=$(date +%s)
 	-drive "file=$disk,format=qcow2,if=none,id=d0" -device "$disk_dev,drive=d0,serial=$serial" \
 	-netdev "$netdev" -device "$nic_dev,netdev=n0,mac=${MAC:-02:00:00:00:00:07},romfile=" \
 	-object "filter-dump,id=f0,netdev=n0,file=$WORK/$run.pcap" \
-	-display none -serial "file:$WORK/$run.serial.log" -no-reboot
+	-display none -serial "file:$WORK/$run.serial.log" -no-reboot \
+	-pidfile "$WORK/$run.pid"
 log "$run: QEMU exited (installer rebooted or powered off) after $(( $(date +%s) - t0 ))s"

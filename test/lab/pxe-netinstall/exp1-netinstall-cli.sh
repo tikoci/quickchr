@@ -6,8 +6,10 @@
 #
 # bios/uefi: the target PXE-boots (target-x86.sh). direct-*: the target loads
 # the netinstall image with -kernel instead (direct-install.sh, no firmware
-# network boot). WAIT (seconds, default 900) bounds the wait for the install;
-# a short WAIT suits bios, which the server rejects at BOOTP.
+# network boot). WAIT (seconds, default 900) bounds the install, counted from
+# the target's launch, in every mode; a short WAIT suits bios, which the server
+# rejects at BOOTP. The server and every QEMU started here are stopped on exit,
+# also on failure or interrupt.
 #
 # Target hardware defaults to what the netinstall kernel accepts (see REPORT.md):
 # DISK_DEV=ide-hd, NIC_DEV=e1000. Override them to reproduce the failures.
@@ -22,6 +24,14 @@ export DISK_DEV="${DISK_DEV:-ide-hd}" NIC_DEV="${NIC_DEV:-e1000}"
 export NI_FILES="$here/scripts/configure.rsc $here/scripts/mode.rsc"
 
 rm -f "$WORK/$run".* "$WORK/ni-$run".*
+ni=""
+cleanup() {
+	kill_pidfile "$WORK/$run.pid"
+	kill_pidfile "$WORK/$run-post.pid"
+	kill_tree "$ni" # still waiting when the install failed
+}
+trap cleanup EXIT
+trap 'exit 143' INT TERM # run the EXIT trap, then stop
 sh "$here/ni-server.sh" "$run" -r -s configure.rsc -sm mode.rsc >"$WORK/ni-$run.out" 2>&1 &
 ni=$!
 # OVMF PXE gives up after ~31 s (4 DISCOVERs, PXE-E18) and netinstall-cli
@@ -32,11 +42,13 @@ for _ in $(seq 1 60); do
 done
 sleep 5
 t0=$(date +%s)
+wait_s=${WAIT:-900}
 case $mode in
 direct-*)
-	# Foreground: returns when the installer reboots (-no-reboot).
+	# Foreground: returns when the installer reboots (-no-reboot), or is
+	# stopped when WAIT runs out.
 	fw=${mode#direct-}
-	sh "$here/direct-install.sh" "$run" "$(dgram_pair "$run" b)" x86 "$fw"
+	run_bounded "$wait_s" sh "$here/direct-install.sh" "$run" "$(dgram_pair "$run" b)" x86 "$fw" || true
 	;;
 *)
 	fw=$mode
@@ -45,14 +57,16 @@ direct-*)
 esac
 
 result=timeout
-for _ in $(seq 1 $(( ${WAIT:-900} / 2 ))); do
+while :; do
 	if grep -q "Successfully finished" "$WORK/ni-$run.serial.log" 2>/dev/null; then result=installed; break; fi
+	[ "$(date +%s)" -lt $(( t0 + wait_s )) ] || break
 	sleep 2
 done
 log "$run: $result after $(( $(date +%s) - t0 ))s"
 grep -E "BOOTP|architecture|Assigned|setup mode|Formatting|Sending|sent|Rebooting|finished" "$WORK/ni-$run.serial.log" | uniq -c >&2 || true
 kill_pidfile "$WORK/$run.pid"
-kill "$ni" 2>/dev/null || true # still waiting when the install failed
+kill_tree "$ni"
+ni=""
 [ "$result" = installed ] || exit 1
 
 cp "$WORK/$run.qcow2" "$WORK/$run-installed.qcow2"

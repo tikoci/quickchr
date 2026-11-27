@@ -9,6 +9,8 @@ here=$(dirname "$0")
 . "$here/lib.sh"
 fetch_downloads
 rm -f "$WORK/e4-slirp".*
+trap 'kill_pidfile "$WORK/e4-slirp.pid"' EXIT
+trap 'exit 143' INT TERM # run the EXIT trap, then stop
 DISK_DEV=ide-hd NIC_DEV=e1000 sh "$here/target-x86.sh" e4-slirp \
 	"user,id=n0,tftp=$DL/netinstk,bootfile=linux.x86_64" uefi
 sleep 60

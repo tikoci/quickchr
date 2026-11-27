@@ -16,10 +16,21 @@
 # protocol and no network driver loads. ARM_CPU=max (FEAT_RNG) loads them.
 #
 # pxe: target-arm64.sh with IGB=1 (virtio-net for the firmware, igb for the
-# netinstall kernel, on one hub) and ARM_CPU=max. WAIT bounds the wait (900 s).
+# netinstall kernel, on one hub) and ARM_CPU=max. WAIT bounds the install in
+# install and pxe modes (900 s). The server and every QEMU started here are
+# stopped on exit, also on failure or interrupt.
 set -eu
 here=$(dirname "$0")
 . "$here/lib.sh"
+ni=""
+cleanup() {
+	kill_pidfile "$WORK/probe.pid"
+	kill_pidfile "$WORK/e3-arm64.pid"
+	kill_pidfile "$WORK/e3-pxe.pid"
+	kill_tree "$ni"
+}
+trap cleanup EXIT
+trap 'exit 143' INT TERM # run the EXIT trap, then stop
 
 case ${1:-install} in
 probe)
@@ -59,8 +70,9 @@ install)
 		grep -q "Waiting for RouterBOARD" "$WORK/ni-e3.serial.log" 2>/dev/null && break
 		sleep 1
 	done
-	sh "$here/direct-install.sh" e3-arm64 "$(dgram_pair e3 b)" arm64 || true
-	kill "$ni" 2>/dev/null || true # still running if the install failed
+	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" e3-arm64 "$(dgram_pair e3 b)" arm64 || true
+	kill_tree "$ni" # still running if the install failed
+	ni=""
 	grep -vE '^\[' "$WORK/ni-e3.serial.log"
 	;;
 pxe)
@@ -83,7 +95,8 @@ pxe)
 	done
 	log "$run: $result after $(( $(date +%s) - t0 ))s"
 	kill_pidfile "$WORK/$run.pid"
-	kill "$ni" 2>/dev/null || true
+	kill_tree "$ni"
+	ni=""
 	grep -vE '^\[' "$WORK/ni-$run.serial.log"
 	;;
 esac
