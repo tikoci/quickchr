@@ -142,35 +142,70 @@ kill_pidfile() {
 	rm -f "$1" || true
 }
 
-# The pid files this invocation started: `own <pidfile>` right before launching the
-# process that writes it, `stop_owned` in the EXIT trap. A pidfile that another
-# run wrote is never touched.
+# The pid files this invocation started. `own <pidfile>` deletes any existing
+# file of that name (a stale one from an earlier, unclean run) and registers it,
+# right before launching the process that writes it; `stop_owned` in the EXIT
+# trap stops only those. A pid this run did not write is never signalled.
 owned=""
-own() { owned="$owned $1"; }
+own() {
+	rm -f "$1"
+	owned="$owned $1"
+}
 stop_owned() {
 	for f in $owned; do kill_pidfile "$f"; done
 	owned=""
 }
 
-# Stop a background process and its direct children (a `sh script.sh &` whose
-# script runs QEMU or netinstall-cli in the foreground). The children are
-# listed first, because once the parent exits they move to a new parent and
-# `pkill -P` would miss them. The parent is signalled before the children, so
-# a parent with its own TERM trap (ni-server.sh native mode) gets to run it.
-# With KILL as $2, sends SIGKILL instead. Empty pid: no-op.
+# One experiment at a time per WORK: runs share pid, disk and socket names
+# there. `lab_lock` takes $WORK/.lock (a directory, created atomically) or
+# fails if a live run holds it; a lock left by a dead run is taken over.
+# `lab_unlock` in the EXIT trap releases it, only if this run holds it.
+lab_lock() {
+	if ! mkdir "$WORK/.lock" 2>/dev/null; then
+		holder=$(cat "$WORK/.lock/pid" 2>/dev/null || true)
+		if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+			echo "another lab run (pid $holder) is using $WORK; set WORK= to run in parallel" >&2
+			exit 1
+		fi
+		log "taking over a stale lock in $WORK (pid ${holder:-unknown})"
+	fi
+	echo $$ >"$WORK/.lock/pid"
+	locked=1
+}
+locked=""
+lab_unlock() {
+	[ -n "$locked" ] || return 0
+	rm -f "$WORK/.lock/pid" || true
+	rmdir "$WORK/.lock" 2>/dev/null || true
+	locked=""
+}
+
+# `kill_tree <pid>`: stop a background process and its direct children (a
+# `sh script.sh &` whose script runs QEMU or netinstall-cli in the
+# foreground). The children are listed once, up front, and that list is used
+# for every signal: once the parent exits they move to a new parent, and a
+# later `pgrep -P` would miss them. The parent is signalled first, so a parent
+# with its own TERM trap (ni-server.sh native mode) gets to run it. TERM, then
+# KILL for whatever is still alive after up to 5 s. Empty pid: no-op.
 kill_tree() {
 	[ -n "${1:-}" ] || return 0
-	kt_sig=${2:-TERM}
-	kt_kids=$(pgrep -P "$1" 2>/dev/null || true)
-	kill -s "$kt_sig" "$1" 2>/dev/null || true
-	for kt_k in $kt_kids; do kill -s "$kt_sig" "$kt_k" 2>/dev/null || true; done
+	kt_all="$1 $(pgrep -P "$1" 2>/dev/null || true)"
+	for kt_p in $kt_all; do kill -TERM "$kt_p" 2>/dev/null || true; done
+	kt_end=$(( $(date +%s) + 5 ))
+	while [ "$(date +%s)" -lt "$kt_end" ]; do
+		kt_live=""
+		for kt_p in $kt_all; do kill -0 "$kt_p" 2>/dev/null && kt_live=1; done
+		[ -n "$kt_live" ] || return 0
+		sleep 1
+	done
+	for kt_p in $kt_all; do kill -KILL "$kt_p" 2>/dev/null || true; done
 }
 
 # `run_bounded <seconds> <command...>`: run a command in the background and
-# wait for it, but stop it (and its children) after <seconds>: TERM, then KILL
-# after 5 s more. Returns the command's status, or 124 on timeout, like GNU
-# timeout, which macOS does not ship. While it runs, rb_pid holds its pid, so
-# an EXIT trap can `kill_tree "$rb_pid"`; rb_pid is cleared once reaped.
+# wait for it, but stop it (and its children, via kill_tree) after <seconds>.
+# Returns the command's status, or 124 on timeout, like GNU timeout, which
+# macOS does not ship. While it runs, rb_pid holds its pid, so an EXIT trap can
+# stop it the same way with `kill_tree "$rb_pid"`; rb_pid is cleared once reaped.
 rb_pid=""
 run_bounded() {
 	rb_limit=$1; shift
@@ -181,9 +216,6 @@ run_bounded() {
 		if [ "$(date +%s)" -ge "$rb_end" ]; then
 			log "timeout after ${rb_limit}s: $*"
 			kill_tree "$rb_pid"
-			rb_grace=$(( $(date +%s) + 5 ))
-			while kill -0 "$rb_pid" 2>/dev/null && [ "$(date +%s)" -lt "$rb_grace" ]; do sleep 1; done
-			kill_tree "$rb_pid" KILL
 			wait "$rb_pid" 2>/dev/null || true
 			rb_pid=""
 			return 124

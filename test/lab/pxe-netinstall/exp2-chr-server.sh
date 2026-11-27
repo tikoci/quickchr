@@ -27,15 +27,18 @@ srv=pxe-srv link=pxe-link run=e2-$mode
 # shellcheck disable=SC2086
 qc() { $QC "$@"; }
 W="" made_link="" made_srv=""
+# shellcheck disable=SC2329  # run by the EXIT trap
 cleanup() {
 	kill_tree "$W"
 	kill_tree "$rb_pid" # a direct install still running
 	stop_owned # the target, only if this run launched it
 	[ -z "$made_srv" ] || qc remove "$srv" >/dev/null 2>&1 || true
 	[ -z "$made_link" ] || qc networks sockets remove "$link" >/dev/null 2>&1 || true
+	lab_unlock
 }
 trap cleanup EXIT
 trap 'exit 143' INT TERM # run the EXIT trap, then stop
+lab_lock
 
 qc networks sockets create "$link"
 made_link=1
@@ -76,13 +79,17 @@ watch_states() {
 	done
 }
 watch_states & W=$!
+# The experiment's status: 0 when the install completed, 124 when WAIT ran out,
+# else the installer's status. Returned after the diagnostic REST calls below.
+rc=0
 case $mode in
 pxe)
 	rm -f "$WORK/$run.qcow2"
 	own "$WORK/$run.pid"
 	DISK_DEV=ide-hd NIC_DEV=e1000 sh "$here/target-x86.sh" "$run" "$netdev" uefi
+	rc=124
 	for _ in $(seq 1 $(( ${WAIT:-600} / 3 ))); do
-		curl -s -m 10 -u admin: "$R/tool/netinstall/devices" | grep -q '"done' && break
+		curl -s -m 10 -u admin: "$R/tool/netinstall/devices" | grep -q '"done' && { rc=0; break; }
 		sleep 3
 	done
 	# The target writes its boot loader after the server reports done; give
@@ -94,8 +101,9 @@ pxe-arm64)
 	rm -f "$WORK/$run.qcow2"
 	own "$WORK/$run.pid"
 	IGB=1 sh "$here/target-arm64.sh" "$run" "$netdev"
+	rc=124
 	for _ in $(seq 1 $(( ${WAIT:-600} / 3 ))); do
-		curl -s -m 10 -u admin: "$R/tool/netinstall/devices" | grep -q '"done' && break
+		curl -s -m 10 -u admin: "$R/tool/netinstall/devices" | grep -q '"done' && { rc=0; break; }
 		sleep 3
 	done
 	sleep 20
@@ -104,7 +112,7 @@ pxe-arm64)
 direct-x86 | direct-x86-uefi | direct-arm64)
 	case $mode in direct-x86) a=x86 f=bios ;; direct-x86-uefi) a=x86 f=uefi ;; *) a=arm64 f=uefi ;; esac
 	own "$WORK/$run.pid"
-	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" "$run" "$netdev" "$a" "$f" || true
+	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" "$run" "$netdev" "$a" "$f" || rc=$?
 	;;
 esac
 kill_tree "$W"
@@ -112,3 +120,5 @@ W=""
 c "$R/tool/netinstall/devices"
 c "$R/tool/netinstall/cache"
 c "$R/tool/netinstall"
+log "$run: exit $rc"
+exit "$rc"

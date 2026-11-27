@@ -27,9 +27,11 @@ cleanup() {
 	kill_tree "$rb_pid" # a direct install still running
 	stop_owned
 	kill_tree "$ni"
+	lab_unlock
 }
 trap cleanup EXIT
 trap 'exit 143' INT TERM # run the EXIT trap, then stop
+lab_lock
 
 case ${1:-install} in
 probe)
@@ -71,10 +73,12 @@ install)
 		sleep 1
 	done
 	own "$WORK/e3-arm64.pid"
-	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" e3-arm64 "$(dgram_pair e3 b)" arm64 || true
+	rc=0
+	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" e3-arm64 "$(dgram_pair e3 b)" arm64 || rc=$?
 	kill_tree "$ni" # still running if the install failed
 	ni=""
 	grep -vE '^\[' "$WORK/ni-e3.serial.log"
+	grep -q "Successfully finished" "$WORK/ni-e3.serial.log" || exit "$(( rc ? rc : 1 ))"
 	;;
 pxe)
 	export NI_FILES="$here/scripts/configure.rsc $here/scripts/mode.rsc"
@@ -100,5 +104,6 @@ pxe)
 	kill_tree "$ni"
 	ni=""
 	grep -vE '^\[' "$WORK/ni-$run.serial.log"
+	[ "$result" = installed ] || exit 1
 	;;
 esac

@@ -44,13 +44,9 @@ ip addr flush dev $dev
 ip addr add 192.168.88.1/24 dev $dev
 cd $dir
 echo "netinstall-cli start \$(date)"
-# In the background so its pid can be recorded: native mode's TERM handler
-# stops netinstall-cli by this pid even after this wrapper is gone.
-./netinstall-cli -v $opts -a 192.168.88.2 $pkgs 2>&1 &
-echo \$! >.cli.pid
-rc=0
-wait \$! || rc=\$?
-echo "netinstall-cli exit \$rc \$(date)"
+# exec: netinstall-cli replaces this shell, so in native mode it is a direct
+# child of the namespace shell, which stops it.
+exec ./netinstall-cli -v $opts -a 192.168.88.2 $pkgs 2>&1
 EOF
 
 if [ "$mode" = native ]; then
@@ -61,14 +57,16 @@ if [ "$mode" = native ]; then
 	# shellcheck disable=SC2016  # expanded by the inner shell
 	exec unshare -rn sh -c '
 		here=$1 share=$2 work=$3 link=$4
-		# This shell owns cleanup of everything below. The trap is set before
-		# anything starts; netinstall-cli is stopped by its recorded pid, so it
-		# goes even if its wrapper (.vm-cmd.sh) was killed first.
+		# This shell owns cleanup of everything below, and everything below is
+		# its direct child (.vm-cmd.sh execs netinstall-cli), so stop() finds
+		# them all with pgrep -P, including one started a moment ago. The trap
+		# is set before anything starts.
 		ni="" dump="" bridge=""
-		rm -f "$share/.cli.pid"
 		stop() {
-			[ -f "$share/.cli.pid" ] && kill "$(cat "$share/.cli.pid")" 2>/dev/null
-			kill $ni $dump $bridge 2>/dev/null
+			kids=$(pgrep -P $$ 2>/dev/null)
+			kill $kids 2>/dev/null
+			sleep 1
+			kill -9 $kids 2>/dev/null
 		}
 		trap "stop; exit 143" TERM INT
 		python3 -I "$here/tapbridge.py" ni0 "$work/$link-a.sock" "$work/$link-b.sock" &
@@ -90,6 +88,7 @@ if [ "$mode" = native ]; then
 		ni=$!
 		rc=0
 		wait $ni || rc=$?
+		echo "netinstall-cli exit $rc $(date)" >>"$work/ni-$link.serial.log"
 		kill $dump $bridge 2>/dev/null
 		exit $rc
 	' sh "$(cd "$(dirname "$0")" && pwd)" "$share" "$WORK" "$link"

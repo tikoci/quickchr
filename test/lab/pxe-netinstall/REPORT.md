@@ -32,9 +32,7 @@ What a netinstalled VM is: **x86 or arm64 RouterOS, not CHR.** It has a 24-hour 
 (`expires-in: 23h49m31s` at 30 s uptime, no `level`) and an `x86`/`arm64` board name. It also
 needs a non-virtio disk at runtime. On virtio-blk both die the same way: `Fatal error 0x853`,
 `died with signal 6`, then power-off. x86 prints this to VGA only, which is why the macOS run saw
-only a power-off. One exception, seen on macOS/HVF only: the **first** boot of a BIOS-installed
-x86 disk on virtio-blk under SeaBIOS reached REST (3 installs), and the later boots of those disks
-on virtio-blk died (3 boots). A UEFI-installed disk's first boot was not tried (see Experiment 1).
+only a power-off. That includes the very first boot after install (see Experiment 1).
 
 ## Linux re-run (KVM)
 
@@ -271,15 +269,16 @@ added a DHCP client:
   `Fatal error 0x853` / `died with signal 6` as arm64. The cause has not been proven. The
   netinstall kernel's Hardware-ID failure on virtio-blk suggests the same lookup, but that is a
   hypothesis.
-- **The first boot after install is the exception** (macOS, HVF, during the review fixes for
-  PR #331). `exp1 direct-bios` installed three times (52, 56 and 61 s, disk on ide-hd with
-  `serial=QCHRPXE0001`), and each time `boot-installed.sh ... bios` booted the fresh copy on
-  virtio-blk under SeaBIOS to REST (26, 30 and 31 s, `board-name: x86 QEMU Standard PC`). The
-  later boots of the same disk on virtio-blk all failed (3 boots, after the first two installs):
-  `bootPart mount: Invalid argument`, then `Fatal error 0x853` / `died with signal 6`, and QEMU
-  stops (`VM status: paused (shutdown)` with `-no-shutdown`). The same disk then boots on ide-hd
-  with the install-time `serial=` to REST in about 6 s, so the disk is intact. The UEFI-installed
-  disk was not tried on its first boot.
+- **The first boot after install is no exception** (macOS, HVF, checked during the review of
+  PR #331). A fresh `exp1 direct-bios` install, copied before anything booted it, died on
+  virtio-blk under SeaBIOS on its first boot: `bootPart mount: Invalid argument`, then
+  `Fatal error 0x853` / `died with signal 6`, and QEMU stops (`VM status: paused (shutdown)` with
+  `-no-shutdown`). A second untouched copy of the same disk booted on ide-hd with the install-time
+  `serial=QCHRPXE0001` to REST in about 20 s, and failed again on virtio-blk afterwards. Earlier in
+  that review, three `exp1` runs seemed to show the first boot reaching REST on virtio-blk. That was
+  an artifact: `exp1` exported `DISK_DEV=ide-hd` for the installer, and `boot-installed.sh`
+  inherited it, so those boots ran on IDE. `exp1` now sets the post-install boot's disk
+  explicitly (`POST_DISK_DEV`, default ide-hd).
 
 ## Experiment 2: a CHR with the `netinstall` package as the server
 
