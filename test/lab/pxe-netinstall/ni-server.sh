@@ -44,8 +44,13 @@ ip addr flush dev $dev
 ip addr add 192.168.88.1/24 dev $dev
 cd $dir
 echo "netinstall-cli start \$(date)"
-./netinstall-cli -v $opts -a 192.168.88.2 $pkgs 2>&1
-echo "netinstall-cli exit \$? \$(date)"
+# In the background so its pid can be recorded: native mode's TERM handler
+# stops netinstall-cli by this pid even after this wrapper is gone.
+./netinstall-cli -v $opts -a 192.168.88.2 $pkgs 2>&1 &
+echo \$! >.cli.pid
+rc=0
+wait \$! || rc=\$?
+echo "netinstall-cli exit \$rc \$(date)"
 EOF
 
 if [ "$mode" = native ]; then
@@ -56,6 +61,16 @@ if [ "$mode" = native ]; then
 	# shellcheck disable=SC2016  # expanded by the inner shell
 	exec unshare -rn sh -c '
 		here=$1 share=$2 work=$3 link=$4
+		# This shell owns cleanup of everything below. The trap is set before
+		# anything starts; netinstall-cli is stopped by its recorded pid, so it
+		# goes even if its wrapper (.vm-cmd.sh) was killed first.
+		ni="" dump="" bridge=""
+		rm -f "$share/.cli.pid"
+		stop() {
+			[ -f "$share/.cli.pid" ] && kill "$(cat "$share/.cli.pid")" 2>/dev/null
+			kill $ni $dump $bridge 2>/dev/null
+		}
+		trap "stop; exit 143" TERM INT
 		python3 -I "$here/tapbridge.py" ni0 "$work/$link-a.sock" "$work/$link-b.sock" &
 		bridge=$!
 		# tapbridge.py creates ni0; give up if it exits first (no /dev/net/tun,
@@ -64,7 +79,7 @@ if [ "$mode" = native ]; then
 		while ! ip link show ni0 >/dev/null 2>&1; do
 			kill -0 $bridge 2>/dev/null || { echo "tapbridge.py exited before ni0 appeared" >&2; exit 1; }
 			n=$((n + 1))
-			[ $n -le 100 ] || { echo "ni0 not up after 10 s" >&2; kill $bridge 2>/dev/null; exit 1; }
+			[ $n -le 100 ] || { echo "ni0 not up after 10 s" >&2; stop; exit 1; }
 			sleep 0.1
 		done
 		ip link set lo up
@@ -73,9 +88,8 @@ if [ "$mode" = native ]; then
 		dump=$!
 		sh "$share/.vm-cmd.sh" >"$work/ni-$link.serial.log" 2>&1 &
 		ni=$!
-		trap "pkill -P $ni; kill $ni $dump $bridge 2>/dev/null; exit 143" TERM INT
-		wait $ni
-		rc=$?
+		rc=0
+		wait $ni || rc=$?
 		kill $dump $bridge 2>/dev/null
 		exit $rc
 	' sh "$(cd "$(dirname "$0")" && pwd)" "$share" "$WORK" "$link"

@@ -6,7 +6,9 @@
 #
 # WORK holds run state: disks, pcaps, serial logs and the unix sockets for
 # the dgram links. Keep it short: a socket path over 104 bytes (macOS) makes
-# QEMU refuse to start.
+# QEMU refuse to start. Runs are not isolated from each other: two runs with
+# the same WORK and run name share files, so run one experiment at a time per
+# WORK. Each script's cleanup stops only the processes it started itself.
 
 VER=${VER:-7.25.2}
 WORK=${WORK:-/tmp/pxeni}
@@ -69,12 +71,17 @@ mkdir -p "$WORK" "$DL"
 ts() { date +%H:%M:%S; }
 log() { echo "[$(ts)] $*" >&2; }
 
-# `fetch <url> <file>`: download once. curl writes to <file>.part, which is
-# renamed only after a complete transfer, so a failed download never leaves a
-# file that a later run would take as cached.
+# `fetch <url> <file>`: download once. curl writes to a temporary name unique
+# to this shell (<file>.part.<pid>), renamed only after a complete transfer, so
+# a failed or concurrent download never leaves or clobbers a cached file.
 fetch() {
 	[ -s "$2" ] && return 0
-	if curl -sf -o "$2.part" "$1"; then mv "$2.part" "$2"; else rm -f "$2.part"; return 1; fi
+	if curl -sf -o "$2.part.$$" "$1"; then
+		mv "$2.part.$$" "$2"
+	else
+		rm -f "$2.part.$$"
+		return 1
+	fi
 }
 
 # Public MikroTik downloads used by the lab. Idempotent.
@@ -87,7 +94,12 @@ fetch_downloads() {
 	fetch "https://download.mikrotik.com/routeros/$VER/routeros-$VER-arm64.npk" "$DL/npk/routeros-$VER-arm64.npk"
 	if [ ! -x "$DL/cli/netinstall-cli" ]; then
 		fetch "https://download.mikrotik.com/routeros/$VER/netinstall-$VER.tar.gz" "$DL/cli/netinstall-$VER.tar.gz"
-		tar xzf "$DL/cli/netinstall-$VER.tar.gz" -C "$DL/cli"
+		# Unpack into a private directory, then rename the binary into place,
+		# so a concurrent run never sees a half-written netinstall-cli.
+		unpack_dir=$(mktemp -d "$DL/cli/.unpack.XXXXXX")
+		tar xzf "$DL/cli/netinstall-$VER.tar.gz" -C "$unpack_dir"
+		mv "$unpack_dir/netinstall-cli" "$DL/cli/netinstall-cli"
+		rm -rf "${unpack_dir:?}"
 	fi
 }
 
@@ -126,34 +138,60 @@ hmp() {
 # Stop the process named in a pidfile. The process may already be gone (QEMU
 # with -no-reboot exits on its own), so a failed kill is expected, not an error.
 kill_pidfile() {
-	if [ -f "$1" ]; then kill "$(cat "$1")" 2>/dev/null || true; fi
-	rm -f "$1"
+	if [ -f "$1" ]; then kill "$(cat "$1" 2>/dev/null)" 2>/dev/null || true; fi
+	rm -f "$1" || true
+}
+
+# The pid files this invocation started: `own <pidfile>` right before launching the
+# process that writes it, `stop_owned` in the EXIT trap. A pidfile that another
+# run wrote is never touched.
+owned=""
+own() { owned="$owned $1"; }
+stop_owned() {
+	for f in $owned; do kill_pidfile "$f"; done
+	owned=""
 }
 
 # Stop a background process and its direct children (a `sh script.sh &` whose
-# script runs QEMU or netinstall-cli in the foreground). Empty pid: no-op.
+# script runs QEMU or netinstall-cli in the foreground). The children are
+# listed first, because once the parent exits they move to a new parent and
+# `pkill -P` would miss them. The parent is signalled before the children, so
+# a parent with its own TERM trap (ni-server.sh native mode) gets to run it.
+# With KILL as $2, sends SIGKILL instead. Empty pid: no-op.
 kill_tree() {
 	[ -n "${1:-}" ] || return 0
-	pkill -TERM -P "$1" 2>/dev/null || true
-	kill "$1" 2>/dev/null || true
+	kt_sig=${2:-TERM}
+	kt_kids=$(pgrep -P "$1" 2>/dev/null || true)
+	kill -s "$kt_sig" "$1" 2>/dev/null || true
+	for kt_k in $kt_kids; do kill -s "$kt_sig" "$kt_k" 2>/dev/null || true; done
 }
 
-# `run_bounded <seconds> <command...>`: run a foreground command, but stop it
-# (and its children) after <seconds>. Returns the command's status, or 124 on
-# timeout, like coreutils timeout(1), which macOS does not ship.
+# `run_bounded <seconds> <command...>`: run a command in the background and
+# wait for it, but stop it (and its children) after <seconds>: TERM, then KILL
+# after 5 s more. Returns the command's status, or 124 on timeout, like GNU
+# timeout, which macOS does not ship. While it runs, rb_pid holds its pid, so
+# an EXIT trap can `kill_tree "$rb_pid"`; rb_pid is cleared once reaped.
+rb_pid=""
 run_bounded() {
-	limit=$1; shift
+	rb_limit=$1; shift
 	"$@" &
 	rb_pid=$!
-	rb_end=$(( $(date +%s) + limit ))
+	rb_end=$(( $(date +%s) + rb_limit ))
 	while kill -0 "$rb_pid" 2>/dev/null; do
 		if [ "$(date +%s)" -ge "$rb_end" ]; then
-			log "timeout after ${limit}s: $*"
+			log "timeout after ${rb_limit}s: $*"
 			kill_tree "$rb_pid"
+			rb_grace=$(( $(date +%s) + 5 ))
+			while kill -0 "$rb_pid" 2>/dev/null && [ "$(date +%s)" -lt "$rb_grace" ]; do sleep 1; done
+			kill_tree "$rb_pid" KILL
 			wait "$rb_pid" 2>/dev/null || true
+			rb_pid=""
 			return 124
 		fi
 		sleep 1
 	done
-	wait "$rb_pid"
+	rb_rc=0
+	wait "$rb_pid" || rb_rc=$?
+	rb_pid=""
+	return "$rb_rc"
 }

@@ -13,6 +13,7 @@
 # images and routeros-*.npk from upgrade.mikrotik.com on demand.
 # QC overrides the quickchr command (default: this checkout's CLI).
 # IP_RANGE (e.g. 192.168.88.10-192.168.88.20) adds ip-range to the rule.
+# WAIT (seconds, default 600 for pxe, 900 for direct-*) bounds the install.
 # The server machine and the named socket are removed on exit, also on failure,
 # but only when this run created them: a pre-existing pxe-srv or pxe-link
 # (another run's) makes this run fail and is left alone.
@@ -28,7 +29,8 @@ qc() { $QC "$@"; }
 W="" made_link="" made_srv=""
 cleanup() {
 	kill_tree "$W"
-	kill_pidfile "$WORK/$run.pid"
+	kill_tree "$rb_pid" # a direct install still running
+	stop_owned # the target, only if this run launched it
 	[ -z "$made_srv" ] || qc remove "$srv" >/dev/null 2>&1 || true
 	[ -z "$made_link" ] || qc networks sockets remove "$link" >/dev/null 2>&1 || true
 }
@@ -77,6 +79,7 @@ watch_states & W=$!
 case $mode in
 pxe)
 	rm -f "$WORK/$run.qcow2"
+	own "$WORK/$run.pid"
 	DISK_DEV=ide-hd NIC_DEV=e1000 sh "$here/target-x86.sh" "$run" "$netdev" uefi
 	for _ in $(seq 1 $(( ${WAIT:-600} / 3 ))); do
 		curl -s -m 10 -u admin: "$R/tool/netinstall/devices" | grep -q '"done' && break
@@ -89,6 +92,7 @@ pxe)
 	;;
 pxe-arm64)
 	rm -f "$WORK/$run.qcow2"
+	own "$WORK/$run.pid"
 	IGB=1 sh "$here/target-arm64.sh" "$run" "$netdev"
 	for _ in $(seq 1 $(( ${WAIT:-600} / 3 ))); do
 		curl -s -m 10 -u admin: "$R/tool/netinstall/devices" | grep -q '"done' && break
@@ -97,9 +101,11 @@ pxe-arm64)
 	sleep 20
 	kill_pidfile "$WORK/$run.pid"
 	;;
-direct-x86) sh "$here/direct-install.sh" "$run" "$netdev" x86 bios ;;
-direct-x86-uefi) sh "$here/direct-install.sh" "$run" "$netdev" x86 uefi ;;
-direct-arm64) sh "$here/direct-install.sh" "$run" "$netdev" arm64 ;;
+direct-x86 | direct-x86-uefi | direct-arm64)
+	case $mode in direct-x86) a=x86 f=bios ;; direct-x86-uefi) a=x86 f=uefi ;; *) a=arm64 f=uefi ;; esac
+	own "$WORK/$run.pid"
+	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" "$run" "$netdev" "$a" "$f" || true
+	;;
 esac
 kill_tree "$W"
 W=""

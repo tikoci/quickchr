@@ -26,8 +26,8 @@ export NI_FILES="$here/scripts/configure.rsc $here/scripts/mode.rsc"
 rm -f "$WORK/$run".* "$WORK/ni-$run".*
 ni=""
 cleanup() {
-	kill_pidfile "$WORK/$run.pid"
-	kill_pidfile "$WORK/$run-post.pid"
+	kill_tree "$rb_pid" # a direct install still running
+	stop_owned
 	kill_tree "$ni" # still waiting when the install failed
 }
 trap cleanup EXIT
@@ -48,10 +48,12 @@ direct-*)
 	# Foreground: returns when the installer reboots (-no-reboot), or is
 	# stopped when WAIT runs out.
 	fw=${mode#direct-}
+	own "$WORK/$run.pid"
 	run_bounded "$wait_s" sh "$here/direct-install.sh" "$run" "$(dgram_pair "$run" b)" x86 "$fw" || true
 	;;
 *)
 	fw=$mode
+	own "$WORK/$run.pid"
 	sh "$here/target-x86.sh" "$run" "$(dgram_pair "$run" b)" "$fw"
 	;;
 esac
@@ -70,6 +72,7 @@ ni=""
 [ "$result" = installed ] || exit 1
 
 cp "$WORK/$run.qcow2" "$WORK/$run-installed.qcow2"
+own "$WORK/$run-post.pid"
 sh "$here/boot-installed.sh" "$WORK/$run-installed.qcow2" "$run-post" "$fw" 19180
 for p in system/resource system/license system/identity system/package ip/dhcp-client system/note; do
 	echo "== /$p"

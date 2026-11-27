@@ -24,9 +24,8 @@ here=$(dirname "$0")
 . "$here/lib.sh"
 ni=""
 cleanup() {
-	kill_pidfile "$WORK/probe.pid"
-	kill_pidfile "$WORK/e3-arm64.pid"
-	kill_pidfile "$WORK/e3-pxe.pid"
+	kill_tree "$rb_pid" # a direct install still running
+	stop_owned
 	kill_tree "$ni"
 }
 trap cleanup EXIT
@@ -36,6 +35,7 @@ case ${1:-install} in
 probe)
 	uefi_vars "$AAVMF_CODE" "$AAVMF_VARS" "$WORK/probe.vars.fd"
 	rm -f "$WORK/probe.ser"
+	own "$WORK/probe.pid"
 	qemu-system-aarch64 -M virt -accel tcg,tb-size=256 -m 1024 \
 		-drive "if=pflash,format=raw,unit=0,readonly=on,file=$AAVMF_CODE" \
 		-drive "if=pflash,format=raw,unit=1,file=$WORK/probe.vars.fd" \
@@ -70,6 +70,7 @@ install)
 		grep -q "Waiting for RouterBOARD" "$WORK/ni-e3.serial.log" 2>/dev/null && break
 		sleep 1
 	done
+	own "$WORK/e3-arm64.pid"
 	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" e3-arm64 "$(dgram_pair e3 b)" arm64 || true
 	kill_tree "$ni" # still running if the install failed
 	ni=""
@@ -87,6 +88,7 @@ pxe)
 		sleep 1
 	done
 	t0=$(date +%s)
+	own "$WORK/$run.pid"
 	IGB=1 MAC=02:00:00:00:00:33 sh "$here/target-arm64.sh" "$run" "$(dgram_pair "$run" b)"
 	result=timeout
 	for _ in $(seq 1 $(( ${WAIT:-900} / 3 ))); do

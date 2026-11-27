@@ -32,8 +32,9 @@ What a netinstalled VM is: **x86 or arm64 RouterOS, not CHR.** It has a 24-hour 
 (`expires-in: 23h49m31s` at 30 s uptime, no `level`) and an `x86`/`arm64` board name. It also
 needs a non-virtio disk at runtime. On virtio-blk both die the same way: `Fatal error 0x853`,
 `died with signal 6`, then power-off. x86 prints this to VGA only, which is why the macOS run saw
-only a power-off. One exception: the **first** boot of a BIOS-installed x86 disk on virtio-blk
-reached REST (twice, see Experiment 1); every later boot of that disk on virtio-blk died.
+only a power-off. One exception, seen on macOS/HVF only: the **first** boot of a BIOS-installed
+x86 disk on virtio-blk under SeaBIOS reached REST (3 installs), and the later boots of those disks
+on virtio-blk died (3 boots). A UEFI-installed disk's first boot was not tried (see Experiment 1).
 
 ## Linux re-run (KVM)
 
@@ -271,10 +272,10 @@ added a DHCP client:
   netinstall kernel's Hardware-ID failure on virtio-blk suggests the same lookup, but that is a
   hypothesis.
 - **The first boot after install is the exception** (macOS, HVF, during the review fixes for
-  PR #331). `exp1 direct-bios` installed twice (52 s and 56 s, disk on ide-hd with
-  `serial=QCHRPXE0001`), and both times `boot-installed.sh ... bios` booted the fresh copy on
-  virtio-blk under SeaBIOS to REST (26 s and 31 s, `board-name: x86 QEMU Standard PC`). The
-  next boot of the same disk on virtio-blk failed each time (3 boots over the two installs):
+  PR #331). `exp1 direct-bios` installed three times (52, 56 and 61 s, disk on ide-hd with
+  `serial=QCHRPXE0001`), and each time `boot-installed.sh ... bios` booted the fresh copy on
+  virtio-blk under SeaBIOS to REST (26, 30 and 31 s, `board-name: x86 QEMU Standard PC`). The
+  later boots of the same disk on virtio-blk all failed (3 boots, after the first two installs):
   `bootPart mount: Invalid argument`, then `Fatal error 0x853` / `died with signal 6`, and QEMU
   stops (`VM status: paused (shutdown)` with `-no-shutdown`). The same disk then boots on ide-hd
   with the install-time `serial=` to REST in about 6 s, so the disk is intact. The UEFI-installed
@@ -419,8 +420,8 @@ flow needs firmware PXE or the iPXE ROM:
 - arm64 EDK2 PXE fails at the server: both MikroTik servers answer option 93 = 11 with a BOOTP
   reply that has no subnet mask, and EDK2 drops it. With quickchr's `cortex-a710` it never gets
   that far, because EDK2's network stack does not load without an RNG.
-- `-kernel netinstk/linux.<arch>` worked in every server × arch combination tried, under plain
-  SeaBIOS, with `romfile=` set.
+- `-kernel netinstk/linux.<arch>` worked in every server × arch combination tried, with
+  `romfile=` set: under plain SeaBIOS (and OVMF) for x86, and under EDK2 for arm64.
 
 Dropping the iPXE ROM by default (#327) therefore costs a future netinstall feature nothing.
 ~~On macOS Homebrew the arm64 `PXESupport` fw_cfg knobs will be no-ops, because there is no network
