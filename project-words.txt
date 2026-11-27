@@ -20,6 +20,7 @@ acks
 acpi
 addrs
 aehd
+ahci
 ahostsv
 allmulti
 amm
@@ -40,15 +41,21 @@ backoff
 bak
 basicauth
 bavail
+bcfg
 bigsnap
 binfmt
 biome
 ble
+blksize
 blockquotes
 bodyless
 bootaa
+bootable
+bootfile
+bootindex
 bootout
 bootptab
+bootx
 borderless
 bpath
 bpf
@@ -62,6 +69,7 @@ bypassable
 cacheowner
 calea
 calltime
+carch
 catppuccin
 cdp
 centrs
@@ -120,6 +128,7 @@ dport
 dsls
 dsv
 dtb
+dxe
 eabi
 eagain
 eai
@@ -149,6 +158,7 @@ errno
 esac
 eservfail
 eslintcache
+etherboot
 ethertype
 ethertypes
 etimeout
@@ -161,6 +171,7 @@ fdroid
 fflate
 fguser
 figcaption
+flashfig
 fmt
 fontcolor
 fontname
@@ -187,6 +198,7 @@ gtk
 haxm
 hdr
 highmem
+hmp
 homecache
 hostfs
 hostfwd
@@ -198,6 +210,7 @@ hvf
 hwaddr
 hwcaps
 hwtype
+ich
 ics
 idx
 iec
@@ -209,6 +222,7 @@ ifdef
 ifdown
 ifname
 ifup
+igb
 igmp
 ihl
 imagekey
@@ -236,6 +250,7 @@ kmod
 kvm
 lanbridge
 lastexitcode
+lba
 libc
 libexec
 libfdt
@@ -280,18 +295,25 @@ mgmt
 mib
 mikropkl
 mikrotik
+mipsbe
 misattributed
 mktemp
 mmcfg
 mmfr
 mmio
+mmips
 mndp
+mnp
+modescript
 mountpoint
 mqtts
 msc
+mtdblock
 mte
+mtftp
 mtree
 mxcl
+nbp
 ncaps
 ncpu
 neoverse
@@ -300,6 +322,8 @@ netdev
 netdevs
 netfs
 netinstall
+netinstalled
+netinstk
 networkd
 networksetup
 newc
@@ -314,13 +338,17 @@ nolocaladdr
 noninteractive
 nopasswd
 notrunc
+nowait
 npk
 nsec
 nsh
 ntstatus
 nul
+nvme
 nvram
+oack
 oci
+oem
 oneshot
 oob
 openflow
@@ -336,6 +364,7 @@ patchless
 pathext
 pauth
 payam
+pcaps
 pci
 pcspk
 pdb
@@ -360,6 +389,7 @@ pointopoint
 postrouting
 powerdown
 poweroff
+ppc
 ppp
 pptp
 prereq
@@ -412,6 +442,7 @@ rosetta
 roskrnl
 routerboard
 routeros
+rrq
 rsc
 rst
 rta
@@ -423,6 +454,7 @@ sandboxed
 savevm
 scaleway
 scp
+screendump
 scriptable
 sdl
 seabios
@@ -438,6 +470,7 @@ settimeout
 setuid
 sfc
 shellcheck
+siaddr
 sidegrade
 sigill
 signalable
@@ -446,6 +479,7 @@ slirp
 smccc
 sme
 smhdw
+smips
 smp
 snapafter
 snapbefore
@@ -481,10 +515,12 @@ syscalls
 sysfs
 sysinit
 sysreg
+tapa
 taskkill
 tcg
 tcpdump
 tgz
+tianocore
 tib
 tikbook
 tikoci
@@ -508,6 +544,7 @@ uefi
 uid
 unc
 uncharacterized
+undi
 unfiled
 unpairs
 unparseable
@@ -560,6 +597,7 @@ whatwg
 whpx
 wifibridge
 winbox
+windowsize
 winget
 winsock
 wintun
@@ -570,6 +608,7 @@ writability
 wsl
 xdg
 xzf
+yiaddr
 zerotier
 zizmor
 EACCES
