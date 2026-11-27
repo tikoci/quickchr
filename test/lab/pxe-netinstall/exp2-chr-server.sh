@@ -5,11 +5,15 @@
 #
 #   exp2-chr-server.sh <server-version> pxe          # x86 target, OVMF PXE
 #   exp2-chr-server.sh <server-version> direct-x86   # x86 target, -kernel, SeaBIOS
+#   exp2-chr-server.sh <server-version> direct-x86-uefi # x86 target, -kernel, OVMF
 #   exp2-chr-server.sh <server-version> direct-arm64 # arm64 target, -kernel, EDK2
+#   exp2-chr-server.sh <server-version> pxe-arm64    # arm64 target, EDK2 PXE (-cpu max, IGB=1)
 #
 # The CHR needs internet through its user NIC: it downloads netinstk/ boot
 # images and routeros-*.npk from upgrade.mikrotik.com on demand.
 # QC overrides the quickchr command (default: this checkout's CLI).
+# IP_RANGE (e.g. 192.168.88.10-192.168.88.20) adds ip-range to the rule.
+# The server machine and the named socket are removed on exit, also on failure.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/lib.sh"
@@ -19,6 +23,15 @@ QC=${QC:-bun run $repo/src/cli/index.ts}
 srv=pxe-srv link=pxe-link run=e2-$mode
 # shellcheck disable=SC2086
 qc() { $QC "$@"; }
+W=""
+cleanup() {
+	[ -n "$W" ] && kill "$W" 2>/dev/null
+	kill_pidfile "$WORK/$run.pid"
+	qc remove "$srv" >/dev/null 2>&1 || true
+	qc networks sockets remove "$link" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+trap 'exit 143' INT TERM # run the EXIT trap, then stop
 
 qc networks sockets create "$link"
 qc add --name "$srv" --version "$srv_ver" --arch x86 \
@@ -34,10 +47,13 @@ for _ in 1 2 3; do
 	c -X POST "$R/system/package/update/check-for-updates" -d '{"duration":"15s"}' | grep -q '"latest-version"' && break
 	sleep 5
 done
-# No ip-range: with one set, 7.25.2 answers with siaddr 0.0.0.0 and mask
-# 0.0.0.0, and OVMF discards the offer (PXE-E16; 7.26 not tried). Without it
-# the server leases 169.254.x.x/16 and names itself 169.254.1.1.
-c -X PUT "$R/tool/netinstall" -d "{\"interface\":\"ether2\",\"version\":\"$srv_ver\",\"keep-old-configuration\":\"no\",\"install-once\":\"yes\"}"
+# No ip-range unless IP_RANGE is set. Without one the server leases
+# 169.254.x.x/16 and names itself 169.254.1.1, which still works on 7.26. With
+# one, 7.25.2 answered with siaddr 0.0.0.0 and mask 0.0.0.0 on macOS (PXE-E16),
+# but with a correct reply on Linux; 7.26beta7 installs with it (REPORT.md).
+range=""
+[ -n "${IP_RANGE:-}" ] && range=",\"ip-range\":\"$IP_RANGE\""
+c -X PUT "$R/tool/netinstall" -d "{\"interface\":\"ether2\",\"version\":\"$srv_ver\",\"keep-old-configuration\":\"no\",\"install-once\":\"yes\"$range}"
 c -X POST "$R/tool/netinstall/devices/clear" -d '{}'
 
 # The raw-QEMU target takes slot 1 of the named socket (quickchr's
@@ -58,7 +74,7 @@ case $mode in
 pxe)
 	rm -f "$WORK/$run.qcow2"
 	DISK_DEV=ide-hd NIC_DEV=e1000 sh "$here/target-x86.sh" "$run" "$netdev" uefi
-	for _ in $(seq 1 200); do
+	for _ in $(seq 1 $(( ${WAIT:-600} / 3 ))); do
 		curl -s -u admin: "$R/tool/netinstall/devices" | grep -q '"done' && break
 		sleep 3
 	done
@@ -67,11 +83,22 @@ pxe)
 	sleep 20
 	kill_pidfile "$WORK/$run.pid"
 	;;
+pxe-arm64)
+	rm -f "$WORK/$run.qcow2"
+	IGB=1 sh "$here/target-arm64.sh" "$run" "$netdev"
+	for _ in $(seq 1 $(( ${WAIT:-600} / 3 ))); do
+		curl -s -u admin: "$R/tool/netinstall/devices" | grep -q '"done' && break
+		sleep 3
+	done
+	sleep 20
+	kill_pidfile "$WORK/$run.pid"
+	;;
 direct-x86) sh "$here/direct-install.sh" "$run" "$netdev" x86 bios ;;
+direct-x86-uefi) sh "$here/direct-install.sh" "$run" "$netdev" x86 uefi ;;
 direct-arm64) sh "$here/direct-install.sh" "$run" "$netdev" arm64 ;;
 esac
 kill $W
+W=""
 c "$R/tool/netinstall/devices"
 c "$R/tool/netinstall/cache"
-qc remove "$srv"
-qc networks sockets remove "$link"
+c "$R/tool/netinstall"

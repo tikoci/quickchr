@@ -16,4 +16,9 @@ hmp "$WORK/e4-slirp.mon" "screendump $WORK/e4-slirp.ppm"
 sleep 1
 kill_pidfile "$WORK/e4-slirp.pid"
 tr -d '\r' <"$WORK/e4-slirp.serial.log" | sed 's/\x1b\[[0-9;?=]*[a-zA-Z]//g' | grep -E 'PXE|Station|Server|NBP'
-tshark -r "$WORK/e4-slirp.pcap" -q -z conv,udp 2>/dev/null | sed -n '5,12p'
+if command -v tshark >/dev/null; then
+	tshark -r "$WORK/e4-slirp.pcap" -q -z conv,udp 2>/dev/null | sed -n '5,12p'
+else
+	# UDP flows by source > destination port, from tcpdump.
+	tcpdump -nr "$WORK/e4-slirp.pcap" udp 2>/dev/null | awk '{print $3, $4, $5}' | sed 's/:$//' | sort | uniq -c | sort -rn | head -8
+fi

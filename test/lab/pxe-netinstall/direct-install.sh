@@ -24,18 +24,19 @@ qemu-img create -q -f qcow2 "$disk" 1G
 serial=${DISK_SERIAL:-QCHRPXE0001}
 
 if [ "$arch" = arm64 ]; then
-	uefi_vars "$QEMU_SHARE/edk2-aarch64-code.fd" "$QEMU_SHARE/edk2-arm-vars.fd" "$WORK/$run.vars.fd"
+	uefi_vars "$AAVMF_CODE" "$AAVMF_VARS" "$WORK/$run.vars.fd"
 	set -- qemu-system-aarch64 -M virt -accel tcg,tb-size=256 -cpu cortex-a710 \
-		-drive "if=pflash,format=raw,unit=0,readonly=on,file=$QEMU_SHARE/edk2-aarch64-code.fd" \
+		-drive "if=pflash,format=raw,unit=0,readonly=on,file=$AAVMF_CODE" \
 		-drive "if=pflash,format=raw,unit=1,file=$WORK/$run.vars.fd" \
 		-kernel "$DL/netinstk/linux.arm64-uefi"
 	disk_dev=${DISK_DEV:-nvme} nic_dev=${NIC_DEV:-igb}
 else
-	set -- qemu-system-x86_64 -accel hvf -cpu host -kernel "$DL/netinstk/linux.x86_64"
+	# shellcheck disable=SC2086  # X86_ACCEL is "-accel <a> -cpu <c>"
+	set -- qemu-system-x86_64 $X86_ACCEL -kernel "$DL/netinstk/linux.x86_64"
 	if [ "$fw" = uefi ]; then
-		uefi_vars "$QEMU_SHARE/edk2-x86_64-code.fd" "$QEMU_SHARE/edk2-i386-vars.fd" "$WORK/$run.vars.fd"
+		uefi_vars "$OVMF_CODE" "$OVMF_VARS" "$WORK/$run.vars.fd"
 		set -- "$@" -M q35 \
-			-drive "if=pflash,format=raw,unit=0,readonly=on,file=$QEMU_SHARE/edk2-x86_64-code.fd" \
+			-drive "if=pflash,format=raw,unit=0,readonly=on,file=$OVMF_CODE" \
 			-drive "if=pflash,format=raw,unit=1,file=$WORK/$run.vars.fd"
 	else
 		set -- "$@" -M pc

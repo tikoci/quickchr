@@ -1,5 +1,10 @@
 #!/bin/sh
+# cspell:ignore tapbridge
 # Linux netinstall-cli as the server, inside an Alpine QEMU VM (no root, no vmnet).
+# Without that VM (NI_VMLINUZ missing) on a Linux host, or with NI_MODE=native,
+# netinstall-cli runs on the host instead, inside an unprivileged user + network
+# namespace (`unshare -rn`) whose TAP device tapbridge.py joins to the link.
+# Still no root and no host network changes.
 #
 #   ni-server.sh <link-name> [netinstall-cli options...] -- [packages...]
 #
@@ -27,17 +32,49 @@ cp "$DL"/npk/*.npk "$share/"
 # Extra files (scripts for -s / -sm) named in NI_FILES land next to the packages.
 for f in ${NI_FILES:-}; do cp "$f" "$share/"; done
 
+mode=${NI_MODE:-}
+if [ -z "$mode" ]; then
+	if [ -r "$NI_VMLINUZ" ] && [ -r "$NI_INITRD" ]; then mode=vm; else mode=native; fi
+fi
+# The Alpine VM sees the share at /host and its NIC as eth0; native mode
+# runs in the share directory with the TAP named ni0.
+if [ "$mode" = native ]; then dev=ni0 dir=$share; else dev=eth0 dir=/host; fi
 cat >"$share/.vm-cmd.sh" <<EOF
-ip addr flush dev eth0
-ip addr add 192.168.88.1/24 dev eth0
-cd /host
+ip addr flush dev $dev
+ip addr add 192.168.88.1/24 dev $dev
+cd $dir
 echo "netinstall-cli start \$(date)"
 ./netinstall-cli -v $opts -a 192.168.88.2 $pkgs 2>&1
 echo "netinstall-cli exit \$? \$(date)"
 EOF
 
+if [ "$mode" = native ]; then
+	log "netinstall-cli native (unshare -rn) on link '$link': opts=[$opts] pkgs=[$pkgs]"
+	rm -f "$WORK/ni-$link.serial.log"
+	# The script runs as namespace root. The serial.log name matches the VM
+	# mode so the experiments can grep either.
+	# shellcheck disable=SC2016  # expanded by the inner shell
+	exec unshare -rn sh -c '
+		here=$1 share=$2 work=$3 link=$4
+		python3 -I "$here/tapbridge.py" ni0 "$work/$link-a.sock" "$work/$link-b.sock" &
+		bridge=$!
+		while ! ip link show ni0 >/dev/null 2>&1; do sleep 0.1; done
+		ip link set lo up
+		ip link set ni0 address 02:00:00:00:00:01 up
+		tcpdump -q -i ni0 -U -w "$work/ni-$link.pcap" 2>/dev/null &
+		dump=$!
+		sh "$share/.vm-cmd.sh" >"$work/ni-$link.serial.log" 2>&1 &
+		ni=$!
+		trap "pkill -P $ni; kill $ni $dump $bridge 2>/dev/null; exit 143" TERM INT
+		wait $ni
+		rc=$?
+		kill $dump $bridge 2>/dev/null
+		exit $rc
+	' sh "$(cd "$(dirname "$0")" && pwd)" "$share" "$WORK" "$link"
+fi
 log "netinstall-cli VM on link '$link': opts=[$opts] pkgs=[$pkgs]"
-exec qemu-system-x86_64 -M q35 -accel hvf -cpu host -m 512 -smp 2 \
+# shellcheck disable=SC2086  # X86_ACCEL is "-accel <a> -cpu <c>"
+exec qemu-system-x86_64 -M q35 $X86_ACCEL -m 512 -smp 2 \
 	-kernel "$NI_VMLINUZ" -initrd "$NI_INITRD" -append "console=ttyS0 quiet" \
 	-virtfs "local,path=$share,mount_tag=hostfs,security_model=none" \
 	-netdev "$(dgram_pair "$link" a)" \

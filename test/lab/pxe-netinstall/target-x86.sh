@@ -30,8 +30,8 @@ bios)
 	;;
 uefi)
 	machine="-M q35"
-	uefi_vars "$QEMU_SHARE/edk2-x86_64-code.fd" "$QEMU_SHARE/edk2-i386-vars.fd" "$WORK/$run.vars.fd"
-	firmware="-drive if=pflash,format=raw,unit=0,readonly=on,file=$QEMU_SHARE/edk2-x86_64-code.fd -drive if=pflash,format=raw,unit=1,file=$WORK/$run.vars.fd"
+	uefi_vars "$OVMF_CODE" "$OVMF_VARS" "$WORK/$run.vars.fd"
+	firmware="-drive if=pflash,format=raw,unit=0,readonly=on,file=$OVMF_CODE -drive if=pflash,format=raw,unit=1,file=$WORK/$run.vars.fd"
 	;;
 esac
 nic_rom=""
@@ -45,7 +45,7 @@ disk_serial=",serial=${DISK_SERIAL-QCHRPXE0001}"
 [ -n "${ROM+x}" ] && nic_rom=",romfile=$rom"
 
 # shellcheck disable=SC2086
-qemu-system-x86_64 $machine -accel hvf -cpu host -m 1024 -smp 2 $firmware \
+qemu-system-x86_64 $machine $X86_ACCEL -m 1024 -smp 2 $firmware \
 	-drive "file=$disk,format=qcow2,if=none,id=d0" -device "${DISK_DEV:-virtio-blk-pci},drive=d0,bootindex=2$disk_serial" \
 	-netdev "$netdev" -device "${NIC_DEV:-virtio-net-pci},netdev=n0,mac=${MAC:-02:00:00:00:00:02},bootindex=1$nic_rom" \
 	-object "filter-dump,id=f0,netdev=n0,file=$WORK/$run.pcap" \
