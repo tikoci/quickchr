@@ -31,6 +31,20 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 - No firmware needed (SeaBIOS built in)
 - Disk: `-drive file=...,format=raw,if=virtio` (fine on q35/pc — maps to PCI)
 - QGA available via `virtio-serial-pci` + `virtserialport`
+- **Two separate guest gates** (grounded on 7.25.2, x86, KVM, 2026-11-27):
+  - QGA starts only when CHR detects KVM. CPUID keys it; faking
+    `hv-vendor-id` under HVF/TCG does not help
+    (`docs/qga-x86-macos-qemu10-investigation.md`).
+  - CHR's cloud-init runs only when the SMBIOS **type 0 BIOS vendor** names a
+    public cloud. With `--qemu-arg=-smbios --qemu-arg=type=0,vendor=Google`,
+    about 10 s after DHCP CHR sends `GET http://169.254.169.254/computeMetadata/v1/instance/hostname`
+    and then `…/instance/attributes/startup-script`, with
+    `Metadata-Flavor: Google`. It sets the identity to the hostname (logged
+    with an empty user), then runs the startup script, which is plain
+    RouterOS script, as the `virtualization` user. With no vendor flag it
+    makes no request. User-mode networking NATs the request to the host's
+    `169.254.169.254:80`. QGA still answers with `vendor=Google` set. Other
+    vendors, every-boot vs first-boot, and arm64 are untested → #325.
 - **Duplicate `-M` merges, last-wins** (measured on QEMU 11.1.2 — do not
   re-derive): `-M pc -M pc,pcspk-audiodev=cap` is accepted, qtree shows
   `audiodev = "cap"` on `isa-pcspk`, and conflicting machine props resolve to
@@ -239,6 +253,9 @@ deprecated no-op: it only ever chose where the serial console went.
 - Monitor: Unix socket, readline protocol. Wait for `(qemu)` prompt before sending commands.
 - Serial: Unix socket, bidirectional byte stream.
 - QGA: Unix socket, JSON protocol. Send `guest-sync-delimited` first, then commands.
+  RouterOS sends a raw `0xFF` byte before the sync reply. Strip it from the
+  bytes **before** decoding: a UTF-8 decode turns it into U+FFFD, the reply
+  line no longer parses, and every QGA call times out (#324).
 
 ## Monitor budgets (#80)
 

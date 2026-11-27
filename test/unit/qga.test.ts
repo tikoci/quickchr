@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { createServer, type Server, type Socket as NetSocket } from "node:net";
 import {
 	stripSyncMarkers,
+	stripSyncMarkerBytes,
 	parseQgaMessages,
 	qgaSync,
 	qgaExec,
@@ -93,6 +94,28 @@ describe("parseQgaMessages", () => {
 	});
 });
 
+describe("stripSyncMarkerBytes", () => {
+	test("removes raw 0xFF bytes that a UTF-8 decode would turn into U+FFFD (#324)", () => {
+		const raw = Buffer.concat([Buffer.from([0xff]), Buffer.from('{"return":4242}\n')]);
+		// The bug: decoding first leaves an unparseable U+FFFD in front of the JSON.
+		expect(parseQgaMessages(raw.toString()).messages).toEqual([]);
+		expect(parseQgaMessages(stripSyncMarkerBytes(raw).toString()).messages).toEqual([{ return: 4242 }]);
+	});
+
+	test("keeps multi-byte UTF-8 intact", () => {
+		const text = '{"return":"Zürich ✓"}\n';
+		const raw = Buffer.concat([Buffer.from([0xff, 0xff]), Buffer.from(text)]);
+		expect(stripSyncMarkerBytes(raw).toString()).toBe(text);
+	});
+
+	test("returns data without markers unchanged", () => {
+		const raw = Buffer.from('{"return":{}}\n');
+		expect(stripSyncMarkerBytes(raw).equals(raw)).toBe(true);
+	});
+});
+
+const SYNC_MARKER = Buffer.from([0xff]);
+
 // --- Socket-based tests with mock QGA server ---
 
 /** Create a mock QGA server that handles sync + one command. */
@@ -116,7 +139,8 @@ function createMockQga(
 						const msg = JSON.parse(line.trim());
 						if (!synced && msg.execute === "guest-sync-delimited") {
 							synced = true;
-							client.write(JSON.stringify({ return: msg.arguments.id }) + "\n");
+							// Real RouterOS sends a raw 0xFF byte before the sync reply (#324).
+							client.write(Buffer.concat([SYNC_MARKER, Buffer.from(JSON.stringify({ return: msg.arguments.id }) + "\n")]));
 						} else if (synced) {
 							handler(msg.execute, msg.arguments, client);
 						}
@@ -452,7 +476,7 @@ describe("qgaPing", () => {
 					const msg = JSON.parse(line.trim()) as { execute: string; arguments?: { id?: number } };
 					if (!synced && msg.execute === "guest-sync-delimited") {
 						synced = true;
-						client.write(JSON.stringify({ return: msg.arguments?.id }) + "\n");
+						client.write(Buffer.concat([SYNC_MARKER, Buffer.from(JSON.stringify({ return: msg.arguments?.id }) + "\n")]));
 						continue;
 					}
 

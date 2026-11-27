@@ -20,6 +20,7 @@
  */
 
 import { connect, type Socket } from "node:net";
+import { StringDecoder } from "node:string_decoder";
 import type {
 	ChannelTcpEndpoint,
 	QgaCommand,
@@ -88,8 +89,23 @@ async function closeSocket(socket: Socket, waitMs: number = 250): Promise<void> 
 }
 
 /**
- * Strip 0xFF sync marker bytes from a buffer.
- * RouterOS QGA may emit these as delimiters between messages.
+ * Remove 0xFF sync marker bytes from raw socket data, before any decoding.
+ *
+ * RouterOS sends a 0xFF byte before the `guest-sync-delimited` reply, as the
+ * QGA protocol specifies. 0xFF never occurs in valid UTF-8, so dropping it at
+ * the byte level is safe. It must happen before decoding: a UTF-8 decode turns
+ * a lone 0xFF into U+FFFD, which {@link stripSyncMarkers} cannot match, and the
+ * reply line then fails to parse (#324).
+ */
+export function stripSyncMarkerBytes(data: Uint8Array): Buffer {
+	const buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+	if (!buf.includes(0xff)) return buf;
+	return Buffer.from(buf.filter((b) => b !== 0xff));
+}
+
+/**
+ * Strip U+00FF sync markers from already-decoded text (latin1, or a test
+ * string). Socket data goes through {@link stripSyncMarkerBytes} first.
  */
 export function stripSyncMarkers(data: string): string {
 	return data.replace(/\xff/g, "");
@@ -176,6 +192,9 @@ function sendAndReceive(
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		let buffer = "";
+		// Decode across chunks so a multi-byte character split between two
+		// reads is not mangled; 0xFF markers are removed before decoding.
+		const decoder = new StringDecoder("utf8");
 
 		const finish = (result?: unknown, err?: QuickCHRError) => {
 			if (settled) return;
@@ -193,7 +212,7 @@ function sendAndReceive(
 		}, timeoutMs);
 
 		const onData = (data: Buffer) => {
-			buffer += data.toString();
+			buffer += decoder.write(stripSyncMarkerBytes(data));
 			const { messages, remainder } = parseQgaMessages(buffer);
 			buffer = remainder;
 
