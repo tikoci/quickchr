@@ -32,7 +32,8 @@ What a netinstalled VM is: **x86 or arm64 RouterOS, not CHR.** It has a 24-hour 
 (`expires-in: 23h49m31s` at 30 s uptime, no `level`) and an `x86`/`arm64` board name. It also
 needs a non-virtio disk at runtime. On virtio-blk both die the same way: `Fatal error 0x853`,
 `died with signal 6`, then power-off. x86 prints this to VGA only, which is why the macOS run saw
-only a power-off. That includes the very first boot after install (see Experiment 1).
+only a power-off. An untouched x86 install died the same way on its very first boot (SeaBIOS,
+HVF; see Experiment 1).
 
 ## Linux re-run (KVM)
 

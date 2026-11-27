@@ -157,20 +157,20 @@ stop_owned() {
 }
 
 # One experiment at a time per WORK: runs share pid, disk and socket names
-# there. `lab_lock` takes $WORK/.lock (a directory, created atomically) or
-# fails if a live run holds it; a lock left by a dead run is taken over.
-# `lab_unlock` in the EXIT trap releases it, only if this run holds it.
+# there. `lab_lock` takes $WORK/.lock (a directory: mkdir is atomic, so only
+# one run can create it) and fails closed if it already exists, whether its
+# holder is alive or not. After a run that died without cleanup, check that
+# nothing from it is still running, then remove $WORK/.lock by hand.
+# `lab_unlock` in the EXIT trap releases the lock, only if this run holds it.
 lab_lock() {
 	if ! mkdir "$WORK/.lock" 2>/dev/null; then
 		holder=$(cat "$WORK/.lock/pid" 2>/dev/null || true)
-		if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-			echo "another lab run (pid $holder) is using $WORK; set WORK= to run in parallel" >&2
-			exit 1
-		fi
-		log "taking over a stale lock in $WORK (pid ${holder:-unknown})"
+		echo "$WORK/.lock exists (pid ${holder:-unknown}): another lab run is using $WORK." >&2
+		echo "Use another WORK=, or if that run is gone, remove $WORK/.lock." >&2
+		exit 1
 	fi
-	echo $$ >"$WORK/.lock/pid"
 	locked=1
+	echo $$ >"$WORK/.lock/pid"
 }
 locked=""
 lab_unlock() {

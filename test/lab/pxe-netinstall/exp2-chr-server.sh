@@ -113,12 +113,19 @@ direct-x86 | direct-x86-uefi | direct-arm64)
 	case $mode in direct-x86) a=x86 f=bios ;; direct-x86-uefi) a=x86 f=uefi ;; *) a=arm64 f=uefi ;; esac
 	own "$WORK/$run.pid"
 	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" "$run" "$netdev" "$a" "$f" || rc=$?
+	# QEMU (-no-reboot) also exits 0 when the installer gives up and reboots
+	# (its "no valid hard drives" error), so success needs the server's "done".
+	if [ "$rc" = 0 ] && ! curl -s -m 10 -u admin: "$R/tool/netinstall/devices" | grep -q '"done'; then
+		log "$run: target exited but the server never reported done"
+		rc=1
+	fi
 	;;
 esac
 kill_tree "$W"
 W=""
-c "$R/tool/netinstall/devices"
-c "$R/tool/netinstall/cache"
-c "$R/tool/netinstall"
+# Diagnostics only: a failed request must not replace the install status.
+c "$R/tool/netinstall/devices" || true
+c "$R/tool/netinstall/cache" || true
+c "$R/tool/netinstall" || true
 log "$run: exit $rc"
 exit "$rc"
