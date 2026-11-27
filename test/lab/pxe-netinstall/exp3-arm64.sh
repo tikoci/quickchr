@@ -77,8 +77,11 @@ install)
 	run_bounded "${WAIT:-900}" sh "$here/direct-install.sh" e3-arm64 "$(dgram_pair e3 b)" arm64 || rc=$?
 	kill_tree "$ni" # still running if the install failed
 	ni=""
-	grep -vE '^\[' "$WORK/ni-e3.serial.log"
-	grep -q "Successfully finished" "$WORK/ni-e3.serial.log" || exit "$(( rc ? rc : 1 ))"
+	grep -vE '^\[' "$WORK/ni-e3.serial.log" || true # diagnostics only
+	# A target that timed out (124) or failed fails the run, even if the
+	# server logged success; then the server must have logged it.
+	[ "$rc" = 0 ] || exit "$rc"
+	grep -q "Successfully finished" "$WORK/ni-e3.serial.log" 2>/dev/null || exit 1
 	;;
 pxe)
 	export NI_FILES="$here/scripts/configure.rsc $here/scripts/mode.rsc"
@@ -103,7 +106,7 @@ pxe)
 	kill_pidfile "$WORK/$run.pid"
 	kill_tree "$ni"
 	ni=""
-	grep -vE '^\[' "$WORK/ni-$run.serial.log"
+	grep -vE '^\[' "$WORK/ni-$run.serial.log" || true # diagnostics only
 	[ "$result" = installed ] || exit 1
 	;;
 esac

@@ -48,13 +48,14 @@ done
 sleep 5
 t0=$(date +%s)
 wait_s=${WAIT:-900}
+target_rc=0
 case $mode in
 direct-*)
 	# Foreground: returns when the installer reboots (-no-reboot), or is
 	# stopped when WAIT runs out.
 	fw=${mode#direct-}
 	own "$WORK/$run.pid"
-	run_bounded "$wait_s" sh "$here/direct-install.sh" "$run" "$(dgram_pair "$run" b)" x86 "$fw" || true
+	run_bounded "$wait_s" sh "$here/direct-install.sh" "$run" "$(dgram_pair "$run" b)" x86 "$fw" || target_rc=$?
 	;;
 *)
 	fw=$mode
@@ -64,7 +65,10 @@ direct-*)
 esac
 
 result=timeout
-while :; do
+# A direct target that timed out or failed fails the run even if the server
+# logged success: the installer writes the boot loader after that.
+[ "$target_rc" = 0 ] || result="target-exit-$target_rc"
+while [ "$target_rc" = 0 ]; do
 	if grep -q "Successfully finished" "$WORK/ni-$run.serial.log" 2>/dev/null; then result=installed; break; fi
 	[ "$(date +%s)" -lt $(( t0 + wait_s )) ] || break
 	sleep 2

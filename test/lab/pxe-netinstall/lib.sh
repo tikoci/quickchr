@@ -159,8 +159,10 @@ stop_owned() {
 # One experiment at a time per WORK: runs share pid, disk and socket names
 # there. `lab_lock` takes $WORK/.lock (a directory: mkdir is atomic, so only
 # one run can create it) and fails closed if it already exists, whether its
-# holder is alive or not. After a run that died without cleanup, check that
-# nothing from it is still running, then remove $WORK/.lock by hand.
+# holder is alive or not. After a run that died without cleanup (killed with
+# SIGKILL, or interrupted in the instant between taking the lock and recording
+# it), check that nothing from it is still running, then remove $WORK/.lock by
+# hand.
 # `lab_unlock` in the EXIT trap releases the lock, only if this run holds it.
 lab_lock() {
 	if ! mkdir "$WORK/.lock" 2>/dev/null; then
