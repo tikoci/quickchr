@@ -189,8 +189,16 @@ describe("qgaSync", () => {
 	});
 });
 
-/** A mock QGA server that answers the sync request with hand-built raw bytes. */
-function createRawSyncQga(sockPath: string, reply: (syncId: number) => Buffer): Promise<Server> {
+/**
+ * A mock QGA server that answers the sync request with hand-built raw bytes:
+ * `stale(id)` at once, then `matching(id)` after `delayMs`.
+ */
+function createRawSyncQga(
+	sockPath: string,
+	stale: (syncId: number) => Buffer,
+	matching: (syncId: number) => Buffer,
+	delayMs: number,
+): Promise<Server> {
 	return new Promise((resolve) => {
 		const server = createServer((client) => {
 			let buffer = "";
@@ -201,7 +209,10 @@ function createRawSyncQga(sockPath: string, reply: (syncId: number) => Buffer): 
 				for (const line of lines) {
 					if (!line.trim()) continue;
 					const msg = JSON.parse(line) as { execute: string; arguments?: { id?: number } };
-					if (msg.execute === "guest-sync-delimited") client.write(reply(msg.arguments?.id ?? -1));
+					if (msg.execute !== "guest-sync-delimited") continue;
+					const id = msg.arguments?.id ?? -1;
+					client.write(stale(id));
+					setTimeout(() => client.write(matching(id)), delayMs);
 				}
 			});
 		});
@@ -209,33 +220,49 @@ function createRawSyncQga(sockPath: string, reply: (syncId: number) => Buffer): 
 	});
 }
 
+/**
+ * Start qgaSync against a server whose matching reply is held back, and check
+ * that the sync is still pending while only stale data has arrived. qgaSync
+ * returns its own ID, so the returned value alone cannot show that a stale
+ * reply was skipped.
+ */
+async function expectSyncWaitsForMatch(
+	stale: (syncId: number) => Buffer,
+	matching: (syncId: number) => Buffer,
+): Promise<void> {
+	const sockPath = join(TMP, "qga.sock");
+	const server = await createRawSyncQga(sockPath, stale, matching, 300);
+	let settled = false;
+	const pending = qgaSync(sockPath, 3000).finally(() => { settled = true; });
+	try {
+		await Bun.sleep(150); // stale data has arrived; the matching reply has not
+		expect(settled).toBe(false);
+		await pending;
+	} finally {
+		// Close the client even when an assertion fails, so the server can close.
+		await pending.then(({ socket }) => socket.destroy(), () => {});
+		await closeServer(server);
+	}
+}
+
 describe("qgaSync stale data (#324 review)", () => {
 	const bytes = (text: string) => Buffer.from(text);
 
 	test("discards a truncated stale reply before the 0xFF marker", async () => {
-		const sockPath = join(TMP, "qga.sock");
-		const server = await createRawSyncQga(sockPath, (id) =>
-			Buffer.concat([bytes('{"return":{"pid'), SYNC_MARKER, bytes(`{"return":${id}}\n`)]));
-		try {
-			const { socket, syncId } = await qgaSync(sockPath, 2000);
-			expect(typeof syncId).toBe("number");
-			socket.destroy();
-		} finally {
-			await closeServer(server);
-		}
+		// A partial reply plus the marker, then the matching reply on its own.
+		// Without the reset at the marker, the reply is glued to the stale text,
+		// never parses, and the sync times out.
+		await expectSyncWaitsForMatch(
+			() => Buffer.concat([bytes('{"return":{"pid'), SYNC_MARKER]),
+			(id) => bytes(`{"return":${id}}\n`),
+		);
 	});
 
-	test("skips a complete stale reply that arrives in the same read", async () => {
-		const sockPath = join(TMP, "qga.sock");
-		const server = await createRawSyncQga(sockPath, (id) =>
-			Buffer.concat([bytes('{"return":{"exited":true}}\n'), SYNC_MARKER, bytes(`{"return":1}\n{"return":${id}}\n`)]));
-		try {
-			const { socket, syncId } = await qgaSync(sockPath, 2000);
-			expect(syncId).not.toBe(1);
-			socket.destroy();
-		} finally {
-			await closeServer(server);
-		}
+	test("skips complete stale replies until the matching ID arrives", async () => {
+		await expectSyncWaitsForMatch(
+			() => Buffer.concat([bytes('{"return":{"exited":true}}\n'), SYNC_MARKER, bytes('{"return":1}\n')]),
+			(id) => bytes(`{"return":${id}}\n`),
+		);
 	});
 });
 
