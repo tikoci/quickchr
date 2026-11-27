@@ -31,20 +31,22 @@ applyTo: "src/lib/qemu.ts,src/lib/channels.ts,src/lib/platform.ts"
 - No firmware needed (SeaBIOS built in)
 - Disk: `-drive file=...,format=raw,if=virtio` (fine on q35/pc — maps to PCI)
 - QGA available via `virtio-serial-pci` + `virtserialport`
-- **Two separate guest gates** (grounded on 7.25.2, x86, KVM, 2026-11-27):
-  - QGA starts only when CHR detects KVM. CPUID keys it; faking
-    `hv-vendor-id` under HVF/TCG does not help
+- **Two separate guest gates** (grounded on 7.25.2, x86, 2026-11-27):
+  - QGA answers only under KVM. Under HVF and TCG, QEMU presents the port but
+    the guest never opens it. Which guest-side check RouterOS uses is not
+    known; faking the KVM CPUID vendor (`hv-vendor-id`) did not help
     (`docs/qga-x86-macos-qemu10-investigation.md`).
-  - CHR's cloud-init runs only when the SMBIOS **type 0 BIOS vendor** names a
-    public cloud. With `--qemu-arg=-smbios --qemu-arg=type=0,vendor=Google`,
-    about 10 s after DHCP CHR sends `GET http://169.254.169.254/computeMetadata/v1/instance/hostname`
+  - CHR's cloud-init followed the SMBIOS **type 0 BIOS vendor** in one A/B
+    test. With `--qemu-arg=-smbios --qemu-arg=type=0,vendor=Google`, about
+    10 s after DHCP CHR sent `GET http://169.254.169.254/computeMetadata/v1/instance/hostname`
     and then `…/instance/attributes/startup-script`, with
-    `Metadata-Flavor: Google`. It sets the identity to the hostname (logged
-    with an empty user), then runs the startup script, which is plain
-    RouterOS script, as the `virtualization` user. With no vendor flag it
-    makes no request. User-mode networking NATs the request to the host's
-    `169.254.169.254:80`. QGA still answers with `vendor=Google` set. Other
-    vendors, every-boot vs first-boot, and arm64 are untested → #325.
+    `Metadata-Flavor: Google`. It set the identity to the hostname (logged
+    with an empty user), then ran the startup script, which is plain
+    RouterOS script, as the `virtualization` user. With QEMU's default
+    vendor it made no request. User-mode networking NATs the request to the
+    host's `169.254.169.254:80`. QGA still answered with `vendor=Google`.
+    Only `Google` was tried; other vendors, every-boot vs first-boot and
+    arm64 are open in #325.
 - **Duplicate `-M` merges, last-wins** (measured on QEMU 11.1.2 — do not
   re-derive): `-M pc -M pc,pcspk-audiodev=cap` is accepted, qtree shows
   `audiodev = "cap"` on `isa-pcspk`, and conflicting machine props resolve to

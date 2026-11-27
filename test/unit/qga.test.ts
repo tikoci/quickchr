@@ -189,6 +189,56 @@ describe("qgaSync", () => {
 	});
 });
 
+/** A mock QGA server that answers the sync request with hand-built raw bytes. */
+function createRawSyncQga(sockPath: string, reply: (syncId: number) => Buffer): Promise<Server> {
+	return new Promise((resolve) => {
+		const server = createServer((client) => {
+			let buffer = "";
+			client.on("data", (data) => {
+				buffer += data.toString();
+				const lines = buffer.split("\n");
+				buffer = lines.pop() || "";
+				for (const line of lines) {
+					if (!line.trim()) continue;
+					const msg = JSON.parse(line) as { execute: string; arguments?: { id?: number } };
+					if (msg.execute === "guest-sync-delimited") client.write(reply(msg.arguments?.id ?? -1));
+				}
+			});
+		});
+		server.listen(sockPath, () => resolve(server));
+	});
+}
+
+describe("qgaSync stale data (#324 review)", () => {
+	const bytes = (text: string) => Buffer.from(text);
+
+	test("discards a truncated stale reply before the 0xFF marker", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createRawSyncQga(sockPath, (id) =>
+			Buffer.concat([bytes('{"return":{"pid'), SYNC_MARKER, bytes(`{"return":${id}}\n`)]));
+		try {
+			const { socket, syncId } = await qgaSync(sockPath, 2000);
+			expect(typeof syncId).toBe("number");
+			socket.destroy();
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	test("skips a complete stale reply that arrives in the same read", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		const server = await createRawSyncQga(sockPath, (id) =>
+			Buffer.concat([bytes('{"return":{"exited":true}}\n'), SYNC_MARKER, bytes(`{"return":1}\n{"return":${id}}\n`)]));
+		try {
+			const { socket, syncId } = await qgaSync(sockPath, 2000);
+			expect(syncId).not.toBe(1);
+			socket.destroy();
+		} finally {
+			await closeServer(server);
+		}
+	});
+});
+
 describe("qgaProbe", () => {
 	test("returns true when QGA responds to ping", async () => {
 		const sockPath = join(TMP, "qga.sock");
@@ -542,6 +592,26 @@ describe("qgaGetHostName", () => {
 		try {
 			const hostname = await qgaGetHostName(sockPath, 5000);
 			expect(hostname).toBe("MikroTik");
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	test("keeps ÿ and a multi-byte character split across reads", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		// cspell:disable-next-line
+		const reply = Buffer.from(`${JSON.stringify({ return: { "host-name": "Rÿü" } })}\n`);
+		const split = reply.indexOf(Buffer.from("ü")) + 1; // between the two bytes of ü
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-get-host-name") {
+				client.write(reply.subarray(0, split));
+				setTimeout(() => client.write(reply.subarray(split)), 30);
+			}
+		});
+		try {
+			const hostname = await qgaGetHostName(sockPath, 5000);
+			// cspell:disable-next-line
+			expect(hostname).toBe("Rÿü");
 		} finally {
 			await closeServer(server);
 		}
