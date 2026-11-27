@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { createServer, type Server, type Socket as NetSocket } from "node:net";
 import {
 	stripSyncMarkers,
+	stripSyncMarkerBytes,
 	parseQgaMessages,
 	qgaSync,
 	qgaExec,
@@ -93,6 +94,28 @@ describe("parseQgaMessages", () => {
 	});
 });
 
+describe("stripSyncMarkerBytes", () => {
+	test("removes raw 0xFF bytes that a UTF-8 decode would turn into U+FFFD (#324)", () => {
+		const raw = Buffer.concat([Buffer.from([0xff]), Buffer.from('{"return":4242}\n')]);
+		// The bug: decoding first leaves an unparseable U+FFFD in front of the JSON.
+		expect(parseQgaMessages(raw.toString()).messages).toEqual([]);
+		expect(parseQgaMessages(stripSyncMarkerBytes(raw).toString()).messages).toEqual([{ return: 4242 }]);
+	});
+
+	test("keeps multi-byte UTF-8 intact", () => {
+		const text = '{"return":"Zürich ✓"}\n';
+		const raw = Buffer.concat([Buffer.from([0xff, 0xff]), Buffer.from(text)]);
+		expect(stripSyncMarkerBytes(raw).toString()).toBe(text);
+	});
+
+	test("returns data without markers unchanged", () => {
+		const raw = Buffer.from('{"return":{}}\n');
+		expect(stripSyncMarkerBytes(raw).equals(raw)).toBe(true);
+	});
+});
+
+const SYNC_MARKER = Buffer.from([0xff]);
+
 // --- Socket-based tests with mock QGA server ---
 
 /** Create a mock QGA server that handles sync + one command. */
@@ -116,7 +139,8 @@ function createMockQga(
 						const msg = JSON.parse(line.trim());
 						if (!synced && msg.execute === "guest-sync-delimited") {
 							synced = true;
-							client.write(JSON.stringify({ return: msg.arguments.id }) + "\n");
+							// Real RouterOS sends a raw 0xFF byte before the sync reply (#324).
+							client.write(Buffer.concat([SYNC_MARKER, Buffer.from(JSON.stringify({ return: msg.arguments.id }) + "\n")]));
 						} else if (synced) {
 							handler(msg.execute, msg.arguments, client);
 						}
@@ -162,6 +186,83 @@ describe("qgaSync", () => {
 		await expect(qgaSync(sockPath, 2000)).rejects.toMatchObject({
 			code: "MACHINE_STOPPED",
 		});
+	});
+});
+
+/**
+ * A mock QGA server that answers the sync request with hand-built raw bytes:
+ * `stale(id)` at once, then `matching(id)` after `delayMs`.
+ */
+function createRawSyncQga(
+	sockPath: string,
+	stale: (syncId: number) => Buffer,
+	matching: (syncId: number) => Buffer,
+	delayMs: number,
+): Promise<Server> {
+	return new Promise((resolve) => {
+		const server = createServer((client) => {
+			let buffer = "";
+			client.on("data", (data) => {
+				buffer += data.toString();
+				const lines = buffer.split("\n");
+				buffer = lines.pop() || "";
+				for (const line of lines) {
+					if (!line.trim()) continue;
+					const msg = JSON.parse(line) as { execute: string; arguments?: { id?: number } };
+					if (msg.execute !== "guest-sync-delimited") continue;
+					const id = msg.arguments?.id ?? -1;
+					client.write(stale(id));
+					setTimeout(() => client.write(matching(id)), delayMs);
+				}
+			});
+		});
+		server.listen(sockPath, () => resolve(server));
+	});
+}
+
+/**
+ * Start qgaSync against a server whose matching reply is held back, and check
+ * that the sync is still pending while only stale data has arrived. qgaSync
+ * returns its own ID, so the returned value alone cannot show that a stale
+ * reply was skipped.
+ */
+async function expectSyncWaitsForMatch(
+	stale: (syncId: number) => Buffer,
+	matching: (syncId: number) => Buffer,
+): Promise<void> {
+	const sockPath = join(TMP, "qga.sock");
+	const server = await createRawSyncQga(sockPath, stale, matching, 300);
+	let settled = false;
+	const pending = qgaSync(sockPath, 3000).finally(() => { settled = true; });
+	try {
+		await Bun.sleep(150); // stale data has arrived; the matching reply has not
+		expect(settled).toBe(false);
+		await pending;
+	} finally {
+		// Close the client even when an assertion fails, so the server can close.
+		await pending.then(({ socket }) => socket.destroy(), () => {});
+		await closeServer(server);
+	}
+}
+
+describe("qgaSync stale data (#324 review)", () => {
+	const bytes = (text: string) => Buffer.from(text);
+
+	test("discards a truncated stale reply before the 0xFF marker", async () => {
+		// A partial reply plus the marker, then the matching reply on its own.
+		// Without the reset at the marker, the reply is glued to the stale text,
+		// never parses, and the sync times out.
+		await expectSyncWaitsForMatch(
+			() => Buffer.concat([bytes('{"return":{"pid'), SYNC_MARKER]),
+			(id) => bytes(`{"return":${id}}\n`),
+		);
+	});
+
+	test("skips complete stale replies until the matching ID arrives", async () => {
+		await expectSyncWaitsForMatch(
+			() => Buffer.concat([bytes('{"return":{"exited":true}}\n'), SYNC_MARKER, bytes('{"return":1}\n')]),
+			(id) => bytes(`{"return":${id}}\n`),
+		);
 	});
 });
 
@@ -452,7 +553,7 @@ describe("qgaPing", () => {
 					const msg = JSON.parse(line.trim()) as { execute: string; arguments?: { id?: number } };
 					if (!synced && msg.execute === "guest-sync-delimited") {
 						synced = true;
-						client.write(JSON.stringify({ return: msg.arguments?.id }) + "\n");
+						client.write(Buffer.concat([SYNC_MARKER, Buffer.from(JSON.stringify({ return: msg.arguments?.id }) + "\n")]));
 						continue;
 					}
 
@@ -518,6 +619,26 @@ describe("qgaGetHostName", () => {
 		try {
 			const hostname = await qgaGetHostName(sockPath, 5000);
 			expect(hostname).toBe("MikroTik");
+		} finally {
+			await closeServer(server);
+		}
+	});
+
+	test("keeps ÿ and a multi-byte character split across reads", async () => {
+		const sockPath = join(TMP, "qga.sock");
+		// cspell:disable-next-line
+		const reply = Buffer.from(`${JSON.stringify({ return: { "host-name": "Rÿü" } })}\n`);
+		const split = reply.indexOf(Buffer.from("ü")) + 1; // between the two bytes of ü
+		const server = await createMockQga(sockPath, (cmd, _args, client) => {
+			if (cmd === "guest-get-host-name") {
+				client.write(reply.subarray(0, split));
+				setTimeout(() => client.write(reply.subarray(split)), 30);
+			}
+		});
+		try {
+			const hostname = await qgaGetHostName(sockPath, 5000);
+			// cspell:disable-next-line
+			expect(hostname).toBe("Rÿü");
 		} finally {
 			await closeServer(server);
 		}

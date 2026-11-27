@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { createServer as createTcpServer } from "node:net";
 import { resolveAuth } from "../../src/lib/auth.ts";
 import { restExecute } from "../../src/lib/exec.ts";
+import { detectAccel } from "../../src/lib/platform.ts";
 import { restPost } from "../../src/lib/rest.ts";
 import { imageTarget } from "./image-target.ts";
 import { bootTestTimeout } from "./timeouts.ts";
@@ -84,6 +85,12 @@ describe.skipIf(SKIP)("exec — shared CHR instance", () => {
 		if (machineArch === "x86") {
 			const qgaSockPath = join(instance.state.machineDir, "qga.sock");
 			isQgaAvailable = await waitForQgaReady(qgaSockPath, 30_000);
+			// Under KVM (Linux x86_64 with a writable /dev/kvm, or a forced accel)
+			// RouterOS runs its guest agent, so an unreachable QGA is a quickchr
+			// bug, not an environment gap. A silent skip here hid #324.
+			if ((await detectAccel("x86")) === "kvm") {
+				expect(isQgaAvailable).toBe(true);
+			}
 			if (!isQgaAvailable) {
 				console.warn(
 					`[exec.test] QGA not available on ${process.platform}/${process.arch} within 30s. ` +

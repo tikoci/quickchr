@@ -11,6 +11,16 @@ odd/even-minor scheme chose the tag; it was retired in 0.5.1.)
 
 ## [Unreleased]
 
+### Fixed
+
+- QGA works again: `quickchr exec --via=qga` and the library's QGA calls no longer
+  time out against a running guest agent. The `0xFF` byte RouterOS sends before the
+  sync reply was decoded as UTF-8 before it was stripped, so the reply never parsed and
+  every call failed with a misleading "requires KVM" timeout (#324).
+- The QGA sync handshake now drops stale bytes before RouterOS's `0xFF` marker and
+  waits for the reply with its own ID, so leftover output from an earlier session no
+  longer stalls or misleads it. A `ÿ` in a QGA reply is no longer deleted.
+
 ### Changed
 
 - `examples/cmr/` now defaults to RouterOS 7.26beta7 (beta6 was never published).

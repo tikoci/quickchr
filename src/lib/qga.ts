@@ -20,6 +20,7 @@
  */
 
 import { connect, type Socket } from "node:net";
+import { StringDecoder } from "node:string_decoder";
 import type {
 	ChannelTcpEndpoint,
 	QgaCommand,
@@ -88,8 +89,23 @@ async function closeSocket(socket: Socket, waitMs: number = 250): Promise<void> 
 }
 
 /**
- * Strip 0xFF sync marker bytes from a buffer.
- * RouterOS QGA may emit these as delimiters between messages.
+ * Remove 0xFF sync marker bytes from raw socket data, before any decoding.
+ *
+ * RouterOS sends a 0xFF byte before the `guest-sync-delimited` reply, as the
+ * QGA protocol specifies. 0xFF never occurs in valid UTF-8, so dropping it at
+ * the byte level is safe. It must happen before decoding: a UTF-8 decode turns
+ * a lone 0xFF into U+FFFD, which {@link stripSyncMarkers} cannot match, and the
+ * reply line then fails to parse (#324).
+ */
+export function stripSyncMarkerBytes(data: Uint8Array): Buffer {
+	const buf = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+	if (!buf.includes(0xff)) return buf;
+	return Buffer.from(buf.filter((b) => b !== 0xff));
+}
+
+/**
+ * Strip U+00FF sync markers from already-decoded text (latin1, or a test
+ * string). Socket data goes through {@link stripSyncMarkerBytes} first.
  */
 export function stripSyncMarkers(data: string): string {
 	return data.replace(/\xff/g, "");
@@ -100,8 +116,17 @@ export function stripSyncMarkers(data: string): string {
  * Returns parsed messages and any remaining incomplete data.
  */
 export function parseQgaMessages(buffer: string): { messages: unknown[]; remainder: string } {
-	const cleaned = stripSyncMarkers(buffer);
-	const lines = cleaned.split("\n");
+	return parseQgaLines(stripSyncMarkers(buffer));
+}
+
+/**
+ * Split decoded text into newline-delimited JSON messages without touching
+ * its characters. The socket path uses this: its 0xFF markers are already
+ * gone at the byte level, and a text-level strip would also delete a real
+ * U+00FF ("ÿ") inside a reply.
+ */
+function parseQgaLines(text: string): { messages: unknown[]; remainder: string } {
+	const lines = text.split("\n");
 	const remainder = lines.pop() || "";
 	const messages: unknown[] = [];
 
@@ -167,15 +192,24 @@ function connectSocket(endpoint: string | ChannelTcpEndpoint, timeoutMs: number)
 /**
  * Send a JSON-RPC command and wait for a single response.
  * Handles 0xFF marker stripping and newline-delimited parsing.
+ *
+ * With `syncId` (a `guest-sync-delimited` call), it follows the QGA sync
+ * contract: everything received before the last 0xFF marker is discarded,
+ * including a truncated stale reply, and any reply other than
+ * `{"return": syncId}` is skipped instead of being taken as the answer.
  */
 function sendAndReceive(
 	socket: Socket,
 	payload: Record<string, unknown>,
 	timeoutMs: number,
+	syncId?: number,
 ): Promise<unknown> {
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		let buffer = "";
+		// Decode across chunks so a multi-byte character split between two
+		// reads is not mangled; 0xFF markers are removed before decoding.
+		let decoder = new StringDecoder("utf8");
 
 		const finish = (result?: unknown, err?: QuickCHRError) => {
 			if (settled) return;
@@ -193,12 +227,29 @@ function sendAndReceive(
 		}, timeoutMs);
 
 		const onData = (data: Buffer) => {
-			buffer += data.toString();
-			const { messages, remainder } = parseQgaMessages(buffer);
+			let chunk = data;
+			if (syncId !== undefined) {
+				const marker = chunk.lastIndexOf(0xff);
+				if (marker >= 0) {
+					// The sync reply follows the marker; anything before it is stale.
+					buffer = "";
+					decoder = new StringDecoder("utf8");
+					chunk = chunk.subarray(marker + 1);
+				}
+			}
+			buffer += decoder.write(stripSyncMarkerBytes(chunk));
+			const { messages, remainder } = parseQgaLines(buffer);
 			buffer = remainder;
 
 			for (const msg of messages) {
 				const response = msg as Record<string, unknown>;
+				if (syncId !== undefined) {
+					if (response.return === syncId) {
+						finish(syncId);
+						return;
+					}
+					continue; // a stale reply from an earlier exchange
+				}
 				if (response.error) {
 					const err = response.error as Record<string, unknown>;
 					finish(undefined, new QuickCHRError(
@@ -235,8 +286,9 @@ function sendAndReceive(
  * Perform guest-sync-delimited handshake.
  *
  * This must be the first operation on each QGA connection to flush any
- * stale data in the virtio-serial buffer. Retries once on failure
- * (stale data from a previous session may cause the first sync to fail).
+ * stale data in the virtio-serial buffer. Stale bytes before the 0xFF marker
+ * and stale replies with another ID are skipped while waiting for the
+ * matching ID, so no retry is needed.
  */
 export async function qgaSync(
 	endpoint: string | ChannelTcpEndpoint,
@@ -246,27 +298,12 @@ export async function qgaSync(
 	const syncId = Date.now() % 1_000_000_000; // Keep it within safe integer range
 
 	try {
-		const result = await sendAndReceive(
+		await sendAndReceive(
 			socket,
 			{ execute: "guest-sync-delimited", arguments: { id: syncId } },
 			timeoutMs,
+			syncId,
 		);
-
-		if (result !== syncId) {
-			// Stale data — retry once
-			const retrySyncId = (syncId + 1) % 1_000_000_000;
-			const retryResult = await sendAndReceive(
-				socket,
-				{ execute: "guest-sync-delimited", arguments: { id: retrySyncId } },
-				timeoutMs,
-			);
-			if (retryResult !== retrySyncId) {
-				socket.destroy();
-				throw new QuickCHRError("PROCESS_FAILED", "QGA sync failed after retry — unexpected sync ID");
-			}
-			return { socket, syncId: retrySyncId };
-		}
-
 		return { socket, syncId };
 	} catch (err) {
 		await closeSocket(socket);
