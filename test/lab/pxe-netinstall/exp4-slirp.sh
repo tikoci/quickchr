@@ -19,7 +19,7 @@ sleep 60
 hmp "$WORK/e4-slirp.mon" "screendump $WORK/e4-slirp.ppm"
 sleep 1
 kill_pidfile "$WORK/e4-slirp.pid"
-tr -d '\r' <"$WORK/e4-slirp.serial.log" | sed 's/\x1b\[[0-9;?=]*[a-zA-Z]//g' | grep -E 'PXE|Station|Server|NBP'
+tr -d '\r' <"$WORK/e4-slirp.serial.log" | sed 's/\x1b\[[0-9;?=]*[a-zA-Z]//g' | grep -E 'PXE|Station|Server|NBP' || true
 if command -v tshark >/dev/null; then
 	tshark -r "$WORK/e4-slirp.pcap" -q -z conv,udp 2>/dev/null | sed -n '5,12p'
 else

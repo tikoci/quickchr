@@ -47,7 +47,14 @@ qc add --name "$srv" --version "$srv_ver" --arch x86 \
 made_srv=1
 qc start "$srv"
 R=$(qc inspect "$srv" --json | python3 -c 'import json,sys;print(json.load(sys.stdin)["services"]["rest-api"]["url"])')
-c() { curl -s -m 60 -u admin: -H 'content-type: application/json' "$@"; echo; }
+# Returns curl's status, so under set -e a failed setup call (HTTP error
+# included) stops the run; the error body is still printed.
+c() {
+	c_rc=0
+	curl -sS --fail-with-body -m 60 -u admin: -H 'content-type: application/json' "$@" || c_rc=$?
+	echo
+	return "$c_rc"
+}
 
 c -X PUT "$R/ip/address" -d '{"address":"192.168.88.1/24","interface":"ether2"}'
 # 7.26 refuses cache/add until an update check has succeeded ("Default version
