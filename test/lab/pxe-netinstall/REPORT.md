@@ -474,7 +474,8 @@ needs `vmlinuz-virt` and `initramfs-netinstall.gz` from a `tikoci/netinstall` ch
 (`NI_MODE=native|vm` forces one). That needs unprivileged user namespaces, `/dev/net/tun`,
 `python3`, `ip` and `tcpdump`. Downloads are fetched into `$WORK/dl`. On a Linux host with a 7.8 GB
 `/tmp` tmpfs, keep `WORK` small or move it: a full `/tmp` makes the installer's disk writes fail
-(`ERROR: could not format partitions`).
+(`ERROR: could not format partitions`). `exp2-chr-server.sh` needs curl 7.76 or later for
+`--fail-with-body` (Ubuntu 20.04's 7.68 is too old).
 
 `lib.sh` picks firmware and acceleration: QEMU's `edk2-*` names under `QEMU_SHARE` first, then
 Arch, Debian/Ubuntu and Fedora package paths (override with `OVMF_CODE`/`OVMF_VARS`,
